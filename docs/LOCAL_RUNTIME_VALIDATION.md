@@ -58,8 +58,9 @@ at test time:
 - `postgres@sha256:fe0737ba566a2c5b2a28f34433c0a423261900ec17b9bf7ad115e1aae7e57f1b`
 - `redis@sha256:becdda6c7f4b3fb42e42fd7f120bbf5c54c4caaaf16f26da24e4563d2c1f0576`
 
-These are validation evidence, not permanent dependency pins. Deployment pins
-will be reviewed and automated in the PR that adds the upstream stack.
+These values began as validation evidence. Phase 1 adopted reviewed release and
+digest pins in `compose.yaml`, including the subsequently validated Data Importer
+and cron images.
 
 ## Isolation and data handling
 
@@ -87,19 +88,21 @@ curl --fail http://127.0.0.1:3333/api/v1/health
 docker compose restart
 ```
 
-The exact smoke files are intentionally outside version control because they
-contain disposable credentials and are not yet the reviewed deployment design.
-The next implementation phase will add secret templates, pinned images,
-healthchecks, backup/restore verification, and automated synthetic integration
-tests to the repository.
+The exact historical smoke files remain outside version control because they
+contain disposable credentials. The reviewed Phase 1 deployment supersedes
+them with the committed template, pinned images, healthchecks, and tested
+backup/restore operations.
 
 ## Current local state and cleanup
 
-At the end of validation, all three application stacks were left running for
-developer inspection. The pages are available at:
+At the end of the preliminary validation, three application stacks were left
+running for developer inspection. Phase 1 stopped those containers without
+deleting their volumes and replaced them with the repository-managed stack.
+The current pages are available at:
 
 - gateway API documentation: <http://127.0.0.1:8000/docs>
 - Firefly III: <http://127.0.0.1:8080>
+- Firefly III Data Importer: <http://127.0.0.1:8081>
 - Ghostfolio: <http://127.0.0.1:3333>
 
 To stop a disposable stack while retaining its synthetic volume data, run

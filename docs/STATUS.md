@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-01
 
-## Completed before the first PR
+## Completed
 
 - Repository created privately under `giedrius-at-home`.
 - `main` protected from direct pushes, force pushes, and deletion.
@@ -18,14 +18,15 @@ Last updated: 2026-09-01
   reachability.
 - Foundation upgraded and verified on Python 3.14.5 locally and Python 3.14 in
   the pinned container image.
+- Phase 0 repository foundation merged through PR #1.
 
-## In review
+## In progress
 
-- Phase 0 repository foundation.
+- Phase 1 reviewed local deployment: pinned upstream services, isolated data
+  networks, generated secrets, health diagnostics, and backup/restore tooling.
 
 ## Not started
 
-- Reviewed Firefly III and Ghostfolio deployment definitions in this repository.
 - Upstream API adapters, webhook ingestion, and persistence.
 - Ollama/Qwen application integration and categorisation evaluation.
 - Native desktop notifications and review UI.

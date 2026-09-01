@@ -16,4 +16,7 @@ project intends to use semantic versioning for its own releases.
 - Local container definition and CI/security checks.
 - Reproducible local runtime validation for Firefly III, Ghostfolio, and Qwen3.
 - Python 3.14 development, typing, linting, and container baseline.
+- Digest-pinned Firefly III, Data Importer, Ghostfolio, and isolated data services.
+- One-time local secret generation and operational health diagnostics.
+- Private, checksummed backup and explicitly confirmed restore tooling.
 - Architecture, privacy, threat-model, operations, and decision documentation.

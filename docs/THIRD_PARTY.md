@@ -1,9 +1,8 @@
 # Third-Party Software
 
 This repository integrates upstream software and does not fork or vendor it.
-Deployment versions and image digests will be pinned in the PR that introduces
-the local stack. The versions below were exercised in the preliminary local
-runtime validation; resolved test-time digests are recorded in
+Deployment versions and image digests are pinned in `compose.yaml`. The
+preliminary evidence and resolved native-architecture details are recorded in
 [LOCAL_RUNTIME_VALIDATION.md](LOCAL_RUNTIME_VALIDATION.md).
 
 ## Firefly III
@@ -14,13 +13,14 @@ runtime validation; resolved test-time digests are recorded in
 - API documentation: <https://api-docs.firefly-iii.org/>
 - License: GNU Affero General Public License v3.0.
 - Integration: documented API and signed webhooks.
-- Locally validated release: 6.6.6.
+- Pinned release: 6.6.6.
 
 ## Firefly III Data Importer
 
 - Purpose: import bank exports and supported data sources into Firefly III.
 - Source: <https://github.com/firefly-iii/data-importer>
 - License: GNU Affero General Public License v3.0.
+- Pinned release: 2.3.4.
 
 ## Ghostfolio
 
@@ -29,7 +29,15 @@ runtime validation; resolved test-time digests are recorded in
 - Source: <https://github.com/ghostfolio/ghostfolio>
 - License: GNU Affero General Public License v3.0.
 - Integration: public API; experimental MCP is not a foundation dependency.
-- Locally validated release: 3.65.0.
+- Pinned release: 3.65.0.
+
+## Data services
+
+- MariaDB LTS stores Firefly III state.
+- PostgreSQL 15 stores Ghostfolio state.
+- Redis stores disposable Ghostfolio cache state.
+- Alpine 3.22 runs the local Firefly III cron request.
+- All container references are pinned by immutable registry digest.
 
 ## Ollama and Qwen
 
