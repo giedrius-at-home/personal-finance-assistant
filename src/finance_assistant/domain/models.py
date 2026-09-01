@@ -46,7 +46,7 @@ class SavingsGoal(StrictModel):
     target_date: date
 
     @model_validator(mode="after")
-    def validate_goal(self) -> "SavingsGoal":
+    def validate_goal(self) -> SavingsGoal:
         if self.current.currency != self.target.currency:
             raise ValueError("target and current amounts must use the same currency")
         if self.target.amount <= 0:
@@ -96,7 +96,7 @@ class BudgetWindow(StrictModel):
     total_days: int = Field(gt=0)
 
     @model_validator(mode="after")
-    def validate_window(self) -> "BudgetWindow":
+    def validate_window(self) -> BudgetWindow:
         amounts = (
             self.budget,
             self.spent,

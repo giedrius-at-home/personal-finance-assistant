@@ -56,7 +56,7 @@ plan](docs/IMPLEMENTATION_PLAN.md).
 
 Prerequisites:
 
-- Python 3.12+
+- Python 3.14+
 - [uv](https://docs.astral.sh/uv/)
 - Docker with Compose, optional for the container workflow
 

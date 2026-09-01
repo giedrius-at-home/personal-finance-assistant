@@ -13,6 +13,7 @@ definition.
 - Docker Compose 5.5.0
 - Docker Buildx 0.36.1
 - Ollama 0.33.2
+- Python 3.14.5 for local development and `python:3.14-slim` for the gateway
 - Colima allocation: 4 CPUs, 8 GiB memory, and a 60 GiB requested disk
 
 Colima, the Docker CLI, Compose, and Buildx were installed with Homebrew. The
@@ -40,6 +41,11 @@ temperature-zero, non-thinking smoke prompt. This validates the local network
 path planned for later model-assisted categorisation; it does not validate the
 categorisation quality or safety policy.
 
+After selecting Python 3.14 as the project baseline, the full local quality
+suite ran on CPython 3.14.5. The rebuilt gateway reported CPython 3.14.7 from
+the pinned base image, remained healthy, reached Ollama, and received the exact
+Qwen smoke response `PYTHON_314_OK`.
+
 ## Resolved image evidence
 
 The test used native `linux/arm64` images. These registry digests were resolved
@@ -47,6 +53,7 @@ at test time:
 
 - `fireflyiii/core@sha256:ae69fdd95cdef9038cd7a460a5aec731f14813973e4f096511d5a4ea9ff0e972`
 - `ghostfolio/ghostfolio@sha256:5762d47097bb30f6e8c51a1a0ebd9a39798631b512d8a78223bcfe68202e5286`
+- `python@sha256:656d12e70054d5fda18a045e2494c96701e9792dd1445f95b3d038df954f57e9`
 - `mariadb@sha256:dd9b303aed4f4890ed09f766d8ca9ddfd176c0c6f6267feff53b3192ec65a979`
 - `postgres@sha256:fe0737ba566a2c5b2a28f34433c0a423261900ec17b9bf7ad115e1aae7e57f1b`
 - `redis@sha256:becdda6c7f4b3fb42e42fd7f120bbf5c54c4caaaf16f26da24e4563d2c1f0576`

@@ -16,6 +16,8 @@ Last updated: 2026-09-01
   locally with synthetic state, including restart health checks.
 - Existing `qwen3:8b` verified through Ollama, including gateway-to-host network
   reachability.
+- Foundation upgraded and verified on Python 3.14.5 locally and Python 3.14 in
+  the pinned container image.
 
 ## In review
 

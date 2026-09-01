@@ -11,13 +11,15 @@ evaluation, and local HTTP integrations.
 
 ## Decision
 
-Use Python 3.12+, FastAPI, Pydantic, uv, pytest, Hypothesis, Ruff, and strict
+Use Python 3.14+, FastAPI, Pydantic, uv, pytest, Hypothesis, Ruff, and strict
 mypy. Keep the initial review interface server-rendered when it is introduced.
 Use `Decimal` for all monetary amounts and reject unknown API fields.
 
 ## Consequences
 
 - One primary implementation language covers APIs, analytics, and evaluation.
+- The project can use current typing and standard-library improvements without
+  carrying compatibility code for older Python releases.
 - Property-based testing can express financial invariants.
 - A separate frontend toolchain is deferred until demonstrated necessary.
 - Currency precision policy remains an explicit follow-up decision.

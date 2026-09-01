@@ -15,4 +15,5 @@ project intends to use semantic versioning for its own releases.
 - Unit and property-based tests using synthetic data.
 - Local container definition and CI/security checks.
 - Reproducible local runtime validation for Firefly III, Ghostfolio, and Qwen3.
+- Python 3.14 development, typing, linting, and container baseline.
 - Architecture, privacy, threat-model, operations, and decision documentation.

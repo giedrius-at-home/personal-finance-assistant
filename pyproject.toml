@@ -3,7 +3,7 @@ name = "personal-finance-assistant"
 version = "0.1.0"
 description = "Local-first intelligence layer for Firefly III and Ghostfolio"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 dependencies = [
   "fastapi>=0.115,<1",
   "pydantic>=2.10,<3",
@@ -31,7 +31,7 @@ packages = ["src/finance_assistant"]
 
 [tool.ruff]
 line-length = 88
-target-version = "py312"
+target-version = "py314"
 
 [tool.ruff.lint]
 select = ["B", "E", "F", "I", "N", "S", "UP"]
@@ -40,7 +40,7 @@ select = ["B", "E", "F", "I", "N", "S", "UP"]
 "tests/**" = ["S101"]
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.14"
 strict = true
 plugins = ["pydantic.mypy"]
 
