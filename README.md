@@ -101,6 +101,7 @@ the default and are reviewed like source code.
 - [Status and review ledger](docs/STATUS.md)
 - [Privacy model](docs/PRIVACY.md)
 - [Threat model](docs/THREAT_MODEL.md)
+- [Security policy](SECURITY.md)
 - [Operations](docs/OPERATIONS.md)
 - [Local runtime validation](docs/LOCAL_RUNTIME_VALIDATION.md)
 - [Phase 1 validation](docs/PHASE1_VALIDATION.md)
