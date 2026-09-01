@@ -47,8 +47,9 @@ out of scope.
 The project now contains a typed FastAPI service, tested domain logic, and a
 pinned local deployment of Firefly III, its Data Importer, and Ghostfolio. The
 gateway does not yet ingest upstream data, and no real financial data has been
-introduced. See the [project status](docs/STATUS.md), [operations
-guide](docs/OPERATIONS.md), and [implementation plan](docs/IMPLEMENTATION_PLAN.md).
+introduced. See the [GitHub Project](https://github.com/users/giedrius-at-home/projects/4)
+for current status and roadmap, and the [operations guide](docs/OPERATIONS.md)
+for the local runtime.
 
 ## Quick start
 
@@ -94,17 +95,21 @@ make check
 No test or CI workflow may use real financial records. Synthetic fixtures are
 the default and are reviewed like source code.
 
+Planning lives in GitHub rather than duplicate repository ledgers: Issues hold
+requirements and acceptance criteria, the Project holds priority and status,
+and pull requests hold implementation evidence. Accepted architecture decisions
+remain version-controlled in `docs/adr/` because they must change with the code.
+
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md)
-- [Implementation plan](docs/IMPLEMENTATION_PLAN.md)
-- [Status and review ledger](docs/STATUS.md)
+- [Project roadmap](https://github.com/users/giedrius-at-home/projects/4)
+- [Requirements and decisions](https://github.com/giedrius-at-home/personal-finance-assistant/issues)
 - [Privacy model](docs/PRIVACY.md)
 - [Threat model](docs/THREAT_MODEL.md)
 - [Security policy](SECURITY.md)
 - [Operations](docs/OPERATIONS.md)
-- [Local runtime validation](docs/LOCAL_RUNTIME_VALIDATION.md)
-- [Phase 1 validation](docs/PHASE1_VALIDATION.md)
+- [Validation](docs/VALIDATION.md)
 - [Third-party software](docs/THIRD_PARTY.md)
 - [Architecture decisions](docs/adr/)
 - [Changelog](CHANGELOG.md)

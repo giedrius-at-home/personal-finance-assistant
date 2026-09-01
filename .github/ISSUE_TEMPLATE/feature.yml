@@ -1,0 +1,69 @@
+name: Feature or requirement
+description: Propose a user-visible or operational capability.
+title: "[Feature]: "
+labels:
+  - "type:feature"
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Do not include credentials or real financial data. Describe examples
+        with synthetic values only.
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: What useful, observable result should this produce?
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What is included and explicitly excluded?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Platform
+        - Firefly III
+        - Ghostfolio
+        - Analytics
+        - AI and categorisation
+        - Notifications
+        - Review experience
+        - Security and privacy
+        - Documentation
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List specific behaviours that prove the outcome is complete.
+    validations:
+      required: true
+  - type: textarea
+    id: security
+    attributes:
+      label: Security and privacy boundaries
+      description: Describe data exposure, secrets, logging, model, and failure considerations.
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Synthetic verification
+      description: How can this be tested without real financial data?
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Confirmation
+      options:
+        - label: I have not included credentials or personal financial data.
+          required: true

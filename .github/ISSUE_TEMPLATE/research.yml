@@ -1,0 +1,45 @@
+name: Research spike
+description: Time-box an investigation needed for a later decision.
+title: "[Research]: "
+labels:
+  - "type:research"
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Research question
+      description: What uncertainty must be reduced?
+    validations:
+      required: true
+  - type: dropdown
+    id: timebox
+    attributes:
+      label: Timebox
+      options:
+        - Up to 2 hours
+        - Up to 1 day
+        - Up to 3 days
+        - Explicitly agreed longer study
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence and deliverable
+      description: Define sources, experiment, comparison, and expected output.
+    validations:
+      required: true
+  - type: textarea
+    id: decision
+    attributes:
+      label: Decision supported
+      description: Link the decision or implementation issue this research unblocks.
+    validations:
+      required: true
+  - type: textarea
+    id: boundaries
+    attributes:
+      label: Data and security boundaries
+      description: State how research avoids real financial data and unsafe external disclosure.
+    validations:
+      required: true
