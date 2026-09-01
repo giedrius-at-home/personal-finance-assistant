@@ -24,3 +24,7 @@ project intends to use semantic versioning for its own releases.
 - GitHub Dependabot alerts, security updates, and enforced action SHA pinning.
 - GitHub Project-backed roadmap, structured Issue Forms, and consolidated
   validation documentation.
+- Explicit currency minor-unit validation and float rejection at financial
+  boundaries.
+- Canonical account, transaction, ownership, and immutable source-lineage
+  contracts.

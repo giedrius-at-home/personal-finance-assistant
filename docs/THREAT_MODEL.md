@@ -25,6 +25,7 @@
 | Financial data enters logs | Redaction policy and no request-body logging |
 | Webhook spoofing or replay | HMAC verification, timestamp window, idempotency |
 | Duplicate imports | Immutable source identifiers and idempotent upserts |
+| Conflicting or over-precise currency data | Explicit minor units; reject conflicts and implicit rounding |
 | LLM invents or mutates data | Schema validation, vocabulary, review gates |
 | Prompt injection in merchant text | Treat descriptions as data, not instructions |
 | Notification storm | Stateful deduplication, cooldown, daily aggregation |

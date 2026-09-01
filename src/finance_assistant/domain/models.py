@@ -13,11 +13,33 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
-class Money(StrictModel):
-    """An exact amount paired with an ISO-style currency code."""
+class Currency(StrictModel):
+    """Currency identity and the supported number of cash decimal places."""
 
-    amount: Decimal
-    currency: str = Field(min_length=3, max_length=3)
+    code: str = Field(min_length=3, max_length=3)
+    minor_unit: int = Field(ge=0, le=18)
+
+    @field_validator("code")
+    @classmethod
+    def normalize_code(cls, value: str) -> str:
+        normalized = value.upper()
+        if not normalized.isascii() or not normalized.isalpha():
+            raise ValueError("currency code must contain exactly three ASCII letters")
+        return normalized
+
+
+class Money(StrictModel):
+    """An exact cash amount paired with explicit currency precision."""
+
+    amount: Decimal = Field(max_digits=38)
+    currency: Currency
+
+    @field_validator("amount", mode="before")
+    @classmethod
+    def reject_binary_float(cls, value: object) -> object:
+        if isinstance(value, (bool, float)):
+            raise ValueError("amount must be supplied as a decimal string or integer")
+        return value
 
     @field_validator("amount")
     @classmethod
@@ -26,13 +48,22 @@ class Money(StrictModel):
             raise ValueError("amount must be finite")
         return value
 
-    @field_validator("currency")
-    @classmethod
-    def normalize_currency(cls, value: str) -> str:
-        normalized = value.upper()
-        if not normalized.isalpha():
-            raise ValueError("currency must contain exactly three letters")
-        return normalized
+    @model_validator(mode="after")
+    def require_supported_precision(self) -> Money:
+        digits = list(self.amount.as_tuple().digits)
+        exponent = self.amount.as_tuple().exponent
+        if not isinstance(exponent, int):  # pragma: no cover - finite values use int
+            raise ValueError("amount exponent must be finite")
+        while digits and digits[-1] == 0:
+            digits.pop()
+            exponent += 1
+        fractional_places = max(-exponent, 0)
+        if fractional_places > self.currency.minor_unit:
+            raise ValueError(
+                "amount precision exceeds the currency minor unit; "
+                "rounding must be explicit"
+            )
+        return self
 
 
 class SavingsGoal(StrictModel):
@@ -62,7 +93,7 @@ class GoalEvaluation(StrictModel):
     """Deterministic savings progress result."""
 
     goal_id: str
-    currency: str
+    currency: Currency
     completed: bool
     overdue: bool
     on_track: bool
@@ -121,7 +152,7 @@ class BudgetEvaluation(StrictModel):
     """Explainable output from the spending alert engine."""
 
     category: str
-    currency: str
+    currency: Currency
     severity: AlertSeverity
     spent_ratio: Decimal
     elapsed_ratio: Decimal

@@ -4,11 +4,13 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
-from finance_assistant.domain.models import BudgetWindow, Money, SavingsGoal
+from finance_assistant.domain.models import BudgetWindow, Currency, Money, SavingsGoal
+
+EUR = Currency(code="EUR", minor_unit=2)
 
 
 def euros(amount: str) -> Money:
-    return Money(amount=Decimal(amount), currency="EUR")
+    return Money(amount=Decimal(amount), currency=EUR)
 
 
 @pytest.mark.parametrize("amount", ["NaN", "Infinity", "-Infinity"])
@@ -18,8 +20,26 @@ def test_money_rejects_non_finite_amounts(amount: str) -> None:
 
 
 def test_money_rejects_invalid_currency() -> None:
-    with pytest.raises(ValidationError, match="three letters"):
-        Money(amount=Decimal("10"), currency="E1R")
+    with pytest.raises(ValidationError, match="ASCII letters"):
+        Currency(code="E1R", minor_unit=2)
+
+
+def test_money_rejects_binary_float_and_implicit_rounding() -> None:
+    with pytest.raises(ValidationError, match="decimal string or integer"):
+        Money(amount=1.1, currency=EUR)
+
+    with pytest.raises(ValidationError, match="precision exceeds"):
+        Money(amount="1.001", currency=EUR)
+
+
+def test_money_accepts_explicit_currency_scales_and_trailing_zeros() -> None:
+    assert (
+        Money(amount="100.00", currency=Currency(code="jpy", minor_unit=0)).amount
+        == 100
+    )
+    assert Money(
+        amount="1.2345", currency=Currency(code="UYW", minor_unit=4)
+    ).amount == Decimal("1.2345")
 
 
 @pytest.mark.parametrize(

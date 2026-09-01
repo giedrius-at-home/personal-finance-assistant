@@ -46,8 +46,9 @@ out of scope.
 
 The project now contains a typed FastAPI service, tested domain logic, and a
 pinned local deployment of Firefly III, its Data Importer, and Ghostfolio. The
-gateway does not yet ingest upstream data, and no real financial data has been
-introduced. See the [GitHub Project](https://github.com/users/giedrius-at-home/projects/4)
+domain includes explicit currency precision and canonical source-lineage
+contracts; the gateway does not yet ingest upstream data, and no real financial
+data has been introduced. See the [GitHub Project](https://github.com/users/giedrius-at-home/projects/4)
 for current status and roadmap, and the [operations guide](docs/OPERATIONS.md)
 for the local runtime.
 
