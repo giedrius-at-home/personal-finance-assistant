@@ -1,0 +1,46 @@
+name: Decision or RFC
+description: Resolve a durable product, architecture, security, or policy choice.
+title: "[Decision]: "
+labels:
+  - "type:decision"
+body:
+  - type: textarea
+    id: context
+    attributes:
+      label: Context and decision
+      description: What must be decided, and why now?
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints
+      description: Include local-first, privacy, compatibility, cost, and reversibility constraints.
+    validations:
+      required: true
+  - type: textarea
+    id: options
+    attributes:
+      label: Options considered
+      description: Compare realistic alternatives and their trade-offs.
+    validations:
+      required: true
+  - type: textarea
+    id: recommendation
+    attributes:
+      label: Recommendation
+      description: State the preferred option if one exists.
+  - type: textarea
+    id: consequences
+    attributes:
+      label: Consequences and follow-up
+      description: What becomes easier, harder, required, or intentionally deferred?
+    validations:
+      required: true
+  - type: checkboxes
+    id: adr
+    attributes:
+      label: Decision record
+      options:
+        - label: I will add or link an ADR if this changes a durable engineering boundary.
+          required: true

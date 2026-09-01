@@ -2,6 +2,10 @@
 
 <!-- What user-visible or operational outcome does this PR produce? -->
 
+## Related work
+
+<!-- Link the canonical Issue. Prefer "Closes #123" when this completes it. -->
+
 ## Changes
 
 <!-- Concise implementation summary. -->
@@ -29,6 +33,7 @@ make check
 ## Checklist
 
 - [ ] Tests cover changed financial behaviour and failure modes.
+- [ ] Requirements and acceptance criteria are linked to an Issue.
 - [ ] Only synthetic financial fixtures are committed.
 - [ ] Documentation and changelog are current.
 - [ ] No credentials or personal financial data appear in the diff.

@@ -2,8 +2,8 @@
 
 This repository integrates upstream software and does not fork or vendor it.
 Deployment versions and image digests are pinned in `compose.yaml`. The
-preliminary evidence and resolved native-architecture details are recorded in
-[LOCAL_RUNTIME_VALIDATION.md](LOCAL_RUNTIME_VALIDATION.md).
+reviewed runtime and native-architecture evidence is linked from the
+[validation guide](VALIDATION.md).
 
 ## Firefly III
 

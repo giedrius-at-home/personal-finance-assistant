@@ -22,3 +22,5 @@ project intends to use semantic versioning for its own releases.
 - Architecture, privacy, threat-model, operations, and decision documentation.
 - Security reporting policy and non-persistent CI checkout credentials.
 - GitHub Dependabot alerts, security updates, and enforced action SHA pinning.
+- GitHub Project-backed roadmap, structured Issue Forms, and consolidated
+  validation documentation.

@@ -13,8 +13,8 @@ docker buildx version
 ```
 
 Docker Desktop is not required. Application ports bind to `127.0.0.1` only;
-databases are not published. See the [runtime validation
-record](LOCAL_RUNTIME_VALIDATION.md) for the host and image evidence.
+databases are not published. See the [validation guide](VALIDATION.md) for the
+current runtime gate and links to reviewed historical evidence.
 
 ## First-time setup
 
