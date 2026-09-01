@@ -31,6 +31,11 @@
 | Double-counted investments | Canonical account ownership mapping |
 | Supply-chain compromise | Lock files, pinned images/actions, audits |
 | Accidental remote exposure | Localhost binding; no initial self-hosting |
+| Database reached from host or peer service | No published DB ports; separate internal networks |
+| Weak or reused local secrets | Cryptographic one-time generation; owner-only `.env` |
+| Corrupt or substituted backup | SHA-256 manifest verified before restore |
+| Accidental destructive restore | Explicit backup path and confirmation flag |
+| Backup disclosure | Git exclusion, owner-only files; encrypted off-device copy required |
 
 ## Prohibited capabilities
 

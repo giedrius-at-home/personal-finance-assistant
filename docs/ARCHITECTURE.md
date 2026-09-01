@@ -48,14 +48,41 @@ using an explicit account mapping.
 
 ## Current vertical slice
 
-The initial implementation contains no persistence or upstream adapters. It
-provides pure functions and HTTP contracts for:
+The current implementation provides pure functions and HTTP contracts for:
 
 - linear savings-goal progress and required weekly contribution;
 - spending ratio, pace, forecast, remaining budget, and safe-to-spend;
 - explainable severity selection.
 
 This creates a testable domain boundary before external data is introduced.
+
+## Local deployment topology
+
+```text
+localhost only
+  :8000 gateway -------- application network -------- Firefly III :8080
+       |                         |                          |
+       |                         |                    internal network
+       |                         |                          |
+       |                         |                       MariaDB
+       |                         |
+       |                         +--------------------- Importer :8081
+       |                         |
+       |                         +------------------- Ghostfolio :3333
+       |                                                    |
+       |                                              internal network
+       |                                             /                \
+       +--> host.docker.internal --> Ollama    PostgreSQL             Redis
+```
+
+Only application HTTP ports are published, always on `127.0.0.1`. Database
+services have no host bindings and live on separate internal Docker networks.
+The gateway joins only the application network and cannot address either
+database directly. Images are pinned by release tag and immutable digest.
+
+The upstream databases and Firefly upload directory use named volumes. Redis is
+treated as disposable cache state. The repository supplies checksummed backup
+and confirmed restore operations for all durable state.
 
 ## Quality attributes
 

@@ -31,4 +31,6 @@ the resulting prompts local.
 ## Retention
 
 Retention periods and deletion workflows will be defined alongside persistence.
-Backups containing personal data must be encrypted and tested for restoration.
+Local backups are owner-only and tested for restoration but are not encrypted by
+the repository. Before real data is introduced, the owner must confirm an
+encrypted local or off-device storage boundary for every retained backup.

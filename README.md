@@ -44,13 +44,11 @@ out of scope.
 
 ## Current state
 
-The foundation release contains a typed FastAPI service and tested domain logic
-for savings goals and budget warnings. It does not yet connect to Firefly III,
-Ghostfolio, or real financial data. The three upstream applications have been
-smoke-tested together on the target local container runtime; see the
-[runtime validation record](docs/LOCAL_RUNTIME_VALIDATION.md). See also the
-[project status](docs/STATUS.md) and the [implementation
-plan](docs/IMPLEMENTATION_PLAN.md).
+The project now contains a typed FastAPI service, tested domain logic, and a
+pinned local deployment of Firefly III, its Data Importer, and Ghostfolio. The
+gateway does not yet ingest upstream data, and no real financial data has been
+introduced. See the [project status](docs/STATUS.md), [operations
+guide](docs/OPERATIONS.md), and [implementation plan](docs/IMPLEMENTATION_PLAN.md).
 
 ## Quick start
 
@@ -58,19 +56,30 @@ Prerequisites:
 
 - Python 3.14+
 - [uv](https://docs.astral.sh/uv/)
-- Docker with Compose, optional for the container workflow
+- Docker with Compose
+- Ollama with `qwen3:8b`, optional until model integration is implemented
 
 ```bash
 uv sync --all-extras --dev
-uv run uvicorn finance_assistant.api:app --reload
+make bootstrap
+# Review non-secret settings such as owner email and timezone in .env.
+make up
+make doctor
 ```
 
-Open `http://127.0.0.1:8000/docs` for the generated API documentation.
+The generated `.env` is owner-readable only, ignored by Git, and never
+overwritten by `make bootstrap`. All browser endpoints bind to loopback:
 
-Alternatively:
+- gateway API: <http://127.0.0.1:8000/docs>
+- Firefly III: <http://127.0.0.1:8080>
+- Firefly III Data Importer: <http://127.0.0.1:8081>
+- Ghostfolio: <http://127.0.0.1:3333>
 
 ```bash
-docker compose up --build
+make status
+make versions
+make backup
+make down
 ```
 
 ## Development
@@ -94,6 +103,7 @@ the default and are reviewed like source code.
 - [Threat model](docs/THREAT_MODEL.md)
 - [Operations](docs/OPERATIONS.md)
 - [Local runtime validation](docs/LOCAL_RUNTIME_VALIDATION.md)
+- [Phase 1 validation](docs/PHASE1_VALIDATION.md)
 - [Third-party software](docs/THIRD_PARTY.md)
 - [Architecture decisions](docs/adr/)
 - [Changelog](CHANGELOG.md)
