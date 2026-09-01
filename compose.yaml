@@ -1,0 +1,15 @@
+name: personal-finance-assistant
+
+services:
+  gateway:
+    build:
+      context: .
+    environment:
+      PFA_LOG_LEVEL: ${PFA_LOG_LEVEL:-INFO}
+      PFA_OLLAMA_BASE_URL: ${PFA_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      PFA_OLLAMA_MODEL: ${PFA_OLLAMA_MODEL:-qwen3}
+    ports:
+      - "127.0.0.1:8000:8000"
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

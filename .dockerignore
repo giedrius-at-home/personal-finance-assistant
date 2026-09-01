@@ -1,0 +1,14 @@
+.git
+.github
+.venv
+data
+backups
+exports
+tests
+*.csv
+*.ofx
+*.qfx
+*.qif
+*.sqlite*
+.env*
+!.env.example
