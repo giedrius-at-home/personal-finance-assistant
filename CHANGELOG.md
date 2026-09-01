@@ -20,3 +20,5 @@ project intends to use semantic versioning for its own releases.
 - One-time local secret generation and operational health diagnostics.
 - Private, checksummed backup and explicitly confirmed restore tooling.
 - Architecture, privacy, threat-model, operations, and decision documentation.
+- Security reporting policy and non-persistent CI checkout credentials.
+- GitHub Dependabot alerts, security updates, and enforced action SHA pinning.
