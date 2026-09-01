@@ -10,6 +10,12 @@ Last updated: 2026-09-01
 - Product boundaries and local-first trust model documented.
 - Initial Python service, deterministic goal/alert logic, and synthetic tests
   implemented on `feat/project-foundation`.
+- Colima/Docker development runtime installed and the foundation image verified
+  healthy on native Apple Silicon.
+- Firefly III 6.6.6, Ghostfolio 3.65.0, and their isolated databases verified
+  locally with synthetic state, including restart health checks.
+- Existing `qwen3:8b` verified through Ollama, including gateway-to-host network
+  reachability.
 
 ## In review
 
@@ -17,9 +23,9 @@ Last updated: 2026-09-01
 
 ## Not started
 
-- Firefly III and Ghostfolio local deployment.
+- Reviewed Firefly III and Ghostfolio deployment definitions in this repository.
 - Upstream API adapters, webhook ingestion, and persistence.
-- Ollama/Qwen integration.
+- Ollama/Qwen application integration and categorisation evaluation.
 - Native desktop notifications and review UI.
 - Real financial-data onboarding.
 
@@ -29,7 +35,8 @@ Last updated: 2026-09-01
 - Operational database for derived state after SQLite prototyping.
 - Currency minor-unit and valuation precision policy.
 - Concrete alert thresholds and cooldown defaults.
-- Qwen model variant and evaluation target.
+- Qwen categorisation evaluation corpus, quality target, and abstention threshold
+  (`qwen3:8b` is the initial local baseline).
 
 ## Review checklist
 

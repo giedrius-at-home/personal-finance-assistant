@@ -46,8 +46,11 @@ out of scope.
 
 The foundation release contains a typed FastAPI service and tested domain logic
 for savings goals and budget warnings. It does not yet connect to Firefly III,
-Ghostfolio, or real financial data. See [project status](docs/STATUS.md) and the
-[implementation plan](docs/IMPLEMENTATION_PLAN.md).
+Ghostfolio, or real financial data. The three upstream applications have been
+smoke-tested together on the target local container runtime; see the
+[runtime validation record](docs/LOCAL_RUNTIME_VALIDATION.md). See also the
+[project status](docs/STATUS.md) and the [implementation
+plan](docs/IMPLEMENTATION_PLAN.md).
 
 ## Quick start
 
@@ -90,6 +93,7 @@ the default and are reviewed like source code.
 - [Privacy model](docs/PRIVACY.md)
 - [Threat model](docs/THREAT_MODEL.md)
 - [Operations](docs/OPERATIONS.md)
+- [Local runtime validation](docs/LOCAL_RUNTIME_VALIDATION.md)
 - [Third-party software](docs/THIRD_PARTY.md)
 - [Architecture decisions](docs/adr/)
 - [Changelog](CHANGELOG.md)

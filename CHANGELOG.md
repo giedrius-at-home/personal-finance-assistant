@@ -14,4 +14,5 @@ project intends to use semantic versioning for its own releases.
 - Deterministic budget pace, forecast, and safe-to-spend evaluation.
 - Unit and property-based tests using synthetic data.
 - Local container definition and CI/security checks.
+- Reproducible local runtime validation for Firefly III, Ghostfolio, and Qwen3.
 - Architecture, privacy, threat-model, operations, and decision documentation.
