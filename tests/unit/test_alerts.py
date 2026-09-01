@@ -1,11 +1,13 @@
 from decimal import Decimal
 
 from finance_assistant.domain.alerts import evaluate_budget
-from finance_assistant.domain.models import AlertSeverity, BudgetWindow, Money
+from finance_assistant.domain.models import AlertSeverity, BudgetWindow, Currency, Money
+
+EUR = Currency(code="EUR", minor_unit=2)
 
 
 def money(amount: str) -> Money:
-    return Money(amount=Decimal(amount), currency="EUR")
+    return Money(amount=Decimal(amount), currency=EUR)
 
 
 def window(**overrides: object) -> BudgetWindow:

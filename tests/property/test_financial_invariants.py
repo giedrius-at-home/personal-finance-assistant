@@ -6,11 +6,13 @@ from hypothesis import strategies as st
 
 from finance_assistant.domain.alerts import evaluate_budget
 from finance_assistant.domain.goals import evaluate_goal
-from finance_assistant.domain.models import BudgetWindow, Money, SavingsGoal
+from finance_assistant.domain.models import BudgetWindow, Currency, Money, SavingsGoal
+
+EUR = Currency(code="EUR", minor_unit=2)
 
 
 def euros(amount: int) -> Money:
-    return Money(amount=Decimal(amount), currency="EUR")
+    return Money(amount=Decimal(amount), currency=EUR)
 
 
 @given(
@@ -61,3 +63,19 @@ def test_safe_to_spend_is_never_negative(
     )
 
     assert result.safe_to_spend >= 0
+
+
+@given(
+    minor_unit=st.integers(min_value=0, max_value=8),
+    units=st.integers(min_value=-(10**18), max_value=10**18),
+)
+def test_money_round_trips_exact_minor_units(minor_unit: int, units: int) -> None:
+    currency = Currency(code="XTS", minor_unit=minor_unit)
+    scale = Decimal(10) ** minor_unit
+    money = Money(amount=Decimal(units) / scale, currency=currency)
+
+    serialized = money.model_dump_json()
+    restored = Money.model_validate_json(serialized)
+
+    assert restored == money
+    assert restored.amount * scale == units

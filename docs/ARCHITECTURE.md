@@ -52,7 +52,9 @@ The current implementation provides pure functions and HTTP contracts for:
 
 - linear savings-goal progress and required weekly contribution;
 - spending ratio, pace, forecast, remaining budget, and safe-to-spend;
-- explainable severity selection.
+- explainable severity selection;
+- explicit currency precision and canonical account, transaction, and source
+  lineage contracts.
 
 This creates a testable domain boundary before external data is introduced.
 
@@ -88,6 +90,7 @@ and confirmed restore operations for all durable state.
 
 - Local-first and localhost-bound by default.
 - Exact decimal arithmetic for money.
+- Explicit currency minor units with no implicit rounding.
 - Idempotent ingestion and immutable source references.
 - Explainable decisions with audit records.
 - Model abstention instead of forced classification.
