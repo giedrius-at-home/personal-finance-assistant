@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import os
+from calendar import monthrange
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -39,6 +41,9 @@ def test_firefly_contract_against_pinned_local_service() -> None:
     environment = local_environment("PFA_FIREFLY_API_TOKEN")
 
     async def verify() -> None:
+        today = date.today()
+        period_start = today.replace(day=1)
+        period_end = today.replace(day=monthrange(today.year, today.month)[1])
         async with FireflyClient(
             base_url=f"http://127.0.0.1:{environment['PFA_FIREFLY_PORT']}/api/v1",
             token=environment["PFA_FIREFLY_API_TOKEN"],
@@ -46,9 +51,15 @@ def test_firefly_contract_against_pinned_local_service() -> None:
             currencies = await client.list_currencies()
             accounts = await client.list_accounts()
             transactions = await client.list_transactions()
+            piggy_banks = await client.list_piggy_banks()
+            budget_limits = await client.list_budget_limits(
+                start=period_start, end=period_end
+            )
         assert currencies
         assert isinstance(accounts, tuple)
         assert isinstance(transactions, tuple)
+        assert isinstance(piggy_banks, tuple)
+        assert isinstance(budget_limits, tuple)
 
     asyncio.run(verify())
 

@@ -11,6 +11,7 @@ from finance_assistant.ingestion.service import IngestionService
 from finance_assistant.integrations.firefly import (
     FireflyAccount,
     FireflyCurrency,
+    FireflyPiggyBank,
     FireflyTransaction,
 )
 from finance_assistant.integrations.ghostfolio import GhostfolioAccount
@@ -101,6 +102,9 @@ async def test_synthetic_sources_map_persist_and_reconcile_exactly(
         async def list_transactions(self) -> tuple[FireflyTransaction, ...]:
             return (transfer,)
 
+        async def list_piggy_banks(self) -> tuple[FireflyPiggyBank, ...]:
+            return ()
+
     class SyntheticGhostfolio:
         async def list_accounts(self) -> tuple[GhostfolioAccount, ...]:
             return (ghostfolio_account,)
@@ -127,6 +131,7 @@ async def test_synthetic_sources_map_persist_and_reconcile_exactly(
 
     assert first.reconciliation.matched
     assert first.projections_changed == 3
+    assert first.goals_seen == 0
     assert replay.projections_changed == 0
     assert len(state.list_accounts()) == 2
     assert len(state.list_transactions()) == 1

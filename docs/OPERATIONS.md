@@ -156,6 +156,26 @@ make down         # remove containers and networks while retaining volumes
 Never use `docker compose down --volumes` after introducing data. That command
 deletes the databases and Firefly uploads.
 
+## Alert scheduling and macOS delivery
+
+Policy version `2026-09-v1` evaluates after a successful source event and against
+the latest 18:00 slot in `PFA_TIMEZONE`. The SQLite scheduler lease ensures only
+one worker claims a due slot. After sleep or downtime, the coordinator evaluates
+once using current state; it does not replay each missed day. A failed evaluator
+does not record success, and its 15-minute lease eventually permits recovery.
+
+The macOS adapter is intentionally disabled unless the host-side caller opts in.
+It cannot run from the Linux gateway container. When enabled on macOS, the OS may
+request notification permission for the invoking terminal/application. Denial,
+non-macOS execution, timeout, and command failure are recorded only as content-free
+outcomes. A non-delivered attempt becomes retryable after one hour.
+
+No launch agent is installed automatically in Phase 3. The scheduling and native
+delivery components are ready for the local review application in Phase 5, where
+the owner can enable them and tune policy without hidden background processes.
+Until then, evaluations are invoked explicitly by the application/test boundary;
+merging this phase does not begin sending notifications.
+
 ## Backup
 
 Create an application-consistent local backup:

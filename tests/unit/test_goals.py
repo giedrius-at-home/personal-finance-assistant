@@ -30,6 +30,7 @@ def test_goal_evaluation_is_exact_and_explainable() -> None:
     assert result.required_weekly_contribution == Decimal("70")
     assert result.days_remaining == 60
     assert result.on_track is True
+    assert result.projected_completion_date == date(2026, 4, 1)
 
 
 def test_completed_goal_never_has_negative_remaining() -> None:
@@ -38,6 +39,7 @@ def test_completed_goal_never_has_negative_remaining() -> None:
     assert result.completed is True
     assert result.remaining == 0
     assert result.required_weekly_contribution == 0
+    assert result.projected_completion_date == date(2026, 2, 1)
 
 
 def test_overdue_goal_requires_remaining_amount_immediately() -> None:

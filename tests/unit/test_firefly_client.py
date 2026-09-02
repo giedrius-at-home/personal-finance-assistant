@@ -201,3 +201,115 @@ async def test_firefly_rejects_a_breaking_schema_change() -> None:
     with pytest.raises(UpstreamProtocolError, match="pinned schema"):
         await client.list_currencies()
     await client.aclose()
+
+
+@pytest.mark.anyio
+async def test_firefly_piggy_bank_contract_and_pagination() -> None:
+    requested_pages: list[int] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        page = int(request.url.params["page"])
+        requested_pages.append(page)
+        return httpx2.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "type": "piggy_banks",
+                        "id": f"synthetic-piggy-{page}",
+                        "attributes": {
+                            "name": "Synthetic emergency fund",
+                            "start_date": "2026-01-01T00:00:00+00:00",
+                            "target_date": "2026-12-31T00:00:00+00:00",
+                            "order": page,
+                            "active": True,
+                            "currency_code": "EUR",
+                            "currency_decimal_places": 2,
+                            "target_amount": "1200.00",
+                            "current_amount": "300.00",
+                            "save_per_month": "100.00",
+                            "accounts": [
+                                {
+                                    "account_id": "synthetic-account",
+                                    "name": "Synthetic savings",
+                                    "current_amount": "300.00",
+                                }
+                            ],
+                        },
+                    }
+                ],
+                "meta": {
+                    "pagination": {
+                        "total": 2,
+                        "count": 1,
+                        "per_page": 100,
+                        "current_page": page,
+                        "total_pages": 2,
+                    }
+                },
+            },
+        )
+
+    async with FireflyClient(
+        base_url="http://firefly.test/api/v1",
+        token="synthetic-token",
+        transport=httpx2.MockTransport(handler),
+    ) as client:
+        records = await client.list_piggy_banks()
+
+    assert requested_pages == [1, 2]
+    assert records[0].attributes.target_amount == Decimal("1200.00")
+    assert records[0].attributes.accounts[0].account_id == "synthetic-account"
+
+
+@pytest.mark.anyio
+async def test_firefly_budget_limit_contract_uses_explicit_range() -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        assert request.url.params["start"] == "2026-09-01"
+        assert request.url.params["end"] == "2026-09-30"
+        return httpx2.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "type": "budget_limits",
+                        "id": "synthetic-limit",
+                        "attributes": {
+                            "start": "2026-09-01T00:00:00+02:00",
+                            "end": "2026-09-30T23:59:59+02:00",
+                            "budget_id": "synthetic-budget",
+                            "currency_code": "EUR",
+                            "currency_decimal_places": 2,
+                            "amount": "300.00",
+                            "spent": [
+                                {
+                                    "currency_code": "EUR",
+                                    "currency_decimal_places": 2,
+                                    "sum": "-90.00",
+                                }
+                            ],
+                        },
+                    }
+                ],
+                "meta": {
+                    "pagination": {
+                        "total": 1,
+                        "count": 1,
+                        "per_page": 100,
+                        "current_page": 1,
+                        "total_pages": 1,
+                    }
+                },
+            },
+        )
+
+    async with FireflyClient(
+        base_url="http://firefly.test/api/v1",
+        token="synthetic-token",
+        transport=httpx2.MockTransport(handler),
+    ) as client:
+        records = await client.list_budget_limits(
+            start=date(2026, 9, 1), end=date(2026, 9, 30)
+        )
+
+    assert records[0].attributes.spent[0].sum == Decimal("-90.00")

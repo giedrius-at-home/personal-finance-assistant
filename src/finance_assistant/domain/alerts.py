@@ -5,13 +5,17 @@ from decimal import Decimal
 from finance_assistant.domain.models import (
     AlertSeverity,
     BudgetEvaluation,
+    BudgetPolicy,
     BudgetWindow,
 )
 
 
-def evaluate_budget(window: BudgetWindow) -> BudgetEvaluation:
+def evaluate_budget(
+    window: BudgetWindow, *, policy: BudgetPolicy | None = None
+) -> BudgetEvaluation:
     """Evaluate one budget window using explicit and explainable thresholds."""
 
+    configured = policy or BudgetPolicy()
     budget = window.budget.amount
     spent = window.spent.amount
     effective_elapsed_days = max(window.elapsed_days, 1)
@@ -46,7 +50,10 @@ def evaluate_budget(window: BudgetWindow) -> BudgetEvaluation:
     elif forecast > budget:
         severity = max(severity, AlertSeverity.WARNING, key=_severity_rank)
         reasons.append("forecast spend exceeds the category budget")
-    elif spent_ratio >= Decimal("0.65") or pace_ratio >= Decimal("1.25"):
+    elif (
+        spent_ratio >= configured.heads_up_spent_ratio
+        or pace_ratio >= configured.heads_up_pace_ratio
+    ):
         severity = max(severity, AlertSeverity.HEADS_UP, key=_severity_rank)
         reasons.append("spending is ahead of the configured budget pace")
 
@@ -61,6 +68,7 @@ def evaluate_budget(window: BudgetWindow) -> BudgetEvaluation:
         remaining_budget=remaining_budget,
         safe_to_spend=safe_to_spend,
         reasons=tuple(reasons),
+        policy_version=configured.version,
     )
 
 

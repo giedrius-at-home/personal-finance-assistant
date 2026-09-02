@@ -31,6 +31,10 @@
 | LLM invents or mutates data | Schema validation, vocabulary, review gates |
 | Prompt injection in merchant text | Treat descriptions as data, not instructions |
 | Notification storm | Stateful deduplication, cooldown, daily aggregation |
+| Concurrent or post-sleep scheduler replay | Durable due-slot lease; only latest missed slot runs |
+| AppleScript injection from financial text | Fixed script; bounded title/body passed only as argv |
+| Alert cannot be explained from a hash | Canonical aggregate evidence retained with policy version |
+| Notification content retained in audit | Persist outcome metadata only; message stays transient |
 | Double-counted investments | Canonical account ownership mapping |
 | Derived state becomes a hidden ledger | Read-only upstream APIs; projections retain authoritative lineage |
 | Audit deletion or accidental schema rollback | Separate projection delete/privacy purge; populated rollback refused |

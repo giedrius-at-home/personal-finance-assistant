@@ -54,6 +54,13 @@ currency precision, transfers, updates, malformed-contract rejection, ambiguous
 ownership rejection, idempotent persistence, immutable source lineage, and
 exact reconciliation without implicit rounding.
 
+Goal and alert changes must additionally prove piggy-bank and budget-limit
+contracts, ineligible-goal reasons, forecasts, policy boundaries, exact aggregate
+evidence, concurrent deduplication, cooldown expiry, severity escalation,
+resolution, delivery failure retry, restart persistence, timezone scheduling,
+single-run sleep catch-up, native argument isolation, and backup survival. CI
+must never invoke an actual desktop notification.
+
 Restore changes must prove that checksums are verified, explicit confirmation
 is required, original synthetic values are recovered, and every service passes
 `make doctor` afterward. Destructive cleanup is never part of the routine gate.

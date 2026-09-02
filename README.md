@@ -56,6 +56,12 @@ either upstream ledger. No real financial data has been introduced. See the
 for current status and roadmap, and the [operations guide](docs/OPERATIONS.md)
 for the local runtime.
 
+Phase 3 adds typed Firefly piggy-bank and budget-limit ingestion, lineaged
+savings goals, completion forecasts, versioned deterministic alert policy,
+durable cooldown/escalation/resolution state, offline-safe daily scheduling, and
+an opt-in native macOS notification adapter. Delivery remains disabled until the
+owner explicitly enables and tests macOS notification permission.
+
 ## Quick start
 
 Prerequisites:

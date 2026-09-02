@@ -43,3 +43,11 @@ project intends to use semantic versioning for its own releases.
   empty-state migrations, privacy purge, and checksummed backup/restore coverage.
 - A labelled synthetic end-to-end ingestion contract covering duplicate
   prevention, transfers, account linking, persistence, and exact balances.
+- Typed Firefly piggy-bank and budget-limit ingestion with canonical goal
+  lineage, priority, protected savings, contribution schedules, and deterministic
+  completion forecasts.
+- Versioned deterministic goal/budget alert policy with exact aggregate evidence,
+  durable cooldown, deduplication, escalation, resolution, and failed-delivery
+  retry state.
+- Offline-safe timezone-aware daily scheduling and an opt-in argument-safe native
+  macOS notification adapter, both inactive until explicitly invoked.

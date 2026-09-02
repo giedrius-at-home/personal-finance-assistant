@@ -10,9 +10,11 @@ from pydantic import Field
 
 from finance_assistant.domain.canonical import (
     CanonicalAccount,
+    CanonicalSavingsGoal,
     CanonicalTransaction,
 )
 from finance_assistant.domain.models import StrictModel
+from finance_assistant.ingestion.goals import build_savings_goals
 from finance_assistant.ingestion.mapping import (
     AccountLink,
     CurrencyRegistry,
@@ -27,6 +29,7 @@ from finance_assistant.ingestion.reconciliation import (
 from finance_assistant.integrations.firefly import (
     FireflyAccount,
     FireflyCurrency,
+    FireflyPiggyBank,
     FireflyTransaction,
 )
 from finance_assistant.integrations.ghostfolio import GhostfolioAccount
@@ -38,6 +41,8 @@ class FireflyReader(Protocol):
     async def list_accounts(self) -> tuple[FireflyAccount, ...]: ...
 
     async def list_transactions(self) -> tuple[FireflyTransaction, ...]: ...
+
+    async def list_piggy_banks(self) -> tuple[FireflyPiggyBank, ...]: ...
 
 
 class GhostfolioReader(Protocol):
@@ -54,10 +59,16 @@ class DerivedState(Protocol):
 
     def list_accounts(self) -> tuple[CanonicalAccount, ...]: ...
 
+    def upsert_goal(
+        self, goal: CanonicalSavingsGoal, *, observed_at: datetime
+    ) -> bool: ...
+
 
 class IngestionResult(StrictModel):
     accounts_seen: int = Field(ge=0)
     transactions_seen: int = Field(ge=0)
+    goals_seen: int = Field(ge=0)
+    goals_ineligible: int = Field(ge=0)
     projections_changed: int = Field(ge=0)
     reconciliation: ReconciliationReport
 
@@ -97,9 +108,16 @@ class IngestionService:
             currencies=currencies,
             accounts=accounts,
         )
+        goal_report = build_savings_goals(
+            await self._firefly.list_piggy_banks(), currencies=currencies
+        )
         observed_at = self._clock()
         changed = self._state.upsert_many(
             (*accounts, *transactions), observed_at=observed_at
+        )
+        changed += sum(
+            self._state.upsert_goal(goal, observed_at=observed_at)
+            for goal in goal_report.goals
         )
         observations = tuple(
             BalanceObservation(
@@ -112,6 +130,8 @@ class IngestionService:
         return IngestionResult(
             accounts_seen=len(accounts),
             transactions_seen=len(transactions),
+            goals_seen=len(goal_report.goals),
+            goals_ineligible=len(goal_report.ineligible),
             projections_changed=changed,
             reconciliation=report,
         )
