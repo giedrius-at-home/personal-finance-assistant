@@ -3,7 +3,7 @@ from decimal import Decimal
 
 import pytest
 
-from finance_assistant.domain.canonical import TransactionKind
+from finance_assistant.domain.canonical import SourceSystem, TransactionKind
 from finance_assistant.domain.models import Currency
 from finance_assistant.ingestion.mapping import (
     AccountLink,
@@ -115,13 +115,23 @@ def test_explicit_link_has_one_owner_and_prevents_double_counting() -> None:
         firefly_accounts=(firefly_account("cash"),),
         ghostfolio_accounts=(ghostfolio_account("broker"),),
         currencies=CurrencyRegistry.from_firefly((firefly_currency(),)),
-        links=(AccountLink("cash", "broker"),),
+        links=(AccountLink("cash", "broker", owner=SourceSystem.FIREFLY_III),),
     )
 
     assert len(records) == 1
     assert records[0].account_id == "firefly:cash"
     assert records[0].balance.amount == Decimal("125.50")
     assert records[0].linked_sources[0].external_id == "broker"
+
+    portfolio_owned = build_canonical_accounts(
+        firefly_accounts=(firefly_account("cash"),),
+        ghostfolio_accounts=(ghostfolio_account("broker"),),
+        currencies=CurrencyRegistry.from_firefly((firefly_currency(),)),
+        links=(AccountLink("cash", "broker", owner=SourceSystem.GHOSTFOLIO),),
+    )
+    assert portfolio_owned[0].account_id == "ghostfolio:broker"
+    assert portfolio_owned[0].balance.amount == Decimal("200")
+    assert portfolio_owned[0].linked_sources[0].external_id == "cash"
 
 
 def test_ambiguous_links_and_currency_metadata_fail_closed() -> None:
@@ -137,8 +147,8 @@ def test_ambiguous_links_and_currency_metadata_fail_closed() -> None:
             ghostfolio_accounts=ghostfolio_accounts,
             currencies=registry,
             links=(
-                AccountLink("cash", "broker-1"),
-                AccountLink("cash", "broker-2"),
+                AccountLink("cash", "broker-1", owner=SourceSystem.FIREFLY_III),
+                AccountLink("cash", "broker-2", owner=SourceSystem.GHOSTFOLIO),
             ),
         )
     with pytest.raises(MappingError, match="no currency"):

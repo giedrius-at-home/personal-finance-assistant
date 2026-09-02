@@ -67,10 +67,20 @@ class CurrencyRegistry:
 
 @dataclass(frozen=True, slots=True)
 class AccountLink:
-    """Explicitly declare that one Ghostfolio account mirrors a Firefly account."""
+    """Link two representations and explicitly select one authoritative owner."""
 
     firefly_account_id: str
     ghostfolio_account_id: str
+    owner: SourceSystem
+
+    def __post_init__(self) -> None:
+        if self.owner not in {SourceSystem.FIREFLY_III, SourceSystem.GHOSTFOLIO}:
+            raise MappingError("linked account owner is unsupported")
+        if (
+            not self.firefly_account_id.strip()
+            or not self.ghostfolio_account_id.strip()
+        ):
+            raise MappingError("linked account IDs cannot be empty")
 
 
 def _revision(updated_at: datetime | None, payload: str) -> str:
@@ -111,7 +121,7 @@ def build_canonical_accounts(
 
     linked_firefly: set[str] = set()
     linked_ghostfolio: set[str] = set()
-    link_map: dict[str, str] = {}
+    link_map: dict[str, AccountLink] = {}
     for link in links:
         if (
             link.firefly_account_id in linked_firefly
@@ -124,7 +134,7 @@ def build_canonical_accounts(
             raise MappingError("linked Ghostfolio account does not exist")
         linked_firefly.add(link.firefly_account_id)
         linked_ghostfolio.add(link.ghostfolio_account_id)
-        link_map[link.firefly_account_id] = link.ghostfolio_account_id
+        link_map[link.firefly_account_id] = link
 
     records: list[CanonicalAccount] = []
     for firefly_account in firefly.values():
@@ -136,23 +146,35 @@ def build_canonical_accounts(
             SourceSystem.FIREFLY_III, firefly_account.id, attributes.updated_at
         )
         linked: tuple[SourceReference, ...] = ()
-        linked_id = link_map.get(firefly_account.id)
-        if linked_id is not None:
-            mirror = ghostfolio[linked_id]
+        configured_link = link_map.get(firefly_account.id)
+        if configured_link is not None:
+            mirror = ghostfolio[configured_link.ghostfolio_account_id]
             if mirror.currency is None:
                 raise MappingError("linked Ghostfolio account has no currency")
             if currencies.require(mirror.currency) != currency:
                 raise MappingError("linked accounts have conflicting currencies")
-            linked = (
-                _account_reference(
-                    SourceSystem.GHOSTFOLIO, mirror.id, mirror.updated_at
-                ),
+            mirror_reference = _account_reference(
+                SourceSystem.GHOSTFOLIO, mirror.id, mirror.updated_at
             )
+            if configured_link.owner is SourceSystem.GHOSTFOLIO:
+                owner, linked = mirror_reference, (owner,)
+                account_id = f"ghostfolio:{mirror.id}"
+                name = mirror.name or f"Ghostfolio {mirror.id}"
+                balance = mirror.value
+            else:
+                linked = (mirror_reference,)
+                account_id = f"firefly:{firefly_account.id}"
+                name = attributes.name
+                balance = attributes.current_balance
+        else:
+            account_id = f"firefly:{firefly_account.id}"
+            name = attributes.name
+            balance = attributes.current_balance
         records.append(
             CanonicalAccount(
-                account_id=f"firefly:{firefly_account.id}",
-                name=attributes.name,
-                balance=Money(amount=attributes.current_balance, currency=currency),
+                account_id=account_id,
+                name=name,
+                balance=Money(amount=balance, currency=currency),
                 canonical_owner=owner,
                 linked_sources=linked,
             )
@@ -168,7 +190,7 @@ def build_canonical_accounts(
             CanonicalAccount(
                 account_id=f"ghostfolio:{ghostfolio_account.id}",
                 name=(ghostfolio_account.name or f"Ghostfolio {ghostfolio_account.id}"),
-                balance=Money(amount=ghostfolio_account.balance, currency=currency),
+                balance=Money(amount=ghostfolio_account.value, currency=currency),
                 canonical_owner=_account_reference(
                     SourceSystem.GHOSTFOLIO,
                     ghostfolio_account.id,

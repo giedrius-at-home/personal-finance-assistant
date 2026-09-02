@@ -80,6 +80,12 @@ no connection to either upstream database. Firefly remains authoritative for
 cash transactions; Ghostfolio activities remain investment-domain records and
 are not misrepresented as cash transactions.
 
+Every cross-system account link explicitly selects either Firefly III or
+Ghostfolio as canonical owner. A Ghostfolio-owned brokerage account uses its
+portfolio value and retains the corresponding Firefly account only as lineage
+and a transaction endpoint; a Firefly-owned link uses the Firefly balance. This
+choice is configuration, never inferred from matching names or amounts.
+
 ## Local deployment topology
 
 ```text

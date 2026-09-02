@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from finance_assistant.domain.canonical import SourceSystem
 from finance_assistant.ingestion.mapping import AccountLink
 from finance_assistant.ingestion.service import IngestionService
 from finance_assistant.integrations.firefly import (
@@ -110,7 +111,13 @@ async def test_synthetic_sources_map_persist_and_reconcile_exactly(
         firefly=SyntheticFirefly(),
         ghostfolio=SyntheticGhostfolio(),
         state=state,
-        links=(AccountLink("synthetic-broker", "synthetic-portfolio"),),
+        links=(
+            AccountLink(
+                "synthetic-broker",
+                "synthetic-portfolio",
+                owner=SourceSystem.GHOSTFOLIO,
+            ),
+        ),
         clock=lambda: NOW,
     )
 
@@ -125,6 +132,6 @@ async def test_synthetic_sources_map_persist_and_reconcile_exactly(
     assert len(state.list_transactions()) == 1
     assert (
         state.list_transactions()[0].counterparty_account_id
-        == "firefly:synthetic-broker"
+        == "ghostfolio:synthetic-portfolio"
     )
     state.close()
