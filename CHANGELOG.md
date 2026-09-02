@@ -51,3 +51,19 @@ project intends to use semantic versioning for its own releases.
   retry state.
 - Offline-safe timezone-aware daily scheduling and an opt-in argument-safe native
   macOS notification adapter, both inactive until explicitly invoked.
+- Deterministic, Unicode-aware merchant normalization with bounded feature
+  extraction and a versioned category vocabulary plus exact/normalized baseline
+  rules that fail closed on conflicts or unsupported transaction kinds.
+- A constrained, local-only Ollama/Qwen client and categorisation adapter that
+  passes redacted merchant text as untrusted JSON data, validates bounded
+  structured output, rejects unapproved categories, and abstains on timeouts,
+  schema drift, or model absence.
+- Versioned confidence calibration and abstention with owner-approved correction
+  holdouts, identity-separated splits, per-category precision gates, and a
+  review-only default until automation evidence clears.
+- Durable categorisation proposals, owner corrections, preview-token batch
+  approval, and idempotent reversal through a typed write port that remains
+  disabled in Phase 4 (no production Firefly write path).
+- Synthetic Phase 4 lifecycle tests covering baseline, model, abstention,
+  correction, preview, approval, conflict, reversal, replay, restart, and
+  unavailable-model degradation.

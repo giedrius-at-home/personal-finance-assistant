@@ -61,6 +61,16 @@ resolution, delivery failure retry, restart persistence, timezone scheduling,
 single-run sleep catch-up, native argument isolation, and backup survival. CI
 must never invoke an actual desktop notification.
 
+Categorisation changes must additionally prove identifier-redacting merchant
+normalization, baseline precedence and conflict abstention, vocabulary/schema
+rejection of unapproved
+categories and prompt injection, loopback-only model connectivity, bounded
+structured output, abstention on timeout/absence/schema drift, identity-separated
+holdout precision with dataset/model/vocabulary binding, preview-token batch
+approval, write-conflict rollback, idempotent reversal, restart
+persistence, and unavailable-model degradation. The Phase 4 write port must
+remain disabled in CI and production validation.
+
 Restore changes must prove that checksums are verified, explicit confirmation
 is required, original synthetic values are recovered, and every service passes
 `make doctor` afterward. Destructive cleanup is never part of the routine gate.
