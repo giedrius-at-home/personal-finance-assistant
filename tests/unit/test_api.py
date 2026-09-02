@@ -1,8 +1,13 @@
+import hashlib
+import hmac
+import json
 from datetime import date
+from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
-from finance_assistant.api import app
+from finance_assistant.api import app, create_app
+from finance_assistant.integrations.firefly_webhook import MAX_WEBHOOK_BYTES
 
 client = TestClient(app)
 
@@ -123,3 +128,108 @@ def test_financial_endpoint_rejects_binary_float_and_excess_precision() -> None:
     messages = [error["msg"] for error in response.json()["detail"]]
     assert any("decimal string or integer" in message for message in messages)
     assert any("precision exceeds" in message for message in messages)
+
+
+def test_webhook_is_unavailable_without_a_configured_secret() -> None:
+    response = client.post("/v1/webhooks/firefly", content=b"{}")
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "webhook receiver is not configured"}
+
+
+def webhook_body() -> bytes:
+    return json.dumps(
+        {
+            "uuid": str(uuid4()),
+            "user_id": 1,
+            "user_group_id": 1,
+            "trigger": "STORE_TRANSACTION",
+            "response": "TRANSACTIONS",
+            "url": "http://gateway.test/v1/webhooks/firefly",
+            "version": "v0",
+            "content": [],
+        },
+        separators=(",", ":"),
+    ).encode()
+
+
+def webhook_signature(body: bytes, timestamp: int, secret: str) -> str:
+    digest = hmac.new(
+        secret.encode(),
+        str(timestamp).encode() + b"." + body,
+        hashlib.sha3_256,
+    ).hexdigest()
+    return f"t={timestamp},v1={digest}"
+
+
+def test_webhook_accepts_once_and_acknowledges_a_duplicate() -> None:
+    now = 1_800_000_000
+    secret = "w" * 32
+    webhook_client = TestClient(
+        create_app(webhook_secret=secret, webhook_clock=lambda: now)
+    )
+    body = webhook_body()
+    headers = {"Signature": webhook_signature(body, now, secret)}
+
+    accepted = webhook_client.post(
+        "/v1/webhooks/firefly", content=body, headers=headers
+    )
+    duplicate = webhook_client.post(
+        "/v1/webhooks/firefly", content=body, headers=headers
+    )
+
+    assert accepted.status_code == 202
+    assert accepted.json() == {"status": "accepted"}
+    assert duplicate.status_code == 202
+    assert duplicate.json() == {"status": "duplicate"}
+
+
+def test_webhook_rejects_before_parsing_and_never_echoes_the_body() -> None:
+    now = 1_800_000_000
+    secret = "w" * 32
+    webhook_client = TestClient(
+        create_app(webhook_secret=secret, webhook_clock=lambda: now)
+    )
+    body = b'sensitive invalid body {"account":"synthetic"}'
+
+    unauthenticated = webhook_client.post(
+        "/v1/webhooks/firefly",
+        content=body,
+        headers={"Signature": webhook_signature(b"different", now, secret)},
+    )
+    signed_invalid = webhook_client.post(
+        "/v1/webhooks/firefly",
+        content=body,
+        headers={"Signature": webhook_signature(body, now, secret)},
+    )
+
+    assert unauthenticated.status_code == 401
+    assert signed_invalid.status_code == 422
+    assert body.decode() not in unauthenticated.text
+    assert body.decode() not in signed_invalid.text
+    assert secret not in unauthenticated.text
+
+
+def test_webhook_rejects_an_oversized_body() -> None:
+    webhook_client = TestClient(
+        create_app(webhook_secret="w" * 32, webhook_clock=lambda: 1_800_000_000)
+    )
+
+    response = webhook_client.post(
+        "/v1/webhooks/firefly", content=b"x" * (MAX_WEBHOOK_BYTES + 1)
+    )
+
+    assert response.status_code == 413
+
+
+def test_webhook_stops_reading_an_oversized_chunked_body() -> None:
+    webhook_client = TestClient(
+        create_app(webhook_secret="w" * 32, webhook_clock=lambda: 1_800_000_000)
+    )
+
+    response = webhook_client.post(
+        "/v1/webhooks/firefly",
+        content=iter((b"x" * MAX_WEBHOOK_BYTES, b"x")),
+    )
+
+    assert response.status_code == 413

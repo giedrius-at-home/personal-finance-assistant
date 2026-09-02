@@ -48,8 +48,9 @@ The project now contains a typed FastAPI service, tested domain logic, typed
 read-only Firefly III and Ghostfolio clients, and a pinned local deployment of
 both upstream systems. The domain includes explicit currency precision and
 canonical source-lineage contracts; the clients are not yet wired into a
-persistent ingestion pipeline, and no real financial data has been introduced.
-See the [GitHub Project](https://github.com/users/giedrius-at-home/projects/4)
+persistent ingestion pipeline. A signed, replay-safe Firefly webhook receipt
+boundary is available, and no real financial data has been introduced. See the
+[GitHub Project](https://github.com/users/giedrius-at-home/projects/4)
 for current status and roadmap, and the [operations guide](docs/OPERATIONS.md)
 for the local runtime.
 

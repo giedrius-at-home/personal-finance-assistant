@@ -9,6 +9,7 @@ services:
       PFA_OLLAMA_BASE_URL: ${PFA_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       PFA_OLLAMA_MODEL: ${PFA_OLLAMA_MODEL:-qwen3:8b}
       PFA_FIREFLY_BASE_URL: http://firefly:8080
+      PFA_FIREFLY_WEBHOOK_SECRET: ${PFA_FIREFLY_WEBHOOK_SECRET:-}
       PFA_GHOSTFOLIO_BASE_URL: http://ghostfolio:3333
     ports:
       - "127.0.0.1:${PFA_GATEWAY_PORT:?Run make bootstrap}:8000"

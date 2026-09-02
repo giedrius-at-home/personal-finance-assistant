@@ -100,6 +100,33 @@ directory containing each synthetic identity, its purpose, creation time,
 credential kind, and deletion instructions. Remove the users and revoke or
 rotate their credentials when the pinned contract environment is retired.
 
+## Firefly webhook receipt
+
+Firefly generates a random 24-character secret when a webhook is created. Copy
+that value into `PFA_FIREFLY_WEBHOOK_SECRET` in the ignored `.env` before
+recreating the gateway. The intended container-network URL would be:
+
+```text
+http://gateway:8000/v1/webhooks/firefly
+```
+
+However, Firefly 6.6.6 rejects Docker-private destination addresses as an SSRF
+control, while loopback inside its container does not reach the gateway. Do not
+weaken that protection or configure this native webhook in the current Compose
+topology. The receiver is validated with source-compatible signed synthetic
+requests while a polling-first or isolated-loopback relay design is reviewed.
+
+Firefly signs the timestamp and exact JSON request bytes using HMAC SHA3-256.
+The gateway verifies that signature before parsing, accepts at most five minutes
+of clock skew in either direction, limits bodies to 1 MiB, and never logs the
+secret or payload. Keep the host and container clocks synchronized. A valid
+duplicate receives another successful acknowledgement without being claimed
+twice.
+
+Replay claims are process-local until issue `#10` adds transactional derived
+persistence. Do not treat webhook acknowledgement as durable ingestion yet, and
+do not connect a real-data Firefly webhook during this phase.
+
 ## Routine commands
 
 ```bash

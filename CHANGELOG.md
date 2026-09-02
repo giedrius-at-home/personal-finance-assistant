@@ -33,3 +33,6 @@ project intends to use semantic versioning for its own releases.
 - Opt-in contract tests against the pinned local upstream services.
 - A Python 3.14 development setup check, including the macOS hidden-virtualenv
   compatibility repair.
+- Firefly III webhook receipt with raw-body HMAC SHA3-256 verification, a
+  five-minute timestamp window, strict envelopes, bounded bodies, and replay
+  acknowledgement.
