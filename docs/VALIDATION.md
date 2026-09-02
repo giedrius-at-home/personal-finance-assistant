@@ -9,7 +9,7 @@ reviewed commit and CI run.
 Run before every pull request:
 
 ```bash
-uv sync --frozen --all-extras --dev
+make setup
 make check
 docker compose --env-file .env.example config --quiet
 docker build --tag personal-finance-assistant:validation .
@@ -32,6 +32,17 @@ make status
 make backup
 make down
 ```
+
+Typed upstream-client changes must also pass authenticated read-only contracts
+against the pinned local versions:
+
+```bash
+make upstream-contracts
+```
+
+The identities and credentials used for this gate remain ignored, owner-only,
+and listed in a local cleanup ledger. Evidence records counts and outcomes only,
+never response bodies or credential values.
 
 Restore changes must prove that checksums are verified, explicit confirmation
 is required, original synthetic values are recovered, and every service passes

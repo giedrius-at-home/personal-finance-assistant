@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
   "fastapi>=0.115,<1",
+  "httpx2>=2.12,<3",
   "pydantic>=2.10,<3",
   "uvicorn[standard]>=0.34,<1",
 ]
@@ -13,7 +14,6 @@ dependencies = [
 [dependency-groups]
 dev = [
   "bandit>=1.8,<2",
-  "httpx2>=2.12,<3",
   "hypothesis>=6.130,<7",
   "mypy>=1.15,<3",
   "pip-audit>=2.8,<3",
@@ -37,7 +37,7 @@ target-version = "py314"
 select = ["B", "E", "F", "I", "N", "S", "UP"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101"]
+"tests/**" = ["S101", "S105", "S106"]
 
 [tool.mypy]
 python_version = "3.14"
@@ -46,6 +46,9 @@ plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
 addopts = "--strict-config --strict-markers"
+markers = [
+  "upstream_contract: opt-in checks against pinned local upstream services",
+]
 pythonpath = ["src", "."]
 testpaths = ["tests"]
 
