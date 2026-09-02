@@ -40,6 +40,13 @@
 | Audit deletion or accidental schema rollback | Separate projection delete/privacy purge; populated rollback refused |
 | Supply-chain compromise | Lock files, pinned images/actions, audits |
 | Accidental remote exposure | Localhost binding; no initial self-hosting |
+| DNS rebinding or forged browser host | Loopback listener plus strict Host allowlist |
+| Cross-site review/settings mutation | Same-origin POST, process CSRF cookie/token, strict SameSite |
+| Browser caches financial pages | `Cache-Control: no-store` on every response |
+| Third-party content leaks viewing behaviour | Self-only CSP; no telemetry, scripts, fonts, or remote assets |
+| Oversized or malformed review form | URL-encoded-only boundary, 8 KiB and field-count limits |
+| Stale policy confirmation | Content-bound preview token and optimistic current-hash check |
+| Duplicate or stale net-worth valuation | Canonical owner counted once; mixed/stale total withheld |
 | Database reached from host or peer service | No published DB ports; separate internal networks |
 | Weak or reused local secrets | Cryptographic one-time generation; owner-only `.env` |
 | Over-privileged or expired upstream credential | GET-only client surface, synthetic contract identity, owner-only storage, explicit rotation |

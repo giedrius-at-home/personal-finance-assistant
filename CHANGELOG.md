@@ -67,3 +67,15 @@ project intends to use semantic versioning for its own releases.
 - Synthetic Phase 4 lifecycle tests covering baseline, model, abstention,
   correction, preview, approval, conflict, reversal, replay, restart, and
   unavailable-model degradation.
+- A responsive localhost owner dashboard and matching typed JSON view for a
+  bounded category-review inbox, weekly cash flow, savings goals, active alert
+  counts, taxonomy health, and net worth.
+- Deterministic ISO-week and refund/transfer reporting with currency isolation,
+  stable evidence hashes, and incomplete-week labelling.
+- Canonical net-worth aggregation that counts linked mirrors once and fails
+  closed on stale valuations or mixed currencies.
+- Preview/confirm owner policy settings with validation, immutable audit
+  revisions, and safe rollback.
+- Same-origin POST and CSRF protection, strict host validation, no-store browser
+  responses, restrictive browser security headers, bounded forms, and an
+  ephemeral invented-data demo mode.

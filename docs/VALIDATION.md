@@ -71,6 +71,16 @@ approval, write-conflict rollback, idempotent reversal, restart
 persistence, and unavailable-model degradation. The Phase 4 write port must
 remain disabled in CI and production validation.
 
+Phase 5 dashboard/reporting changes must prove deterministic output under input
+reordering, ISO-week timezone boundaries, refunds, transfer exclusion, explicit
+currency separation, linked-account deduplication, stale-valuation fail-closed
+behaviour, and sparse/duplicate-like/overloaded taxonomy signals. Browser tests
+must cover the invented empty/filled views, narrow-screen layout, semantic
+controls, exact review decisions, settings preview/apply/rollback, invalid Host,
+cross-origin and missing-CSRF rejection, no-store/CSP headers, and the absence of
+third-party requests. Screenshots and console/network observations must contain
+invented data only and stay in pull-request evidence rather than the repository.
+
 Restore changes must prove that checksums are verified, explicit confirmation
 is required, original synthetic values are recovered, and every service passes
 `make doctor` afterward. Destructive cleanup is never part of the routine gate.

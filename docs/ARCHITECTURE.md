@@ -78,6 +78,16 @@ The current implementation provides pure functions and HTTP contracts for:
   durable categorisation proposals, and preview-token batch approval/reversal
   through a typed write port that stays disabled in Phase 4;
 - an opt-in host-side macOS adapter that receives only pre-rendered minimal text.
+- a server-rendered localhost dashboard and typed JSON projection built from the
+  same deterministic reporting service, with bounded review items and no client
+  JavaScript or third-party resources;
+- ISO-week cash-flow reports that model refunds and transfers explicitly, keep
+  currencies separate, and bind output to a stable evidence hash;
+- net-worth aggregation that counts each canonical account once, exposes linked
+  mirrors as excluded evidence, and withholds a combined total for stale or
+  mixed-currency state;
+- versioned owner policy settings with an exact preview token, explicit apply,
+  audit history, and last-write-safe rollback.
 
 Upstream DTOs remain inside `finance_assistant.integrations`; conversion into
 canonical domain records occurs in the ingestion application layer. This keeps

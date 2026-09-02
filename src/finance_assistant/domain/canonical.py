@@ -85,6 +85,7 @@ class TransactionKind(StrEnum):
 
     INFLOW = "inflow"
     OUTFLOW = "outflow"
+    REFUND = "refund"
     TRANSFER = "transfer"
 
 

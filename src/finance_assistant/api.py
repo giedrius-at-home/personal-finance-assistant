@@ -6,7 +6,10 @@ from contextlib import asynccontextmanager
 from datetime import date
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import APIRouter, FastAPI, HTTPException, Request, status
+from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import RequestResponseEndpoint
+from starlette.responses import PlainTextResponse, Response
 
 from finance_assistant import __version__
 from finance_assistant.domain.alerts import evaluate_budget
@@ -25,6 +28,7 @@ from finance_assistant.integrations.firefly_webhook import (
     WebhookPayloadError,
 )
 from finance_assistant.persistence.sqlite import SQLiteDerivedState
+from finance_assistant.web import install_web_routes, new_csrf_token
 
 
 def create_app(
@@ -32,6 +36,8 @@ def create_app(
     webhook_secret: str | None = None,
     webhook_clock: Callable[[], int] | None = None,
     database_path: Path | str | None = None,
+    demo_mode: bool = False,
+    allowed_hosts: frozenset[str] = frozenset({"127.0.0.1", "localhost", "::1"}),
 ) -> FastAPI:
     """Build the API with an explicitly configured webhook boundary."""
 
@@ -51,6 +57,11 @@ def create_app(
         version=__version__,
         lifespan=lifespan,
     )
+    application.mount(
+        "/static",
+        StaticFiles(directory=Path(__file__).parent / "static"),
+        name="static",
+    )
     application.state.firefly_webhook_receiver = (
         FireflyWebhookReceiver(
             secret=webhook_secret,
@@ -60,6 +71,25 @@ def create_app(
         if webhook_secret
         else None
     )
+
+    @application.middleware("http")
+    async def local_security(
+        request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
+        host = request.url.hostname or ""
+        test_client = request.client is not None and request.client.host == "testclient"
+        if host not in allowed_hosts and not (test_client and host == "testserver"):
+            return PlainTextResponse("invalid host", status_code=400)
+        response = await call_next(request)
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; style-src 'self'; img-src 'self'; "
+            "form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
+        )
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        return response
 
     application.add_api_route("/health", health, methods=["GET"], tags=["system"])
     application.add_api_route(
@@ -81,6 +111,14 @@ def create_app(
         tags=["ingestion"],
         status_code=status.HTTP_202_ACCEPTED,
     )
+    web_router = APIRouter()
+    install_web_routes(
+        web_router,
+        state=state,
+        demo_mode=demo_mode,
+        csrf_token=new_csrf_token(),
+    )
+    application.include_router(web_router)
     return application
 
 
@@ -157,4 +195,5 @@ async def receive_firefly_webhook(request: Request) -> dict[str, str]:
 app = create_app(
     webhook_secret=os.getenv("PFA_FIREFLY_WEBHOOK_SECRET"),
     database_path=os.getenv("PFA_DATABASE_PATH"),
+    demo_mode=os.getenv("PFA_DEMO_MODE", "false").casefold() == "true",
 )

@@ -14,7 +14,11 @@ from uuid import UUID
 
 from pydantic import TypeAdapter
 
-from finance_assistant.categorisation_service import CategoryProposal, ProposalStatus
+from finance_assistant.categorisation_service import (
+    CategoryProposal,
+    ProposalStatus,
+    source_identity,
+)
 from finance_assistant.domain.alerting import (
     AlertCandidate,
     AlertDecision,
@@ -28,7 +32,8 @@ from finance_assistant.domain.canonical import (
     SourceReference,
 )
 from finance_assistant.domain.categorisation import CalibrationExample
-from finance_assistant.domain.models import AlertSeverity
+from finance_assistant.domain.models import AlertSeverity, BudgetEvaluation, Money
+from finance_assistant.domain.settings import OwnerSettings, SettingsPreview
 
 CanonicalRecord = CanonicalAccount | CanonicalTransaction
 RecordKind = Literal["account", "transaction"]
@@ -206,6 +211,36 @@ DROP TABLE category_proposals;
 DELETE FROM schema_migrations WHERE version = 4;
 """
 
+MIGRATION_5_UP = """
+CREATE TABLE owner_settings (
+    singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+    content_hash TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE settings_history (
+    revision_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    before_hash TEXT NOT NULL,
+    after_hash TEXT NOT NULL,
+    before_json TEXT NOT NULL,
+    after_json TEXT NOT NULL,
+    preview_token TEXT NOT NULL UNIQUE,
+    actor TEXT NOT NULL,
+    applied_at TEXT NOT NULL,
+    active INTEGER NOT NULL CHECK(active IN (0, 1)),
+    rolled_back_at TEXT,
+    rolled_back_by TEXT
+);
+INSERT INTO schema_migrations(version, applied_at)
+VALUES (5, CURRENT_TIMESTAMP);
+"""
+
+MIGRATION_5_DOWN = """
+DROP TABLE settings_history;
+DROP TABLE owner_settings;
+DELETE FROM schema_migrations WHERE version = 5;
+"""
+
 
 def _serialize(record: CanonicalRecord) -> str:
     return json.dumps(
@@ -273,6 +308,8 @@ class SQLiteDerivedState:
                 self._connection.executescript(MIGRATION_3_UP)
             if version < 4:
                 self._connection.executescript(MIGRATION_4_UP)
+            if version < 5:
+                self._connection.executescript(MIGRATION_5_UP)
 
     def migrate_down(self) -> None:
         """Reverse the prototype schema only when no financial state exists."""
@@ -294,12 +331,14 @@ class SQLiteDerivedState:
                           OR EXISTS(SELECT 1 FROM alert_events)
                           OR EXISTS(SELECT 1 FROM notification_attempts)
                           OR EXISTS(SELECT 1 FROM category_proposals)
-                          OR EXISTS(SELECT 1 FROM category_corrections)"""
+                          OR EXISTS(SELECT 1 FROM category_corrections)
+                          OR EXISTS(SELECT 1 FROM settings_history)"""
             ).fetchone()[0]
             if populated:
                 raise PersistenceConflictError(
                     "refusing to migrate down populated state"
                 )
+            self._connection.executescript(MIGRATION_5_DOWN)
             self._connection.executescript(MIGRATION_4_DOWN)
             self._connection.executescript(MIGRATION_3_DOWN)
             self._connection.executescript(MIGRATION_2_DOWN)
@@ -652,6 +691,24 @@ class SQLiteDerivedState:
         adapter = TypeAdapter(CategoryProposal)
         return tuple(adapter.validate_json(row["payload_json"]) for row in rows)
 
+    def list_proposals(self, *, limit: int = 100) -> tuple[CategoryProposal, ...]:
+        """Return bounded newest review items with their current lifecycle state."""
+
+        if not 1 <= limit <= 500:
+            raise ValueError("proposal limit must be between 1 and 500")
+        rows = self._connection.execute(
+            "SELECT status, payload_json FROM category_proposals "
+            "ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        adapter = TypeAdapter(CategoryProposal)
+        proposals: list[CategoryProposal] = []
+        for row in rows:
+            payload = json.loads(row["payload_json"])
+            payload["status"] = row["status"]
+            proposals.append(adapter.validate_python(payload))
+        return tuple(proposals)
+
     def get_pending(self, proposal_id: str) -> CategoryProposal | None:
         row = self._connection.execute(
             "SELECT payload_json FROM category_proposals "
@@ -760,6 +817,181 @@ class SQLiteDerivedState:
             "SELECT status FROM category_batches WHERE batch_id = ?", (batch_id,)
         ).fetchone()
         return row is not None and row["status"] == "approved"
+
+    def list_active_alerts(
+        self, *, limit: int = 100
+    ) -> tuple[tuple[str, str, AlertSeverity, str], ...]:
+        """Return bounded content-free alert summaries for local review."""
+
+        if not 1 <= limit <= 500:
+            raise ValueError("alert limit must be between 1 and 500")
+        rows = self._connection.execute(
+            "SELECT subject_kind, subject_id, severity, updated_at "
+            "FROM alert_lifecycle WHERE active = 1 "
+            "ORDER BY updated_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return tuple(
+            (
+                str(row["subject_kind"]),
+                str(row["subject_id"]),
+                AlertSeverity(row["severity"]),
+                str(row["updated_at"]),
+            )
+            for row in rows
+        )
+
+    def list_safe_to_spend(self) -> tuple[Money, ...]:
+        """Return latest exact budget evidence for conservative currency totals."""
+
+        rows = self._connection.execute(
+            """SELECT evidence_json FROM alert_events
+               WHERE event_id IN (
+                   SELECT MAX(event_id) FROM alert_events
+                   WHERE subject_kind = 'budget' GROUP BY subject_id
+               ) ORDER BY subject_id"""
+        ).fetchall()
+        adapter = TypeAdapter(BudgetEvaluation)
+        return tuple(
+            Money(
+                amount=evaluation.safe_to_spend,
+                currency=evaluation.currency,
+            )
+            for row in rows
+            for evaluation in (adapter.validate_json(row["evidence_json"]),)
+        )
+
+    def get_settings(self) -> OwnerSettings:
+        row = self._connection.execute(
+            "SELECT payload_json FROM owner_settings WHERE singleton = 1"
+        ).fetchone()
+        if row is None:
+            return OwnerSettings()
+        return TypeAdapter(OwnerSettings).validate_json(row["payload_json"])
+
+    def preview_settings(self, desired: OwnerSettings) -> SettingsPreview:
+        before = self.get_settings()
+        token = hashlib.sha256(
+            f"settings-preview\0{before.content_hash}\0{desired.content_hash}".encode()
+        ).hexdigest()
+        return SettingsPreview(token=token, before=before, after=desired)
+
+    def apply_settings(
+        self,
+        preview: SettingsPreview,
+        *,
+        actor: str = "local-owner",
+        applied_at: datetime | None = None,
+    ) -> int:
+        """Atomically apply the exact preview when current settings are unchanged."""
+
+        if not actor or len(actor) > 64 or actor != actor.strip():
+            raise ValueError("actor must be a bounded non-empty identifier")
+        timestamp = applied_at or datetime.now(UTC)
+        if timestamp.tzinfo is None:
+            raise ValueError("applied_at must be timezone-aware")
+        expected = self.preview_settings(preview.after)
+        if expected != preview:
+            raise PersistenceConflictError("settings changed after preview")
+        before_json = preview.before.model_dump_json()
+        after_json = preview.after.model_dump_json()
+        with self._lock, self._connection:
+            current = self.get_settings()
+            if current.content_hash != preview.before.content_hash:
+                raise PersistenceConflictError("settings changed after preview")
+            cursor = self._connection.execute(
+                """INSERT INTO settings_history(
+                       before_hash, after_hash, before_json, after_json,
+                       preview_token, actor, applied_at, active)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, 1)""",
+                (
+                    preview.before.content_hash,
+                    preview.after.content_hash,
+                    before_json,
+                    after_json,
+                    preview.token,
+                    actor,
+                    timestamp.astimezone(UTC).isoformat(),
+                ),
+            )
+            self._connection.execute(
+                """INSERT INTO owner_settings(
+                       singleton, content_hash, payload_json, updated_at)
+                   VALUES (1, ?, ?, ?)
+                   ON CONFLICT(singleton) DO UPDATE SET
+                       content_hash = excluded.content_hash,
+                       payload_json = excluded.payload_json,
+                       updated_at = excluded.updated_at""",
+                (
+                    preview.after.content_hash,
+                    after_json,
+                    timestamp.astimezone(UTC).isoformat(),
+                ),
+            )
+            if cursor.lastrowid is None:  # pragma: no cover - SQLite INSERT invariant
+                raise RuntimeError("settings revision was not created")
+            return cursor.lastrowid
+
+    def rollback_settings(
+        self,
+        revision_id: int,
+        *,
+        actor: str = "local-owner",
+        rolled_back_at: datetime | None = None,
+    ) -> bool:
+        if not actor or len(actor) > 64 or actor != actor.strip():
+            raise ValueError("actor must be a bounded non-empty identifier")
+        timestamp = rolled_back_at or datetime.now(UTC)
+        if timestamp.tzinfo is None:
+            raise ValueError("rolled_back_at must be timezone-aware")
+        with self._lock, self._connection:
+            row = self._connection.execute(
+                "SELECT before_hash, after_hash, before_json, active "
+                "FROM settings_history WHERE revision_id = ?",
+                (revision_id,),
+            ).fetchone()
+            if row is None or not row["active"]:
+                return False
+            current = self.get_settings()
+            if current.content_hash != row["after_hash"]:
+                raise PersistenceConflictError(
+                    "newer settings prevent rollback of this revision"
+                )
+            self._connection.execute(
+                "UPDATE owner_settings SET content_hash = ?, payload_json = ?, "
+                "updated_at = ? WHERE singleton = 1",
+                (
+                    row["before_hash"],
+                    row["before_json"],
+                    timestamp.astimezone(UTC).isoformat(),
+                ),
+            )
+            self._connection.execute(
+                "UPDATE settings_history SET active = 0, rolled_back_at = ?, "
+                "rolled_back_by = ? WHERE revision_id = ?",
+                (timestamp.astimezone(UTC).isoformat(), actor, revision_id),
+            )
+            return True
+
+    def list_settings_revisions(
+        self,
+    ) -> tuple[tuple[int, str, str, bool, str | None, str | None], ...]:
+        rows = self._connection.execute(
+            "SELECT revision_id, actor, applied_at, active, rolled_back_at, "
+            "rolled_back_by FROM settings_history "
+            "ORDER BY revision_id DESC LIMIT 50"
+        ).fetchall()
+        return tuple(
+            (
+                int(row["revision_id"]),
+                str(row["actor"]),
+                str(row["applied_at"]),
+                bool(row["active"]),
+                str(row["rolled_back_at"]) if row["rolled_back_at"] else None,
+                str(row["rolled_back_by"]) if row["rolled_back_by"] else None,
+            )
+            for row in rows
+        )
 
     def _require_pending(
         self, proposal_ids: tuple[str, ...]
@@ -928,7 +1160,7 @@ class SQLiteDerivedState:
             )
             self._connection.execute(
                 "DELETE FROM category_corrections WHERE source_identity = ?",
-                (f"{identity[0]}:{identity[1]}:{identity[2]}",),
+                (source_identity(source),),
             )
 
     def backup_to(self, destination: Path) -> None:
