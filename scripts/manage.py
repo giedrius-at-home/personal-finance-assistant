@@ -22,12 +22,14 @@ ROOT = Path(__file__).resolve().parents[1]
 ENV_TEMPLATE = ROOT / ".env.example"
 ENV_FILE = ROOT / ".env"
 BACKUP_ROOT = ROOT / "backups"
+BACKUP_SCHEMA_VERSION = 2
 
 SECRET_MARKERS = {
     "__GENERATE_32_HEX__": 16,
     "__GENERATE_64_HEX__": 32,
 }
 REQUIRED_BACKUP_FILES = (
+    "assistant.sqlite3",
     "firefly.sql",
     "firefly-upload.tar.gz",
     "ghostfolio.sql",
@@ -198,13 +200,27 @@ def backup(destination_root: Path = BACKUP_ROOT) -> Path:
                     ),
                     partial / "ghostfolio.sql",
                 )
+                capture_private(
+                    compose_command(
+                        "run",
+                        "--rm",
+                        "--no-deps",
+                        "-T",
+                        "gateway",
+                        "python",
+                        "-c",
+                        "import pathlib,sys;sys.stdout.buffer.write("
+                        "pathlib.Path('/var/lib/pfa/assistant.sqlite3').read_bytes())",
+                    ),
+                    partial / "assistant.sqlite3",
+                )
                 capture_private(compose_command("images"), partial / "images.txt")
 
                 checksums = {
                     name: sha256_file(partial / name) for name in REQUIRED_BACKUP_FILES
                 }
                 metadata = {
-                    "schema_version": 1,
+                    "schema_version": BACKUP_SCHEMA_VERSION,
                     "created_at": datetime.now(UTC).isoformat(),
                     "checksums": checksums,
                 }
@@ -232,7 +248,7 @@ def verify_backup(source: Path) -> None:
     if not metadata_path.is_file():
         raise OperationError("backup metadata is missing")
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    if metadata.get("schema_version") != 1:
+    if metadata.get("schema_version") != BACKUP_SCHEMA_VERSION:
         raise OperationError("unsupported backup schema version")
     checksums = metadata.get("checksums")
     if not isinstance(checksums, dict):
@@ -297,6 +313,23 @@ def restore(source: Path, *, confirmed: bool) -> None:
                     "/var/www/html/storage/upload",
                     "-xzf",
                     "-",
+                ),
+                stdin=stream,
+                stdout=subprocess.DEVNULL,
+            )
+        with (source / "assistant.sqlite3").open("rb") as stream:
+            run(
+                compose_command(
+                    "run",
+                    "--rm",
+                    "--no-deps",
+                    "-T",
+                    "gateway",
+                    "python",
+                    "-c",
+                    "import pathlib,sys;pathlib.Path("
+                    "'/var/lib/pfa/assistant.sqlite3').write_bytes("
+                    "sys.stdin.buffer.read())",
                 ),
                 stdin=stream,
                 stdout=subprocess.DEVNULL,

@@ -139,3 +139,20 @@ async def test_ghostfolio_rejects_pagination_drift() -> None:
     with pytest.raises(UpstreamProtocolError, match="count changed"):
         await client.list_activities()
     await client.aclose()
+
+
+@pytest.mark.anyio
+async def test_ghostfolio_rejects_a_breaking_schema_change() -> None:
+    client = GhostfolioClient(
+        base_url="http://ghostfolio.test/api/v1",
+        api_key="synthetic-key",
+        transport=httpx2.MockTransport(
+            lambda _request: httpx2.Response(
+                200, json={"accounts": [{"id": "missing-required-fields"}]}
+            )
+        ),
+    )
+
+    with pytest.raises(UpstreamProtocolError, match="pinned schema"):
+        await client.list_accounts()
+    await client.aclose()

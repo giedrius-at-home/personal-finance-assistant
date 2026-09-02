@@ -46,8 +46,13 @@ never response bodies or credential values.
 
 Webhook changes must prove valid Firefly-compatible SHA3-256 signatures are
 accepted, invalid and stale signatures are rejected before parsing, concurrent
-duplicate UUID claims are atomic, malformed envelopes fail closed, and neither
-secrets nor raw bodies appear in error responses.
+duplicate UUID claims are atomic and survive restart, malformed envelopes fail
+closed, and neither secrets nor raw bodies appear in error responses.
+
+Ingestion changes must use explicitly synthetic fixtures and prove pagination,
+currency precision, transfers, updates, malformed-contract rejection, ambiguous
+ownership rejection, idempotent persistence, immutable source lineage, and
+exact reconciliation without implicit rounding.
 
 Restore changes must prove that checksums are verified, explicit confirmation
 is required, original synthetic values are recovered, and every service passes

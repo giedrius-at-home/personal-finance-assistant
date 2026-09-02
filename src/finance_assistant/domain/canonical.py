@@ -52,9 +52,15 @@ class CanonicalAccount(StrictModel):
 
     account_id: str = Field(min_length=1, max_length=128)
     name: str = Field(min_length=1, max_length=256)
-    currency: Currency
+    balance: Money
     canonical_owner: SourceReference
     linked_sources: tuple[SourceReference, ...] = ()
+
+    @property
+    def currency(self) -> Currency:
+        """Expose the balance currency for callers that only need identity."""
+
+        return self.balance.currency
 
     @model_validator(mode="after")
     def validate_ownership(self) -> CanonicalAccount:

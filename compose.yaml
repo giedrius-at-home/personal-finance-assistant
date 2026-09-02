@@ -6,6 +6,7 @@ services:
       context: .
     environment:
       PFA_LOG_LEVEL: ${PFA_LOG_LEVEL:-INFO}
+      PFA_DATABASE_PATH: ${PFA_DATABASE_PATH:-/var/lib/pfa/assistant.sqlite3}
       PFA_OLLAMA_BASE_URL: ${PFA_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       PFA_OLLAMA_MODEL: ${PFA_OLLAMA_MODEL:-qwen3:8b}
       PFA_FIREFLY_BASE_URL: http://firefly:8080
@@ -18,6 +19,8 @@ services:
       - "host.docker.internal:host-gateway"
     networks:
       - application
+    volumes:
+      - assistant_state:/var/lib/pfa
 
   firefly:
     image: fireflyiii/core:version-6.6.6@sha256:ae69fdd95cdef9038cd7a460a5aec731f14813973e4f096511d5a4ea9ff0e972
@@ -203,6 +206,7 @@ services:
       - ghostfolio_data
 
 volumes:
+  assistant_state:
   firefly_db:
   firefly_upload:
   ghostfolio_db:

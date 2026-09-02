@@ -47,9 +47,11 @@ out of scope.
 The project now contains a typed FastAPI service, tested domain logic, typed
 read-only Firefly III and Ghostfolio clients, and a pinned local deployment of
 both upstream systems. The domain includes explicit currency precision and
-canonical source-lineage contracts; the clients are not yet wired into a
-persistent ingestion pipeline. A signed, replay-safe Firefly webhook receipt
-boundary is available, and no real financial data has been introduced. See the
+canonical source-lineage contracts. Deterministic adapters map accounts and
+Firefly transactions into idempotent assistant-owned derived state, with exact
+balance reconciliation and durable signed-webhook replay protection. SQLite is
+the Phase 2 prototype pending the recorded database decision; it never replaces
+either upstream ledger. No real financial data has been introduced. See the
 [GitHub Project](https://github.com/users/giedrius-at-home/projects/4)
 for current status and roadmap, and the [operations guide](docs/OPERATIONS.md)
 for the local runtime.
@@ -98,7 +100,9 @@ make upstream-contracts
 ```
 
 No test or CI workflow may use real financial records. Synthetic fixtures are
-the default and are reviewed like source code.
+the default and are reviewed like source code. The end-to-end ingestion fixture
+is explicitly labelled as invented and proves mapping, duplicate prevention,
+persistence, transfers, account linking, and exact reconciliation together.
 
 Planning lives in GitHub rather than duplicate repository ledgers: Issues hold
 requirements and acceptance criteria, the Project holds priority and status,

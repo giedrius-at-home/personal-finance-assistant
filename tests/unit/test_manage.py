@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from scripts.manage import (
+    BACKUP_SCHEMA_VERSION,
     REQUIRED_BACKUP_FILES,
     OperationError,
     bootstrap,
@@ -84,7 +85,8 @@ def test_verify_backup_detects_tampering(tmp_path: Path) -> None:
         (tmp_path / name).write_text(f"synthetic {name}", encoding="utf-8")
     checksums = {name: sha256_file(tmp_path / name) for name in REQUIRED_BACKUP_FILES}
     (tmp_path / "metadata.json").write_text(
-        json.dumps({"schema_version": 1, "checksums": checksums}), encoding="utf-8"
+        json.dumps({"schema_version": BACKUP_SCHEMA_VERSION, "checksums": checksums}),
+        encoding="utf-8",
     )
 
     verify_backup(tmp_path)
