@@ -44,11 +44,12 @@ out of scope.
 
 ## Current state
 
-The project now contains a typed FastAPI service, tested domain logic, and a
-pinned local deployment of Firefly III, its Data Importer, and Ghostfolio. The
-domain includes explicit currency precision and canonical source-lineage
-contracts; the gateway does not yet ingest upstream data, and no real financial
-data has been introduced. See the [GitHub Project](https://github.com/users/giedrius-at-home/projects/4)
+The project now contains a typed FastAPI service, tested domain logic, typed
+read-only Firefly III and Ghostfolio clients, and a pinned local deployment of
+both upstream systems. The domain includes explicit currency precision and
+canonical source-lineage contracts; the clients are not yet wired into a
+persistent ingestion pipeline, and no real financial data has been introduced.
+See the [GitHub Project](https://github.com/users/giedrius-at-home/projects/4)
 for current status and roadmap, and the [operations guide](docs/OPERATIONS.md)
 for the local runtime.
 
@@ -62,7 +63,7 @@ Prerequisites:
 - Ollama with `qwen3:8b`, optional until model integration is implemented
 
 ```bash
-uv sync --all-extras --dev
+make setup
 make bootstrap
 # Review non-secret settings such as owner email and timezone in .env.
 make up
@@ -91,6 +92,8 @@ make format
 make lint
 make test
 make check
+# After configuring synthetic local API credentials:
+make upstream-contracts
 ```
 
 No test or CI workflow may use real financial records. Synthetic fixtures are

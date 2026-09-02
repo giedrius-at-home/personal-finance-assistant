@@ -34,6 +34,8 @@
 | Accidental remote exposure | Localhost binding; no initial self-hosting |
 | Database reached from host or peer service | No published DB ports; separate internal networks |
 | Weak or reused local secrets | Cryptographic one-time generation; owner-only `.env` |
+| Over-privileged or expired upstream credential | GET-only client surface, synthetic contract identity, owner-only storage, explicit rotation |
+| Credential or financial body leaked by client error | Typed body-free errors; no redirect following or request/response logging |
 | Corrupt or substituted backup | SHA-256 manifest verified before restore |
 | Accidental destructive restore | Explicit backup path and confirmation flag |
 | Backup disclosure | Git exclusion, owner-only files; encrypted off-device copy required |

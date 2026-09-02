@@ -1,5 +1,10 @@
 .PHONY: backup bootstrap check compose-config doctor down format lint logs pull \
-	restore run security status stop test up versions
+	restore run security setup status stop test upstream-contracts up versions
+
+setup:
+	uv sync
+	@if [ "$$(uname -s)" = "Darwin" ]; then chflags -R nohidden .venv; fi
+	uv run python -c "import finance_assistant"
 
 format:
 	uv run ruff format .
@@ -16,6 +21,10 @@ security:
 
 test:
 	uv run pytest --cov=finance_assistant --cov-report=term-missing
+
+upstream-contracts:
+	PFA_REQUIRE_UPSTREAM_CONTRACTS=1 uv run pytest -m upstream_contract \
+		tests/integration/test_upstream_contracts.py
 
 check: lint security test
 

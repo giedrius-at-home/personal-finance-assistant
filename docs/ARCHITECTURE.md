@@ -54,9 +54,16 @@ The current implementation provides pure functions and HTTP contracts for:
 - spending ratio, pace, forecast, remaining budget, and safe-to-spend;
 - explainable severity selection;
 - explicit currency precision and canonical account, transaction, and source
-  lineage contracts.
+  lineage contracts;
+- narrow read-only Firefly III and Ghostfolio clients with typed upstream DTOs,
+  explicit authentication, bounded retry and pagination policies, and
+  fail-closed response validation.
 
-This creates a testable domain boundary before external data is introduced.
+Upstream DTOs remain inside `finance_assistant.integrations`; conversion into
+canonical domain records will occur in the ingestion application layer. This
+keeps upstream schema drift from silently changing deterministic domain logic.
+No client has a write method, and failures never include response bodies or
+credentials.
 
 ## Local deployment topology
 

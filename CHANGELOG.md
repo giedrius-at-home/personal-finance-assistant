@@ -28,3 +28,8 @@ project intends to use semantic versioning for its own releases.
   boundaries.
 - Canonical account, transaction, ownership, and immutable source-lineage
   contracts.
+- Typed, read-only Firefly III and Ghostfolio API clients with bounded retries,
+  pagination, response validation, and credential-safe failures.
+- Opt-in contract tests against the pinned local upstream services.
+- A Python 3.14 development setup check, including the macOS hidden-virtualenv
+  compatibility repair.

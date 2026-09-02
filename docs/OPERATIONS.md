@@ -21,9 +21,13 @@ current runtime gate and links to reviewed historical evidence.
 Install dependencies and generate the local configuration:
 
 ```bash
-uv sync --frozen --all-extras --dev
+make setup
 make bootstrap
 ```
+
+`make setup` synchronizes the Python 3.14 environment and verifies the package
+is importable. On macOS it also clears an inherited filesystem flag that can
+cause Python to skip editable-install `.pth` files inside a hidden `.venv`.
 
 `make bootstrap` reads `.env.example`, creates distinct cryptographic secrets,
 writes `.env` with mode `0600`, and refuses to replace an existing file. Review
@@ -54,9 +58,47 @@ The local interfaces are:
 - Firefly III Data Importer: <http://127.0.0.1:8081>
 - Ghostfolio: <http://127.0.0.1:3333>
 
-The importer intentionally starts without a Firefly access token. Create and
-configure permanent user accounts only after the deployment PR is reviewed and
-merged. Real-data onboarding is a separate controlled step.
+The importer intentionally starts without a Firefly access token. Real-data
+onboarding is a separate controlled step.
+
+## Synthetic upstream contract identities
+
+Before connecting any personal data, create dedicated synthetic local users in
+Firefly III and Ghostfolio. Use generated, unique passwords and keep them only
+in the local password manager or another encrypted store. Then create:
+
+- a Firefly III personal access token for the synthetic user;
+- a Ghostfolio bearer session for the synthetic user. The pinned 3.65.0
+  self-hosted admin role cannot create a dedicated API key, so this credential
+  expires after 180 days and must be rotated.
+
+These upstream credentials may inherit broader user permissions even though the
+assistant clients expose only GET operations. Treat both as sensitive and use
+them only for these local synthetic identities.
+
+Add only those two credentials to the ignored, owner-only `.env` file:
+
+```dotenv
+PFA_FIREFLY_API_TOKEN=<local synthetic token>
+PFA_GHOSTFOLIO_BEARER_TOKEN=<local synthetic bearer token>
+```
+
+Do not place credentials on a command line, in shell history, test output, issue
+comments, or commits. With the pinned stack healthy, verify the real response
+contracts:
+
+```bash
+make upstream-contracts
+```
+
+This command performs read-only requests and reports test outcomes without
+printing response bodies or secrets. It fails when either credential is absent;
+the ordinary offline test suite skips these live-only checks.
+
+Keep a local owner-only cleanup ledger under the ignored `credentials/`
+directory containing each synthetic identity, its purpose, creation time,
+credential kind, and deletion instructions. Remove the users and revoke or
+rotate their credentials when the pinned contract environment is retired.
 
 ## Routine commands
 
