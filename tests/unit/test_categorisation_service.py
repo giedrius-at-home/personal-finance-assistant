@@ -27,6 +27,8 @@ from finance_assistant.domain.categorisation import (
     CalibrationReport,
     CategorisationMethod,
     CategoryVocabulary,
+    PredictionRecord,
+    compute_calibration,
 )
 from finance_assistant.persistence.sqlite import (
     PersistenceConflictError,
@@ -92,6 +94,11 @@ class RecordingWritePort:
         return CategoryWriteResult.REVERSED
 
 
+class ConflictingWritePort(RecordingWritePort):
+    def apply(self, proposal) -> CategoryWriteResult:
+        return CategoryWriteResult.CONFLICT
+
+
 def source(external_id: str = "txn-1") -> SourceReference:
     return SourceReference(
         system=SourceSystem.FIREFLY_III,
@@ -108,7 +115,23 @@ def model_result(category: str, confidence: str = "0.95") -> str:
     )
 
 
-def make_service(store, *, backend=None, automation=frozenset(), write_port=None):
+def calibration_report(*categories: str) -> CalibrationReport:
+    return compute_calibration(
+        tuple(
+            PredictionRecord(
+                feature_hash=f"{index:064x}",
+                approved_category=category,
+                predicted_category=category,
+            )
+            for index, category in enumerate(categories, start=1)
+        ),
+        policy=POLICY,
+        vocabulary_version=VOCAB.version,
+        model_version="qwen3:8b",
+    )
+
+
+def make_service(store, *, backend=None, calibrated_categories=(), write_port=None):
     model = QwenCategoriser(
         backend=backend or FakeBackend([]), vocabulary=VOCAB, model="qwen3:8b"
     )
@@ -119,7 +142,11 @@ def make_service(store, *, backend=None, automation=frozenset(), write_port=None
         baseline_rules=BASELINE,
         calibration_policy=POLICY,
         model_version="qwen3:8b",
-        automation=automation,
+        calibration_report=(
+            calibration_report(*calibrated_categories)
+            if calibrated_categories
+            else None
+        ),
         write_port=write_port,
         clock=lambda: NOW,
     )
@@ -142,6 +169,19 @@ async def test_adapter_validates_and_abstains_on_unapproved_or_malformed() -> No
         model="qwen3:8b",
     )
     assert (await adapter.propose("airline")).abstention == "unapproved_category"
+
+    adapter = QwenCategoriser(
+        backend=FakeBackend(
+            [
+                '{"category":"dining","confidence":0.95,'
+                '"runner_up":"travel","runner_up_confidence":0.1,'
+                '"reason":"evidence"}'
+            ]
+        ),
+        vocabulary=VOCAB,
+        model="qwen3:8b",
+    )
+    assert (await adapter.propose("airline")).abstention == "unapproved_runner_up"
 
     adapter = QwenCategoriser(
         backend=FakeBackend(["not json"]), vocabulary=VOCAB, model="qwen3:8b"
@@ -197,9 +237,7 @@ async def test_propose_uses_baseline_before_model(store) -> None:
 async def test_propose_abstains_without_calibration_and_none_for_transfers(
     store,
 ) -> None:
-    service = make_service(
-        store, backend=FakeBackend([model_result("dining")]), automation=frozenset()
-    )
+    service = make_service(store, backend=FakeBackend([model_result("dining")]))
     proposal = await service.propose(
         source=source(), description="Local Cafe", kind=TransactionKind.OUTFLOW
     )
@@ -218,7 +256,7 @@ async def test_propose_automates_only_enabled_categories(store) -> None:
     service = make_service(
         store,
         backend=FakeBackend([model_result("dining")]),
-        automation=frozenset({"dining"}),
+        calibrated_categories=("dining",),
     )
     proposal = await service.propose(
         source=source(), description="Local Cafe", kind=TransactionKind.OUTFLOW
@@ -292,7 +330,7 @@ async def test_evaluate_holdout_runs_model_over_identity_split(store) -> None:
             feature_hash="a" * 64,
             normalized_merchant="cafe one",
             approved_category="dining",
-            source_identity="firefly:transaction:1",
+            source_identity="1" * 64,
         )
     )
     store.record_correction(
@@ -300,7 +338,7 @@ async def test_evaluate_holdout_runs_model_over_identity_split(store) -> None:
             feature_hash="b" * 64,
             normalized_merchant="market two",
             approved_category="groceries",
-            source_identity="firefly:transaction:2",
+            source_identity="2" * 64,
         )
     )
     backend = FakeBackend([model_result("dining"), model_result("groceries")])
@@ -315,3 +353,33 @@ async def test_evaluate_holdout_runs_model_over_identity_split(store) -> None:
 async def test_disabled_write_port_is_the_phase4_default(store) -> None:
     service = make_service(store)
     assert isinstance(service._write_port, DisabledCategoryWritePort)
+
+
+def test_calibration_versions_cannot_be_bypassed(store) -> None:
+    report = calibration_report("dining").model_copy(
+        update={"model_version": "different-model"}
+    )
+    model = QwenCategoriser(backend=FakeBackend([]), vocabulary=VOCAB, model="qwen3:8b")
+    with pytest.raises(ValueError, match="calibration report versions"):
+        CategorisationService(
+            store=store,
+            model=model,
+            vocabulary=VOCAB,
+            baseline_rules=BASELINE,
+            calibration_policy=POLICY,
+            model_version="qwen3:8b",
+            calibration_report=report,
+        )
+
+
+@pytest.mark.anyio
+async def test_write_conflict_keeps_proposal_pending(store) -> None:
+    service = make_service(store, write_port=ConflictingWritePort())
+    proposal = await service.propose(
+        source=source(), description="ACME", kind=TransactionKind.OUTFLOW
+    )
+    assert proposal is not None
+    token = service.preview((proposal.proposal_id,))
+    with pytest.raises(RuntimeError, match="write conflict"):
+        service.approve((proposal.proposal_id,), preview_token=token)
+    assert store.list_pending() == (proposal,)

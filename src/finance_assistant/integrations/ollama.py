@@ -43,6 +43,8 @@ def normalize_ollama_base_url(value: str) -> str:
         raise ValueError("ollama base_url cannot contain credentials")
     if parts.query or parts.fragment:
         raise ValueError("ollama base_url cannot contain a query or fragment")
+    if parts.path not in {"", "/"}:
+        raise ValueError("ollama base_url cannot contain a path")
     host = parts.hostname.lower()
     if host not in _LOCAL_HOSTS:
         raise ValueError("ollama base_url must use a local loopback host")
@@ -62,8 +64,8 @@ class OllamaClient:
         backoff_seconds: float = 0.1,
         read_timeout_seconds: float = 120,
     ) -> None:
-        if not model.strip():
-            raise ValueError("model cannot be empty")
+        if not model.strip() or len(model.strip()) > 128:
+            raise ValueError("model must be a non-empty bounded identifier")
         if not 1 <= max_attempts <= 5:
             raise ValueError("max_attempts must be between 1 and 5")
         if not 0 <= backoff_seconds <= 5:
@@ -102,6 +104,9 @@ class OllamaClient:
             "model": self._model,
             "prompt": prompt,
             "stream": False,
+            "format": "json",
+            "options": {"temperature": 0},
+            "think": False,
         }
         if system is not None:
             payload["system"] = system

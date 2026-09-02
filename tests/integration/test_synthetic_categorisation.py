@@ -26,8 +26,11 @@ from finance_assistant.domain.categorisation import (
     BaselineRuleKind,
     BaselineRuleSet,
     CalibrationPolicy,
+    CalibrationReport,
     CategorisationMethod,
     CategoryVocabulary,
+    PredictionRecord,
+    compute_calibration,
 )
 from finance_assistant.persistence.sqlite import (
     PersistenceConflictError,
@@ -104,7 +107,23 @@ def model_result(category: str, confidence: str = "0.95") -> str:
     )
 
 
-def build_service(store, *, backend, automation=frozenset(), write_port=None):
+def calibration_report(*categories: str) -> CalibrationReport:
+    return compute_calibration(
+        tuple(
+            PredictionRecord(
+                feature_hash=f"{index:064x}",
+                approved_category=category,
+                predicted_category=category,
+            )
+            for index, category in enumerate(categories, start=1)
+        ),
+        policy=POLICY,
+        vocabulary_version=VOCAB.version,
+        model_version="qwen3:8b",
+    )
+
+
+def build_service(store, *, backend, calibrated_categories=(), write_port=None):
     model = QwenCategoriser(backend=backend, vocabulary=VOCAB, model="qwen3:8b")
     return CategorisationService(
         store=store,
@@ -113,7 +132,11 @@ def build_service(store, *, backend, automation=frozenset(), write_port=None):
         baseline_rules=BASELINE,
         calibration_policy=POLICY,
         model_version="qwen3:8b",
-        automation=automation,
+        calibration_report=(
+            calibration_report(*calibrated_categories)
+            if calibrated_categories
+            else None
+        ),
         write_port=write_port,
         clock=lambda: NOW,
     )
@@ -128,7 +151,7 @@ async def test_full_categorisation_lifecycle(tmp_path) -> None:
     service = build_service(
         store,
         backend=QueueBackend([model_result("dining")]),
-        automation=frozenset({"dining"}),
+        calibrated_categories=("dining",),
         write_port=write_port,
     )
 

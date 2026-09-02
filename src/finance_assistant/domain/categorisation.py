@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import unicodedata
 from decimal import Decimal
 from enum import StrEnum
@@ -20,6 +21,7 @@ from finance_assistant.domain.models import StrictModel
 
 MERCHANT_MAX_LENGTH = 200
 REASON_MAX_LENGTH = 256
+MAX_CATEGORIES = 256
 DEFAULT_POLICY_VERSION = "2026-09-v1"
 DEFAULT_VOCABULARY_VERSION = "2026-09-v1"
 
@@ -28,6 +30,10 @@ DEFAULT_VOCABULARY_VERSION = "2026-09-v1"
 # are stripped so a merchant string such as "ACME\u200b<script>" becomes plain
 # data instead of a channel for control or injection structure.
 _STRIPPED_UNICODE_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Co", "Cn"})
+_URL = re.compile(r"\b(?:https?://|www\.)\S+", re.IGNORECASE)
+_EMAIL = re.compile(r"\b[^\s@]+@[^\s@]+\.[^\s@]+\b")
+_IBAN = re.compile(r"\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b", re.IGNORECASE)
+_LONG_NUMBER = re.compile(r"\b\d{4,}\b")
 
 
 class CategorisationMethod(StrEnum):
@@ -52,7 +58,7 @@ class CategoryVocabulary(StrictModel):
     version: str = Field(
         default=DEFAULT_VOCABULARY_VERSION, min_length=1, max_length=64
     )
-    categories: tuple[str, ...]
+    categories: tuple[str, ...] = Field(min_length=1, max_length=MAX_CATEGORIES)
 
     @model_validator(mode="after")
     def validate_categories(self) -> CategoryVocabulary:
@@ -61,6 +67,8 @@ class CategoryVocabulary(StrictModel):
         for category in self.categories:
             if not category or category != category.strip():
                 raise ValueError("category cannot be empty or padded with whitespace")
+            if len(category) > 128:
+                raise ValueError("category exceeds the vocabulary item size limit")
         if len(set(self.categories)) != len(self.categories):
             raise ValueError("vocabulary contains duplicate categories")
         return self
@@ -101,7 +109,7 @@ class MerchantFeatures(StrictModel):
 
 
 def normalize_merchant(value: str) -> str:
-    """Normalize untrusted merchant text deterministically and bound its length."""
+    """Normalize and redact common identifiers before storage or model use."""
 
     text = unicodedata.normalize("NFKC", value)
     text = "".join(
@@ -109,7 +117,14 @@ def normalize_merchant(value: str) -> str:
         for character in text
         if unicodedata.category(character) not in _STRIPPED_UNICODE_CATEGORIES
     )
-    return " ".join(text.split()).lower()[:MERCHANT_MAX_LENGTH]
+    text = _URL.sub(" url ", text)
+    text = _EMAIL.sub(" email ", text)
+    text = _IBAN.sub(" account ", text)
+    text = _LONG_NUMBER.sub(" number ", text)
+    normalized = " ".join(text.split()).lower()[:MERCHANT_MAX_LENGTH]
+    if not normalized:
+        raise ValueError("merchant description has no usable normalized content")
+    return normalized
 
 
 def extract_features(description: str) -> MerchantFeatures:
@@ -143,6 +158,16 @@ class ModelCategorisation(StrictModel):
     runner_up: str | None = Field(default=None, min_length=1, max_length=128)
     runner_up_confidence: Decimal = Field(default=Decimal("0"), ge=0, le=1)
     reason: str = Field(min_length=1, max_length=REASON_MAX_LENGTH)
+
+    @model_validator(mode="after")
+    def validate_alternative(self) -> ModelCategorisation:
+        if self.runner_up is None and self.runner_up_confidence != 0:
+            raise ValueError("runner_up_confidence requires a runner_up")
+        if self.runner_up == self.category:
+            raise ValueError("runner_up must differ from the selected category")
+        if self.runner_up_confidence > self.confidence:
+            raise ValueError("runner_up cannot outrank the selected category")
+        return self
 
 
 def baseline_categorise(
@@ -215,14 +240,12 @@ class CalibrationExample(StrictModel):
     feature_hash: str = Field(pattern="^[0-9a-f]{64}$")
     normalized_merchant: str = Field(min_length=1, max_length=MERCHANT_MAX_LENGTH)
     approved_category: str = Field(min_length=1, max_length=128)
-    source_identity: str = Field(min_length=1, max_length=256)
+    source_identity: str = Field(pattern="^[0-9a-f]{64}$")
 
     @model_validator(mode="after")
     def validate_fields(self) -> CalibrationExample:
         if self.approved_category != self.approved_category.strip():
             raise ValueError("approved_category cannot have surrounding whitespace")
-        if self.source_identity != self.source_identity.strip():
-            raise ValueError("source_identity cannot have surrounding whitespace")
         return self
 
 
@@ -285,6 +308,9 @@ class CalibrationReport(StrictModel):
     """Explains whether automation may be enabled and for which categories."""
 
     policy_version: str
+    vocabulary_version: str
+    model_version: str
+    dataset_hash: str = Field(pattern="^[0-9a-f]{64}$")
     total_examples: int = Field(ge=0)
     total_support: int = Field(ge=0)
     coverage: Decimal = Field(ge=0, le=1)
@@ -302,6 +328,8 @@ def compute_calibration(
     records: tuple[PredictionRecord, ...],
     *,
     policy: CalibrationPolicy,
+    vocabulary_version: str,
+    model_version: str,
 ) -> CalibrationReport:
     """Compute precision, coverage, support, and per-category failures."""
 
@@ -334,8 +362,16 @@ def compute_calibration(
             by_category.items()
         )
     )
+    canonical_records = json.dumps(
+        [record.model_dump(mode="json") for record in records],
+        sort_keys=True,
+        separators=(",", ":"),
+    )
     return CalibrationReport(
         policy_version=policy.version,
+        vocabulary_version=vocabulary_version,
+        model_version=model_version,
+        dataset_hash=hashlib.sha256(canonical_records.encode()).hexdigest(),
         total_examples=total,
         total_support=support,
         coverage=_precision(support, total),

@@ -54,9 +54,10 @@ project intends to use semantic versioning for its own releases.
 - Deterministic, Unicode-aware merchant normalization with bounded feature
   extraction and a versioned category vocabulary plus exact/normalized baseline
   rules that fail closed on conflicts or unsupported transaction kinds.
-- A constrained, loopback-only Ollama/Qwen client and categorisation adapter that
-  validates bounded structured output, rejects unapproved categories and prompt
-  injection, and abstains on timeouts, schema drift, or model absence.
+- A constrained, local-only Ollama/Qwen client and categorisation adapter that
+  passes redacted merchant text as untrusted JSON data, validates bounded
+  structured output, rejects unapproved categories, and abstains on timeouts,
+  schema drift, or model absence.
 - Versioned confidence calibration and abstention with owner-approved correction
   holdouts, identity-separated splits, per-category precision gates, and a
   review-only default until automation evidence clears.

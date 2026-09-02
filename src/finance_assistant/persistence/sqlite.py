@@ -192,7 +192,7 @@ CREATE TABLE category_corrections (
 );
 CREATE TABLE category_batches (
     batch_id TEXT PRIMARY KEY,
-    status TEXT NOT NULL CHECK(status IN ('applied', 'reversed')),
+    status TEXT NOT NULL CHECK(status IN ('approved', 'reversed')),
     created_at TEXT NOT NULL
 );
 INSERT INTO schema_migrations(version, applied_at)
@@ -665,15 +665,21 @@ class SQLiteDerivedState:
     def preview_batch(self, proposal_ids: tuple[str, ...]) -> str:
         return _batch_token(self._require_pending(proposal_ids))
 
+    def validate_category_batch(
+        self, proposal_ids: tuple[str, ...], *, preview_token: str
+    ) -> tuple[CategoryProposal, ...]:
+        proposals = self._require_pending(proposal_ids)
+        if _batch_token(proposals) != preview_token:
+            raise PersistenceConflictError(
+                "preview token does not match the current proposals"
+            )
+        return proposals
+
     def approve_batch(
         self, proposal_ids: tuple[str, ...], *, preview_token: str
     ) -> tuple[CategoryProposal, ...]:
         with self._lock, self._connection:
-            proposals = self._require_pending(proposal_ids)
-            if _batch_token(proposals) != preview_token:
-                raise PersistenceConflictError(
-                    "preview token does not match the current proposals"
-                )
+            self.validate_category_batch(proposal_ids, preview_token=preview_token)
             batch_id = preview_token
             now = datetime.now(UTC).isoformat()
             placeholders = ",".join("?" for _ in proposal_ids)
@@ -685,12 +691,17 @@ class SQLiteDerivedState:
             )
             self._connection.execute(
                 """INSERT OR IGNORE INTO category_batches(batch_id, status, created_at)
-                   VALUES (?, 'applied', ?)""",
+                   VALUES (?, 'approved', ?)""",
                 (batch_id, now),
             )
         return self._load_proposals(proposal_ids)
 
-    def record_correction(self, example: CalibrationExample) -> None:
+    def record_correction(
+        self, example: CalibrationExample, *, approved_at: datetime | None = None
+    ) -> None:
+        timestamp = approved_at or datetime.now(UTC)
+        if timestamp.tzinfo is None:
+            raise ValueError("approved_at must be timezone-aware")
         with self._lock, self._connection:
             self._connection.execute(
                 """INSERT OR IGNORE INTO category_corrections(
@@ -701,7 +712,7 @@ class SQLiteDerivedState:
                     example.feature_hash,
                     example.normalized_merchant,
                     example.approved_category,
-                    datetime.now(UTC).isoformat(),
+                    timestamp.astimezone(UTC).isoformat(),
                 ),
             )
 
@@ -743,6 +754,12 @@ class SQLiteDerivedState:
                 (now, batch_id),
             )
             return cursor.rowcount
+
+    def category_batch_is_approved(self, batch_id: str) -> bool:
+        row = self._connection.execute(
+            "SELECT status FROM category_batches WHERE batch_id = ?", (batch_id,)
+        ).fetchone()
+        return row is not None and row["status"] == "approved"
 
     def _require_pending(
         self, proposal_ids: tuple[str, ...]

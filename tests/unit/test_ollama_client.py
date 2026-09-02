@@ -37,6 +37,8 @@ def test_normalize_ollama_base_url_accepts_only_local_hosts() -> None:
         normalize_ollama_base_url("ftp://127.0.0.1:11434")
     with pytest.raises(ValueError):
         normalize_ollama_base_url("http://127.0.0.1:11434#fragment")
+    with pytest.raises(ValueError):
+        normalize_ollama_base_url("http://127.0.0.1:11434/other")
 
 
 def test_ollama_client_rejects_invalid_configuration() -> None:
@@ -59,6 +61,8 @@ async def test_generate_posts_pinned_model_and_returns_response_text() -> None:
         body = json.loads(request.content)
         assert body["model"] == "qwen3:8b"
         assert body["stream"] is False
+        assert body["format"] == "json"
+        assert body["think"] is False
         assert "untrusted" in body["prompt"]
         return httpx2.Response(
             200,

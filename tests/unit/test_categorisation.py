@@ -37,6 +37,15 @@ def test_normalize_merchant_strips_controls_collapses_and_lowercases() -> None:
     assert normalize_merchant("ＣＡＦＥ") == "cafe"
 
 
+def test_normalize_merchant_redacts_common_identifiers() -> None:
+    normalized = normalize_merchant(
+        "Cafe LT601010012345678901 receipt 123456 john@example.test "
+        "https://merchant.invalid/order"
+    )
+    assert normalized == "cafe account receipt number email url"
+    assert "123456" not in normalized
+
+
 def test_normalize_merchant_is_bounded() -> None:
     assert len(normalize_merchant("x" * 500)) == 200
 
@@ -149,6 +158,8 @@ def test_compute_calibration_reports_precision_coverage_and_support() -> None:
             _prediction("groceries", None),
         ),
         policy=CalibrationPolicy(),
+        vocabulary_version=VOCAB.version,
+        model_version="qwen3:8b",
     )
     assert report.total_examples == 4
     assert report.total_support == 3
@@ -172,6 +183,8 @@ def test_automation_categories_gates_on_evidence() -> None:
             _prediction("transport", "dining"),
         ),
         policy=policy,
+        vocabulary_version=VOCAB.version,
+        model_version="qwen3:8b",
     )
     assert automation_categories(below_precision, policy=policy) == frozenset()
 
@@ -182,6 +195,8 @@ def test_automation_categories_gates_on_evidence() -> None:
             _prediction("dining", "groceries"),
         ),
         policy=policy,
+        vocabulary_version=VOCAB.version,
+        model_version="qwen3:8b",
     )
     assert automation_categories(at_precision, policy=policy) == frozenset({"dining"})
 
@@ -227,9 +242,7 @@ def test_split_by_identity_keeps_identity_in_one_bucket() -> None:
             approved_category="dining",
             source_identity=identity,
         )
-        for index, identity in enumerate(
-            ["firefly:transaction:1", "firefly:transaction:2", "firefly:transaction:3"]
-        )
+        for index, identity in enumerate(f"{value:064x}" for value in range(1, 4))
     )
     split = split_by_identity(examples)
     assert len(split.train) + len(split.calibration) + len(split.holdout) == 3

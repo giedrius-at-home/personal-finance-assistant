@@ -35,6 +35,12 @@ Thresholds and dataset fingerprints are versioned so the policy can be
 recalibrated or rolled back without mutating upstream data or rewriting audit
 history.
 
+An automation allowlist cannot be supplied independently. It is derived from a
+calibration report whose policy, vocabulary, model, and dataset fingerprint are
+bound to the running categorisation service. Merchant features redact common
+account numbers, long numeric identifiers, email addresses, and URLs before
+they enter durable correction data or the local model prompt.
+
 ## Consequences
 
 - Every automated category is traceable to an owner-approved holdout with
