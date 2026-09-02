@@ -36,3 +36,10 @@ project intends to use semantic versioning for its own releases.
 - Firefly III webhook receipt with raw-body HMAC SHA3-256 verification, a
   five-minute timestamp window, strict envelopes, bounded bodies, and replay
   acknowledgement.
+- Deterministic Firefly/Ghostfolio account mapping, Firefly transaction and
+  transfer mapping, explicit ownership links, and fail-closed currency handling.
+- Idempotent SQLite-derived projections with immutable source-version lineage,
+  restart-safe webhook deduplication, exact reconciliation reports, reversible
+  empty-state migrations, privacy purge, and checksummed backup/restore coverage.
+- A labelled synthetic end-to-end ingestion contract covering duplicate
+  prevention, transfers, account linking, persistence, and exact balances.

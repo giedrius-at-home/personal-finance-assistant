@@ -60,19 +60,31 @@ The current implementation provides pure functions and HTTP contracts for:
   fail-closed response validation;
 - a Firefly webhook receipt boundary that authenticates raw request bytes before
   JSON parsing, rejects stale timestamps, validates the pinned envelope, and
-  atomically acknowledges duplicate delivery UUIDs.
+  durably acknowledges duplicate delivery UUIDs;
+- fail-closed conversion of Firefly accounts and transactions plus Ghostfolio
+  accounts into canonical records, with explicit cross-system account links;
+- idempotent current projections, immutable source-version lineage, and exact
+  explainable account-balance reconciliation in assistant-owned SQLite state.
 
 Upstream DTOs remain inside `finance_assistant.integrations`; conversion into
-canonical domain records will occur in the ingestion application layer. This
-keeps upstream schema drift from silently changing deterministic domain logic.
+canonical domain records occurs in the ingestion application layer. This keeps
+upstream schema drift from silently changing deterministic domain logic.
 No client has a write method, and failures never include response bodies or
 credentials.
 
-Webhook replay state is currently bounded and process-local. It protects a
-running receiver from concurrent and immediate duplicate delivery, while issue
-`#10` will move delivery claims into transactional derived persistence so
-idempotency survives restarts. No webhook payload is processed into canonical
-state until that durable claim can be made atomically.
+SQLite is a Phase 2 workload prototype, not a permanent database selection.
+Issue `#17` retains that decision for review after operational evidence exists.
+It stores only assistant projections, source-version metadata, validated
+canonical JSON, and webhook delivery IDs. It is never queried by an LLM and has
+no connection to either upstream database. Firefly remains authoritative for
+cash transactions; Ghostfolio activities remain investment-domain records and
+are not misrepresented as cash transactions.
+
+Every cross-system account link explicitly selects either Firefly III or
+Ghostfolio as canonical owner. A Ghostfolio-owned brokerage account uses its
+portfolio value and retains the corresponding Firefly account only as lineage
+and a transaction endpoint; a Firefly-owned link uses the Firefly balance. This
+choice is configuration, never inferred from matching names or amounts.
 
 ## Local deployment topology
 
@@ -98,9 +110,10 @@ services have no host bindings and live on separate internal Docker networks.
 The gateway joins only the application network and cannot address either
 database directly. Images are pinned by release tag and immutable digest.
 
-The upstream databases and Firefly upload directory use named volumes. Redis is
-treated as disposable cache state. The repository supplies checksummed backup
-and confirmed restore operations for all durable state.
+The upstream databases, Firefly upload directory, and assistant-derived SQLite
+state use named volumes. Redis is treated as disposable cache state. The
+repository supplies checksummed backup and confirmed restore operations for all
+durable state.
 
 ## Quality attributes
 

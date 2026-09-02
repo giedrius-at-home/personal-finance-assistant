@@ -184,3 +184,20 @@ async def test_firefly_rejects_invalid_range_and_pagination() -> None:
     with pytest.raises(UpstreamProtocolError, match="page limit"):
         await client.list_currencies()
     await client.aclose()
+
+
+@pytest.mark.anyio
+async def test_firefly_rejects_a_breaking_schema_change() -> None:
+    payload = currency_page(1, 1)
+    del payload["data"][0]["attributes"]["decimal_places"]  # type: ignore[index]
+    client = FireflyClient(
+        base_url="http://firefly.test/api/v1",
+        token="synthetic-token",
+        transport=httpx2.MockTransport(
+            lambda _request: httpx2.Response(200, json=payload)
+        ),
+    )
+
+    with pytest.raises(UpstreamProtocolError, match="pinned schema"):
+        await client.list_currencies()
+    await client.aclose()

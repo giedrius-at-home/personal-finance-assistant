@@ -123,9 +123,23 @@ secret or payload. Keep the host and container clocks synchronized. A valid
 duplicate receives another successful acknowledgement without being claimed
 twice.
 
-Replay claims are process-local until issue `#10` adds transactional derived
-persistence. Do not treat webhook acknowledgement as durable ingestion yet, and
-do not connect a real-data Firefly webhook during this phase.
+Replay UUIDs are retained in assistant-owned SQLite state and survive gateway
+restart. Acknowledgement proves authenticated durable receipt, not that a later
+poll/reconciliation cycle has completed. Do not connect a real-data Firefly
+webhook until the current polling-versus-relay topology limitation is reviewed.
+
+## Assistant-derived state
+
+The gateway initializes `/var/lib/pfa/assistant.sqlite3` in its dedicated named
+volume. This Phase 2 SQLite store contains canonical projections, immutable
+source-version lineage, and webhook delivery IDs only. Firefly III and
+Ghostfolio remain authoritative, and issue `#17` tracks the permanent database
+decision after prototype evidence is reviewed.
+
+Derived projections can be deleted while retaining audit lineage, or a specific
+source identity can be privacy-purged from both current and historical state.
+Schema rollback refuses populated state. Exercise migration reversal only on an
+empty synthetic database; never treat a migration rollback as a deletion tool.
 
 ## Routine commands
 
@@ -157,12 +171,17 @@ resumes the applications. Each backup contains:
 - a MariaDB dump for Firefly III;
 - a compressed archive of Firefly uploads;
 - a PostgreSQL dump for Ghostfolio;
+- a consistent SQLite copy of assistant-derived state;
 - the resolved image inventory;
 - versioned metadata and SHA-256 checksums.
 
 Backup directories and files are owner-only and excluded from Git. They are not
 encrypted by the repository. Store any off-device copy only on an encrypted
 destination. Redis is a cache and is not backed up.
+
+The assistant-state addition advances the manifest to backup schema 2. Phase 1
+schema-1 backups remain historical evidence but are intentionally rejected by
+the all-durable-state restore command because they contain no assistant state.
 
 ## Restore
 
@@ -175,8 +194,9 @@ make doctor
 ```
 
 The tool validates the manifest and every checksum before stopping application
-services. It restores both databases and Firefly uploads, then starts the stack.
-It refuses to run without the explicit confirmation supplied by the Make target.
+services. It restores both upstream databases, Firefly uploads, and assistant
+derived state, then starts the stack. It refuses to run without the explicit
+confirmation supplied by the Make target.
 
 The Phase 1 validation created synthetic records in both databases and a
 synthetic Firefly upload, backed them up, mutated all three, restored the backup,

@@ -11,7 +11,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from decimal import Decimal
 from enum import StrEnum
-from typing import Any
+from typing import Any, Protocol
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
@@ -169,6 +169,12 @@ class InMemoryReplayGuard:
             return True
 
 
+class ReplayGuard(Protocol):
+    """Storage boundary required for an atomic delivery claim."""
+
+    def claim(self, delivery_id: UUID, *, now: int) -> bool: ...
+
+
 class FireflyWebhookReceiver:
     """Authenticate raw input, validate it, then claim its delivery UUID."""
 
@@ -177,7 +183,7 @@ class FireflyWebhookReceiver:
         *,
         secret: SecretStr | str,
         clock: Callable[[], int] | None = None,
-        replay_guard: InMemoryReplayGuard | None = None,
+        replay_guard: ReplayGuard | None = None,
     ) -> None:
         self._verifier = FireflyWebhookVerifier(secret)
         self._clock = clock or (lambda: int(datetime.now(UTC).timestamp()))

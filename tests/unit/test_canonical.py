@@ -42,7 +42,7 @@ def test_account_has_one_explicit_owner_and_deduplicated_lineage() -> None:
     account = CanonicalAccount(
         account_id="canonical-account-1",
         name="Brokerage cash",
-        currency=EUR,
+        balance=Money(amount="125.50", currency=EUR),
         canonical_owner=owner,
         linked_sources=(linked,),
     )
@@ -54,7 +54,7 @@ def test_account_has_one_explicit_owner_and_deduplicated_lineage() -> None:
         CanonicalAccount(
             account_id="canonical-account-1",
             name="Brokerage cash",
-            currency=EUR,
+            balance=Money(amount="0", currency=EUR),
             canonical_owner=owner,
             linked_sources=(
                 owner.model_copy(update={"source_revision": "revision-2"}),
@@ -67,7 +67,7 @@ def test_account_lineage_rejects_non_account_entities() -> None:
         CanonicalAccount(
             account_id="canonical-account-1",
             name="Cash",
-            currency=EUR,
+            balance=Money(amount="0", currency=EUR),
             canonical_owner=source(
                 "transaction-1",
                 entity=SourceEntity.TRANSACTION,

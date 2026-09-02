@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import json
 from datetime import date
+from pathlib import Path
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
@@ -182,6 +183,35 @@ def test_webhook_accepts_once_and_acknowledges_a_duplicate() -> None:
     assert accepted.json() == {"status": "accepted"}
     assert duplicate.status_code == 202
     assert duplicate.json() == {"status": "duplicate"}
+
+
+def test_webhook_duplicate_is_retained_across_app_restart(tmp_path: Path) -> None:
+    now = 1_800_000_000
+    secret = "w" * 32
+    database = tmp_path / "derived.sqlite3"
+    body = webhook_body()
+    headers = {"Signature": webhook_signature(body, now, secret)}
+
+    with TestClient(
+        create_app(
+            webhook_secret=secret,
+            webhook_clock=lambda: now,
+            database_path=database,
+        )
+    ) as first_client:
+        assert first_client.post(
+            "/v1/webhooks/firefly", content=body, headers=headers
+        ).json() == {"status": "accepted"}
+    with TestClient(
+        create_app(
+            webhook_secret=secret,
+            webhook_clock=lambda: now,
+            database_path=database,
+        )
+    ) as restarted_client:
+        assert restarted_client.post(
+            "/v1/webhooks/firefly", content=body, headers=headers
+        ).json() == {"status": "duplicate"}
 
 
 def test_webhook_rejects_before_parsing_and_never_echoes_the_body() -> None:

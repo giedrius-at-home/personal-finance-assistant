@@ -12,6 +12,8 @@ COPY src ./src
 
 RUN uv sync --frozen --no-dev --no-editable
 
+RUN mkdir -p /var/lib/pfa && chown 65532:65532 /var/lib/pfa
+
 USER 65532:65532
 
 EXPOSE 8000

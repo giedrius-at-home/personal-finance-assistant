@@ -1,8 +1,10 @@
 """HTTP boundary for deterministic financial calculations."""
 
 import os
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from datetime import date
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, status
 
@@ -22,22 +24,39 @@ from finance_assistant.integrations.firefly_webhook import (
     WebhookAuthenticationError,
     WebhookPayloadError,
 )
+from finance_assistant.persistence.sqlite import SQLiteDerivedState
 
 
 def create_app(
     *,
     webhook_secret: str | None = None,
     webhook_clock: Callable[[], int] | None = None,
+    database_path: Path | str | None = None,
 ) -> FastAPI:
     """Build the API with an explicitly configured webhook boundary."""
+
+    state = SQLiteDerivedState(database_path) if database_path else None
+    if state is not None:
+        state.migrate_up()
+
+    @asynccontextmanager
+    async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
+        yield
+        if state is not None:
+            state.close()
 
     application = FastAPI(
         title="Personal Finance Assistant",
         description="Local deterministic analytics for Firefly III and Ghostfolio.",
         version=__version__,
+        lifespan=lifespan,
     )
     application.state.firefly_webhook_receiver = (
-        FireflyWebhookReceiver(secret=webhook_secret, clock=webhook_clock)
+        FireflyWebhookReceiver(
+            secret=webhook_secret,
+            clock=webhook_clock,
+            replay_guard=state,
+        )
         if webhook_secret
         else None
     )
@@ -135,4 +154,7 @@ async def receive_firefly_webhook(request: Request) -> dict[str, str]:
     return {"status": "accepted" if accepted else "duplicate"}
 
 
-app = create_app(webhook_secret=os.getenv("PFA_FIREFLY_WEBHOOK_SECRET"))
+app = create_app(
+    webhook_secret=os.getenv("PFA_FIREFLY_WEBHOOK_SECRET"),
+    database_path=os.getenv("PFA_DATABASE_PATH"),
+)

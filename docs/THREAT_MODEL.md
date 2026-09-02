@@ -26,11 +26,14 @@
 | Webhook spoofing or replay | HMAC verification, timestamp window, idempotency |
 | Oversized or malformed signed webhook | 1 MiB limit; authenticate raw bytes before strict parsing |
 | Duplicate imports | Immutable source identifiers and idempotent upserts |
+| Replay after gateway restart | Durable unique webhook delivery IDs |
 | Conflicting or over-precise currency data | Explicit minor units; reject conflicts and implicit rounding |
 | LLM invents or mutates data | Schema validation, vocabulary, review gates |
 | Prompt injection in merchant text | Treat descriptions as data, not instructions |
 | Notification storm | Stateful deduplication, cooldown, daily aggregation |
 | Double-counted investments | Canonical account ownership mapping |
+| Derived state becomes a hidden ledger | Read-only upstream APIs; projections retain authoritative lineage |
+| Audit deletion or accidental schema rollback | Separate projection delete/privacy purge; populated rollback refused |
 | Supply-chain compromise | Lock files, pinned images/actions, audits |
 | Accidental remote exposure | Localhost binding; no initial self-hosting |
 | Database reached from host or peer service | No published DB ports; separate internal networks |
