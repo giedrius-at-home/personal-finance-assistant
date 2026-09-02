@@ -69,6 +69,13 @@ The current implementation provides pure functions and HTTP contracts for:
   deterministic completion forecasts, and versioned alert candidates;
 - durable alert lifecycle and daily evaluation leases that bound duplicate,
   concurrent, restart, and desktop-sleep behavior;
+- deterministic merchant normalization, a versioned category vocabulary, and
+  exact/normalized baseline rules with fail-closed conflict handling;
+- a constrained loopback-only Ollama/Qwen client and adapter with bounded,
+  schema-validated output and abstention on unapproved categories or injection;
+- versioned confidence calibration gated on owner-approved correction holdouts,
+  durable categorisation proposals, and preview-token batch approval/reversal
+  through a typed write port that stays disabled in Phase 4;
 - an opt-in host-side macOS adapter that receives only pre-rendered minimal text.
 
 Upstream DTOs remain inside `finance_assistant.integrations`; conversion into

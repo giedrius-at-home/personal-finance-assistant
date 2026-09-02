@@ -14,6 +14,7 @@ from uuid import UUID
 
 from pydantic import TypeAdapter
 
+from finance_assistant.categorisation_service import CategoryProposal, ProposalStatus
 from finance_assistant.domain.alerting import (
     AlertCandidate,
     AlertDecision,
@@ -26,6 +27,7 @@ from finance_assistant.domain.canonical import (
     CanonicalTransaction,
     SourceReference,
 )
+from finance_assistant.domain.categorisation import CalibrationExample
 from finance_assistant.domain.models import AlertSeverity
 
 CanonicalRecord = CanonicalAccount | CanonicalTransaction
@@ -164,6 +166,46 @@ DROP TABLE alert_lifecycle;
 DELETE FROM schema_migrations WHERE version = 3;
 """
 
+MIGRATION_4_UP = """
+CREATE TABLE category_proposals (
+    proposal_id TEXT PRIMARY KEY,
+    source_system TEXT NOT NULL,
+    source_entity TEXT NOT NULL,
+    external_id TEXT NOT NULL,
+    feature_hash TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN (
+        'pending', 'approved', 'corrected', 'rejected', 'reversed'
+    )),
+    batch_id TEXT,
+    payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE category_corrections (
+    correction_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_identity TEXT NOT NULL,
+    feature_hash TEXT NOT NULL,
+    normalized_merchant TEXT NOT NULL,
+    approved_category TEXT NOT NULL,
+    approved_at TEXT NOT NULL,
+    UNIQUE(source_identity, feature_hash, approved_category)
+);
+CREATE TABLE category_batches (
+    batch_id TEXT PRIMARY KEY,
+    status TEXT NOT NULL CHECK(status IN ('applied', 'reversed')),
+    created_at TEXT NOT NULL
+);
+INSERT INTO schema_migrations(version, applied_at)
+VALUES (4, CURRENT_TIMESTAMP);
+"""
+
+MIGRATION_4_DOWN = """
+DROP TABLE category_batches;
+DROP TABLE category_corrections;
+DROP TABLE category_proposals;
+DELETE FROM schema_migrations WHERE version = 4;
+"""
+
 
 def _serialize(record: CanonicalRecord) -> str:
     return json.dumps(
@@ -183,6 +225,21 @@ def _record_parts(
     if isinstance(record, CanonicalAccount):
         return "account", record.account_id, record.canonical_owner
     return "transaction", record.transaction_id, record.source
+
+
+def _proposal_token_payload(proposal: CategoryProposal) -> str:
+    """Canonical serialization of immutable proposal content for batch binding."""
+
+    return json.dumps(
+        proposal.model_dump(mode="json", exclude={"status", "created_at"}),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _batch_token(proposals: tuple[CategoryProposal, ...]) -> str:
+    payloads = sorted(_proposal_token_payload(proposal) for proposal in proposals)
+    return hashlib.sha256("\n".join(payloads).encode()).hexdigest()
 
 
 class SQLiteDerivedState:
@@ -214,6 +271,8 @@ class SQLiteDerivedState:
                 self._connection.executescript(MIGRATION_2_UP)
             if version < 3:
                 self._connection.executescript(MIGRATION_3_UP)
+            if version < 4:
+                self._connection.executescript(MIGRATION_4_UP)
 
     def migrate_down(self) -> None:
         """Reverse the prototype schema only when no financial state exists."""
@@ -233,12 +292,15 @@ class SQLiteDerivedState:
                           OR EXISTS(SELECT 1 FROM canonical_goals)
                           OR EXISTS(SELECT 1 FROM goal_source_versions)
                           OR EXISTS(SELECT 1 FROM alert_events)
-                          OR EXISTS(SELECT 1 FROM notification_attempts)"""
+                          OR EXISTS(SELECT 1 FROM notification_attempts)
+                          OR EXISTS(SELECT 1 FROM category_proposals)
+                          OR EXISTS(SELECT 1 FROM category_corrections)"""
             ).fetchone()[0]
             if populated:
                 raise PersistenceConflictError(
                     "refusing to migrate down populated state"
                 )
+            self._connection.executescript(MIGRATION_4_DOWN)
             self._connection.executescript(MIGRATION_3_DOWN)
             self._connection.executescript(MIGRATION_2_DOWN)
             self._connection.executescript(MIGRATION_1_DOWN)
@@ -553,6 +615,168 @@ class SQLiteDerivedState:
                     ),
                 )
 
+    def record_proposal(self, proposal: CategoryProposal) -> None:
+        """Idempotently persist a reviewable categorisation proposal."""
+
+        if proposal.created_at.tzinfo is None:
+            raise ValueError("proposal.created_at must be timezone-aware")
+        payload = json.dumps(
+            proposal.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+        )
+        timestamp = proposal.created_at.astimezone(UTC).isoformat()
+        source = proposal.source
+        with self._lock, self._connection:
+            self._connection.execute(
+                """INSERT OR IGNORE INTO category_proposals(
+                       proposal_id, source_system, source_entity, external_id,
+                       feature_hash, status, batch_id, payload_json, created_at,
+                       updated_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)""",
+                (
+                    proposal.proposal_id,
+                    source.system.value,
+                    source.entity.value,
+                    source.external_id,
+                    proposal.feature_hash,
+                    proposal.status.value,
+                    payload,
+                    timestamp,
+                    timestamp,
+                ),
+            )
+
+    def list_pending(self) -> tuple[CategoryProposal, ...]:
+        rows = self._connection.execute(
+            "SELECT payload_json FROM category_proposals "
+            "WHERE status = 'pending' ORDER BY created_at"
+        ).fetchall()
+        adapter = TypeAdapter(CategoryProposal)
+        return tuple(adapter.validate_json(row["payload_json"]) for row in rows)
+
+    def get_pending(self, proposal_id: str) -> CategoryProposal | None:
+        row = self._connection.execute(
+            "SELECT payload_json FROM category_proposals "
+            "WHERE proposal_id = ? AND status = 'pending'",
+            (proposal_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return TypeAdapter(CategoryProposal).validate_json(row["payload_json"])
+
+    def preview_batch(self, proposal_ids: tuple[str, ...]) -> str:
+        return _batch_token(self._require_pending(proposal_ids))
+
+    def approve_batch(
+        self, proposal_ids: tuple[str, ...], *, preview_token: str
+    ) -> tuple[CategoryProposal, ...]:
+        with self._lock, self._connection:
+            proposals = self._require_pending(proposal_ids)
+            if _batch_token(proposals) != preview_token:
+                raise PersistenceConflictError(
+                    "preview token does not match the current proposals"
+                )
+            batch_id = preview_token
+            now = datetime.now(UTC).isoformat()
+            placeholders = ",".join("?" for _ in proposal_ids)
+            self._connection.execute(
+                f"UPDATE category_proposals SET status = 'approved', "  # noqa: S608
+                f"batch_id = ?, updated_at = ? WHERE proposal_id IN ({placeholders}) "  # nosec B608
+                f"AND status = 'pending'",
+                (batch_id, now, *proposal_ids),
+            )
+            self._connection.execute(
+                """INSERT OR IGNORE INTO category_batches(batch_id, status, created_at)
+                   VALUES (?, 'applied', ?)""",
+                (batch_id, now),
+            )
+        return self._load_proposals(proposal_ids)
+
+    def record_correction(self, example: CalibrationExample) -> None:
+        with self._lock, self._connection:
+            self._connection.execute(
+                """INSERT OR IGNORE INTO category_corrections(
+                       source_identity, feature_hash, normalized_merchant,
+                       approved_category, approved_at) VALUES (?, ?, ?, ?, ?)""",
+                (
+                    example.source_identity,
+                    example.feature_hash,
+                    example.normalized_merchant,
+                    example.approved_category,
+                    datetime.now(UTC).isoformat(),
+                ),
+            )
+
+    def list_corrections(self) -> tuple[CalibrationExample, ...]:
+        rows = self._connection.execute(
+            """SELECT source_identity, feature_hash, normalized_merchant,
+                      approved_category FROM category_corrections
+               ORDER BY correction_id"""
+        ).fetchall()
+        return tuple(
+            CalibrationExample(
+                source_identity=row["source_identity"],
+                feature_hash=row["feature_hash"],
+                normalized_merchant=row["normalized_merchant"],
+                approved_category=row["approved_category"],
+            )
+            for row in rows
+        )
+
+    def resolve_proposal(self, proposal_id: str, *, status: ProposalStatus) -> bool:
+        with self._lock, self._connection:
+            cursor = self._connection.execute(
+                "UPDATE category_proposals SET status = ?, updated_at = ? "
+                "WHERE proposal_id = ? AND status = 'pending'",
+                (status.value, datetime.now(UTC).isoformat(), proposal_id),
+            )
+            return cursor.rowcount == 1
+
+    def reverse_batch(self, batch_id: str) -> int:
+        with self._lock, self._connection:
+            now = datetime.now(UTC).isoformat()
+            self._connection.execute(
+                "UPDATE category_batches SET status = 'reversed' WHERE batch_id = ?",
+                (batch_id,),
+            )
+            cursor = self._connection.execute(
+                "UPDATE category_proposals SET status = 'reversed', updated_at = ? "
+                "WHERE batch_id = ? AND status = 'approved'",
+                (now, batch_id),
+            )
+            return cursor.rowcount
+
+    def _require_pending(
+        self, proposal_ids: tuple[str, ...]
+    ) -> tuple[CategoryProposal, ...]:
+        if not proposal_ids or len(set(proposal_ids)) != len(proposal_ids):
+            raise ValueError("proposal_ids must be non-empty and unique")
+        placeholders = ",".join("?" for _ in proposal_ids)
+        rows = self._connection.execute(
+            f"SELECT payload_json FROM category_proposals "  # noqa: S608
+            f"WHERE proposal_id IN ({placeholders}) AND status = 'pending'",  # nosec B608
+            proposal_ids,
+        ).fetchall()
+        if len(rows) != len(proposal_ids):
+            raise PersistenceConflictError("a proposal is missing or not pending")
+        adapter = TypeAdapter(CategoryProposal)
+        return tuple(adapter.validate_json(row["payload_json"]) for row in rows)
+
+    def _load_proposals(
+        self, proposal_ids: tuple[str, ...]
+    ) -> tuple[CategoryProposal, ...]:
+        placeholders = ",".join("?" for _ in proposal_ids)
+        rows = self._connection.execute(
+            f"SELECT status, payload_json FROM category_proposals "  # noqa: S608
+            f"WHERE proposal_id IN ({placeholders})",  # nosec B608
+            proposal_ids,
+        ).fetchall()
+        adapter = TypeAdapter(CategoryProposal)
+        proposals: list[CategoryProposal] = []
+        for row in rows:
+            data = json.loads(row["payload_json"])
+            data["status"] = row["status"]
+            proposals.append(adapter.validate_python(data))
+        return tuple(proposals)
+
     def delete_goal(self, goal_id: str) -> bool:
         """Delete a current goal projection while retaining source history."""
 
@@ -679,6 +903,15 @@ class SQLiteDerivedState:
                 "DELETE FROM goal_source_versions WHERE source_system = ? "
                 "AND source_entity = ? AND external_id = ?",
                 identity,
+            )
+            self._connection.execute(
+                "DELETE FROM category_proposals WHERE source_system = ? "
+                "AND source_entity = ? AND external_id = ?",
+                identity,
+            )
+            self._connection.execute(
+                "DELETE FROM category_corrections WHERE source_identity = ?",
+                (f"{identity[0]}:{identity[1]}:{identity[2]}",),
             )
 
     def backup_to(self, destination: Path) -> None:

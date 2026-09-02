@@ -62,6 +62,14 @@ durable cooldown/escalation/resolution state, offline-safe daily scheduling, and
 an opt-in native macOS notification adapter. Delivery remains disabled until the
 owner explicitly enables and tests macOS notification permission.
 
+Phase 4 adds explainable, review-only transaction categorisation: deterministic
+merchant normalization and baseline rules, a constrained loopback-only Ollama/Qwen
+adapter with a versioned category vocabulary, confidence calibration and
+abstention gated on owner-approved correction holdouts, and durable preview/approve/
+reversal workflows. No production Firefly write path is activated in this phase;
+model output can never invent categories and always flows through preview and
+audit.
+
 ## Quick start
 
 Prerequisites:
