@@ -24,6 +24,7 @@
 | Credential committed to Git | Ignore rules, synthetic-only policy, CI scan |
 | Financial data enters logs | Redaction policy and no request-body logging |
 | Webhook spoofing or replay | HMAC verification, timestamp window, idempotency |
+| Oversized or malformed signed webhook | 1 MiB limit; authenticate raw bytes before strict parsing |
 | Duplicate imports | Immutable source identifiers and idempotent upserts |
 | Conflicting or over-precise currency data | Explicit minor units; reject conflicts and implicit rounding |
 | LLM invents or mutates data | Schema validation, vocabulary, review gates |

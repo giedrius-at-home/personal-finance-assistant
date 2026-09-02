@@ -44,6 +44,11 @@ The identities and credentials used for this gate remain ignored, owner-only,
 and listed in a local cleanup ledger. Evidence records counts and outcomes only,
 never response bodies or credential values.
 
+Webhook changes must prove valid Firefly-compatible SHA3-256 signatures are
+accepted, invalid and stale signatures are rejected before parsing, concurrent
+duplicate UUID claims are atomic, malformed envelopes fail closed, and neither
+secrets nor raw bodies appear in error responses.
+
 Restore changes must prove that checksums are verified, explicit confirmation
 is required, original synthetic values are recovered, and every service passes
 `make doctor` afterward. Destructive cleanup is never part of the routine gate.

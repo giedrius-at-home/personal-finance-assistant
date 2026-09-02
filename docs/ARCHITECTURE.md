@@ -57,13 +57,22 @@ The current implementation provides pure functions and HTTP contracts for:
   lineage contracts;
 - narrow read-only Firefly III and Ghostfolio clients with typed upstream DTOs,
   explicit authentication, bounded retry and pagination policies, and
-  fail-closed response validation.
+  fail-closed response validation;
+- a Firefly webhook receipt boundary that authenticates raw request bytes before
+  JSON parsing, rejects stale timestamps, validates the pinned envelope, and
+  atomically acknowledges duplicate delivery UUIDs.
 
 Upstream DTOs remain inside `finance_assistant.integrations`; conversion into
 canonical domain records will occur in the ingestion application layer. This
 keeps upstream schema drift from silently changing deterministic domain logic.
 No client has a write method, and failures never include response bodies or
 credentials.
+
+Webhook replay state is currently bounded and process-local. It protects a
+running receiver from concurrent and immediate duplicate delivery, while issue
+`#10` will move delivery claims into transactional derived persistence so
+idempotency survives restarts. No webhook payload is processed into canonical
+state until that durable claim can be made atomically.
 
 ## Local deployment topology
 
