@@ -103,6 +103,56 @@ class FireflyTransaction(FireflyModel):
     attributes: FireflyTransactionAttributes
 
 
+class FireflyPiggyBankAccount(FireflyModel):
+    account_id: str = Field(min_length=1, max_length=128)
+    name: str = Field(min_length=1, max_length=256)
+    current_amount: FiniteDecimal
+
+
+class FireflyPiggyBankAttributes(FireflyModel):
+    name: str = Field(min_length=1, max_length=256)
+    start_date: AwareDatetime | None = None
+    target_date: AwareDatetime | None = None
+    order: int | None = Field(default=None, ge=1)
+    active: bool = True
+    accounts: tuple[FireflyPiggyBankAccount, ...] = ()
+    currency_code: str = Field(min_length=3, max_length=3)
+    currency_decimal_places: int = Field(ge=0, le=16)
+    target_amount: FiniteDecimal | None = None
+    current_amount: FiniteDecimal
+    save_per_month: FiniteDecimal | None = None
+    updated_at: AwareDatetime | None = None
+
+
+class FireflyPiggyBank(FireflyModel):
+    type: str = Field(pattern="^piggy_banks$")
+    id: str = Field(min_length=1, max_length=128)
+    attributes: FireflyPiggyBankAttributes
+
+
+class FireflyCurrencySum(FireflyModel):
+    currency_code: str = Field(min_length=3, max_length=3)
+    currency_decimal_places: int = Field(ge=0, le=16)
+    sum: FiniteDecimal
+
+
+class FireflyBudgetLimitAttributes(FireflyModel):
+    start: AwareDatetime
+    end: AwareDatetime
+    budget_id: str = Field(min_length=1, max_length=128)
+    currency_code: str = Field(min_length=3, max_length=3)
+    currency_decimal_places: int = Field(ge=0, le=16)
+    amount: FiniteDecimal
+    spent: tuple[FireflyCurrencySum, ...] = ()
+    updated_at: AwareDatetime | None = None
+
+
+class FireflyBudgetLimit(FireflyModel):
+    type: str = Field(pattern="^budget_limits$")
+    id: str = Field(min_length=1, max_length=128)
+    attributes: FireflyBudgetLimitAttributes
+
+
 class FireflyClient:
     """Authenticated client exposing only read operations required for ingestion."""
 
@@ -164,6 +214,20 @@ class FireflyClient:
         if end is not None:
             params["end"] = end.isoformat()
         return await self._paginate("transactions", FireflyTransaction, params=params)
+
+    async def list_piggy_banks(self) -> tuple[FireflyPiggyBank, ...]:
+        return await self._paginate("piggy-banks", FireflyPiggyBank)
+
+    async def list_budget_limits(
+        self, *, start: date, end: date
+    ) -> tuple[FireflyBudgetLimit, ...]:
+        if start > end:
+            raise ValueError("start cannot be after end")
+        return await self._paginate(
+            "budget-limits",
+            FireflyBudgetLimit,
+            params={"start": start.isoformat(), "end": end.isoformat()},
+        )
 
     async def _paginate[RecordT: FireflyModel](
         self,

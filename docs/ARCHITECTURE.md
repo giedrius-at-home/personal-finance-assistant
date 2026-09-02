@@ -65,6 +65,11 @@ The current implementation provides pure functions and HTTP contracts for:
   accounts into canonical records, with explicit cross-system account links;
 - idempotent current projections, immutable source-version lineage, and exact
   explainable account-balance reconciliation in assistant-owned SQLite state.
+- typed Firefly piggy-bank and budget-limit boundaries, canonical savings goals,
+  deterministic completion forecasts, and versioned alert candidates;
+- durable alert lifecycle and daily evaluation leases that bound duplicate,
+  concurrent, restart, and desktop-sleep behavior;
+- an opt-in host-side macOS adapter that receives only pre-rendered minimal text.
 
 Upstream DTOs remain inside `finance_assistant.integrations`; conversion into
 canonical domain records occurs in the ingestion application layer. This keeps
@@ -85,6 +90,11 @@ Ghostfolio as canonical owner. A Ghostfolio-owned brokerage account uses its
 portfolio value and retains the corresponding Firefly account only as lineage
 and a transaction endpoint; a Firefly-owned link uses the Firefly balance. This
 choice is configuration, never inferred from matching names or amounts.
+
+Alert audit records retain exact canonical aggregate evidence, hashes, policy
+version, reason codes/text, and lifecycle outcomes. They never contain raw
+transactions, webhook bodies, notification message content, or credentials.
+Qwen does not calculate severity or control delivery.
 
 ## Local deployment topology
 

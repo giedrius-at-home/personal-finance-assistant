@@ -102,6 +102,15 @@ class GoalEvaluation(StrictModel):
     schedule_variance: Decimal
     required_weekly_contribution: Decimal
     days_remaining: int
+    projected_completion_date: date | None
+
+
+class BudgetPolicy(StrictModel):
+    """Versioned deterministic thresholds for budget evaluation."""
+
+    version: str = Field(default="2026-09-v1", min_length=1, max_length=64)
+    heads_up_spent_ratio: Decimal = Field(default=Decimal("0.65"), ge=0, le=1)
+    heads_up_pace_ratio: Decimal = Field(default=Decimal("1.25"), gt=0)
 
 
 class AlertSeverity(StrEnum):
@@ -161,3 +170,4 @@ class BudgetEvaluation(StrictModel):
     remaining_budget: Decimal
     safe_to_spend: Decimal
     reasons: tuple[str, ...]
+    policy_version: str = "2026-09-v1"

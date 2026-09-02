@@ -4,7 +4,7 @@ from enum import StrEnum
 
 from pydantic import AwareDatetime, Field, model_validator
 
-from finance_assistant.domain.models import Currency, Money, StrictModel
+from finance_assistant.domain.models import Currency, Money, SavingsGoal, StrictModel
 
 
 class SourceSystem(StrEnum):
@@ -20,6 +20,7 @@ class SourceEntity(StrEnum):
     ACCOUNT = "account"
     TRANSACTION = "transaction"
     ACTIVITY = "activity"
+    PIGGY_BANK = "piggy_bank"
 
 
 class SourceReference(StrictModel):
@@ -126,4 +127,25 @@ class CanonicalTransaction(StrictModel):
         ):
             if value is not None and value != value.strip():
                 raise ValueError(f"{field_name} cannot have surrounding whitespace")
+        return self
+
+
+class CanonicalSavingsGoal(StrictModel):
+    """A Firefly-backed savings goal with explicit local planning metadata."""
+
+    goal: SavingsGoal
+    source: SourceReference
+    priority: int = Field(ge=1, le=10_000)
+    protected_amount: Money
+
+    @model_validator(mode="after")
+    def validate_goal_lineage(self) -> CanonicalSavingsGoal:
+        if self.source.entity is not SourceEntity.PIGGY_BANK:
+            raise ValueError("goal lineage must reference a piggy bank")
+        if self.protected_amount.currency != self.goal.target.currency:
+            raise ValueError("protected amount must use the goal currency")
+        if self.protected_amount.amount < 0:
+            raise ValueError("protected amount cannot be negative")
+        if self.protected_amount.amount > self.goal.current.amount:
+            raise ValueError("protected amount cannot exceed current savings")
         return self
