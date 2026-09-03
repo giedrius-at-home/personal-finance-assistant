@@ -257,6 +257,45 @@ same-origin requests, and return no-store responses. A process restart
 invalidates open forms. Settings are shown once more as an exact preview before
 apply and can be rolled back only while that revision is still current.
 
+## macOS application launcher
+
+After the first successful `make up` and `make doctor`, install the optional
+owner-scoped launcher:
+
+```bash
+make install-macos-app
+```
+
+This creates `~/Applications/Personal Finance Assistant.app` without admin
+privileges. Run `make up` from the repository once after initial setup and after
+pulling application changes. Double-clicking the app, opening it through
+Spotlight, or pinning it to the Dock then performs this bounded workflow:
+
+1. use the current Docker engine, starting Colima only if Docker is unavailable;
+2. verify the eight expected existing containers by their fixed names;
+3. start those containers without reading Compose or `.env`;
+4. wait up to 60 seconds for the loopback gateway health endpoint;
+5. open <http://127.0.0.1:8000/dashboard> in the default browser.
+
+The bundle stores only its icon, metadata, and fixed container names. It does
+not store or read the repository path, `.env`, credentials, databases, or
+finance data. This also avoids granting an unsigned launcher access to the
+macOS-protected Documents folder. It does not enable Codex MCP, public research,
+category writes, or notifications beyond the settings already present in the
+created containers.
+
+Operational launcher output is written to
+`~/Library/Logs/Personal Finance Assistant/launcher.log`. A failed startup shows
+a fixed local alert without financial or command-error content. Use `make logs`
+for the existing bounded service logs.
+
+The installer refuses to overwrite an existing app. To update it after launcher
+changes, move the existing app to Trash and run `make install-macos-app` again.
+To remove it, move the app to Trash; this does not stop services or delete data.
+Use `make stop` or `make down` separately when desired. After `make down` removes
+the containers, run `make up` before using the icon again. The source icon
+remains at `assets/macos/AppIcon.svg`.
+
 ## Codex MCP and public research
 
 Phase 6 does not enable Codex tools or outbound research automatically. After

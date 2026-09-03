@@ -104,6 +104,8 @@ make bootstrap
 # Review non-secret settings such as owner email and timezone in .env.
 make up
 make doctor
+# Optional: install a normal owner-scoped Mac app icon.
+make install-macos-app
 ```
 
 The generated `.env` is owner-readable only, ignored by Git, and never
@@ -114,6 +116,12 @@ overwritten by `make bootstrap`. All browser endpoints bind to loopback:
 - Firefly III: <http://127.0.0.1:8080>
 - Firefly III Data Importer: <http://127.0.0.1:8081>
 - Ghostfolio: <http://127.0.0.1:3333>
+
+After `make install-macos-app`, open **Personal Finance Assistant** from
+`~/Applications` or Launchpad. It starts Docker through Colima when necessary,
+starts the existing reviewed containers, waits for health, and opens the owner
+dashboard. The app contains no repository path, credentials, or financial data.
+Run `make up` from the repository once after initial setup or a code update.
 
 ```bash
 make status

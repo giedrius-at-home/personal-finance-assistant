@@ -14,6 +14,10 @@ project intends to use semantic versioning for its own releases.
 
 ### Added
 
+- An owner-scoped native macOS launcher with a source-controlled icon that can
+  start Colima and the existing local containers, wait for loopback health, and
+  open the dashboard without reading the repository or embedding credentials or
+  financial data.
 - Private GitHub repository foundation and review-driven governance.
 - Typed FastAPI service with a non-sensitive health endpoint.
 - Deterministic savings-goal schedule evaluation.
