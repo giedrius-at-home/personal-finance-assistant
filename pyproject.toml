@@ -5,12 +5,16 @@ description = "Local-first intelligence layer for Firefly III and Ghostfolio"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+  "defusedxml>=0.7,<1",
   "fastapi>=0.115,<1",
   "httpx2>=2.12,<3",
   "jinja2>=3.1,<4",
   "pydantic>=2.10,<3",
   "uvicorn[standard]>=0.34,<1",
 ]
+
+[project.optional-dependencies]
+codex = ["mcp>=2,<3"]
 
 [dependency-groups]
 dev = [
@@ -21,6 +25,7 @@ dev = [
   "pytest>=9.0.3,<10",
   "pytest-cov>=6,<8",
   "ruff>=0.11,<1",
+  "types-defusedxml>=0.7,<1",
 ]
 
 [build-system]

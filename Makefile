@@ -1,8 +1,9 @@
-.PHONY: backup bootstrap check compose-config demo doctor down format lint logs \
-	pull restore run security setup status stop test upstream-contracts up versions
+.PHONY: backup bootstrap check codex-tools compose-config demo doctor down format \
+	lint logs pull purge-research-cache restore run security setup status stop test \
+	upstream-contracts up versions
 
 setup:
-	uv sync
+	uv sync --all-extras --dev
 	@if [ "$$(uname -s)" = "Darwin" ]; then chflags -R nohidden .venv; fi
 	uv run python -c "import finance_assistant"
 
@@ -34,6 +35,17 @@ run:
 demo:
 	PFA_DEMO_MODE=true uv run uvicorn --app-dir src finance_assistant.api:app \
 		--host 127.0.0.1 --port 8002
+
+codex-tools:
+	test -f .env
+	@docker compose --env-file .env exec -T \
+		-e PFA_CODEX_TOOLS_ENABLED=true gateway \
+		python -m finance_assistant.mcp_server
+
+purge-research-cache:
+	test -f .env
+	docker compose --env-file .env exec -T gateway \
+		python -m finance_assistant.research_cache_cli --confirm-purge
 
 compose-config:
 	docker compose --env-file .env.example config --quiet

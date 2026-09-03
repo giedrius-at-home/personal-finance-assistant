@@ -75,6 +75,20 @@ def test_source_cannot_silently_change_canonical_owner(tmp_path: Path) -> None:
     state.close()
 
 
+def test_read_only_connection_reads_but_sqlite_rejects_writes(tmp_path: Path) -> None:
+    path = tmp_path / "state.sqlite3"
+    writable = SQLiteDerivedState(path)
+    writable.migrate_up()
+    writable.upsert(account(), observed_at=NOW)
+    writable.close()
+
+    read_only = SQLiteDerivedState(path, read_only=True)
+    assert read_only.list_accounts() == (account(),)
+    with pytest.raises(sqlite3.OperationalError, match="readonly"):
+        read_only.upsert(account("200"), observed_at=NOW)
+    read_only.close()
+
+
 def test_durable_delivery_claim_is_atomic_and_survives_restart(
     tmp_path: Path,
 ) -> None:

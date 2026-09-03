@@ -35,6 +35,8 @@ Firefly III ----\
 Ghostfolio -----/                               |
                                                    -> Qwen/Ollama explanations
 Public web data -> restricted retrieval adapter --/
+                                                  |
+                      opt-in aggregate STDIO MCP -+-> Codex
 ```
 
 Financial calculations are deterministic Python code. The LLM may classify,
@@ -77,6 +79,15 @@ remove the combined total, and every report carries deterministic evidence.
 Policy settings use preview/confirm, versioned audit history, and rollback.
 Browser mutations are same-origin POSTs protected by CSRF; upstream category
 writes and notifications remain disabled by default.
+
+Phase 6 adds disabled-by-default public research and an opt-in STDIO MCP server
+for Codex. Research accepts only sanitized public business names or validated
+market identifiers, constructs exact-allowlisted Wikipedia/SEC URLs internally,
+labels every excerpt as untrusted, and retains citations in a separate purgeable
+cache. The Codex tool surface exposes only currency-separated reports, goal
+progress without identifiers, alert/taxonomy counts, and those bounded public
+queries. It cannot read raw transactions, execute SQL, mutate either ledger,
+move money, recommend personalized trades, or accept arbitrary URLs.
 
 ## Quick start
 
@@ -125,6 +136,14 @@ make upstream-contracts
 To inspect Phase 5 without accounts or persisted records, run `make demo` and
 open <http://127.0.0.1:8002/dashboard>. Every displayed record is invented in
 memory and disappears when the process stops.
+
+To review the Phase 6 MCP surface, keep the local stack running and leave
+`PFA_RESEARCH_ENABLED=false` initially. `make codex-tools` starts a STDIO server
+in the gateway container; it is intended to be launched by an MCP client, not
+opened in a browser. Adding it to Codex is an explicit privacy opt-in because
+tool arguments and results may be sent to the configured hosted model. See the
+[operations guide](docs/OPERATIONS.md#codex-mcp-and-public-research) for the
+configuration and cache-purge workflow.
 
 No test or CI workflow may use real financial records. Synthetic fixtures are
 the default and are reviewed like source code. The end-to-end ingestion fixture

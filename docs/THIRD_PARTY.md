@@ -46,3 +46,21 @@ reviewed runtime and native-architecture evidence is linked from the
   variant is selected.
 - Integration: localhost HTTP API with schema-constrained outputs.
 - Locally validated baseline: `qwen3:8b` (8.2B parameters, Q4_K_M).
+
+## Model Context Protocol
+
+- Purpose: opt-in STDIO tool contract for aggregate reports and restricted
+  public research.
+- OpenAI Codex documentation: <https://learn.chatgpt.com/docs/extend/mcp?surface=cli>
+- Python SDK source: <https://github.com/modelcontextprotocol/python-sdk>
+- Integration: optional locked Python dependency; STDIO only, no MCP listener.
+
+## Public research providers
+
+- [English Wikipedia API](https://www.mediawiki.org/wiki/API:Main_page): bounded
+  public business-name discovery. Returned
+  excerpts retain page title, publisher, canonical link, and content hash.
+- [SEC EDGAR](https://www.sec.gov/about/developer-resources): public company
+  filing/profile lookup by validated ticker or CIK.
+- Both are disabled by default, receive no raw financial records, and are
+  treated as untrusted sources rather than financial advice.

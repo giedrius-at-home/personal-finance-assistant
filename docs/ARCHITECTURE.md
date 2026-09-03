@@ -36,8 +36,8 @@ Ghostfolio API/MCP ----->|                      |          |
 
 Qwen through Ollama is outside the deterministic calculation boundary. It
 receives the minimum context necessary for a classification or explanation and
-returns validated structured output. A future restricted retrieval adapter may
-fetch public information using sanitized queries.
+returns validated structured output. The public retrieval adapter accepts only
+sanitized domain requests and returns cited, explicitly untrusted excerpts.
 
 ## Data ownership and double counting
 
@@ -88,6 +88,11 @@ The current implementation provides pure functions and HTTP contracts for:
   mixed-currency state;
 - versioned owner policy settings with an exact preview token, explicit apply,
   audit history, and last-write-safe rollback.
+- a disabled-by-default public research boundary with internally constructed
+  exact-host Wikipedia and SEC requests, public-address checks, bounded fetches,
+  fail-closed parsers, citations, and a separate disposable cache;
+- an opt-in STDIO MCP server whose schemas expose only currency-separated
+  aggregates and bounded public-research inputs, never raw records or IDs.
 
 Upstream DTOs remain inside `finance_assistant.integrations`; conversion into
 canonical domain records occurs in the ingestion application layer. This keeps
@@ -113,6 +118,17 @@ Alert audit records retain exact canonical aggregate evidence, hashes, policy
 version, reason codes/text, and lifecycle outcomes. They never contain raw
 transactions, webhook bodies, notification message content, or credentials.
 Qwen does not calculate severity or control delivery.
+
+The MCP process is launched inside the gateway container and opens the same
+assistant-derived SQLite volume using SQLite `mode=ro`, without migrations.
+The implementation is additionally limited to report service methods and has no
+write tool. The public-research cache is a separate writable SQLite file in the
+volume and is not part of the durable backup manifest.
+
+Codex connects over STDIO through `docker compose exec`; no MCP TCP listener is
+created. Codex is outside the local trust boundary: aggregate outputs and public
+query inputs may leave the workstation according to its configured model and
+service policy. Ollama/Qwen remains available for workflows that must stay local.
 
 ## Local deployment topology
 
