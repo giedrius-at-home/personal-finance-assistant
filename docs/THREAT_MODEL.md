@@ -14,8 +14,9 @@
 2. Gateway to Firefly III and Ghostfolio.
 3. Firefly webhook sender to webhook receiver.
 4. Deterministic services to Ollama.
-5. Future retrieval adapter to the public internet.
-6. Developer workstation to GitHub Actions.
+5. Restricted retrieval adapter to the public internet.
+6. Local STDIO MCP process to Codex/the configured model provider.
+7. Developer workstation to GitHub Actions.
 
 ## Initial threats and controls
 
@@ -54,6 +55,15 @@
 | Corrupt or substituted backup | SHA-256 manifest verified before restore |
 | Accidental destructive restore | Explicit backup path and confirmation flag |
 | Backup disclosure | Git exclusion, owner-only files; encrypted off-device copy required |
+| Financial query leakage to public search | Strict public-name/identifier DTOs; no raw bank text or arbitrary query field |
+| SSRF through research input or redirect | Internally built HTTPS URLs; exact hosts/ports; public DNS preflight; redirect revalidation; environment proxies disabled |
+| Oversized or malicious public response | 256 KiB streamed limit; content-type/schema validation; three excerpts maximum |
+| Public prompt injection controls the model | Every excerpt labelled untrusted; MCP instructions prohibit treating it as instructions; no mutation/trade tools |
+| Stale research appears current | Citation retrieval/expiry times; explicit `fresh_cache` and `stale_cache` statuses |
+| Research cache becomes a shadow profile | Public-only fields, hashed query key, mode 0600, separate purge, no durable backup |
+| Hosted model receives raw ledger data | Aggregate-only output DTO; canary/schema tests; no database or raw-record tool |
+| MCP creates remote ingress | STDIO only inside existing container; no listener or remote transport |
+| Model causes financial action | Tool annotations and implementation are read-only; no payments, writes, advice, or trade execution |
 
 ## Prohibited capabilities
 
@@ -62,5 +72,7 @@
 - accepting arbitrary model-generated SQL;
 - giving an LLM database credentials;
 - public ingress without a new security decision.
+- model-accessible arbitrary URL fetching, raw transaction retrieval, or generic
+  database/filesystem access.
 
 This document will be updated when each new boundary is implemented.

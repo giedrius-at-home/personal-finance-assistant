@@ -250,6 +250,77 @@ same-origin requests, and return no-store responses. A process restart
 invalidates open forms. Settings are shown once more as an exact preview before
 apply and can be rolled back only while that revision is still current.
 
+## Codex MCP and public research
+
+Phase 6 does not enable Codex tools or outbound research automatically. After
+updating an older generated `.env`, add and review:
+
+```dotenv
+PFA_CODEX_TOOLS_ENABLED=false
+PFA_RESEARCH_ENABLED=false
+PFA_RESEARCH_CACHE_PATH=/var/lib/pfa/research-cache.sqlite3
+PFA_RESEARCH_USER_AGENT=personal-finance-assistant/0.1 (https://github.com/giedrius-at-home/personal-finance-assistant)
+```
+
+Keep research disabled for the first tool review. Rebuild and start the gateway,
+then verify the STDIO server can start with `make codex-tools`; terminate it with
+Control-C after its initialization message. It is a protocol process and has no
+browser page or TCP listener.
+
+To add it to Codex, configure a STDIO MCP server using Docker as the command and
+these arguments, replacing both absolute repository paths for this workstation:
+
+```toml
+[mcp_servers.personal_finance]
+command = "docker"
+args = [
+  "compose",
+  "--env-file", "/absolute/repository/path/.env",
+  "-f", "/absolute/repository/path/compose.yaml",
+  "exec", "-T", "-e", "PFA_CODEX_TOOLS_ENABLED=true",
+  "gateway", "python", "-m", "finance_assistant.mcp_server",
+]
+```
+
+Restart Codex after changing its configuration. The local stack must be healthy
+while the MCP server is in use. The process opens `assistant.sqlite3` with
+SQLite `mode=ro` and offers exactly three tools:
+
+- `get_finance_aggregates`: currency-separated cash flow, safe-to-spend, alert
+  counts, de-identified goal progress, net worth, and taxonomy counts;
+- `research_public_merchant`: an owner-approved public business name and optional
+  two-letter country code;
+- `research_public_market`: a validated ticker/CIK/ISIN and one enumerated public
+  question. SEC lookup currently abstains for ISIN rather than guessing.
+
+The server does not expose raw transactions, account/source/goal identifiers,
+merchant bank text, SQL, arbitrary URLs, writes, payments, or trades. Codex is a
+hosted-model boundary: anything returned by these tools may leave the device.
+Do not enable the server if this aggregate disclosure is unacceptable; use the
+local Ollama/Qwen path instead.
+
+To opt into public retrieval, set `PFA_RESEARCH_ENABLED=true` and retain a
+bounded, identifying user-agent string consistent with
+[Wikimedia API etiquette](https://www.mediawiki.org/wiki/API:Etiquette) and
+[SEC fair-access guidance](https://www.sec.gov/about/developer-resources). A
+project URL is sufficient; do not put a secret in the value. Recreate the
+gateway with `make up`. Public names/identifiers are disclosed only to their
+fixed provider; raw financial data is never a valid query input.
+
+Results expire after 24 hours by default. A cited expired result may be returned
+with status `stale_cache` during an outage. Purge all cached public excerpts and
+citations without changing derived financial state:
+
+```bash
+make purge-research-cache
+```
+
+The research cache is disposable, owner-readable only, excluded from Git, and
+not included in `make backup`. Disable retrieval immediately and purge the cache
+if a public subject was entered in error. Removing the MCP entry from Codex and
+restarting Codex removes the hosted tool connection; it does not purge the local
+cache.
+
 ## Troubleshooting
 
 - Run `make doctor` before inspecting application-specific behaviour.

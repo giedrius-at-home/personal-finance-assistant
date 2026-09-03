@@ -79,3 +79,16 @@ project intends to use semantic versioning for its own releases.
 - Same-origin POST and CSRF protection, strict host validation, no-store browser
   responses, restrictive browser security headers, bounded forms, and an
   ephemeral invented-data demo mode.
+- A disabled-by-default public research gateway with typed sanitized queries,
+  internally constructed exact-allowlisted Wikipedia/SEC URLs, public-DNS and
+  redirect checks, bounded streaming responses, fail-closed parsing, citations,
+  untrusted-content labels, and an owner-only disposable cache with stale mode.
+- Bounded merchant and public-market research contracts that prohibit bank text,
+  arbitrary URLs, holdings, forecasts, personalized advice, category mutation,
+  and trades.
+- An opt-in read-only STDIO MCP server for Codex exposing only documented
+  currency-separated financial aggregates and restricted public research, with
+  no raw records, identifiers, database access, or mutation tools.
+- Synthetic privacy/security tests for query leakage, prompt injection labels,
+  SSRF and redirect rejection, response limits, cache recovery, aggregate
+  canaries, disabled-by-default network access, and non-advisory market output.

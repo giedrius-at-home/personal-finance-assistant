@@ -280,14 +280,24 @@ def _batch_token(proposals: tuple[CategoryProposal, ...]) -> str:
 class SQLiteDerivedState:
     """Store current projections plus immutable source versions transactionally."""
 
-    def __init__(self, path: Path | str) -> None:
+    def __init__(self, path: Path | str, *, read_only: bool = False) -> None:
         self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
-        self._connection = sqlite3.connect(self.path, check_same_thread=False)
+        if read_only:
+            if not self.path.is_file():
+                raise FileNotFoundError(self.path)
+            self._connection = sqlite3.connect(
+                f"file:{self.path}?mode=ro",
+                uri=True,
+                check_same_thread=False,
+            )
+        else:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self._connection = sqlite3.connect(self.path, check_same_thread=False)
         self._connection.row_factory = sqlite3.Row
         self._connection.execute("PRAGMA foreign_keys = ON")
-        self._connection.execute("PRAGMA journal_mode = WAL")
+        if not read_only:
+            self._connection.execute("PRAGMA journal_mode = WAL")
 
     def close(self) -> None:
         self._connection.close()

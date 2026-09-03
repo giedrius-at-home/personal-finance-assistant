@@ -10,7 +10,7 @@ COPY --from=ghcr.io/astral-sh/uv:0.12.8@sha256:d1cbaeadc234fe19c0d93daabcf5e9873
 COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
 
-RUN uv sync --frozen --no-dev --no-editable
+RUN uv sync --frozen --no-dev --no-editable --extra codex
 
 RUN mkdir -p /var/lib/pfa && chown 65532:65532 /var/lib/pfa
 

@@ -81,6 +81,31 @@ cross-origin and missing-CSRF rejection, no-store/CSP headers, and the absence o
 third-party requests. Screenshots and console/network observations must contain
 invented data only and stay in pull-request evidence rather than the repository.
 
+Phase 6 changes must prove that private/query-like merchant inputs are rejected,
+market identifiers and questions are enumerated, URLs are internally built, and
+exact hosts, HTTPS/443, public DNS answers, redirects, response content types,
+sizes, parsing, citations, and cache expiry fail closed. Network-off and stale-
+cache behavior must be deterministic. Prompt-injection text remains visibly
+labelled untrusted and never changes a category or initiates advice/trades.
+
+MCP validation must enumerate the complete tool list and schemas, confirm
+read-only annotations and SQLite `mode=ro`, pass private account/source/raw-input
+canaries through populated synthetic state, and prove none appear in aggregate
+output. Extra arguments must not widen the contract. Public research remains
+network-disabled without explicit opt-in, and no MCP test may contact a live
+provider. Cache purge must be independently recoverable and content-free.
+
+Phase 6 retrieval changes must prove that private/query-like merchant text is
+rejected, only internally constructed allowlisted URLs are reachable, redirects
+are revalidated, private/non-global DNS answers fail closed, proxies are ignored,
+response sizes and content types are bounded, citations and untrusted labels are
+always present, stale cache use is explicit, and disabled research performs no
+network call. MCP tests must inspect its complete tool list and annotations,
+seed synthetic source/account/argument canaries, and prove that no raw record or
+identifier reaches aggregate output. They must also prove extra holdings/trade
+arguments cannot enable advice or action and that all research remains disabled
+without explicit opt-in. Cache purge must be independently recoverable.
+
 Restore changes must prove that checksums are verified, explicit confirmation
 is required, original synthetic values are recovered, and every service passes
 `make doctor` afterward. Destructive cleanup is never part of the routine gate.
