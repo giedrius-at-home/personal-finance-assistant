@@ -1,6 +1,6 @@
 .PHONY: backup bootstrap check codex-tools compose-config demo doctor down format \
-	lint logs pull purge-research-cache restore run security setup status stop test \
-	upstream-contracts up versions
+	install-macos-app lint logs pull purge-research-cache restore run security setup \
+	status stop test upstream-contracts up versions
 
 setup:
 	uv sync --all-extras --dev
@@ -35,6 +35,10 @@ run:
 demo:
 	PFA_DEMO_MODE=true uv run uvicorn --app-dir src finance_assistant.api:app \
 		--host 127.0.0.1 --port 8002
+
+install-macos-app:
+	test -f .env
+	uv run python scripts/macos_app.py
 
 codex-tools:
 	test -f .env

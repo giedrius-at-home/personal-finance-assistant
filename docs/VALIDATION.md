@@ -95,6 +95,14 @@ sizes, parsing, citations, and cache expiry fail closed. Network-off and stale-
 cache behavior must be deterministic. Prompt-injection text remains visibly
 labelled untrusted and never changes a category or initiates advice/trades.
 
+macOS launcher changes must prove the generated bundle identifier, executable
+mode, icon presence, fixed loopback dashboard/health URLs, non-overwriting
+installation, fixed expected container names, non-macOS failure, and absence of
+repository/config access or optional-feature overrides in the executable.
+Manual validation may install the owner app, launch the healthy synthetic/local
+stack, and inspect the fixed operational log; removal must not touch application
+data.
+
 MCP validation must enumerate the complete tool list and schemas, confirm
 read-only annotations and SQLite `mode=ro`, pass private account/source/raw-input
 canaries through populated synthetic state, and prove none appear in aggregate

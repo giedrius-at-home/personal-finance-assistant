@@ -55,6 +55,7 @@
 | Corrupt or substituted backup | SHA-256 manifest verified before restore |
 | Accidental destructive restore | Explicit backup path and confirmation flag |
 | Backup disclosure | Git exclusion, owner-only files; encrypted off-device copy required |
+| Finder launcher leaks secrets or widens exposure | Bundle reads no repo/config; starts fixed existing container names; fixed loopback health/dashboard URLs; no new ports |
 | Financial query leakage to public search | Strict public-name/identifier DTOs; no raw bank text or arbitrary query field |
 | SSRF through research input or redirect | Internally built HTTPS URLs; exact hosts/ports; public DNS preflight; redirect revalidation; environment proxies disabled |
 | Oversized or malicious public response | 256 KiB streamed limit; content-type/schema validation; three excerpts maximum |
