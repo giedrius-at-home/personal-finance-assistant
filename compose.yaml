@@ -6,6 +6,7 @@ services:
       context: .
     environment:
       PFA_LOG_LEVEL: ${PFA_LOG_LEVEL:-INFO}
+      PFA_DEMO_MODE: ${PFA_DEMO_MODE:-false}
       PFA_DATABASE_PATH: ${PFA_DATABASE_PATH:-/var/lib/pfa/assistant.sqlite3}
       PFA_OLLAMA_BASE_URL: ${PFA_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       PFA_OLLAMA_MODEL: ${PFA_OLLAMA_MODEL:-qwen3:8b}

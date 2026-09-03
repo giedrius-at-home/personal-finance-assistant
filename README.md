@@ -70,6 +70,14 @@ reversal workflows. No production Firefly write path is activated in this phase;
 model output can never invent categories and always flows through preview and
 audit.
 
+Phase 5 adds a localhost owner dashboard and matching typed JSON view for the
+category inbox, weekly cash flow, savings progress, alerts, and net worth.
+Currency totals never mix, linked accounts are counted once, stale valuations
+remove the combined total, and every report carries deterministic evidence.
+Policy settings use preview/confirm, versioned audit history, and rollback.
+Browser mutations are same-origin POSTs protected by CSRF; upstream category
+writes and notifications remain disabled by default.
+
 ## Quick start
 
 Prerequisites:
@@ -91,6 +99,7 @@ The generated `.env` is owner-readable only, ignored by Git, and never
 overwritten by `make bootstrap`. All browser endpoints bind to loopback:
 
 - gateway API: <http://127.0.0.1:8000/docs>
+- owner dashboard: <http://127.0.0.1:8000/dashboard>
 - Firefly III: <http://127.0.0.1:8080>
 - Firefly III Data Importer: <http://127.0.0.1:8081>
 - Ghostfolio: <http://127.0.0.1:3333>
@@ -112,6 +121,10 @@ make check
 # After configuring synthetic local API credentials:
 make upstream-contracts
 ```
+
+To inspect Phase 5 without accounts or persisted records, run `make demo` and
+open <http://127.0.0.1:8002/dashboard>. Every displayed record is invented in
+memory and disappears when the process stops.
 
 No test or CI workflow may use real financial records. Synthetic fixtures are
 the default and are reviewed like source code. The end-to-end ingestion fixture

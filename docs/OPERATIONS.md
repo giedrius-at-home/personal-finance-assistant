@@ -54,6 +54,7 @@ make versions
 The local interfaces are:
 
 - gateway: <http://127.0.0.1:8000/docs>
+- owner dashboard: <http://127.0.0.1:8000/dashboard>
 - Firefly III: <http://127.0.0.1:8080>
 - Firefly III Data Importer: <http://127.0.0.1:8081>
 - Ghostfolio: <http://127.0.0.1:3333>
@@ -230,6 +231,24 @@ The gateway can run without the upstream containers for Python development:
 make check
 make run
 ```
+
+For a safe visual walkthrough with no upstream accounts or stored records:
+
+```bash
+make demo
+```
+
+Open <http://127.0.0.1:8002/dashboard>. `PFA_DEMO_MODE=true` creates only
+invented in-memory accounts, transactions, a goal, and category proposals. It
+does not write SQLite or either upstream system, and stopping the process is the
+complete cleanup. Do not enable demo mode on a real-data runtime because the
+invented view intentionally replaces its displayed derived state.
+
+The normal dashboard uses SQLite-derived state. Category decisions and policy
+changes accept URL-encoded POSTs only, require the process CSRF cookie/token and
+same-origin requests, and return no-store responses. A process restart
+invalidates open forms. Settings are shown once more as an exact preview before
+apply and can be rolled back only while that revision is still current.
 
 ## Troubleshooting
 

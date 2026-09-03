@@ -1,5 +1,5 @@
-.PHONY: backup bootstrap check compose-config doctor down format lint logs pull \
-	restore run security setup status stop test upstream-contracts up versions
+.PHONY: backup bootstrap check compose-config demo doctor down format lint logs \
+	pull restore run security setup status stop test upstream-contracts up versions
 
 setup:
 	uv sync
@@ -30,6 +30,10 @@ check: lint security test
 
 run:
 	uv run uvicorn --app-dir src finance_assistant.api:app --reload
+
+demo:
+	PFA_DEMO_MODE=true uv run uvicorn --app-dir src finance_assistant.api:app \
+		--host 127.0.0.1 --port 8002
 
 compose-config:
 	docker compose --env-file .env.example config --quiet
