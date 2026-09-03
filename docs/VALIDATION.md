@@ -33,6 +33,13 @@ make backup
 make down
 ```
 
+The SQLite local-v1 decision is reviewed through practical operation as well as
+tests. Record lock failures, representative ingestion/dashboard latency,
+database size growth, restart and sleep recovery, `PRAGMA integrity_check`, and
+backup/restore duration without recording financial values. Multiple writers,
+multi-owner or remote hosting, recurring contention, or unmet recovery needs
+trigger a new database ADR rather than an unreviewed topology change.
+
 Typed upstream-client changes must also pass authenticated read-only contracts
 against the pinned local versions:
 
