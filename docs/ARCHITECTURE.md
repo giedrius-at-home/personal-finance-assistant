@@ -100,13 +100,14 @@ upstream schema drift from silently changing deterministic domain logic.
 No client has a write method, and failures never include response bodies or
 credentials.
 
-SQLite is a Phase 2 workload prototype, not a permanent database selection.
-Issue `#17` retains that decision for review after operational evidence exists.
-It stores only assistant projections, source-version metadata, validated
-canonical JSON, and webhook delivery IDs. It is never queried by an LLM and has
-no connection to either upstream database. Firefly remains authoritative for
-cash transactions; Ghostfolio activities remain investment-domain records and
-are not misrepresented as cash transactions.
+SQLite is the selected derived-state database for the local, single-owner v1.
+ADR 0010 records its single-writer constraint and the operational triggers for
+reconsidering PostgreSQL. It stores only assistant projections, source-version
+metadata, validated canonical JSON, and webhook delivery IDs. It is never
+queried directly by an LLM and has no connection to either upstream database.
+Firefly remains authoritative for cash transactions; Ghostfolio activities
+remain investment-domain records and are not misrepresented as cash
+transactions.
 
 Every cross-system account link explicitly selects either Firefly III or
 Ghostfolio as canonical owner. A Ghostfolio-owned brokerage account uses its

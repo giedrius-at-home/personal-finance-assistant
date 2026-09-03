@@ -132,15 +132,22 @@ webhook until the current polling-versus-relay topology limitation is reviewed.
 ## Assistant-derived state
 
 The gateway initializes `/var/lib/pfa/assistant.sqlite3` in its dedicated named
-volume. This Phase 2 SQLite store contains canonical projections, immutable
-source-version lineage, and webhook delivery IDs only. Firefly III and
-Ghostfolio remain authoritative, and issue `#17` tracks the permanent database
-decision after prototype evidence is reviewed.
+volume. SQLite is the selected local single-owner v1 store for canonical
+projections, immutable source-version lineage, and webhook delivery IDs only.
+Firefly III and Ghostfolio remain authoritative. ADR 0010 records the
+single-writer constraint and the conditions that require another database
+review.
 
 Derived projections can be deleted while retaining audit lineage, or a specific
 source identity can be privacy-purged from both current and historical state.
 Schema rollback refuses populated state. Exercise migration reversal only on an
 empty synthetic database; never treat a migration rollback as a deletion tool.
+
+During practical use, record any `database is locked` error, slow dashboard or
+ingestion operation, unexpected database growth, failed integrity check, or
+backup/restore delay. Also verify restart and desktop-sleep recovery. These are
+decision inputs: do not add a second writer process or move the database to a
+network filesystem as an attempted workaround.
 
 ## Routine commands
 

@@ -6,6 +6,12 @@ project intends to use semantic versioning for its own releases.
 
 ## [Unreleased]
 
+### Changed
+
+- Retained SQLite as the supported local single-owner v1 derived-state database
+  after prototype review, with explicit single-writer, practical-validation,
+  recovery, and future migration triggers recorded in ADR 0010.
+
 ### Added
 
 - Private GitHub repository foundation and review-driven governance.

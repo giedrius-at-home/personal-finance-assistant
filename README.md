@@ -52,7 +52,7 @@ both upstream systems. The domain includes explicit currency precision and
 canonical source-lineage contracts. Deterministic adapters map accounts and
 Firefly transactions into idempotent assistant-owned derived state, with exact
 balance reconciliation and durable signed-webhook replay protection. SQLite is
-the Phase 2 prototype pending the recorded database decision; it never replaces
+the selected local single-owner v1 derived-state database; it never replaces
 either upstream ledger. No real financial data has been introduced. See the
 [GitHub Project](https://github.com/users/giedrius-at-home/projects/4)
 for current status and roadmap, and the [operations guide](docs/OPERATIONS.md)
