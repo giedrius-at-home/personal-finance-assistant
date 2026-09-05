@@ -38,7 +38,11 @@ def firefly_currency(code: str = "EUR", places: int = 2) -> FireflyCurrency:
 
 
 def firefly_account(
-    account_id: str, balance: str = "125.50", currency: str = "EUR"
+    account_id: str,
+    balance: str = "125.50",
+    currency: str = "EUR",
+    *,
+    include_net_worth: bool = True,
 ) -> FireflyAccount:
     return FireflyAccount.model_validate(
         {
@@ -50,10 +54,21 @@ def firefly_account(
                 "currency_code": currency,
                 "currency_decimal_places": 2,
                 "current_balance": balance,
+                "include_net_worth": include_net_worth,
                 "updated_at": NOW.isoformat(),
             },
         }
     )
+
+
+def test_firefly_net_worth_preference_is_preserved() -> None:
+    records = build_canonical_accounts(
+        firefly_accounts=(firefly_account("cash", include_net_worth=False),),
+        ghostfolio_accounts=(),
+        currencies=CurrencyRegistry((Currency(code="EUR", minor_unit=2),)),
+    )
+
+    assert records[0].include_net_worth is False
 
 
 def ghostfolio_account(

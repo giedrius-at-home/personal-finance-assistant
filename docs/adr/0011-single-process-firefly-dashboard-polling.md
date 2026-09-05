@@ -26,7 +26,9 @@ five-minute minimum interval.
 
 Fetch only typed Firefly v1 API resources needed by the existing ingestion
 service. Request asset accounts explicitly so expense and revenue counterparties
-cannot enter net-worth state as assets. Map and validate the full snapshot
+cannot enter net-worth state as assets. Preserve Firefly's explicit
+`include_net_worth` preference so excluded assets remain available for cash-flow
+lineage without entering the combined total. Map and validate the full snapshot
 before one idempotent SQLite update. Contain poll failures so the dashboard
 continues serving the last valid projection. Logs may include aggregate counts
 and exception class names only, never transaction content, account identifiers,

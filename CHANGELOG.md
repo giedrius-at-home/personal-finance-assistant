@@ -8,6 +8,8 @@ project intends to use semantic versioning for its own releases.
 
 ### Changed
 
+- Formatted dashboard money at each currency's declared precision and honored
+  Firefly's per-account net-worth inclusion preference.
 - Retained SQLite as the supported local single-owner v1 derived-state database
   after prototype review, with explicit single-writer, practical-validation,
   recovery, and future migration triggers recorded in ADR 0010.

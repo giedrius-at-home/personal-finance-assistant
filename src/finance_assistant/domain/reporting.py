@@ -256,7 +256,14 @@ def net_worth_report(
     totals: dict[Currency, Decimal] = defaultdict(Decimal)
     reasons: list[str] = []
     has_stale = False
-    for account in sorted(accounts, key=lambda item: item.account_id):
+    included_accounts = tuple(item for item in accounts if item.include_net_worth)
+    excluded_count = len(accounts) - len(included_accounts)
+    if excluded_count:
+        account_label = "account" if excluded_count == 1 else "accounts"
+        reasons.append(
+            f"source settings exclude {excluded_count} {account_label} from net worth"
+        )
+    for account in sorted(included_accounts, key=lambda item: item.account_id):
         updated_at = account.canonical_owner.source_updated_at
         stale = updated_at is None or as_of - updated_at > stale_after
         if stale:

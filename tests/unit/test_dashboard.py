@@ -16,10 +16,16 @@ from finance_assistant.domain.canonical import (
 from finance_assistant.domain.categorisation import CategorisationMethod
 from finance_assistant.domain.models import BudgetWindow, Currency, Money
 from finance_assistant.persistence.sqlite import SQLiteDerivedState
+from finance_assistant.web import format_money
 
 NOW = datetime(2026, 9, 2, tzinfo=UTC)
 SAME_ORIGIN = {"origin": "http://testserver"}
 EUR = Currency(code="EUR", minor_unit=2)
+
+
+def test_money_display_uses_currency_precision_without_negative_zero() -> None:
+    assert format_money(Decimal("77.470000000000"), EUR) == "77.47"
+    assert format_money(Decimal("-0.00"), EUR) == "0.00"
 
 
 def proposal(name: str) -> CategoryProposal:
@@ -55,6 +61,9 @@ def test_demo_dashboard_is_invented_responsive_and_no_store() -> None:
     assert response.status_code == 200
     assert "Invented demo data" in response.text
     assert "Northstar Bicycle Repair" in response.text
+    assert "2266.80 net" in response.text
+    assert "Income 2400.00 · spending 133.20" in response.text
+    assert "10300.00 EUR" in response.text
     assert "writes disabled" in response.text
     assert response.headers["cache-control"] == "no-store"
     assert "frame-ancestors 'none'" in response.headers["content-security-policy"]

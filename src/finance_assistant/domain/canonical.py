@@ -56,6 +56,7 @@ class CanonicalAccount(StrictModel):
     balance: Money
     canonical_owner: SourceReference
     linked_sources: tuple[SourceReference, ...] = ()
+    include_net_worth: bool = True
 
     @property
     def currency(self) -> Currency:

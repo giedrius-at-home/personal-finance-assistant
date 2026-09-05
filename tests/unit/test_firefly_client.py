@@ -83,6 +83,7 @@ async def test_firefly_accounts_preserve_exact_decimal_strings() -> None:
                     "currency_code": "EUR",
                     "currency_decimal_places": 2,
                     "current_balance": "123.45",
+                    "include_net_worth": False,
                 },
             }
         ],
@@ -111,6 +112,7 @@ async def test_firefly_accounts_preserve_exact_decimal_strings() -> None:
         accounts = await client.list_accounts()
 
     assert accounts[0].attributes.current_balance == Decimal("123.45")
+    assert accounts[0].attributes.include_net_worth is False
 
 
 @pytest.mark.anyio

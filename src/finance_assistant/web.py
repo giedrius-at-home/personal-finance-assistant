@@ -5,6 +5,7 @@ from __future__ import annotations
 import hmac
 import secrets
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 from urllib.parse import parse_qs
 
@@ -15,6 +16,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from finance_assistant.categorisation_service import ProposalStatus
 from finance_assistant.dashboard import DashboardService, DashboardView
+from finance_assistant.domain.models import Currency
 from finance_assistant.domain.settings import OwnerSettings, SettingsPreview
 from finance_assistant.persistence.sqlite import (
     PersistenceConflictError,
@@ -23,6 +25,16 @@ from finance_assistant.persistence.sqlite import (
 
 MAX_FORM_BYTES = 8_192
 TEMPLATES = Jinja2Templates(directory=Path(__file__).parent / "templates")
+
+
+def format_money(amount: Decimal, currency: Currency) -> str:
+    """Render exact money using the currency's declared minor unit."""
+
+    normalized = abs(amount) if amount == 0 else amount
+    return f"{normalized:.{currency.minor_unit}f}"
+
+
+TEMPLATES.env.filters["money"] = format_money
 
 
 def install_web_routes(

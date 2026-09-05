@@ -71,6 +71,7 @@ class FireflyAccountAttributes(FireflyModel):
     currency_decimal_places: int = Field(ge=0, le=16)
     current_balance: FiniteDecimal
     active: bool = True
+    include_net_worth: bool = True
     updated_at: AwareDatetime | None = None
 
 

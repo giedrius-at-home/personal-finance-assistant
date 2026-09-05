@@ -116,6 +116,25 @@ def test_net_worth_counts_mirrors_once_and_fails_closed_when_stale() -> None:
     assert report.reasons == ("stale valuations prevent a combined total",)
 
 
+def test_net_worth_honors_source_exclusion() -> None:
+    excluded = CanonicalAccount(
+        account_id="excluded",
+        name="Excluded synthetic account",
+        balance=Money(amount="999", currency=EUR),
+        canonical_owner=source("excluded").model_copy(
+            update={"entity": SourceEntity.ACCOUNT}
+        ),
+        include_net_worth=False,
+    )
+
+    report = net_worth_report((excluded,), as_of=NOW)
+
+    assert report.components == ()
+    assert report.currency_totals == ()
+    assert report.total is None
+    assert report.reasons == ("source settings exclude 1 account from net worth",)
+
+
 def test_taxonomy_signals_are_deterministic_and_reject_duplicate_input() -> None:
     aggregates = (
         CategoryAggregate(category="Dining out", transaction_count=20, amount="200"),
