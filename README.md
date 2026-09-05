@@ -89,6 +89,11 @@ progress without identifiers, alert/taxonomy counts, and those bounded public
 queries. It cannot read raw transactions, execute SQL, mutate either ledger,
 move money, recommend personalized trades, or accept arbitrary URLs.
 
+The owner dashboard can optionally poll Firefly III into its local derived
+state. Polling runs inside the single gateway writer, starts immediately with
+the gateway, and repeats daily by default. It is disabled until an owner adds a
+dedicated token to the ignored `.env` file and opts in explicitly.
+
 ## Quick start
 
 Prerequisites:
@@ -108,6 +113,19 @@ make doctor
 make install-macos-app
 ```
 
+To populate and refresh the owner dashboard from Firefly III, create a
+dedicated personal access token, place it only in the ignored `.env`, and set:
+
+```dotenv
+PFA_FIREFLY_API_TOKEN=<owner-only token>
+PFA_FIREFLY_SYNC_ENABLED=true
+PFA_FIREFLY_SYNC_INTERVAL_SECONDS=86400
+```
+
+Recreate only the gateway with `docker compose up --build --detach gateway`.
+The first read-only sync runs at startup. Never commit or paste the token into
+logs, shell arguments, issues, or chat.
+
 The generated `.env` is owner-readable only, ignored by Git, and never
 overwritten by `make bootstrap`. All browser endpoints bind to loopback:
 
@@ -115,6 +133,7 @@ overwritten by `make bootstrap`. All browser endpoints bind to loopback:
 - owner dashboard: <http://127.0.0.1:8000/dashboard>
 - Firefly III: <http://127.0.0.1:8080>
 - Firefly III Data Importer: <http://127.0.0.1:8081>
+- Firefly III Data Importer HTTPS: <https://localhost:8444> (self-signed)
 - Ghostfolio: <http://127.0.0.1:3333>
 
 After `make install-macos-app`, open **Personal Finance Assistant** from

@@ -109,6 +109,20 @@ Firefly remains authoritative for cash transactions; Ghostfolio activities
 remain investment-domain records and are not misrepresented as cash
 transactions.
 
+Optional Firefly polling runs as a background task inside the gateway process,
+so SQLite retains one write-capable process. The task performs an immediate
+read-only snapshot at startup and repeats at the configured interval. It uses
+only Firefly asset accounts, transactions, currencies, and piggy banks; errors
+are isolated from HTTP availability and logged by exception type without raw
+upstream content or credentials. ADR 0011 records this production ingestion
+boundary.
+
+The Data Importer receives durable Firefly and Enable Banking credentials only
+through ignored owner-only configuration and a read-only PEM secret. Its local
+TLS identity is persisted independently, while browser sessions remain
+ephemeral because they may contain several live credentials. ADR 0012 records
+this separation.
+
 Every cross-system account link explicitly selects either Firefly III or
 Ghostfolio as canonical owner. A Ghostfolio-owned brokerage account uses its
 portfolio value and retains the corresponding Firefly account only as lineage

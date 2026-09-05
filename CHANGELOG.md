@@ -14,6 +14,13 @@ project intends to use semantic versioning for its own releases.
 
 ### Added
 
+- Durable, configurable importer HTTPS with a persisted local certificate,
+  read-only injection of ignored Enable Banking credentials, separate durable
+  Firefly importer authentication, and documented per-bank recovery/rotation.
+- Disabled-by-default Firefly polling inside the single gateway writer, with an
+  immediate startup sync, configurable daily interval, asset-account filtering,
+  idempotent derived-state updates, credential-safe logging, and shutdown-safe
+  cancellation.
 - An owner-scoped native macOS launcher with a source-controlled icon that can
   start Colima and the existing local containers, wait for loopback health, and
   open the dashboard without reading the repository or embedding credentials or

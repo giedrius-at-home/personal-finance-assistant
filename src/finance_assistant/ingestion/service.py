@@ -80,7 +80,7 @@ class IngestionService:
         self,
         *,
         firefly: FireflyReader,
-        ghostfolio: GhostfolioReader,
+        ghostfolio: GhostfolioReader | None = None,
         state: DerivedState,
         links: tuple[AccountLink, ...] = (),
         clock: Callable[[], datetime] | None = None,
@@ -99,7 +99,9 @@ class IngestionService:
         )
         accounts = build_canonical_accounts(
             firefly_accounts=await self._firefly.list_accounts(),
-            ghostfolio_accounts=await self._ghostfolio.list_accounts(),
+            ghostfolio_accounts=(
+                await self._ghostfolio.list_accounts() if self._ghostfolio else ()
+            ),
             currencies=currencies,
             links=self._links,
         )

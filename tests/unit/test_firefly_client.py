@@ -96,9 +96,12 @@ async def test_firefly_accounts_preserve_exact_decimal_strings() -> None:
             }
         },
     }
-    transport = httpx2.MockTransport(
-        lambda _request: httpx2.Response(200, json=payload)
-    )
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        assert request.url.params["type"] == "asset"
+        return httpx2.Response(200, json=payload)
+
+    transport = httpx2.MockTransport(handler)
 
     async with FireflyClient(
         base_url="http://firefly.test/api/v1",

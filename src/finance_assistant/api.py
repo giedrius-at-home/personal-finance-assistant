@@ -1,5 +1,6 @@
 """HTTP boundary for deterministic financial calculations."""
 
+import asyncio
 import os
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
@@ -20,6 +21,11 @@ from finance_assistant.domain.models import (
     GoalEvaluation,
     SavingsGoal,
 )
+from finance_assistant.ingestion.runtime import (
+    FireflySyncRunner,
+    FireflySyncSettings,
+    run_firefly_sync_loop,
+)
 from finance_assistant.integrations.firefly_webhook import (
     MAX_WEBHOOK_BYTES,
     FireflyWebhookReceiver,
@@ -38,6 +44,7 @@ def create_app(
     database_path: Path | str | None = None,
     demo_mode: bool = False,
     allowed_hosts: frozenset[str] = frozenset({"127.0.0.1", "localhost", "::1"}),
+    firefly_sync_settings: FireflySyncSettings | None = None,
 ) -> FastAPI:
     """Build the API with an explicitly configured webhook boundary."""
 
@@ -47,9 +54,25 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
-        yield
-        if state is not None:
-            state.close()
+        sync_task: asyncio.Task[None] | None = None
+        if state is not None and firefly_sync_settings is not None:
+            sync_task = asyncio.create_task(
+                run_firefly_sync_loop(
+                    FireflySyncRunner(state=state, settings=firefly_sync_settings),
+                    interval_seconds=firefly_sync_settings.interval_seconds,
+                )
+            )
+        try:
+            yield
+        finally:
+            if sync_task is not None:
+                sync_task.cancel()
+                try:
+                    await sync_task
+                except asyncio.CancelledError:
+                    pass
+            if state is not None:
+                state.close()
 
     application = FastAPI(
         title="Personal Finance Assistant",
@@ -192,8 +215,11 @@ async def receive_firefly_webhook(request: Request) -> dict[str, str]:
     return {"status": "accepted" if accepted else "duplicate"}
 
 
+_sync_settings = FireflySyncSettings.from_environment(os.environ)
+
 app = create_app(
     webhook_secret=os.getenv("PFA_FIREFLY_WEBHOOK_SECRET"),
     database_path=os.getenv("PFA_DATABASE_PATH"),
     demo_mode=os.getenv("PFA_DEMO_MODE", "false").casefold() == "true",
+    firefly_sync_settings=_sync_settings,
 )

@@ -198,7 +198,9 @@ class FireflyClient:
         return await self._paginate("currencies", FireflyCurrency)
 
     async def list_accounts(self) -> tuple[FireflyAccount, ...]:
-        return await self._paginate("accounts", FireflyAccount)
+        return await self._paginate(
+            "accounts", FireflyAccount, params={"type": "asset"}
+        )
 
     async def list_transactions(
         self,
