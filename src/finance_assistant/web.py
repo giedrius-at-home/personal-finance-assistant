@@ -43,8 +43,11 @@ def install_web_routes(
     state: SQLiteDerivedState | None,
     demo_mode: bool,
     csrf_token: str,
+    owner_name_aliases: tuple[str, ...] = (),
 ) -> None:
-    service = DashboardService(state, demo_mode=demo_mode)
+    service = DashboardService(
+        state, demo_mode=demo_mode, owner_name_aliases=owner_name_aliases
+    )
 
     @router.get("/", include_in_schema=False)
     async def index() -> RedirectResponse:

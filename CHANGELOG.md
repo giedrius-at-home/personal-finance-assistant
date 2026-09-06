@@ -8,6 +8,9 @@ project intends to use semantic versioning for its own releases.
 
 ### Changed
 
+- Pruned deleted Firefly accounts and transactions from the current dashboard
+  after complete syncs, added configurable owner-name transfer recognition, and
+  made cash-account balances and pay-cycle context clearer on the dashboard.
 - Formatted dashboard money at each currency's declared precision and honored
   Firefly's per-account net-worth inclusion preference.
 - Retained SQLite as the supported local single-owner v1 derived-state database

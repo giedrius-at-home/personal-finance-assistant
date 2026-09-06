@@ -120,11 +120,19 @@ dedicated personal access token, place it only in the ignored `.env`, and set:
 PFA_FIREFLY_API_TOKEN=<owner-only token>
 PFA_FIREFLY_SYNC_ENABLED=true
 PFA_FIREFLY_SYNC_INTERVAL_SECONDS=86400
+# Optional: comma-separated aliases that identify transfers between your accounts.
+PFA_OWNER_NAME_ALIASES=<full name>,<abbreviated name>
 ```
 
 Recreate only the gateway with `docker compose up --build --detach gateway`.
 The first read-only sync runs at startup. Never commit or paste the token into
 logs, shell arguments, issues, or chat.
+
+Each successful full Firefly sync removes current dashboard projections that no
+longer exist upstream while retaining immutable source-version history. Owner
+name aliases are matched locally against normalized transaction descriptions;
+matching inflows and outflows are reported as transfers and excluded from cash
+flow income, spending, and category totals.
 
 The generated `.env` is owner-readable only, ignored by Git, and never
 overwritten by `make bootstrap`. All browser endpoints bind to loopback:

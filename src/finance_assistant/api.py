@@ -45,6 +45,7 @@ def create_app(
     demo_mode: bool = False,
     allowed_hosts: frozenset[str] = frozenset({"127.0.0.1", "localhost", "::1"}),
     firefly_sync_settings: FireflySyncSettings | None = None,
+    owner_name_aliases: tuple[str, ...] = (),
 ) -> FastAPI:
     """Build the API with an explicitly configured webhook boundary."""
 
@@ -140,6 +141,7 @@ def create_app(
         state=state,
         demo_mode=demo_mode,
         csrf_token=new_csrf_token(),
+        owner_name_aliases=owner_name_aliases,
     )
     application.include_router(web_router)
     return application
@@ -217,9 +219,22 @@ async def receive_firefly_webhook(request: Request) -> dict[str, str]:
 
 _sync_settings = FireflySyncSettings.from_environment(os.environ)
 
+
+def _owner_name_aliases(raw: str | None) -> tuple[str, ...]:
+    if not raw:
+        return ()
+    aliases = tuple(item.strip() for item in raw.split(",") if item.strip())
+    if len(aliases) > 16 or any(len(item) > 100 for item in aliases):
+        raise ValueError(
+            "PFA_OWNER_NAME_ALIASES contains too many or oversized aliases"
+        )
+    return tuple(dict.fromkeys(aliases))
+
+
 app = create_app(
     webhook_secret=os.getenv("PFA_FIREFLY_WEBHOOK_SECRET"),
     database_path=os.getenv("PFA_DATABASE_PATH"),
     demo_mode=os.getenv("PFA_DEMO_MODE", "false").casefold() == "true",
     firefly_sync_settings=_sync_settings,
+    owner_name_aliases=_owner_name_aliases(os.getenv("PFA_OWNER_NAME_ALIASES")),
 )

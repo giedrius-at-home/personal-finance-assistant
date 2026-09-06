@@ -83,9 +83,16 @@ class DashboardView(StrictModel):
 class DashboardService:
     """Build the HTML and JSON dashboard from the same deterministic view."""
 
-    def __init__(self, state: SQLiteDerivedState | None, *, demo_mode: bool = False):
+    def __init__(
+        self,
+        state: SQLiteDerivedState | None,
+        *,
+        demo_mode: bool = False,
+        owner_name_aliases: tuple[str, ...] = (),
+    ):
         self.state = state
         self.demo_mode = demo_mode
+        self.owner_name_aliases = owner_name_aliases
 
     def view(self, *, now: datetime) -> DashboardView:
         if now.tzinfo is None:
@@ -124,6 +131,7 @@ class DashboardService:
             alert_severities=severities,
             as_of=now,
             timezone=settings.timezone,
+            owner_name_aliases=self.owner_name_aliases,
         )
         aggregates = tuple(
             CategoryAggregate(
