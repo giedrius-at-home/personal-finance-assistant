@@ -238,6 +238,38 @@ def test_review_approve_reject_and_correct_lifecycle(tmp_path: Path) -> None:
     checked.close()
 
 
+def test_reviewed_categories_are_written_to_firefly_before_local_approval(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "state.sqlite3"
+    seeded = SQLiteDerivedState(path)
+    seeded.migrate_up()
+    item = proposal("journal-1")
+    seeded.record_proposal(item)
+    seeded.close()
+    writes: list[tuple[str, str | None, str | None]] = []
+
+    async def update(
+        transaction_id: str,
+        expected_category: str | None,
+        category: str | None,
+    ) -> None:
+        writes.append((transaction_id, expected_category, category))
+
+    with TestClient(create_app(database_path=path, category_updater=update)) as client:
+        dashboard = client.get("/v1/dashboard").json()
+        assert dashboard["upstream_writes"] == "reviewed categories only"
+        token = client.get("/dashboard").cookies["pfa_csrf"]
+        response = client.post(
+            f"/review/{item.proposal_id}/approve",
+            data={"csrf_token": token},
+            headers=SAME_ORIGIN,
+        )
+
+    assert response.status_code == 200
+    assert writes == [("journal-1", None, "Groceries")]
+
+
 def test_review_failures_are_bounded_and_do_not_mutate_demo() -> None:
     client = TestClient(create_app(demo_mode=True))
     token = client.get("/dashboard").cookies["pfa_csrf"]

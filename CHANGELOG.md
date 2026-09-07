@@ -8,6 +8,11 @@ project intends to use semantic versioning for its own releases.
 
 ### Changed
 
+- Made Firefly the authoritative category source for dashboard reporting and
+  added opt-in, owner-reviewed, category-only updates with stale-preview
+  conflict detection; local model suggestions still cannot write automatically.
+- Added bounded local-Qwen suggestion generation for recent uncategorised
+  non-transfer transactions, with explicit opt-in and a dashboard trigger.
 - Pruned deleted Firefly accounts and transactions from the current dashboard
   after complete syncs, added configurable owner-name transfer recognition, and
   made cash-account balances and pay-cycle context clearer on the dashboard.

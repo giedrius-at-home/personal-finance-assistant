@@ -249,6 +249,7 @@ def _map_split(
             account_ids[counterparty] if counterparty is not None else None
         ),
         description=split.description,
+        category=split.category_name,
     )
 
 

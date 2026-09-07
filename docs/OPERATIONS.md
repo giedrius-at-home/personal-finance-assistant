@@ -369,6 +369,27 @@ same-origin requests, and return no-store responses. A process restart
 invalidates open forms. Settings are shown once more as an exact preview before
 apply and can be rolled back only while that revision is still current.
 
+Firefly is the authoritative category store. To allow reviewed categories to
+be copied from the dashboard to Firefly, enable the narrow write path in the
+ignored `.env` file:
+
+```dotenv
+PFA_FIREFLY_CATEGORY_WRITES_ENABLED=true
+PFA_CATEGORY_SUGGESTIONS_ENABLED=true
+PFA_CATEGORY_SUGGESTION_BATCH_SIZE=20
+```
+
+This uses the configured Firefly API token but permits only a category update
+for the exact transaction under review. Before writing, the gateway reads the
+transaction and checks that its category still matches the proposal preview.
+A manual Firefly change therefore causes a conflict instead of being
+overwritten. Rejecting a suggestion never writes upstream. Local Qwen output
+cannot bypass owner approval, create transactions, alter amounts or accounts,
+or run Firefly rules. Disable the setting or revoke the token to stop writes.
+Suggestion generation requires the configured Ollama model to be installed and
+running locally. It examines only a bounded batch of uncategorised,
+non-transfer transactions and creates pending reviews; it never approves them.
+
 ## macOS application launcher
 
 After the first successful `make up` and `make doctor`, install the optional

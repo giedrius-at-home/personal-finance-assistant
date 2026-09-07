@@ -89,7 +89,11 @@ def ghostfolio_account(
 
 
 def transaction(
-    kind: str, source: str | None, destination: str | None
+    kind: str,
+    source: str | None,
+    destination: str | None,
+    *,
+    category: str | None = None,
 ) -> FireflyTransaction:
     return FireflyTransaction.model_validate(
         {
@@ -108,6 +112,7 @@ def transaction(
                         "description": f"Synthetic {kind}",
                         "source_id": source,
                         "destination_id": destination,
+                        "category_name": category,
                     }
                 ],
             },
@@ -183,7 +188,7 @@ def test_transactions_map_all_directions_including_transfer() -> None:
     )
     records = build_canonical_transactions(
         (
-            transaction("Withdrawal", "asset-1", "expense-1"),
+            transaction("Withdrawal", "asset-1", "expense-1", category="Groceries"),
             transaction("Deposit", "revenue-1", "asset-1"),
             transaction("Transfer", "asset-1", "asset-2"),
         ),
@@ -197,6 +202,7 @@ def test_transactions_map_all_directions_including_transfer() -> None:
         TransactionKind.TRANSFER,
     ]
     assert records[2].counterparty_account_id == "firefly:asset-2"
+    assert records[0].category == "Groceries"
 
 
 def test_malformed_transaction_ownership_and_duplicates_fail_closed() -> None:

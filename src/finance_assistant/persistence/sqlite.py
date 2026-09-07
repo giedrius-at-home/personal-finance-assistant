@@ -771,6 +771,17 @@ class SQLiteDerivedState:
             return None
         return TypeAdapter(CategoryProposal).validate_json(row["payload_json"])
 
+    def category_proposal_exists(self, source: SourceReference) -> bool:
+        """Return whether this exact upstream transaction already had a review."""
+
+        row = self._connection.execute(
+            "SELECT 1 FROM category_proposals "
+            "WHERE source_system = ? AND source_entity = ? AND external_id = ? "
+            "LIMIT 1",
+            (source.system.value, source.entity.value, source.external_id),
+        ).fetchone()
+        return row is not None
+
     def preview_batch(self, proposal_ids: tuple[str, ...]) -> str:
         return _batch_token(self._require_pending(proposal_ids))
 

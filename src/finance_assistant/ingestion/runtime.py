@@ -62,6 +62,39 @@ class FireflySyncSettings:
         return cls(base_url=base_url, token=token, interval_seconds=interval)
 
 
+@dataclass(frozen=True, slots=True)
+class FireflyCategoryWriteSettings:
+    """Opt-in credentials for reviewed category-only writes."""
+
+    base_url: str
+    token: SecretStr
+
+    @classmethod
+    def from_environment(
+        cls, environment: Mapping[str, str]
+    ) -> FireflyCategoryWriteSettings | None:
+        enabled = environment.get(
+            "PFA_FIREFLY_CATEGORY_WRITES_ENABLED", "false"
+        ).casefold()
+        if enabled not in {"true", "false"}:
+            raise ValueError(
+                "PFA_FIREFLY_CATEGORY_WRITES_ENABLED must be true or false"
+            )
+        if enabled == "false":
+            return None
+        token = SecretStr(environment.get("PFA_FIREFLY_API_TOKEN", ""))
+        if not token.get_secret_value():
+            raise ValueError(
+                "PFA_FIREFLY_API_TOKEN is required when category writes are enabled"
+            )
+        base_url = environment.get("PFA_FIREFLY_BASE_URL", "").rstrip("/")
+        if not base_url:
+            raise ValueError(
+                "PFA_FIREFLY_BASE_URL is required when category writes are enabled"
+            )
+        return cls(base_url=base_url, token=token)
+
+
 class FireflySyncRunner:
     """Fetch one read-only snapshot into the gateway-owned SQLite connection."""
 

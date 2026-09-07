@@ -64,20 +64,20 @@ durable cooldown/escalation/resolution state, offline-safe daily scheduling, and
 an opt-in native macOS notification adapter. Delivery remains disabled until the
 owner explicitly enables and tests macOS notification permission.
 
-Phase 4 adds explainable, review-only transaction categorisation: deterministic
+Phase 4 adds explainable, review-first transaction categorisation: deterministic
 merchant normalization and baseline rules, a constrained local-only Ollama/Qwen
 adapter with a versioned category vocabulary, confidence calibration and
 abstention gated on owner-approved correction holdouts, and durable preview/approve/
-reversal workflows. No production Firefly write path is activated in this phase;
-model output can never invent categories and always flows through preview and
-audit.
+reversal workflows. Model output can never invent categories and always flows
+through owner review and audit. An optional category-only adapter can copy an
+exact approved decision to Firefly; unreviewed model output has no write path.
 
 Phase 5 adds a localhost owner dashboard and matching typed JSON view for the
 category inbox, weekly cash flow, savings progress, alerts, and net worth.
 Currency totals never mix, linked accounts are counted once, stale valuations
 remove the combined total, and every report carries deterministic evidence.
 Policy settings use preview/confirm, versioned audit history, and rollback.
-Browser mutations are same-origin POSTs protected by CSRF; upstream category
+Browser mutations are same-origin POSTs protected by CSRF; Firefly category
 writes and notifications remain disabled by default.
 
 Phase 6 adds disabled-by-default public research and an opt-in STDIO MCP server
@@ -93,6 +93,11 @@ The owner dashboard can optionally poll Firefly III into its local derived
 state. Polling runs inside the single gateway writer, starts immediately with
 the gateway, and repeats daily by default. It is disabled until an owner adds a
 dedicated token to the ignored `.env` file and opts in explicitly.
+When reviewed category writes are enabled separately, Firefly remains the
+authoritative category store and the next dashboard sync reads its value back.
+Local Qwen suggestion generation is also separately opt-in and processes a
+bounded batch of recent uncategorised, non-transfer transactions after each
+Firefly sync or when the owner requests suggestions from the dashboard.
 
 ## Quick start
 

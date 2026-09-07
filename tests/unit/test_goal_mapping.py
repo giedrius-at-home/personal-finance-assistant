@@ -25,7 +25,7 @@ def piggy_bank(**overrides: object) -> FireflyPiggyBank:
     }
     attributes.update(overrides)
     return FireflyPiggyBank.model_validate(
-        {"type": "piggy_banks", "id": "synthetic-piggy", "attributes": attributes}
+        {"type": "piggy-banks", "id": "synthetic-piggy", "attributes": attributes}
     )
 
 
