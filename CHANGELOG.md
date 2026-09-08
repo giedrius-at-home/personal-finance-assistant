@@ -21,6 +21,9 @@ project intends to use semantic versioning for its own releases.
 - Retained SQLite as the supported local single-owner v1 derived-state database
   after prototype review, with explicit single-writer, practical-validation,
   recovery, and future migration triggers recorded in ADR 0010.
+- Retained Firefly III and reviewed CSV imports after the direct Trade Republic
+  experiment exposed repeated, duplicate Enable Banking pagination; `bank-mcp`
+  is explicitly not adopted for live credentials in ADR 0014.
 
 ### Added
 

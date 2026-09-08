@@ -277,6 +277,12 @@ coverage gap, the bank/Enable Banking feed is the limiting source and CSV remain
 the fallback. Revoke the diagnostic session after the comparison and remove its
 local session-ID file.
 
+The diagnostic deliberately stops if Enable Banking repeats a continuation key.
+During the 2026-09-08 Trade Republic evaluation, the provider repeated the same
+populated page and cursor even for a single-day request. Do not treat the first
+page as complete and do not adopt `bank-mcp` as a workaround: its evaluated
+adapter did not guard this condition. ADR 0014 records the non-adoption decision.
+
 Back up `.env`, the Enable Banking PEM, and per-bank configurations only to an
 encrypted owner-controlled destination. The ordinary application backup does
 not copy these credentials or importer browser sessions. To rotate or revoke:
