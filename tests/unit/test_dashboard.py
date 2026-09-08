@@ -8,7 +8,13 @@ from fastapi.testclient import TestClient
 
 from finance_assistant.api import _owner_name_aliases, create_app
 from finance_assistant.categorisation_service import CategoryProposal, ProposalStatus
-from finance_assistant.csv_import import CsvImportPreview, CsvPreviewRow, CsvRowStatus
+from finance_assistant.csv_import import (
+    CsvImportConflictError,
+    CsvImportError,
+    CsvImportPreview,
+    CsvPreviewRow,
+    CsvRowStatus,
+)
 from finance_assistant.domain.alerting import AlertPolicy, budget_alert_candidate
 from finance_assistant.domain.canonical import (
     SourceEntity,
@@ -57,6 +63,32 @@ class StubCsvCoordinator:
     async def commit(self, preview_id: str) -> int:
         self.commit_calls.append(preview_id)
         return 1
+
+
+class RaisingCsvCoordinator(StubCsvCoordinator):
+    def __init__(
+        self,
+        *,
+        preview_error: Exception | None = None,
+        commit_error: Exception | None = None,
+    ) -> None:
+        super().__init__()
+        self.preview_error = preview_error
+        self.commit_error = commit_error
+
+    async def preview(
+        self, *, content: bytes, filename: str, account_id: str
+    ) -> CsvImportPreview:
+        if self.preview_error is not None:
+            raise self.preview_error
+        return await super().preview(
+            content=content, filename=filename, account_id=account_id
+        )
+
+    async def commit(self, preview_id: str) -> int:
+        if self.commit_error is not None:
+            raise self.commit_error
+        return await super().commit(preview_id)
 
 
 def test_money_display_uses_currency_precision_without_negative_zero() -> None:
@@ -220,6 +252,80 @@ def test_csv_upload_rejects_cross_origin_and_oversized_files(tmp_path: Path) -> 
 
     assert foreign.status_code == 403
     assert oversized.status_code == 413
+
+
+def test_csv_routes_fail_closed_and_render_refresh_status(tmp_path: Path) -> None:
+    path = tmp_path / "state.sqlite3"
+    with TestClient(create_app(database_path=path)) as disabled:
+        token = disabled.get("/dashboard").cookies["pfa_csrf"]
+        response = disabled.post(
+            "/imports/csv/preview",
+            data={"csrf_token": token, "account_id": "auto"},
+            files={"upload": ("synthetic.csv", b"x", "text/csv")},
+            headers=SAME_ORIGIN,
+        )
+        assert response.status_code == 409
+
+    for error, expected_status in (
+        (CsvImportError("synthetic invalid CSV"), 422),
+        (CsvImportConflictError("synthetic ambiguous account"), 409),
+    ):
+        coordinator = RaisingCsvCoordinator(preview_error=error)
+        with TestClient(
+            create_app(
+                database_path=path,
+                csv_import_coordinator=coordinator,  # type: ignore[arg-type]
+            )
+        ) as client:
+            token = client.get("/dashboard").cookies["pfa_csrf"]
+            response = client.post(
+                "/imports/csv/preview",
+                data={"csrf_token": token, "account_id": "auto"},
+                files={"upload": ("synthetic.csv", b"x", "text/csv")},
+                headers=SAME_ORIGIN,
+            )
+            assert response.status_code == expected_status
+
+    coordinator = RaisingCsvCoordinator(
+        commit_error=CsvImportConflictError("synthetic stale preview")
+    )
+    with TestClient(
+        create_app(
+            database_path=path,
+            csv_import_coordinator=coordinator,  # type: ignore[arg-type]
+        )
+    ) as client:
+        token = client.get("/dashboard").cookies["pfa_csrf"]
+        conflict = client.post(
+            "/imports/csv/commit",
+            data={"csrf_token": token, "preview_id": "p" * 43},
+            headers=SAME_ORIGIN,
+        )
+        assert conflict.status_code == 409
+        refreshed = client.get("/dashboard?csv_imported=2&csv_refreshed=true")
+        deferred = client.get("/dashboard?csv_imported=1&csv_refreshed=false")
+        invalid = client.get("/dashboard?csv_imported=invalid")
+        assert "The dashboard is refreshed" in refreshed.text
+        assert "refresh will retry" in deferred.text
+        assert "Imported invalid" not in invalid.text
+
+
+def test_csv_upload_rejects_an_oversized_filename(tmp_path: Path) -> None:
+    coordinator = StubCsvCoordinator()
+    with TestClient(
+        create_app(
+            database_path=tmp_path / "state.sqlite3",
+            csv_import_coordinator=coordinator,  # type: ignore[arg-type]
+        )
+    ) as client:
+        token = client.get("/dashboard").cookies["pfa_csrf"]
+        response = client.post(
+            "/imports/csv/preview",
+            data={"csrf_token": token, "account_id": "auto"},
+            files={"upload": (f"{'x' * 252}.csv", b"x", "text/csv")},
+            headers=SAME_ORIGIN,
+        )
+        assert response.status_code == 422
     assert not coordinator.preview_calls
 
 

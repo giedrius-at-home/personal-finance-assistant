@@ -182,6 +182,33 @@ async def test_adapter_passes_only_bounded_category_examples_as_data() -> None:
         '[{"category":"dining","merchant":"synthetic bistro"}]' in payload
     )
 
+
+@pytest.mark.anyio
+async def test_adapter_rejects_unbounded_or_unapproved_category_examples() -> None:
+    with pytest.raises(ValueError, match="too many"):
+        QwenCategoriser(
+            backend=FakeBackend([]),
+            vocabulary=VOCAB,
+            model="qwen3:8b",
+            category_examples=tuple(
+                (f"merchant {index}", "dining") for index in range(49)
+            ),
+        )
+    with pytest.raises(ValueError, match="merchant category example"):
+        QwenCategoriser(
+            backend=FakeBackend([]),
+            vocabulary=VOCAB,
+            model="qwen3:8b",
+            category_examples=(("", "dining"),),
+        )
+    with pytest.raises(ValueError, match="not in the vocabulary"):
+        QwenCategoriser(
+            backend=FakeBackend([]),
+            vocabulary=VOCAB,
+            model="qwen3:8b",
+            category_examples=(("synthetic merchant", "travel"),),
+        )
+
     adapter = QwenCategoriser(
         backend=FakeBackend([model_result("travel")]),
         vocabulary=VOCAB,

@@ -159,6 +159,12 @@ def test_parser_rejects_unsafe_or_unmappable_files() -> None:
         parse_bank_csv(b"date,amount,description\n", filename="export.xlsx")
     with pytest.raises(CsvImportError, match="date and amount"):
         parse_bank_csv(b"unknown,description\n1,Synthetic\n", filename="bank.csv")
+    with pytest.raises(CsvImportError, match="description"):
+        parse_bank_csv(b"date,amount\n2026-09-01,1\n", filename="bank.csv")
+    with pytest.raises(CsvImportError, match="no valid"):
+        parse_bank_csv(
+            b"date,amount,description\ninvalid,0,Synthetic\n", filename="bank.csv"
+        )
 
 
 @pytest.mark.anyio
