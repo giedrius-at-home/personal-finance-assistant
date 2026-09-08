@@ -1,5 +1,5 @@
 import hashlib
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from finance_assistant.api import _owner_name_aliases, create_app
 from finance_assistant.categorisation_service import CategoryProposal, ProposalStatus
+from finance_assistant.csv_import import CsvImportPreview, CsvPreviewRow, CsvRowStatus
 from finance_assistant.domain.alerting import AlertPolicy, budget_alert_candidate
 from finance_assistant.domain.canonical import (
     SourceEntity,
@@ -22,6 +23,40 @@ from finance_assistant.web import format_money
 NOW = datetime(2026, 9, 2, tzinfo=UTC)
 SAME_ORIGIN = {"origin": "http://testserver"}
 EUR = Currency(code="EUR", minor_unit=2)
+
+
+class StubCsvCoordinator:
+    def __init__(self) -> None:
+        self.preview_calls: list[tuple[bytes, str, str]] = []
+        self.commit_calls: list[str] = []
+
+    async def preview(
+        self, *, content: bytes, filename: str, account_id: str
+    ) -> CsvImportPreview:
+        self.preview_calls.append((content, filename, account_id))
+        return CsvImportPreview(
+            preview_id="p" * 43,
+            bank_label="Synthetic bank",
+            account_name="Synthetic account",
+            row_count=2,
+            new_count=1,
+            duplicate_count=1,
+            possible_duplicate_count=0,
+            rejected_count=0,
+            rows=(
+                CsvPreviewRow(
+                    booked_on=date(2026, 9, 1),
+                    amount=Decimal("-1.25"),
+                    currency="EUR",
+                    description="Synthetic merchant",
+                    status=CsvRowStatus.NEW,
+                ),
+            ),
+        )
+
+    async def commit(self, preview_id: str) -> int:
+        self.commit_calls.append(preview_id)
+        return 1
 
 
 def test_money_display_uses_currency_precision_without_negative_zero() -> None:
@@ -115,6 +150,77 @@ def test_mutation_requires_same_origin_csrf_and_persistent_state(
     assert missing.status_code == 403
     assert foreign.status_code == 403
     assert no_origin.status_code == 403
+
+
+def test_csv_upload_requires_preview_and_exact_owner_commit(tmp_path: Path) -> None:
+    coordinator = StubCsvCoordinator()
+    with TestClient(
+        create_app(
+            database_path=tmp_path / "state.sqlite3",
+            csv_import_coordinator=coordinator,  # type: ignore[arg-type]
+        )
+    ) as client:
+        page = client.get("/dashboard")
+        token = page.cookies["pfa_csrf"]
+        assert "Upload any connected bank CSV" in page.text
+        preview = client.post(
+            "/imports/csv/preview",
+            data={"csrf_token": token, "account_id": "asset-1"},
+            files={"upload": ("synthetic.csv", b"safe synthetic CSV", "text/csv")},
+            headers=SAME_ORIGIN,
+        )
+        assert preview.status_code == 200
+        assert "1 new" in preview.text
+        assert "duplicates skipped" in preview.text
+        assert "safe synthetic CSV" not in preview.text
+        committed = client.post(
+            "/imports/csv/commit",
+            data={"csrf_token": token, "preview_id": "p" * 43},
+            headers=SAME_ORIGIN,
+            follow_redirects=False,
+        )
+        assert committed.status_code == 303
+        assert committed.headers["location"] == (
+            "/dashboard?csv_imported=1&csv_refreshed=false"
+        )
+
+    assert coordinator.preview_calls == [
+        (b"safe synthetic CSV", "synthetic.csv", "asset-1")
+    ]
+    assert coordinator.commit_calls == ["p" * 43]
+
+
+def test_csv_upload_rejects_cross_origin_and_oversized_files(tmp_path: Path) -> None:
+    coordinator = StubCsvCoordinator()
+    with TestClient(
+        create_app(
+            database_path=tmp_path / "state.sqlite3",
+            csv_import_coordinator=coordinator,  # type: ignore[arg-type]
+        )
+    ) as client:
+        token = client.get("/dashboard").cookies["pfa_csrf"]
+        foreign = client.post(
+            "/imports/csv/preview",
+            data={"csrf_token": token, "account_id": "asset-1"},
+            files={"upload": ("synthetic.csv", b"x", "text/csv")},
+            headers={"origin": "https://attacker.invalid"},
+        )
+        oversized = client.post(
+            "/imports/csv/preview",
+            data={"csrf_token": token, "account_id": "asset-1"},
+            files={
+                "upload": (
+                    "synthetic.csv",
+                    b"x" * (5 * 1024 * 1024 + 1),
+                    "text/csv",
+                )
+            },
+            headers=SAME_ORIGIN,
+        )
+
+    assert foreign.status_code == 403
+    assert oversized.status_code == 413
+    assert not coordinator.preview_calls
 
 
 def test_settings_exact_preview_apply_and_rollback(tmp_path: Path) -> None:

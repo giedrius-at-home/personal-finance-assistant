@@ -17,6 +17,7 @@ from finance_assistant.categorisation_runtime import (
     CategorySuggestionRunner,
     CategorySuggestionSettings,
 )
+from finance_assistant.csv_import import CsvImportCoordinator
 from finance_assistant.domain.alerts import evaluate_budget
 from finance_assistant.domain.goals import evaluate_goal
 from finance_assistant.domain.models import (
@@ -27,12 +28,16 @@ from finance_assistant.domain.models import (
 )
 from finance_assistant.ingestion.runtime import (
     FireflyCategoryWriteSettings,
+    FireflyCsvImportSettings,
     FireflySyncRunner,
     FireflySyncSettings,
     run_firefly_sync_loop,
 )
 from finance_assistant.ingestion.service import IngestionResult
-from finance_assistant.integrations.firefly import FireflyCategoryClient
+from finance_assistant.integrations.firefly import (
+    FireflyCategoryClient,
+    FireflyCsvImportClient,
+)
 from finance_assistant.integrations.firefly_webhook import (
     MAX_WEBHOOK_BYTES,
     FireflyWebhookReceiver,
@@ -53,10 +58,12 @@ def create_app(
     allowed_hosts: frozenset[str] = frozenset({"127.0.0.1", "localhost", "::1"}),
     firefly_sync_settings: FireflySyncSettings | None = None,
     firefly_category_write_settings: FireflyCategoryWriteSettings | None = None,
+    firefly_csv_import_settings: FireflyCsvImportSettings | None = None,
     category_suggestion_settings: CategorySuggestionSettings | None = None,
     category_updater: (
         Callable[[str, str | None, str | None], Awaitable[None]] | None
     ) = None,
+    csv_import_coordinator: CsvImportCoordinator | None = None,
     owner_name_aliases: tuple[str, ...] = (),
 ) -> FastAPI:
     """Build the API with an explicitly configured webhook boundary."""
@@ -69,6 +76,30 @@ def create_app(
         if state is not None and category_suggestion_settings is not None
         else None
     )
+    sync_runner = (
+        FireflySyncRunner(state=state, settings=firefly_sync_settings)
+        if state is not None and firefly_sync_settings is not None
+        else None
+    )
+    sync_lock = asyncio.Lock()
+
+    async def sync_and_suggest() -> IngestionResult:
+        if sync_runner is None:
+            raise RuntimeError("Firefly sync is disabled")
+        async with sync_lock:
+            result = await sync_runner()
+            if suggestion_runner is not None:
+                await suggestion_runner()
+            return result
+
+    configured_csv_importer = csv_import_coordinator
+    if configured_csv_importer is None and firefly_csv_import_settings is not None:
+        configured_csv_importer = CsvImportCoordinator(
+            client_factory=lambda: FireflyCsvImportClient(
+                base_url=f"{firefly_csv_import_settings.base_url}/api/v1",
+                token=firefly_csv_import_settings.token,
+            )
+        )
 
     async def configured_category_updater(
         transaction_id: str,
@@ -90,15 +121,7 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
         sync_task: asyncio.Task[None] | None = None
-        if state is not None and firefly_sync_settings is not None:
-            sync_runner = FireflySyncRunner(state=state, settings=firefly_sync_settings)
-
-            async def sync_and_suggest() -> IngestionResult:
-                result = await sync_runner()
-                if suggestion_runner is not None:
-                    await suggestion_runner()
-                return result
-
+        if sync_runner is not None and firefly_sync_settings is not None:
             sync_task = asyncio.create_task(
                 run_firefly_sync_loop(
                     sync_and_suggest,
@@ -193,6 +216,8 @@ def create_app(
             )
         ),
         suggestion_runner=suggestion_runner,
+        csv_import_coordinator=configured_csv_importer,
+        csv_post_import_sync=sync_and_suggest if sync_runner is not None else None,
     )
     application.include_router(web_router)
     return application
@@ -270,6 +295,7 @@ async def receive_firefly_webhook(request: Request) -> dict[str, str]:
 
 _sync_settings = FireflySyncSettings.from_environment(os.environ)
 _category_write_settings = FireflyCategoryWriteSettings.from_environment(os.environ)
+_csv_import_settings = FireflyCsvImportSettings.from_environment(os.environ)
 _category_suggestion_settings = CategorySuggestionSettings.from_environment(os.environ)
 
 
@@ -290,6 +316,7 @@ app = create_app(
     demo_mode=os.getenv("PFA_DEMO_MODE", "false").casefold() == "true",
     firefly_sync_settings=_sync_settings,
     firefly_category_write_settings=_category_write_settings,
+    firefly_csv_import_settings=_csv_import_settings,
     category_suggestion_settings=_category_suggestion_settings,
     owner_name_aliases=_owner_name_aliases(os.getenv("PFA_OWNER_NAME_ALIASES")),
 )

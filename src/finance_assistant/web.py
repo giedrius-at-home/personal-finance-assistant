@@ -8,14 +8,21 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
+from typing import Annotated
 from urllib.parse import parse_qs
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import TypeAdapter, ValidationError
 
 from finance_assistant.categorisation_service import ProposalStatus
+from finance_assistant.csv_import import (
+    MAX_CSV_BYTES,
+    CsvImportConflictError,
+    CsvImportCoordinator,
+    CsvImportError,
+)
 from finance_assistant.dashboard import DashboardService, DashboardView
 from finance_assistant.domain.canonical import (
     SourceEntity,
@@ -24,9 +31,11 @@ from finance_assistant.domain.canonical import (
 )
 from finance_assistant.domain.models import Currency
 from finance_assistant.domain.settings import OwnerSettings, SettingsPreview
+from finance_assistant.integrations._http import UpstreamError
 from finance_assistant.integrations.firefly import (
     FireflyCategoryConflictError,
     FireflyCategoryWriteError,
+    FireflyCsvImportWriteError,
 )
 from finance_assistant.persistence.sqlite import (
     PersistenceConflictError,
@@ -59,6 +68,8 @@ def install_web_routes(
     owner_name_aliases: tuple[str, ...] = (),
     category_updater: CategoryUpdater | None = None,
     suggestion_runner: SuggestionRunner | None = None,
+    csv_import_coordinator: CsvImportCoordinator | None = None,
+    csv_post_import_sync: Callable[[], Awaitable[object]] | None = None,
 ) -> None:
     service = DashboardService(
         state,
@@ -83,6 +94,10 @@ def install_web_routes(
             context={
                 "view": service.view(now=datetime.now(UTC)),
                 "csrf_token": csrf_token,
+                "csv_import_enabled": csv_import_coordinator is not None
+                and not demo_mode,
+                "csv_import_accounts": state.list_accounts() if state else (),
+                "csv_import_status": _import_status(request),
             },
         )
         response.set_cookie(
@@ -107,6 +122,73 @@ def install_web_routes(
             )
         await suggestion_runner()
         return RedirectResponse("/dashboard", status_code=status.HTTP_303_SEE_OTHER)
+
+    @router.post(
+        "/imports/csv/preview", response_class=HTMLResponse, include_in_schema=False
+    )
+    async def csv_preview(
+        request: Request,
+        account_id: Annotated[str, Form(min_length=1, max_length=128)],
+        supplied_csrf: Annotated[
+            str, Form(alias="csrf_token", min_length=1, max_length=128)
+        ],
+        upload: Annotated[UploadFile, File()],
+    ) -> HTMLResponse:
+        _verify_same_origin(request, supplied_csrf, csrf_token)
+        if csv_import_coordinator is None or demo_mode:
+            raise HTTPException(status_code=409, detail="CSV imports are disabled")
+        filename = upload.filename or ""
+        if len(filename) > 255:
+            raise HTTPException(status_code=422, detail="invalid CSV filename")
+        content = await upload.read(MAX_CSV_BYTES + 1)
+        await upload.close()
+        if len(content) > MAX_CSV_BYTES:
+            raise HTTPException(status_code=413, detail="CSV is too large")
+        try:
+            preview = await csv_import_coordinator.preview(
+                content=content,
+                filename=filename,
+                account_id=account_id,
+            )
+        except CsvImportError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        except CsvImportConflictError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except UpstreamError as error:
+            raise HTTPException(
+                status_code=503, detail="Firefly could not prepare the CSV preview"
+            ) from error
+        return TEMPLATES.TemplateResponse(
+            request=request,
+            name="csv_import_preview.html",
+            context={"preview": preview, "csrf_token": csrf_token},
+        )
+
+    @router.post("/imports/csv/commit", include_in_schema=False)
+    async def csv_commit(request: Request) -> RedirectResponse:
+        values = await _verified_form(request, csrf_token)
+        if csv_import_coordinator is None or demo_mode:
+            raise HTTPException(status_code=409, detail="CSV imports are disabled")
+        preview_id = _one(values, "preview_id", max_length=128)
+        try:
+            imported = await csv_import_coordinator.commit(preview_id)
+        except CsvImportConflictError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except (FireflyCsvImportWriteError, UpstreamError) as error:
+            raise HTTPException(
+                status_code=503, detail="Firefly could not complete the CSV import"
+            ) from error
+        refreshed = False
+        if csv_post_import_sync is not None:
+            try:
+                await csv_post_import_sync()
+                refreshed = True
+            except Exception:  # noqa: BLE001 - the completed import must stay successful
+                refreshed = False
+        return RedirectResponse(
+            f"/dashboard?csv_imported={imported}&csv_refreshed={str(refreshed).lower()}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
 
     @router.post("/review/{proposal_id}/{decision}", include_in_schema=False)
     async def review(
@@ -243,6 +325,11 @@ async def _verified_form(request: Request, expected_token: str) -> dict[str, lis
     except (UnicodeDecodeError, ValueError) as error:
         raise HTTPException(status_code=400, detail="invalid form") from error
     supplied = _one(values, "csrf_token", max_length=128)
+    _verify_same_origin(request, supplied, expected_token)
+    return values
+
+
+def _verify_same_origin(request: Request, supplied: str, expected_token: str) -> None:
     cookie = request.cookies.get("pfa_csrf", "")
     if not hmac.compare_digest(supplied, expected_token) or not hmac.compare_digest(
         cookie, expected_token
@@ -253,7 +340,26 @@ async def _verified_form(request: Request, expected_token: str) -> dict[str, lis
     origin_matches = origin.rstrip("/") == str(request.base_url).rstrip("/")
     if not origin_matches and fetch_site != "same-origin":
         raise HTTPException(status_code=403, detail="same-origin request required")
-    return values
+
+
+def _import_status(request: Request) -> str | None:
+    raw = request.query_params.get("csv_imported")
+    if raw is None:
+        return None
+    try:
+        count = int(raw)
+    except ValueError:
+        return None
+    if not 0 <= count <= 10_000:
+        return None
+    message = (
+        f"Imported {count} new transaction{'s' if count != 1 else ''} into Firefly."
+    )
+    if request.query_params.get("csv_refreshed") == "true":
+        return f"{message} The dashboard is refreshed."
+    if request.query_params.get("csv_refreshed") == "false":
+        return f"{message} Dashboard refresh will retry on the next sync."
+    return message
 
 
 def _one(values: dict[str, list[str]], key: str, *, max_length: int) -> str:

@@ -8,6 +8,9 @@ project intends to use semantic versioning for its own releases.
 
 ### Changed
 
+- Rebuilt category vocabularies, conflict-safe merchant rules, and bounded local
+  Qwen examples from current categorized Firefly history after each sync while
+  preserving owner review as the only approval path.
 - Made Firefly the authoritative category source for dashboard reporting and
   added opt-in, owner-reviewed, category-only updates with stale-preview
   conflict detection; local model suggestions still cannot write automatically.
@@ -24,6 +27,10 @@ project intends to use semantic versioning for its own releases.
 
 ### Added
 
+- A disabled-by-default, provider-neutral dashboard CSV resync flow with
+  semantic bank-export parsing, automatic or explicit account targeting,
+  exact preview/confirm, duplicate and ambiguity protection, Firefly rule
+  application, and an immediate derived-dashboard refresh.
 - Durable, configurable importer HTTPS with a persisted local certificate,
   read-only injection of ignored Enable Banking credentials, separate durable
   Firefly importer authentication, and documented per-bank recovery/rotation.

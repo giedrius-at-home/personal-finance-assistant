@@ -6,6 +6,7 @@ from pydantic import SecretStr
 from finance_assistant.ingestion.reconciliation import ReconciliationReport
 from finance_assistant.ingestion.runtime import (
     FireflyCategoryWriteSettings,
+    FireflyCsvImportSettings,
     FireflySyncSettings,
     run_firefly_sync_loop,
 )
@@ -79,6 +80,35 @@ def test_category_writes_are_explicitly_opt_in_and_keep_token_secret() -> None:
         }
     )
     assert settings is not None
+    assert "synthetic-token" not in repr(settings)
+
+
+def test_csv_import_writes_are_explicitly_opt_in_and_keep_token_secret() -> None:
+    assert FireflyCsvImportSettings.from_environment({}) is None
+    with pytest.raises(ValueError, match="must be true or false"):
+        FireflyCsvImportSettings.from_environment(
+            {"PFA_FIREFLY_CSV_IMPORTS_ENABLED": "yes"}
+        )
+    with pytest.raises(ValueError, match="API_TOKEN"):
+        FireflyCsvImportSettings.from_environment(
+            {"PFA_FIREFLY_CSV_IMPORTS_ENABLED": "true"}
+        )
+    with pytest.raises(ValueError, match="BASE_URL"):
+        FireflyCsvImportSettings.from_environment(
+            {
+                "PFA_FIREFLY_CSV_IMPORTS_ENABLED": "true",
+                "PFA_FIREFLY_API_TOKEN": "synthetic-token",
+            }
+        )
+    settings = FireflyCsvImportSettings.from_environment(
+        {
+            "PFA_FIREFLY_CSV_IMPORTS_ENABLED": "true",
+            "PFA_FIREFLY_API_TOKEN": "synthetic-token",
+            "PFA_FIREFLY_BASE_URL": "http://firefly.test/",
+        }
+    )
+    assert settings is not None
+    assert settings.base_url == "http://firefly.test"
     assert "synthetic-token" not in repr(settings)
 
 

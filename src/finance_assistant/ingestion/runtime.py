@@ -95,6 +95,35 @@ class FireflyCategoryWriteSettings:
         return cls(base_url=base_url, token=token)
 
 
+@dataclass(frozen=True, slots=True)
+class FireflyCsvImportSettings:
+    """Opt-in credentials for previewed, owner-approved CSV imports."""
+
+    base_url: str
+    token: SecretStr
+
+    @classmethod
+    def from_environment(
+        cls, environment: Mapping[str, str]
+    ) -> FireflyCsvImportSettings | None:
+        enabled = environment.get("PFA_FIREFLY_CSV_IMPORTS_ENABLED", "false").casefold()
+        if enabled not in {"true", "false"}:
+            raise ValueError("PFA_FIREFLY_CSV_IMPORTS_ENABLED must be true or false")
+        if enabled == "false":
+            return None
+        token = SecretStr(environment.get("PFA_FIREFLY_API_TOKEN", ""))
+        if not token.get_secret_value():
+            raise ValueError(
+                "PFA_FIREFLY_API_TOKEN is required when CSV imports are enabled"
+            )
+        base_url = environment.get("PFA_FIREFLY_BASE_URL", "").rstrip("/")
+        if not base_url:
+            raise ValueError(
+                "PFA_FIREFLY_BASE_URL is required when CSV imports are enabled"
+            )
+        return cls(base_url=base_url, token=token)
+
+
 class FireflySyncRunner:
     """Fetch one read-only snapshot into the gateway-owned SQLite connection."""
 

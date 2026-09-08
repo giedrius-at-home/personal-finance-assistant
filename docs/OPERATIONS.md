@@ -245,6 +245,31 @@ preview totals before submission, and leave the bill field unmapped unless the
 referenced Firefly bill already exists. Firefly duplicate detection makes
 repeat imports safer, but every submission should still be reviewed.
 
+For repeated exports from any connected bank, the owner dashboard provides a
+single provider-neutral upload flow. Enable it separately in the ignored
+owner-only `.env` and recreate only the gateway:
+
+```dotenv
+PFA_FIREFLY_CSV_IMPORTS_ENABLED=true
+```
+
+Open <http://127.0.0.1:8000/dashboard>, choose the exported CSV and either leave
+account detection on automatic or select the intended Firefly asset account.
+The gateway recognizes common comma, semicolon, tab, date, amount/debit-credit,
+currency, description, reference, and counterparty-IBAN columns. A maximum 5 MiB
+and 10,000 rows is accepted. The raw file and preview expire from process memory
+after 30 minutes and are never saved by the gateway.
+
+Review the exact preview before confirming. Confirmed duplicates are skipped;
+ambiguous repeated rows or rejected rows block the whole commit. The gateway
+rechecks Firefly immediately before writing, creates stable opaque external IDs,
+and asks Firefly to apply its rules and duplicate protection. Exact counterparty
+IBAN matches between two Firefly asset accounts become transfers; unmatched
+positive and negative rows become deposits and withdrawals. A successful commit
+triggers a Firefly-to-dashboard refresh. If that refresh fails, the import stays
+successful and the normal sync retries later. Keep every source CSV outside Git
+and delete or archive it according to the owner's encrypted retention policy.
+
 Back up `.env`, the Enable Banking PEM, and per-bank configurations only to an
 encrypted owner-controlled destination. The ordinary application backup does
 not copy these credentials or importer browser sessions. To rotate or revoke:
@@ -389,6 +414,12 @@ or run Firefly rules. Disable the setting or revoke the token to stop writes.
 Suggestion generation requires the configured Ollama model to be installed and
 running locally. It examines only a bounded batch of uncategorised,
 non-transfer transactions and creates pending reviews; it never approves them.
+Each Firefly sync also rebuilds the approved vocabulary and conflict-safe
+normalized merchant examples from current categorized Firefly transactions.
+Identifiers are redacted before local model use. A merchant with conflicting
+historical categories does not become a deterministic rule.
+Pending dashboard suggestions are marked superseded when a later Firefly sync
+shows that the same transaction was categorized directly in Firefly.
 
 ## macOS application launcher
 

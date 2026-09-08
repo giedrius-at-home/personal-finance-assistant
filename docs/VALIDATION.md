@@ -84,6 +84,13 @@ approval, write-conflict rollback, idempotent reversal, restart
 persistence, and unavailable-model degradation. The Phase 4 write port must
 remain disabled in CI and production validation.
 
+CSV resync changes must prove size and row bounds, common delimiter/date/decimal
+and debit-credit layouts, explicit or unambiguous account selection, stable
+opaque identities, exact and possible-duplicate separation, repeated-row
+ambiguity, preview expiry, Firefly recheck-before-write, transfer creation only
+for exact asset-account IBAN matches, rule application, CSRF/same-origin
+protection, and disabled-by-default operation. Fixtures must be wholly synthetic.
+
 Phase 5 dashboard/reporting changes must prove deterministic output under input
 reordering, ISO-week timezone boundaries, refunds, transfer exclusion, explicit
 currency separation, linked-account deduplication, stale-valuation fail-closed

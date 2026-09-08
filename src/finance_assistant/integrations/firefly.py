@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime, time
 from decimal import Decimal
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import httpx2
 from pydantic import (
@@ -21,6 +21,9 @@ from finance_assistant.integrations._http import (
     ReadOnlyHttpClient,
     UpstreamProtocolError,
 )
+
+if TYPE_CHECKING:
+    from finance_assistant.csv_import import ParsedCsvRow
 
 
 class FireflyModel(BaseModel):
@@ -73,7 +76,13 @@ class FireflyAccountAttributes(FireflyModel):
     current_balance: FiniteDecimal
     active: bool = True
     include_net_worth: bool = True
+    iban: str | None = Field(default=None, min_length=1, max_length=64)
     updated_at: AwareDatetime | None = None
+
+    @field_validator("iban", mode="before")
+    @classmethod
+    def normalize_empty_iban(cls, value: object) -> object:
+        return None if value == "" else value
 
 
 class FireflyAccount(FireflyModel):
@@ -93,8 +102,9 @@ class FireflyTransactionSplit(FireflyModel):
     source_id: str | None = Field(default=None, min_length=1, max_length=128)
     destination_id: str | None = Field(default=None, min_length=1, max_length=128)
     category_name: str | None = Field(default=None, min_length=1, max_length=128)
+    external_id: str | None = Field(default=None, min_length=1, max_length=256)
 
-    @field_validator("category_name", mode="before")
+    @field_validator("category_name", "external_id", mode="before")
     @classmethod
     def normalize_empty_category(cls, value: object) -> object:
         return None if value == "" else value
@@ -280,6 +290,133 @@ class FireflyCategoryConflictError(RuntimeError):
 
 class FireflyCategoryWriteError(RuntimeError):
     """A category-only Firefly update failed without exposing response content."""
+
+
+class FireflyCsvImportWriteError(RuntimeError):
+    """A reviewed CSV transaction could not be safely written to Firefly."""
+
+
+class FireflyCsvImportClient:
+    """Owner-approved transaction writer with read-back duplicate evidence."""
+
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        token: SecretStr | str,
+        transport: httpx2.AsyncBaseTransport | None = None,
+    ) -> None:
+        secret = token if isinstance(token, SecretStr) else SecretStr(token)
+        if not secret.get_secret_value():
+            raise ValueError("token cannot be empty")
+        self._reader = FireflyClient(
+            base_url=base_url,
+            token=secret,
+            transport=transport,
+        )
+        self._client = httpx2.AsyncClient(
+            base_url=base_url.rstrip("/") + "/",
+            headers={
+                "Accept": "application/vnd.api+json",
+                "Authorization": f"Bearer {secret.get_secret_value()}",
+                "User-Agent": "personal-finance-assistant/0.1",
+            },
+            timeout=httpx2.Timeout(connect=2, read=20, write=20, pool=2),
+            limits=httpx2.Limits(max_connections=2, max_keepalive_connections=1),
+            follow_redirects=False,
+            trust_env=False,
+            transport=transport,
+        )
+
+    async def __aenter__(self) -> FireflyCsvImportClient:
+        await self._reader.__aenter__()
+        return self
+
+    async def __aexit__(self, *_args: object) -> None:
+        await self.aclose()
+
+    async def aclose(self) -> None:
+        await self._reader.aclose()
+        await self._client.aclose()
+
+    async def list_accounts(self) -> tuple[FireflyAccount, ...]:
+        return await self._reader.list_accounts()
+
+    async def list_transactions(
+        self, *, start: date | None = None, end: date | None = None
+    ) -> tuple[FireflyTransaction, ...]:
+        return await self._reader.list_transactions(start=start, end=end)
+
+    async def create_csv_transaction(
+        self,
+        *,
+        row: ParsedCsvRow,
+        account: FireflyAccount,
+        accounts: tuple[FireflyAccount, ...],
+        external_id: str,
+    ) -> None:
+        """Create one exact transaction and let Firefly apply configured rules."""
+
+        split: dict[str, object] = {
+            "date": datetime.combine(row.booked_on, time.min, tzinfo=UTC).isoformat(),
+            "amount": format(abs(row.amount), "f"),
+            "currency_code": row.currency,
+            "description": row.description,
+            "external_id": external_id,
+        }
+        other = _account_for_iban(accounts, row.counterparty_iban)
+        if other is not None and other.id != account.id:
+            split.update(
+                {
+                    "type": "transfer",
+                    "source_id": account.id if row.amount < 0 else other.id,
+                    "destination_id": other.id if row.amount < 0 else account.id,
+                }
+            )
+        elif row.amount < 0:
+            split.update(
+                {
+                    "type": "withdrawal",
+                    "source_id": account.id,
+                    "destination_name": row.description,
+                }
+            )
+        else:
+            split.update(
+                {
+                    "type": "deposit",
+                    "source_name": row.description,
+                    "destination_id": account.id,
+                }
+            )
+        response = await self._client.post(
+            "transactions",
+            json={
+                "error_if_duplicate_hash": True,
+                "apply_rules": True,
+                "fire_webhooks": True,
+                "transactions": [split],
+            },
+        )
+        if response.status_code not in {200, 201}:
+            raise FireflyCsvImportWriteError(
+                f"Firefly CSV import returned HTTP {response.status_code}"
+            )
+
+
+def _account_for_iban(
+    accounts: tuple[FireflyAccount, ...], iban: str | None
+) -> FireflyAccount | None:
+    if not iban:
+        return None
+    normalized = "".join(iban.upper().split())
+    matches = tuple(
+        account
+        for account in accounts
+        if account.attributes.iban
+        and "".join(account.attributes.iban.upper().split()) == normalized
+    )
+    return matches[0] if len(matches) == 1 else None
 
 
 class FireflyCategoryClient:

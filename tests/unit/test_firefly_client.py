@@ -1,14 +1,20 @@
+import json
 from datetime import date
 from decimal import Decimal
 
 import httpx2
 import pytest
 
+from finance_assistant.csv_import import ParsedCsvRow
 from finance_assistant.integrations._http import UpstreamProtocolError
 from finance_assistant.integrations.firefly import (
+    FireflyAccount,
+    FireflyAccountAttributes,
     FireflyCategoryClient,
     FireflyCategoryConflictError,
     FireflyClient,
+    FireflyCsvImportClient,
+    FireflyCsvImportWriteError,
 )
 
 
@@ -263,6 +269,87 @@ async def test_reviewed_category_write_refuses_stale_preview() -> None:
             expected_category=None,
             category="Groceries",
         )
+    await client.aclose()
+
+
+def csv_account(account_id: str, name: str, iban: str | None = None) -> FireflyAccount:
+    return FireflyAccount(
+        type="accounts",
+        id=account_id,
+        attributes=FireflyAccountAttributes(
+            name=name,
+            type="asset",
+            currency_code="EUR",
+            currency_decimal_places=2,
+            current_balance="100.00",
+            iban=iban,
+        ),
+    )
+
+
+@pytest.mark.anyio
+async def test_csv_writer_creates_transfer_and_applies_firefly_rules() -> None:
+    source = csv_account("asset-1", "Synthetic one", "NL00TEST0000000001")
+    destination = csv_account("asset-2", "Synthetic two", "NL00TEST0000000002")
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        assert request.method == "POST"
+        assert request.url.path == "/api/v1/transactions"
+        payload = json.loads(request.content)
+        assert payload["apply_rules"] is True
+        assert payload["error_if_duplicate_hash"] is True
+        split = payload["transactions"][0]
+        assert split["type"] == "transfer"
+        assert split["source_id"] == "asset-1"
+        assert split["destination_id"] == "asset-2"
+        assert split["external_id"].startswith("pfa-csv-v1-")
+        assert "source_name" not in split
+        return httpx2.Response(201, json={"data": {}})
+
+    async with FireflyCsvImportClient(
+        base_url="http://firefly.test/api/v1",
+        token="synthetic-token",
+        transport=httpx2.MockTransport(handler),
+    ) as client:
+        await client.create_csv_transaction(
+            row=ParsedCsvRow(
+                line_number=2,
+                booked_on=date(2026, 9, 1),
+                amount="-5.25",
+                currency="EUR",
+                description="Synthetic transfer",
+                counterparty_iban="NL00 TEST 0000 0000 02",
+            ),
+            account=source,
+            accounts=(source, destination),
+            external_id="pfa-csv-v1-" + "a" * 64,
+        )
+
+
+@pytest.mark.anyio
+async def test_csv_writer_reports_bounded_firefly_failure() -> None:
+    selected = csv_account("asset-1", "Synthetic one")
+    client = FireflyCsvImportClient(
+        base_url="http://firefly.test/api/v1",
+        token="synthetic-token",
+        transport=httpx2.MockTransport(
+            lambda _request: httpx2.Response(422, text="sensitive response")
+        ),
+    )
+    with pytest.raises(FireflyCsvImportWriteError, match="HTTP 422") as caught:
+        await client.create_csv_transaction(
+            row=ParsedCsvRow(
+                line_number=2,
+                booked_on=date(2026, 9, 1),
+                amount="10.00",
+                currency="EUR",
+                description="Synthetic income",
+            ),
+            account=selected,
+            accounts=(selected,),
+            external_id="pfa-csv-v1-" + "b" * 64,
+        )
+    assert "sensitive" not in str(caught.value)
     await client.aclose()
 
 

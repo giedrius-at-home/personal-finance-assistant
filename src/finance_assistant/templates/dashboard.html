@@ -27,6 +27,20 @@
   <article class="card"><div class="eyebrow">Savings goals & alerts</div>{% for goal in view.weekly.goals %}<p><strong>{{ goal.goal_id }}</strong><br>{{ goal.remaining|money(goal.currency) }} {{ goal.currency.code }} remaining · {% if goal.on_track %}on track{% else %}attention needed{% endif %}</p>{% else %}<p class="muted">No goals imported.</p>{% endfor %}{% for alert in view.weekly.active_alerts %}<p><strong>{{ alert.count }} active {{ alert.severity.value|replace('_', ' ') }}</strong></p>{% else %}<small>No active alerts.</small>{% endfor %}</article>
 </section>
 
+<section class="card" aria-label="Bank CSV resync">
+  <div class="row"><div><div class="eyebrow">Bank resync</div><h2>Upload any connected bank CSV</h2></div><span class="pill">preview required</span></div>
+  {% if csv_import_status %}<p class="notice safe"><strong>{{ csv_import_status }}</strong></p>{% endif %}
+  {% if csv_import_enabled %}
+  <p class="muted">Choose the account the export belongs to. The file stays in memory only while you review it. Dates, amounts, currencies and descriptions are normalized; exact duplicates are skipped; possible duplicates block the import; and Firefly rules reorganize approved transactions.</p>
+  <form method="post" action="/imports/csv/preview" enctype="multipart/form-data" class="csv-upload">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Firefly account<select name="account_id" required><option value="auto" selected>Detect automatically</option>{% for account in csv_import_accounts %}<option value="{{ account.account_id }}">{{ account.name }} · {{ account.currency.code }}</option>{% endfor %}</select></label>
+    <label>Bank export<input type="file" name="upload" accept=".csv,.txt,text/csv,text/plain" required></label>
+    <button>Preview and reorganize</button>
+  </form>
+  {% else %}<p class="muted">CSV imports are disabled. Enable reviewed Firefly CSV writes in local configuration.</p>{% endif %}
+</section>
+
 <section class="card"><div class="row"><div><div class="eyebrow">Category inbox</div><h2>Review proposals</h2></div><span class="pill">{{ view.review_items|length }} shown · max 100</span></div>
 {% if view.data_mode != 'invented demo' %}<form method="post" action="/review/suggest"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="secondary">Suggest categories with local Qwen</button></form>{% endif %}
 {% for item in view.review_items %}<article class="review"><div class="row"><div><strong>{{ item.merchant }}</strong><br><span class="muted">{{ item.original_category or 'Uncategorised' }} → {{ item.proposed_category or 'Abstained' }}</span></div><span class="pill">{{ item.status.value }}</span></div><p>{{ item.method.value }}{% if item.confidence is not none %} · confidence {{ item.confidence }}{% endif %}{% if item.runner_up %} · runner-up {{ item.runner_up }} ({{ item.runner_up_confidence }}){% endif %}</p><ul>{% for reason in item.reasons %}<li>{{ reason }}</li>{% endfor %}</ul><small>policy {{ item.policy_version }} · vocabulary {{ item.vocabulary_version }}{% if item.model_version %} · model {{ item.model_version }} · prompt {{ item.prompt_version }}{% endif %} · source {{ item.source_updated_at or 'unknown' }}</small>{% if item.status.value == 'pending' and view.data_mode != 'invented demo' %}<div class="row"><form method="post" action="/review/{{ item.proposal_id }}/approve"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>Approve exact preview</button></form><form method="post" action="/review/{{ item.proposal_id }}/reject"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="danger">Reject</button></form><form method="post" action="/review/{{ item.proposal_id }}/correct"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label>Correct category<input name="category" maxlength="128" required></label><button class="secondary">Save correction</button></form></div>{% endif %}</article>{% else %}<p class="muted">Inbox empty. New categorisation proposals will appear here.</p>{% endfor %}</section>

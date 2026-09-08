@@ -97,7 +97,18 @@ When reviewed category writes are enabled separately, Firefly remains the
 authoritative category store and the next dashboard sync reads its value back.
 Local Qwen suggestion generation is also separately opt-in and processes a
 bounded batch of recent uncategorised, non-transfer transactions after each
-Firefly sync or when the owner requests suggestions from the dashboard.
+Firefly sync or when the owner requests suggestions from the dashboard. The
+current categorized Firefly history supplies a bounded, versioned vocabulary,
+conflict-safe normalized merchant rules, and local-only categorized examples;
+the model still cannot write or approve a category. Pending suggestions are retired
+when the corresponding transaction has since been categorized directly in
+Firefly.
+
+The dashboard also has a disabled-by-default provider-neutral CSV resync path.
+It accepts common bank export layouts, auto-detects or explicitly selects one
+connected Firefly asset account, stages an exact preview, skips confirmed
+duplicates, and blocks ambiguous repeats. Only the owner's confirmation creates
+transactions, after which Firefly rules run and the dashboard refreshes.
 
 ## Quick start
 
@@ -125,6 +136,8 @@ dedicated personal access token, place it only in the ignored `.env`, and set:
 PFA_FIREFLY_API_TOKEN=<owner-only token>
 PFA_FIREFLY_SYNC_ENABLED=true
 PFA_FIREFLY_SYNC_INTERVAL_SECONDS=86400
+# Optional: enable exact preview/confirm CSV imports from the dashboard.
+PFA_FIREFLY_CSV_IMPORTS_ENABLED=true
 # Optional: comma-separated aliases that identify transfers between your accounts.
 PFA_OWNER_NAME_ALIASES=<full name>,<abbreviated name>
 ```

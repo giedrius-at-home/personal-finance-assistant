@@ -242,6 +242,33 @@ DROP TABLE owner_settings;
 DELETE FROM schema_migrations WHERE version = 5;
 """
 
+MIGRATION_6_UP = """
+CREATE TABLE category_proposals_v6 (
+    proposal_id TEXT PRIMARY KEY,
+    source_system TEXT NOT NULL,
+    source_entity TEXT NOT NULL,
+    external_id TEXT NOT NULL,
+    feature_hash TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN (
+        'pending', 'approved', 'corrected', 'rejected', 'reversed', 'superseded'
+    )),
+    batch_id TEXT,
+    payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+INSERT INTO category_proposals_v6
+SELECT * FROM category_proposals;
+DROP TABLE category_proposals;
+ALTER TABLE category_proposals_v6 RENAME TO category_proposals;
+INSERT INTO schema_migrations(version, applied_at)
+VALUES (6, CURRENT_TIMESTAMP);
+"""
+
+MIGRATION_6_DOWN = """
+DELETE FROM schema_migrations WHERE version = 6;
+"""
+
 
 def _serialize(record: CanonicalRecord) -> str:
     return json.dumps(
@@ -321,6 +348,8 @@ class SQLiteDerivedState:
                 self._connection.executescript(MIGRATION_4_UP)
             if version < 5:
                 self._connection.executescript(MIGRATION_5_UP)
+            if version < 6:
+                self._connection.executescript(MIGRATION_6_UP)
 
     def migrate_down(self) -> None:
         """Reverse the prototype schema only when no financial state exists."""
@@ -349,6 +378,7 @@ class SQLiteDerivedState:
                 raise PersistenceConflictError(
                     "refusing to migrate down populated state"
                 )
+            self._connection.executescript(MIGRATION_6_DOWN)
             self._connection.executescript(MIGRATION_5_DOWN)
             self._connection.executescript(MIGRATION_4_DOWN)
             self._connection.executescript(MIGRATION_3_DOWN)
