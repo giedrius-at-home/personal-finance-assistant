@@ -138,7 +138,23 @@ def test_demo_dashboard_is_invented_responsive_and_no_store() -> None:
     assert "writes disabled" in response.text
     assert response.headers["cache-control"] == "no-store"
     assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
+    assert "script-src 'self'" in response.headers["content-security-policy"]
+    assert 'src="/static/dashboard.js"' in response.text
+    assert 'id="dashboard-content"' in response.text
     assert response.cookies["pfa_csrf"]
+
+
+def test_dashboard_live_updates_are_local_and_progressively_enhanced() -> None:
+    client = TestClient(create_app(demo_mode=True))
+
+    script = client.get("/static/dashboard.js")
+
+    assert script.status_code == 200
+    assert 'fetch("/dashboard"' in script.text
+    assert "localStorage" not in script.text
+    assert "sessionStorage" not in script.text
+    assert "http://" not in script.text
+    assert "https://" not in script.text
 
 
 def test_owner_name_alias_environment_is_bounded_and_deduplicated() -> None:

@@ -37,3 +37,6 @@ full refreshes and settings confirmations expire on process restart. The weekly
 safe-to-spend figure uses the most conservative latest budget evaluation per
 currency, preventing category-level cash availability from being counted more
 than once.
+
+ADR 0016 later supersedes only the no-client-JavaScript and full-page-refresh
+parts of this decision with a small first-party progressive enhancement.

@@ -79,6 +79,10 @@ remove the combined total, and every report carries deterministic evidence.
 Policy settings use preview/confirm, versioned audit history, and rollback.
 Browser mutations are same-origin POSTs protected by CSRF; Firefly category
 writes and notifications remain disabled by default.
+The server-rendered dashboard progressively refreshes its main region while
+visible and applies category-review actions in place. It uses one local script,
+no third-party browser resources or storage, and retains normal navigation when
+JavaScript is unavailable or an exact preview is required.
 
 Phase 6 adds disabled-by-default public research and an opt-in STDIO MCP server
 for Codex. Research accepts only sanitized public business names or validated

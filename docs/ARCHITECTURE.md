@@ -81,8 +81,8 @@ The current implementation provides pure functions and HTTP contracts for:
   suggestions superseded by later direct Firefly categories are retired;
 - an opt-in host-side macOS adapter that receives only pre-rendered minimal text.
 - a server-rendered localhost dashboard and typed JSON projection built from the
-  same deterministic reporting service, with bounded review items and no client
-  JavaScript or third-party resources;
+  same deterministic reporting service, with bounded review items and one
+  first-party progressive-enhancement script but no third-party resources;
 - ISO-week cash-flow reports that model refunds and transfers explicitly, keep
   currencies separate, and bind output to a stable evidence hash;
 - net-worth aggregation that counts each canonical account once, exposes linked
