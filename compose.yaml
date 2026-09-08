@@ -24,6 +24,9 @@ services:
       PFA_OWNER_NAME_ALIASES: ${PFA_OWNER_NAME_ALIASES:-}
       PFA_FIREFLY_WEBHOOK_SECRET: ${PFA_FIREFLY_WEBHOOK_SECRET:-}
       PFA_GHOSTFOLIO_BASE_URL: http://ghostfolio:3333
+      PFA_ENABLE_BANKING_APP_ID: ${PFA_ENABLE_BANKING_APP_ID:-}
+      PFA_ENABLE_BANKING_PRIVATE_KEY_FILE: /run/secrets/enable-banking-private-key.pem
+      PFA_ENABLE_BANKING_SESSION_ID_FILE: /run/secrets/enable-banking-session-id.txt
     ports:
       - "127.0.0.1:${PFA_GATEWAY_PORT:?Run make bootstrap}:8000"
     restart: unless-stopped
@@ -33,6 +36,11 @@ services:
       - application
     volumes:
       - assistant_state:/var/lib/pfa
+    secrets:
+      - source: importer_enable_banking_private_key
+        target: enable-banking-private-key.pem
+      - source: gateway_enable_banking_session_id
+        target: enable-banking-session-id.txt
 
   firefly:
     image: fireflyiii/core:version-6.6.6@sha256:ae69fdd95cdef9038cd7a460a5aec731f14813973e4f096511d5a4ea9ff0e972
@@ -239,6 +247,9 @@ secrets:
   # Configure an ignored owner-only PEM path to inject the real key read-only.
   importer_enable_banking_private_key:
     file: ${PFA_ENABLE_BANKING_PRIVATE_KEY_PATH:-/dev/null}
+  # A separately consented read-only session for direct coverage comparisons.
+  gateway_enable_banking_session_id:
+    file: ${PFA_ENABLE_BANKING_SESSION_ID_PATH:-/dev/null}
 
 networks:
   application:

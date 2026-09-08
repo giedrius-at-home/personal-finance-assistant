@@ -24,6 +24,9 @@ project intends to use semantic versioning for its own releases.
 
 ### Added
 
+- An isolated, read-only Enable Banking coverage diagnostic for comparing direct
+  API pagination with Data Importer results without exposing transaction content,
+  balances, account identifiers, or importer session credentials.
 - Durable, configurable importer HTTPS with a persisted local certificate,
   read-only injection of ignored Enable Banking credentials, separate durable
   Firefly importer authentication, and documented per-bank recovery/rotation.

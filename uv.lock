@@ -929,6 +929,7 @@ dependencies = [
     { name = "httpx2" },
     { name = "jinja2" },
     { name = "pydantic" },
+    { name = "pyjwt", extra = ["crypto"] },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -957,6 +958,7 @@ requires-dist = [
     { name = "jinja2", specifier = ">=3.1,<4" },
     { name = "mcp", marker = "extra == 'codex'", specifier = ">=2,<3" },
     { name = "pydantic", specifier = ">=2.10,<3" },
+    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.10,<3" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34,<1" },
 ]
 provides-extras = ["codex"]

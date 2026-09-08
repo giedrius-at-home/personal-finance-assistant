@@ -245,6 +245,38 @@ preview totals before submission, and leave the bill field unmapped unless the
 referenced Firefly bill already exists. Firefly duplicate detection makes
 repeat imports safer, but every submission should still be reviewed.
 
+### Direct Enable Banking coverage experiment
+
+The gateway includes an opt-in, read-only diagnostic derived from the pagination
+approach evaluated in `bank-mcp`. It is not an importer and never writes to
+Firefly. Its output is limited to account count, transaction count, page count,
+session expiry, and earliest/latest dates. It does not print account identifiers,
+descriptions, transaction amounts, or balances.
+
+Use a separately consented Enable Banking session. Store only its opaque session
+ID in an ignored owner-only file such as
+`credentials/enable-banking-session-id.txt` with mode `0600`, then set:
+
+```dotenv
+PFA_ENABLE_BANKING_SESSION_ID_PATH=./credentials/enable-banking-session-id.txt
+```
+
+Never read the Data Importer's runtime/session files to obtain this value. Those
+files contain a mixed cache of live credentials. Once a separate session exists,
+run the comparison for the exact date range under review:
+
+```console
+docker compose run --rm gateway python -m \
+  finance_assistant.enable_banking_compare_cli \
+  --from YYYY-MM-DD --to YYYY-MM-DD
+```
+
+If direct coverage contains more transactions than the importer for the same
+session and dates, investigate importer parsing or mapping. If both have the same
+coverage gap, the bank/Enable Banking feed is the limiting source and CSV remains
+the fallback. Revoke the diagnostic session after the comparison and remove its
+local session-ID file.
+
 Back up `.env`, the Enable Banking PEM, and per-bank configurations only to an
 encrypted owner-controlled destination. The ordinary application backup does
 not copy these credentials or importer browser sessions. To rotate or revoke:
