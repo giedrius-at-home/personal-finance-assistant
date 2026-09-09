@@ -306,3 +306,14 @@ td {
     max-width: 100%;
   }
 }
+/* Monthly groups reuse the existing local dashboard palette and cards. */
+.spending-currency { margin-block: 1.5rem; }
+.spending-group { border-top: 1px solid #d5dcd5; padding-block: 1rem; }
+.spending-group summary { cursor: pointer; font-size: 1rem; }
+.group-label { display: inline-block; min-width: 12rem; font-weight: 700; }
+.spending-group progress { width: 100%; height: .5rem; accent-color: #176b50; }
+.group-mapping { display: flex; align-items: end; flex-wrap: wrap; gap: .75rem; padding-block: .8rem; }
+.group-mapping[hidden] { display: none; }
+.group-mapping label { flex: 1 1 18rem; overflow-wrap: anywhere; }
+.group-mapping select { width: 100%; }
+.group-suggestion-status { flex-basis: 100%; }

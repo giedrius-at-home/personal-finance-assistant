@@ -49,9 +49,14 @@ from finance_assistant.integrations.firefly_webhook import (
     WebhookAuthenticationError,
     WebhookPayloadError,
 )
+from finance_assistant.integrations.ollama import OllamaClient
 from finance_assistant.persistence.sqlite import SQLiteDerivedState
 from finance_assistant.research import RestrictedResearchGateway
 from finance_assistant.research_cache import ResearchCache
+from finance_assistant.spending_group_suggestions import (
+    GroupSuggestion,
+    suggest_spending_group,
+)
 from finance_assistant.web import install_web_routes, new_csrf_token
 
 
@@ -144,6 +149,19 @@ def create_app(
                 transaction_id=transaction_id,
                 expected_category=expected_category,
                 category=category,
+            )
+
+    async def configured_group_suggester(category: str) -> GroupSuggestion:
+        if state is None or category_suggestion_settings is None:
+            raise RuntimeError("local suggestions are disabled")
+        async with OllamaClient(
+            base_url=category_suggestion_settings.base_url,
+            model=category_suggestion_settings.model,
+            max_attempts=1,
+            read_timeout_seconds=45,
+        ) as client:
+            return await suggest_spending_group(
+                category, state.list_group_mappings(), client
             )
 
     @asynccontextmanager
@@ -251,6 +269,9 @@ def create_app(
         csv_import_coordinator=configured_csv_importer,
         csv_post_import_sync=sync_and_suggest if sync_runner is not None else None,
         merchant_researcher=configured_merchant_researcher,
+        group_suggester=configured_group_suggester
+        if category_suggestion_settings is not None
+        else None,
     )
     application.include_router(web_router)
     return application

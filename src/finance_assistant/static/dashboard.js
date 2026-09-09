@@ -15,8 +15,37 @@ function replaceDashboard(html) {
   const next = parsed.querySelector("#dashboard-content");
   const current = document.querySelector("#dashboard-content");
   if (!next || !current) throw new Error("dashboard fragment unavailable");
+  for (const details of current.querySelectorAll("details[id][open]")) {
+    const replacement = next.querySelector(`#${CSS.escape(details.id)}`);
+    if (replacement) replacement.open = true;
+  }
+  const search = current.querySelector("#group-search")?.value || "";
+  const drafts = new Map([...current.querySelectorAll(".group-mapping[data-dirty='true']:not([data-submitting='true'])")]
+    .map(form => [form.dataset.groupCategory, form]));
+  for (const replacement of next.querySelectorAll(".group-mapping")) {
+    const draft = drafts.get(replacement.dataset.groupCategory);
+    if (!draft) continue;
+    replacement.elements.group.value = draft.elements.group.value;
+    replacement.elements.revision.value = draft.elements.revision.value;
+    replacement.dataset.dirty = "true";
+    replacement.querySelector(".group-suggestion-status").textContent =
+      draft.querySelector(".group-suggestion-status").textContent || "Unsaved choice.";
+  }
   current.replaceWith(next);
+  const nextSearch = next.querySelector("#group-search");
+  if (nextSearch) nextSearch.value = search;
+  filterGroupMappings(search);
 }
+
+function filterGroupMappings(query) {
+  for (const form of document.querySelectorAll("[data-group-category]")) {
+    form.hidden = !form.dataset.groupCategory.toLocaleLowerCase().includes(query.toLocaleLowerCase());
+  }
+}
+
+document.addEventListener("input", (event) => {
+  if (event.target.id === "group-search") filterGroupMappings(event.target.value);
+});
 
 function ownerIsEditing() {
   const active = document.activeElement;
@@ -24,8 +53,45 @@ function ownerIsEditing() {
     active instanceof HTMLInputElement ||
     active instanceof HTMLSelectElement ||
     active instanceof HTMLTextAreaElement;
-  return editing || document.querySelector("form[data-submitting='true']") !== null;
+  return editing || document.querySelector("form[data-submitting='true'], form[data-dirty='true']") !== null;
 }
+
+document.addEventListener("change", (event) => {
+  const form = event.target.closest("form.group-mapping");
+  if (form) form.dataset.dirty = "true";
+});
+
+document.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-suggest-group]");
+  if (!button || requestInFlight) return;
+  const form = button.closest("form");
+  const message = form.querySelector(".group-suggestion-status");
+  requestInFlight = true;
+  button.disabled = true;
+  message.textContent = "Asking the local model…";
+  try {
+    const body = new URLSearchParams();
+    body.set("csrf_token", form.elements.csrf_token.value);
+    body.set("category", form.elements.category.value);
+    const response = await fetch("/spending-groups/suggest", {
+      method: "POST", body, credentials: "same-origin", cache: "no-store",
+    });
+    if (!response.ok) throw new Error("suggestion unavailable");
+    const result = await response.json();
+    if (result.group !== null && [...form.elements.group.options].some(option => option.value === result.group)) {
+      form.elements.group.value = result.group;
+      form.dataset.dirty = "true";
+      message.textContent = "Suggestion only—not saved. Review it, then select Save group.";
+    } else {
+      message.textContent = "No confident suggestion. Choose the group yourself.";
+    }
+  } catch (_error) {
+    message.textContent = "Local model unavailable. You can still choose and save a group.";
+  } finally {
+    requestInFlight = false;
+    button.disabled = false;
+  }
+});
 
 async function refreshDashboard({ quiet = false } = {}) {
   if (requestInFlight || document.hidden || ownerIsEditing()) return;

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import secrets
 from collections.abc import Awaitable, Callable
@@ -35,16 +36,23 @@ from finance_assistant.domain.research import (
     MerchantResearchResult,
 )
 from finance_assistant.domain.settings import OwnerSettings, SettingsPreview
+from finance_assistant.domain.spending_groups import (
+    GroupMapping,
+    SpendingGroup,
+    expense_categories,
+)
 from finance_assistant.integrations._http import UpstreamError
 from finance_assistant.integrations.firefly import (
     FireflyCategoryConflictError,
     FireflyCategoryWriteError,
     FireflyCsvImportWriteError,
 )
+from finance_assistant.integrations.ollama import OllamaError
 from finance_assistant.persistence.sqlite import (
     PersistenceConflictError,
     SQLiteDerivedState,
 )
+from finance_assistant.spending_group_suggestions import GroupSuggestion
 
 CategoryUpdater = Callable[[str, str | None, str | None], Awaitable[None]]
 SuggestionRunner = Callable[[], Awaitable[int]]
@@ -78,7 +86,9 @@ def install_web_routes(
     csv_import_coordinator: CsvImportCoordinator | None = None,
     csv_post_import_sync: Callable[[], Awaitable[object]] | None = None,
     merchant_researcher: MerchantResearcher | None = None,
+    group_suggester: Callable[[str], Awaitable[GroupSuggestion]] | None = None,
 ) -> None:
+    group_suggestion_lock = asyncio.Lock()
     service = DashboardService(
         state,
         demo_mode=demo_mode,
@@ -101,6 +111,9 @@ def install_web_routes(
             name="dashboard.html",
             context={
                 "view": service.view(now=datetime.now(UTC)),
+                "spending_groups": tuple(SpendingGroup),
+                "group_suggestions_enabled": group_suggester is not None
+                and not demo_mode,
                 "csrf_token": csrf_token,
                 "csv_import_enabled": csv_import_coordinator is not None
                 and not demo_mode,
@@ -140,6 +153,61 @@ def install_web_routes(
             "/dashboard?notice=suggestions",
             status_code=status.HTTP_303_SEE_OTHER,
         )
+
+    @router.post("/spending-groups/save", include_in_schema=False)
+    async def save_spending_group(request: Request) -> RedirectResponse:
+        form = await _verified_form(request, csrf_token)
+        if state is None or demo_mode:
+            raise HTTPException(status_code=409, detail="group editing is disabled")
+        category = _one(form, "category", max_length=128)
+        if category not in expense_categories(state.list_transactions()):
+            raise HTTPException(
+                status_code=422, detail="category is not in Firefly expenses"
+            )
+        try:
+            group = _one(form, "group", max_length=64)
+            mapping = GroupMapping(
+                category=category,
+                group=None if group == "unassigned" else SpendingGroup(group),
+                revision=int(_one(form, "revision", max_length=12)),
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422, detail="invalid spending group"
+            ) from exc
+        try:
+            state.save_group_mapping(mapping, now=datetime.now(UTC))
+        except PersistenceConflictError as exc:
+            raise HTTPException(
+                status_code=409, detail="spending group changed; refresh"
+            ) from exc
+        return RedirectResponse(
+            "/dashboard?notice=group-saved#monthly-spending", status_code=303
+        )
+
+    @router.post("/spending-groups/suggest", include_in_schema=False)
+    async def suggest_group(request: Request) -> GroupSuggestion:
+        form = await _verified_form(request, csrf_token)
+        if state is None or demo_mode or group_suggester is None:
+            raise HTTPException(
+                status_code=409, detail="local suggestions are disabled"
+            )
+        category = _one(form, "category", max_length=128)
+        if category not in expense_categories(state.list_transactions()):
+            raise HTTPException(
+                status_code=422, detail="category is not in Firefly expenses"
+            )
+        if group_suggestion_lock.locked():
+            raise HTTPException(
+                status_code=409, detail="a suggestion is already running"
+            )
+        async with group_suggestion_lock:
+            try:
+                return await group_suggester(category)
+            except OllamaError as exc:
+                raise HTTPException(
+                    status_code=503, detail="local suggestion unavailable"
+                ) from exc
 
     @router.post(
         "/imports/csv/preview", response_class=HTMLResponse, include_in_schema=False
@@ -420,6 +488,10 @@ def _import_status(request: Request) -> str | None:
 
 def _action_status(request: Request) -> str | None:
     return {
+        "group-saved": (
+            "Spending group saved. Monthly totals updated; "
+            "Firefly categories unchanged."
+        ),
         "suggestions": "Category suggestions refreshed.",
         "category-approve": "Category approval saved successfully.",
         "category-reject": "Category suggestion rejected.",

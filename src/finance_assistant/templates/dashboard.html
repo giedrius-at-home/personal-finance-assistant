@@ -21,6 +21,7 @@
   {% for component in view.net_worth.components %}<article class="account-card"><h3>{{ component.label }}</h3><div class="account-balance">{{ component.amount|money(component.currency) }} <span>{{ component.currency.code }}</span></div>{% if component.stale %}<small>Balance may be stale</small>{% endif %}</article>{% else %}<article class="account-card"><p class="muted">No accounts imported yet.</p></article>{% endfor %}
   </div>
 </section>
+{% include 'monthly_spending.html' %}
 <section class="card cash-overview" aria-label="Until payday">
   <div class="eyebrow">Your pay cycle</div>
   <div class="row"><h2>Until payday</h2><a href="#payday-setting">Set monthly payday</a></div>

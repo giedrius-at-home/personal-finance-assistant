@@ -8,6 +8,13 @@ project intends to use semantic versioning for its own releases.
 
 ### Changed
 
+- Added currency-separated calendar-month spending groups with expandable
+  store categories, gross-purchase shares, refund-aware totals and equal-day
+  previous-month comparisons, without changing Firefly transactions.
+- Added reviewed, revision-protected store-to-group mappings and optional local
+  model suggestions that require a separate save; preserved open sections,
+  search and unsaved group choices during dashboard updates.
+
 - Made the dashboard category inbox a pending-only work queue while retaining
   resolved proposals in the local audit history.
 - Added optional local embedding retrieval over bounded, identifier-redacted,
