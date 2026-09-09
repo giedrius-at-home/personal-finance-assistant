@@ -1,0 +1,46 @@
+{% set report = view.monthly_spending %}
+<section class="card" id="monthly-spending" aria-label="Monthly spending">
+  <div class="eyebrow">The bigger picture</div>
+  <div class="row"><h2>Monthly spending</h2><span>{{ report.start }} – {{ report.through }}</span></div>
+  <p class="muted">Open a group to see its store categories. Figures use confirmed Firefly categories, not pending suggestions. Recorded spending only: bank import completeness is unverified.</p>
+  {% for item in report.currencies %}
+  <div class="spending-currency">
+    <div class="account-grid">
+      <article class="account-card"><h3>{{ item.currency.code }} · month to date</h3><div class="account-balance">{{ item.spending|money(item.currency) }} spent</div><p>{{ item.gross|money(item.currency) }} purchases − {{ item.refunds|money(item.currency) }} refunds</p><small>{{ item.transfer_count }} Firefly transfers excluded. Salary is not included in spending.</small></article>
+      <article class="account-card"><h3>Same elapsed days</h3>
+      {% if item.previous_spending is not none %}<p><strong>{{ item.comparison_spending|money(item.currency) }}</strong> · {{ report.start }} – {{ report.comparison_through }}<br><strong>{{ item.previous_spending|money(item.currency) }}</strong> · {{ report.previous_start }} – {{ report.previous_through }}</p><p>{{ (item.comparison_spending - item.previous_spending)|money(item.currency) }} {{ item.currency.code }} change in recorded spending</p>
+      {% else %}<p>No spending or refund records in the previous comparison window. No comparison available.</p>{% endif %}
+      <small>Shorter months use the same number of calendar days. Today may be partial; missing imports can distort comparisons.</small></article>
+    </div>
+    {% for group in item.groups %}
+    <details class="spending-group" id="spending-{{ item.currency.code }}-{{ item.currency.minor_unit }}-{{ group.group.name if group.group else 'unassigned' }}">
+      <summary><span class="group-label">{{ group.group.value if group.group else 'Needs a group' }}</span><span>{{ group.spending|money(item.currency) }} {{ item.currency.code }} <small>· {{ '%.1f'|format(group.share_percent) }}% of purchases</small></span></summary>
+      <progress max="100" value="{{ group.share_percent }}" aria-label="Share of purchases"></progress>
+      <div class="table-scroll"><table><thead><tr><th>Store / Firefly category</th><th>Month-to-date spending</th><th>Refunds included</th><th>Records</th></tr></thead><tbody>
+      {% for store in group.stores %}<tr><td>{{ store.category if store.category is not none else 'No Firefly category' }}</td><td>{{ store.spending|money(item.currency) }} {{ item.currency.code }}</td><td>{{ store.refunds|money(item.currency) }}</td><td>{{ store.transaction_count }}</td></tr>{% endfor %}
+      </tbody></table></div>
+    </details>
+    {% endfor %}
+  </div>
+  {% else %}<p>No spending records in this or the previous comparison window yet.</p>{% endfor %}
+  <p class="muted">Shares use purchases before refunds, so refund-heavy groups do not distort the chart. Group totals include refunds. This is spending, not your balance or a spending allowance.</p>
+  <details id="spending-group-editor" class="spending-group">
+    <summary>Manage store groups <small>· {{ report.mappings|length }} Firefly categories</small></summary>
+    <p>Assign each store category to a broader group. Changes regroup recorded history locally and leave Firefly categories untouched. Choose “Needs a group” to undo an assignment. A store can sell different things; this groups its category as a whole.</p>
+    <label>Find a store category<input type="search" id="group-search" placeholder="Search your categories" autocomplete="off"></label>
+    <div id="group-mapping-list">
+    {% for mapping in report.mappings %}
+    <form method="post" action="/spending-groups/save" class="group-mapping" data-group-category="{{ mapping.category }}" data-live-form data-live-success="Spending group saved.">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="category" value="{{ mapping.category }}">
+      <input type="hidden" name="revision" value="{{ mapping.revision }}">
+      <label>{{ mapping.category }}<select name="group" {% if view.data_mode == 'invented demo' %}disabled{% endif %}><option value="unassigned" {% if mapping.group is none %}selected{% endif %}>Needs a group</option>{% for choice in spending_groups %}<option value="{{ choice.value }}" {% if mapping.group == choice %}selected{% endif %}>{{ choice.value }}</option>{% endfor %}</select></label>
+      <button {% if view.data_mode == 'invented demo' %}disabled{% endif %}>Save group</button>
+      {% if group_suggestions_enabled %}<button type="button" data-suggest-group>Ask local model</button>{% endif %}
+      <small class="group-suggestion-status" aria-live="polite"></small>
+    </form>
+    {% else %}<p>No confirmed expense categories to group yet.</p>{% endfor %}
+    </div>
+    {% if group_suggestions_enabled %}<p class="muted">The local model sees this category and up to 48 reviewed group examples, not transaction details. Suggestions are not saved until you review and select Save group. Unknown stores may need your judgement.</p>{% endif %}
+  </details>
+</section>

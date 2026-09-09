@@ -301,6 +301,35 @@ make down         # remove containers and networks while retaining volumes
 Never use `docker compose down --volumes` after introducing data. That command
 deletes the databases and Firefly uploads.
 
+## Monthly spending groups
+
+Open **Monthly spending → Manage store groups**. A reviewed group applies to
+the exact Firefly category across recorded history, not to individual purchases.
+Search the list, choose a group and save. The success message confirms persistence;
+**Needs a group** reverses the mapping with a new audit revision. Old tabs receive
+a conflict instead of overwriting newer choices. Unmapped expenses remain in totals.
+
+Optional **Ask local model** uses the existing `PFA_CATEGORY_SUGGESTIONS_ENABLED`,
+`PFA_OLLAMA_BASE_URL` and `PFA_OLLAMA_MODEL` configuration. It sends only the category
+and up to 48 reviewed group examples to local Ollama, with a single bounded attempt.
+It never saves or performs public research. A failed or uncertain suggestion leaves
+manual selection available. No full transaction reclassification is triggered.
+
+Mappings and immutable revisions live in `spending_group_history` in the existing
+derived SQLite database (schema 9). Include this database in the normal local backup;
+do not export real mappings into Git. Migration adds a table without modifying ledger
+projections. Schema teardown refuses populated history. Changing a Firefly category
+name requires reviewing its new mapping; old mapping revisions remain for audit.
+
+Calendar-month reports use the owner's timezone and confirmed Firefly records only.
+Comparison windows have equal calendar-day counts, capped by the shorter month.
+Today's partial day and missing imports can distort comparisons; no prior records
+means comparison unavailable. No expected salary, protected-savings allowance or
+bank completeness claim is inferred from these totals.
+
+`make check` includes dependency-free dashboard interaction tests using Node.js
+(`node --test`); use a supported Node LTS in addition to the Python environment.
+
 ## Account health and payday overview
 
 Open the dashboard and use **Set monthly payday**. Enter your usual day of the
