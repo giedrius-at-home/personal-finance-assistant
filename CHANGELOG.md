@@ -8,6 +8,9 @@ project intends to use semantic versioning for its own releases.
 
 ### Changed
 
+- Taught the local categorizer to use recognizable merchant identity and
+  ordinary business type as evidence, with lower confidence or abstention when
+  either is unclear.
 - Added first-party progressive dashboard refresh and in-place category review
   actions with visible result toasts and full transaction context, while
   preserving server-rendered fallback and exact preview screens.
@@ -30,6 +33,9 @@ project intends to use semantic versioning for its own releases.
 
 ### Added
 
+- An explicit dashboard merchant-research action that accepts only a validated
+  public store name, uses the existing allowlisted and cache-backed research
+  boundary, labels results untrusted, and never submits transaction text.
 - A disabled-by-default, provider-neutral dashboard CSV resync flow with
   semantic bank-export parsing, automatic or explicit account targeting,
   exact preview/confirm, duplicate and ambiguity protection, Firefly rule

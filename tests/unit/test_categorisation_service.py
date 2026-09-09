@@ -177,6 +177,8 @@ async def test_adapter_passes_only_bounded_category_examples_as_data() -> None:
     await adapter.propose("new synthetic bistro")
 
     payload = backend.calls[0]
+    assert "merchant/store identity and what that business normally does" in payload
+    assert "coffee shop or bakery" in payload
     assert (
         '"firefly_category_examples":'
         '[{"category":"dining","merchant":"synthetic bistro"}]' in payload

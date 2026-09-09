@@ -12,7 +12,7 @@ from typing import Annotated
 from urllib.parse import parse_qs
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import TypeAdapter, ValidationError
 
@@ -30,6 +30,10 @@ from finance_assistant.domain.canonical import (
     SourceSystem,
 )
 from finance_assistant.domain.models import Currency
+from finance_assistant.domain.research import (
+    MerchantResearchRequest,
+    MerchantResearchResult,
+)
 from finance_assistant.domain.settings import OwnerSettings, SettingsPreview
 from finance_assistant.integrations._http import UpstreamError
 from finance_assistant.integrations.firefly import (
@@ -44,6 +48,9 @@ from finance_assistant.persistence.sqlite import (
 
 CategoryUpdater = Callable[[str, str | None, str | None], Awaitable[None]]
 SuggestionRunner = Callable[[], Awaitable[int]]
+MerchantResearcher = Callable[
+    [MerchantResearchRequest], Awaitable[MerchantResearchResult]
+]
 
 MAX_FORM_BYTES = 8_192
 TEMPLATES = Jinja2Templates(directory=Path(__file__).parent / "templates")
@@ -70,6 +77,7 @@ def install_web_routes(
     suggestion_runner: SuggestionRunner | None = None,
     csv_import_coordinator: CsvImportCoordinator | None = None,
     csv_post_import_sync: Callable[[], Awaitable[object]] | None = None,
+    merchant_researcher: MerchantResearcher | None = None,
 ) -> None:
     service = DashboardService(
         state,
@@ -99,6 +107,8 @@ def install_web_routes(
                 "csv_import_accounts": state.list_accounts() if state else (),
                 "csv_import_status": _import_status(request),
                 "action_status": _action_status(request),
+                "merchant_research_enabled": merchant_researcher is not None
+                and not demo_mode,
             },
         )
         response.set_cookie(
@@ -193,6 +203,26 @@ def install_web_routes(
             f"/dashboard?csv_imported={imported}&csv_refreshed={str(refreshed).lower()}",
             status_code=status.HTTP_303_SEE_OTHER,
         )
+
+    @router.post("/review/{proposal_id}/research", include_in_schema=False)
+    async def research_merchant(proposal_id: str, request: Request) -> JSONResponse:
+        values = await _verified_form(request, csrf_token)
+        if state is None or demo_mode or merchant_researcher is None:
+            raise HTTPException(
+                status_code=409, detail="public merchant research is disabled"
+            )
+        if state.get_pending(proposal_id) is None:
+            raise HTTPException(status_code=409, detail="proposal is no longer pending")
+        public_name = _one(values, "public_name", max_length=80).strip()
+        try:
+            research_request = MerchantResearchRequest(public_name=public_name)
+        except ValidationError as error:
+            raise HTTPException(
+                status_code=422,
+                detail="enter only a public store or merchant name",
+            ) from error
+        result = await merchant_researcher(research_request)
+        return JSONResponse(result.model_dump(mode="json"))
 
     @router.post("/review/{proposal_id}/{decision}", include_in_schema=False)
     async def review(

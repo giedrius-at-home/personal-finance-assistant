@@ -157,6 +157,21 @@ ul {
   font-variant-numeric: tabular-nums;
   font-weight: 650;
 }
+.merchant-research {
+  display: flex;
+  gap: 0.6rem;
+  align-items: end;
+  flex-wrap: wrap;
+  margin-top: 0.8rem;
+}
+.research-result {
+  flex-basis: 100%;
+  border-left: 3px solid var(--green);
+  padding-left: 0.7rem;
+}
+.research-result:empty {
+  display: none;
+}
 button,
 .button {
   border: 0;

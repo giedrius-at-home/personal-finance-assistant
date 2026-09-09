@@ -517,6 +517,13 @@ project URL is sufficient; do not put a secret in the value. Recreate the
 gateway with `make up`. Public names/identifiers are disclosed only to their
 fixed provider; raw financial data is never a valid query input.
 
+When retrieval is enabled, pending category cards also show **Research
+merchant**. Enter only the public store or company name—never a full bank
+description, account reference, or payment identifier. The current merchant
+identity provider is allowlisted Wikipedia, not a general web or Google search.
+Results are untrusted evidence and cannot select or write a category; verify the
+citation before saving a correction.
+
 Results expire after 24 hours by default. A cited expired result may be returned
 with status `stale_cache` during an outage. Purge all cached public excerpts and
 citations without changing derived financial state:

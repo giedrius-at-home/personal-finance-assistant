@@ -23,6 +23,13 @@ from finance_assistant.domain.canonical import (
 )
 from finance_assistant.domain.categorisation import CategorisationMethod
 from finance_assistant.domain.models import BudgetWindow, Currency, Money
+from finance_assistant.domain.research import (
+    MerchantResearchRequest,
+    MerchantResearchResult,
+    ResearchPurpose,
+    ResearchResult,
+    ResearchStatus,
+)
 from finance_assistant.persistence.sqlite import SQLiteDerivedState
 from finance_assistant.web import format_money
 
@@ -489,6 +496,71 @@ def test_review_approve_reject_and_correct_lifecycle(tmp_path: Path) -> None:
     }
     assert checked.list_corrections()[0].approved_category == "Transport"
     checked.close()
+
+
+def test_owner_triggered_merchant_research_sends_only_validated_public_name(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "state.sqlite3"
+    seeded = SQLiteDerivedState(path)
+    seeded.migrate_up()
+    item = proposal("Synthetic Merchant")
+    seeded.record_proposal(item)
+    seeded.close()
+    requests: list[MerchantResearchRequest] = []
+
+    async def research(request: MerchantResearchRequest) -> MerchantResearchResult:
+        requests.append(request)
+        return MerchantResearchResult(
+            public_name=request.public_name,
+            country_code=None,
+            research=ResearchResult(
+                query_key="a" * 64,
+                purpose=ResearchPurpose.MERCHANT_IDENTITY,
+                status=ResearchStatus.ABSTAINED,
+                documents=(),
+                error_code="no_cited_evidence",
+                generated_at=NOW,
+            ),
+        )
+
+    with TestClient(
+        create_app(database_path=path, merchant_researcher=research)
+    ) as client:
+        page = client.get("/dashboard")
+        token = page.cookies["pfa_csrf"]
+        assert "Use the store name or a clear business type" in page.text
+        assert "Public store name only" in page.text
+        response = client.post(
+            f"/review/{item.proposal_id}/research",
+            data={"csrf_token": token, "public_name": "Synthetic Bakery"},
+            headers=SAME_ORIGIN,
+        )
+        rejected = client.post(
+            f"/review/{item.proposal_id}/research",
+            data={"csrf_token": token, "public_name": "NL00FAKE0000000000"},
+            headers=SAME_ORIGIN,
+        )
+
+    assert response.status_code == 200
+    assert response.json()["category_change_allowed"] is False
+    assert rejected.status_code == 422
+    assert requests == [MerchantResearchRequest(public_name="Synthetic Bakery")]
+
+
+def test_dashboard_research_gateway_requires_and_closes_its_private_cache(
+    tmp_path: Path,
+) -> None:
+    cache_path = tmp_path / "research.sqlite3"
+    with TestClient(
+        create_app(research_enabled=True, research_cache_path=cache_path)
+    ) as client:
+        assert client.get("/health").status_code == 200
+        assert cache_path.exists()
+        assert cache_path.stat().st_mode & 0o777 == 0o600
+
+    with pytest.raises(ValueError, match="research_cache_path"):
+        create_app(research_enabled=True)
 
 
 def test_reviewed_categories_are_written_to_firefly_before_local_approval(

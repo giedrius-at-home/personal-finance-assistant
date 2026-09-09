@@ -87,8 +87,70 @@ async function submitLive(form) {
   }
 }
 
+function renderResearch(container, result) {
+  container.replaceChildren();
+  const document = result?.research?.documents?.[0];
+  const message = document
+    ? `${document.citation.title}: ${document.excerpt}`
+    : "No reliable public match was found. Please categorize this one manually.";
+  const text = window.document.createElement("p");
+  text.textContent = message;
+  container.append(text);
+  if (document) {
+    const citation = new URL(document.citation.url);
+    if (citation.protocol === "https:" && citation.hostname === "en.wikipedia.org") {
+      const link = window.document.createElement("a");
+      link.href = citation.href;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = "Verify public source";
+      container.append(link);
+    }
+  }
+  const warning = window.document.createElement("small");
+  warning.textContent = "Untrusted public result—verify it before choosing a category.";
+  container.append(warning);
+}
+
+async function submitResearch(form) {
+  if (requestInFlight) return;
+  requestInFlight = true;
+  form.dataset.submitting = "true";
+  const container = form.querySelector(".research-result");
+  const buttons = form.querySelectorAll("button");
+  for (const button of buttons) button.disabled = true;
+  status("Researching public merchant name…");
+  try {
+    const body = new URLSearchParams();
+    for (const [key, value] of new FormData(form)) {
+      if (typeof value === "string") body.append(key, value);
+    }
+    const response = await fetch(form.action, {
+      method: "POST",
+      body,
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) throw new Error("merchant research failed");
+    renderResearch(container, await response.json());
+    status("Public merchant lookup finished. Verify the result before categorizing.");
+  } catch (_error) {
+    status("Could not find a safe public merchant match. Categorize this one manually.", "error");
+  } finally {
+    delete form.dataset.submitting;
+    for (const button of buttons) button.disabled = false;
+    requestInFlight = false;
+  }
+}
+
 document.addEventListener("submit", (event) => {
   const form = event.target instanceof HTMLFormElement ? event.target : null;
+  if (form?.matches("form[data-research-form]")) {
+    event.preventDefault();
+    void submitResearch(form);
+    return;
+  }
   if (!form?.matches("form[data-live-form]")) return;
   event.preventDefault();
   void submitLive(form);
