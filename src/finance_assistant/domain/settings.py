@@ -17,6 +17,7 @@ class OwnerSettings(StrictModel):
     timezone: str = "Europe/Amsterdam"
     evaluation_hour: int = Field(default=18, ge=0, le=23)
     notifications_enabled: bool = False
+    payday_day: int | None = Field(default=None, ge=1, le=31)
     heads_up_spent_ratio: Decimal = Field(default=Decimal("0.65"), ge=0, le=1)
     heads_up_pace_ratio: Decimal = Field(default=Decimal("1.25"), gt=0, le=10)
     heads_up_cooldown_hours: int = Field(default=168, ge=1, le=744)

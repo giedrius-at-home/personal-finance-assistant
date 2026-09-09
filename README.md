@@ -1,5 +1,11 @@
 # Personal Finance Assistant
 
+The owner dashboard includes an **Until payday** overview and **Account data
+health** panel. Set an optional monthly payday through the previewable settings
+form to see cycle income and spending. Account history and category coverage
+come from Firefly; last successful Firefly refresh is distinct from a bank CSV
+import. See [operations](docs/OPERATIONS.md#account-health-and-payday-overview).
+
 [![CI](https://github.com/giedrius-at-home/personal-finance-assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/giedrius-at-home/personal-finance-assistant/actions/workflows/ci.yml)
 
 Local-first personal finance intelligence layer for Firefly III and Ghostfolio,

@@ -30,6 +30,24 @@ NOW = datetime(2026, 1, 2, tzinfo=UTC)
 EUR = Currency(code="EUR", minor_unit=2)
 
 
+def test_sync_health_survives_restart_and_failed_refresh_preserves_success(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "state.sqlite3"
+    state = SQLiteDerivedState(path)
+    state.migrate_up()
+    assert state.firefly_sync_health() == (None, None, False)
+    state.record_firefly_sync(success=True, now=NOW)
+    state.record_firefly_sync(success=False, now=NOW + timedelta(hours=1))
+    state.close()
+    state = SQLiteDerivedState(path)
+    state.migrate_up()
+    assert state.firefly_sync_health() == (NOW, NOW + timedelta(hours=1), True)
+    with pytest.raises(ValueError, match="timezone"):
+        state.record_firefly_sync(success=True, now=datetime(2026, 1, 1))
+    state.close()
+
+
 def account(balance: str = "125.50", revision: str = "r1") -> CanonicalAccount:
     return CanonicalAccount(
         account_id="firefly:synthetic-account",

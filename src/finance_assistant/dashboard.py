@@ -19,6 +19,7 @@ from finance_assistant.domain.canonical import (
     SourceSystem,
     TransactionKind,
 )
+from finance_assistant.domain.cash_overview import CashOverview, cash_overview
 from finance_assistant.domain.categorisation import CategorisationMethod
 from finance_assistant.domain.models import (
     AlertSeverity,
@@ -78,6 +79,10 @@ class DashboardView(StrictModel):
     upstream_writes: str = "disabled"
     weekly: WeeklyReport
     net_worth: NetWorthReport
+    cash_overview: CashOverview
+    last_firefly_refresh: AwareDatetime | None = None
+    last_firefly_attempt: AwareDatetime | None = None
+    firefly_refresh_failed: bool = False
     review_items: tuple[ReviewItem, ...] = Field(max_length=100)
     taxonomy: tuple[TaxonomyRecommendation, ...]
     settings: OwnerSettings
@@ -155,12 +160,27 @@ class DashboardService:
         transactions_by_source = {
             transaction.source.identity: transaction for transaction in transactions
         }
+        last_success, last_attempt, refresh_failed = (
+            self.state.firefly_sync_health()
+            if self.state and not self.demo_mode
+            else (None, None, False)
+        )
         return DashboardView(
             generated_at=now,
             data_mode="invented demo" if self.demo_mode else "local derived state",
             upstream_writes=self.upstream_writes,
+            last_firefly_refresh=last_success,
+            last_firefly_attempt=last_attempt,
+            firefly_refresh_failed=refresh_failed,
             weekly=weekly,
             net_worth=net_worth_report(accounts, as_of=now),
+            cash_overview=cash_overview(
+                accounts,
+                transactions,
+                as_of=now,
+                timezone=settings.timezone,
+                payday_day=settings.payday_day,
+            ),
             review_items=tuple(
                 _review_item(item, transactions_by_source.get(item.source.identity))
                 for item in proposals

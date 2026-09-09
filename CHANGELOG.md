@@ -49,6 +49,10 @@ project intends to use semantic versioning for its own releases.
 
 ### Added
 
+- An account-health panel with observed history, saved-category coverage and
+  durable Firefly refresh outcomes, plus configurable monthly payday cash flow.
+  Bank statement completeness and reconciliation remain explicitly unverified;
+  no spending allowance is inferred from incomplete planning inputs.
 - An explicit dashboard merchant-research action that accepts only a validated
   public store name, uses the existing allowlisted and cache-backed research
   boundary, labels results untrusted, and never submits transaction text.

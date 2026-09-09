@@ -269,6 +269,22 @@ MIGRATION_6_DOWN = """
 DELETE FROM schema_migrations WHERE version = 6;
 """
 
+MIGRATION_7_UP = """
+CREATE TABLE firefly_sync_health (
+    singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+    last_success TEXT,
+    last_attempt TEXT NOT NULL,
+    failed INTEGER NOT NULL CHECK(failed IN (0, 1))
+);
+INSERT INTO schema_migrations(version, applied_at)
+VALUES (7, CURRENT_TIMESTAMP);
+"""
+
+MIGRATION_7_DOWN = """
+DROP TABLE IF EXISTS firefly_sync_health;
+DELETE FROM schema_migrations WHERE version = 7;
+"""
+
 
 def _serialize(record: CanonicalRecord) -> str:
     return json.dumps(
@@ -350,6 +366,8 @@ class SQLiteDerivedState:
                 self._connection.executescript(MIGRATION_5_UP)
             if version < 6:
                 self._connection.executescript(MIGRATION_6_UP)
+            if version < 7:
+                self._connection.executescript(MIGRATION_7_UP)
 
     def migrate_down(self) -> None:
         """Reverse the prototype schema only when no financial state exists."""
@@ -378,12 +396,41 @@ class SQLiteDerivedState:
                 raise PersistenceConflictError(
                     "refusing to migrate down populated state"
                 )
+            self._connection.executescript(MIGRATION_7_DOWN)
             self._connection.executescript(MIGRATION_6_DOWN)
             self._connection.executescript(MIGRATION_5_DOWN)
             self._connection.executescript(MIGRATION_4_DOWN)
             self._connection.executescript(MIGRATION_3_DOWN)
             self._connection.executescript(MIGRATION_2_DOWN)
             self._connection.executescript(MIGRATION_1_DOWN)
+
+    def record_firefly_sync(self, *, success: bool, now: datetime) -> None:
+        """Persist only refresh timestamps and outcome, never source content."""
+        if now.tzinfo is None:
+            raise ValueError("now must be timezone-aware")
+        stamp = now.astimezone(UTC).isoformat()
+        with self._lock, self._connection:
+            self._connection.execute(
+                """INSERT INTO firefly_sync_health VALUES (1, ?, ?, ?)
+                   ON CONFLICT(singleton) DO UPDATE SET
+                     last_success = COALESCE(excluded.last_success, last_success),
+                     last_attempt = excluded.last_attempt,
+                     failed = excluded.failed""",
+                (stamp if success else None, stamp, int(not success)),
+            )
+
+    def firefly_sync_health(self) -> tuple[datetime | None, datetime | None, bool]:
+        row = self._connection.execute(
+            "SELECT last_success, last_attempt, failed "
+            "FROM firefly_sync_health WHERE singleton = 1"
+        ).fetchone()
+        if row is None:
+            return None, None, False
+        return (
+            datetime.fromisoformat(row[0]) if row[0] else None,
+            datetime.fromisoformat(row[1]),
+            bool(row[2]),
+        )
 
     def upsert(self, record: CanonicalRecord, *, observed_at: datetime) -> bool:
         """Insert/update one projection; return false for an exact replay."""

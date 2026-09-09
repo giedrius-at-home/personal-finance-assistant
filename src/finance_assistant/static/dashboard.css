@@ -228,6 +228,12 @@ label {
   border-left-color: var(--green);
   background: #e9f5ed;
 }
+.cash-overview {
+  margin: 1rem 0;
+}
+.cash-overview td {
+  vertical-align: top;
+}
 .table-scroll {
   overflow-x: auto;
 }

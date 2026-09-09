@@ -301,6 +301,30 @@ make down         # remove containers and networks while retaining volumes
 Never use `docker compose down --volumes` after introducing data. That command
 deletes the databases and Firefly uploads.
 
+## Account health and payday overview
+
+Open the dashboard and use **Set monthly payday**. Enter your usual day of the
+month, choose **Preview settings**, and apply the reviewed change. Leave it
+blank if unknown; a day beyond the end of a month uses that month's final day.
+This is a calendar assumption, not confirmation that salary arrived. Weekends
+and holidays are not adjusted. Settings can be rolled back using their history.
+
+The new cycle view includes observed Firefly income, spending net of refunds
+and explicitly typed transfers, separately per currency. It does not infer
+internal transfers from the owner's name. Existing weekly reporting remains
+separate and may differ when its legacy owner-name heuristic is involved.
+
+Account health shows available record dates and category coverage; those are
+not a guarantee of a complete statement. The timestamp for a successful
+Firefly-to-dashboard refresh is persisted even when no records changed. A
+failed refresh is shown without source-error text. Bank import time, statement
+completeness and bank balance reconciliation remain unverified until dedicated
+evidence is connected. No new spending allowance is calculated yet.
+
+Gateway startup adds the schema-7 refresh-status table. It stores timestamps
+and a boolean outcome only. It does not migrate, rewrite or reconcile financial
+records. The old application can ignore this additive table during rollback.
+
 ## Alert scheduling and macOS delivery
 
 Policy version `2026-09-v1` evaluates after a successful source event and against

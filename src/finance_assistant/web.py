@@ -435,7 +435,11 @@ def _one(values: dict[str, list[str]], key: str, *, max_length: int) -> str:
 
 
 def _settings(values: dict[str, list[str]]) -> OwnerSettings:
+    payday = values.get("payday_day", [])
+    if len(payday) > 1:
+        raise HTTPException(status_code=422, detail="invalid payday_day")
     payload = {
+        "payday_day": payday[0] if payday and payday[0] not in {"", "None"} else None,
         "timezone": _one(values, "timezone", max_length=64),
         "evaluation_hour": _one(values, "evaluation_hour", max_length=2),
         "notifications_enabled": values.get("notifications_enabled") == ["on"],

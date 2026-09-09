@@ -6,6 +6,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from pydantic import SecretStr
 
@@ -134,11 +135,19 @@ class FireflySyncRunner:
         self._settings = settings
 
     async def __call__(self) -> IngestionResult:
-        async with FireflyClient(
-            base_url=f"{self._settings.base_url}/api/v1",
-            token=self._settings.token,
-        ) as firefly:
-            return await IngestionService(firefly=firefly, state=self._state).ingest()
+        try:
+            async with FireflyClient(
+                base_url=f"{self._settings.base_url}/api/v1",
+                token=self._settings.token,
+            ) as firefly:
+                result = await IngestionService(
+                    firefly=firefly, state=self._state
+                ).ingest()
+        except Exception:
+            self._state.record_firefly_sync(success=False, now=datetime.now(UTC))
+            raise
+        self._state.record_firefly_sync(success=True, now=datetime.now(UTC))
+        return result
 
 
 async def run_firefly_sync_loop(
