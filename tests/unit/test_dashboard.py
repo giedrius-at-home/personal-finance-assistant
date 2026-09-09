@@ -17,6 +17,7 @@ from finance_assistant.csv_import import (
 )
 from finance_assistant.domain.alerting import AlertPolicy, budget_alert_candidate
 from finance_assistant.domain.canonical import (
+    CanonicalAccount,
     SourceEntity,
     SourceReference,
     SourceSystem,
@@ -218,15 +219,35 @@ def test_mutation_requires_same_origin_csrf_and_persistent_state(
 
 def test_csv_upload_requires_preview_and_exact_owner_commit(tmp_path: Path) -> None:
     coordinator = StubCsvCoordinator()
+    path = tmp_path / "state.sqlite3"
+    state = SQLiteDerivedState(path)
+    state.migrate_up()
+    state.upsert(
+        CanonicalAccount(
+            account_id="firefly:asset-1",
+            name="Synthetic account",
+            balance=Money(amount="10.00", currency=EUR),
+            canonical_owner=SourceReference(
+                system=SourceSystem.FIREFLY_III,
+                entity=SourceEntity.ACCOUNT,
+                external_id="asset-1",
+                source_updated_at=NOW,
+            ),
+        ),
+        observed_at=NOW,
+    )
+    state.close()
     with TestClient(
         create_app(
-            database_path=tmp_path / "state.sqlite3",
+            database_path=path,
             csv_import_coordinator=coordinator,  # type: ignore[arg-type]
         )
     ) as client:
         page = client.get("/dashboard")
         token = page.cookies["pfa_csrf"]
         assert "Upload any connected bank CSV" in page.text
+        assert 'value="asset-1"' in page.text
+        assert 'value="firefly:asset-1"' not in page.text
         preview = client.post(
             "/imports/csv/preview",
             data={"csrf_token": token, "account_id": "asset-1"},

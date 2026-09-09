@@ -36,7 +36,7 @@
   <p class="muted">Choose the account the export belongs to. The file stays in memory only while you review it. Dates, amounts, currencies and descriptions are normalized; exact duplicates are skipped; possible duplicates block the import; and Firefly rules reorganize approved transactions.</p>
   <form method="post" action="/imports/csv/preview" enctype="multipart/form-data" class="csv-upload">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label>Firefly account<select name="account_id" required><option value="auto" selected>Detect automatically</option>{% for account in csv_import_accounts %}<option value="{{ account.account_id }}">{{ account.name }} · {{ account.currency.code }}</option>{% endfor %}</select></label>
+    <label>Firefly account<select name="account_id" required><option value="auto" selected>Detect automatically</option>{% for account in csv_import_accounts %}<option value="{{ account.canonical_owner.external_id }}">{{ account.name }} · {{ account.currency.code }}</option>{% endfor %}</select></label>
     <label>Bank export<input type="file" name="upload" accept=".csv,.txt,text/csv,text/plain" required></label>
     <button>Preview and reorganize</button>
   </form>

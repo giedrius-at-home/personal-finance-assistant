@@ -36,6 +36,12 @@ project intends to use semantic versioning for its own releases.
   after prototype review, with explicit single-writer, practical-validation,
   recovery, and future migration triggers recorded in ADR 0010.
 
+### Fixed
+
+- Passed the selected Firefly source account ID—not its internal canonical ID—
+  from the dashboard CSV form, so explicit account selection bypasses ambiguous
+  bank-name detection correctly.
+
 ### Added
 
 - An explicit dashboard merchant-research action that accepts only a validated

@@ -104,7 +104,11 @@ def install_web_routes(
                 "csrf_token": csrf_token,
                 "csv_import_enabled": csv_import_coordinator is not None
                 and not demo_mode,
-                "csv_import_accounts": state.list_accounts() if state else (),
+                "csv_import_accounts": tuple(
+                    account
+                    for account in (state.list_accounts() if state else ())
+                    if account.canonical_owner.system is SourceSystem.FIREFLY_III
+                ),
                 "csv_import_status": _import_status(request),
                 "action_status": _action_status(request),
                 "merchant_research_enabled": merchant_researcher is not None
