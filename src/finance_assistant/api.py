@@ -1,7 +1,8 @@
 """HTTP boundary for deterministic financial calculations."""
 
+import asyncio
 import os
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import date
 from pathlib import Path
@@ -12,6 +13,10 @@ from starlette.middleware.base import RequestResponseEndpoint
 from starlette.responses import PlainTextResponse, Response
 
 from finance_assistant import __version__
+from finance_assistant.categorisation_runtime import (
+    CategorySuggestionRunner,
+    CategorySuggestionSettings,
+)
 from finance_assistant.domain.alerts import evaluate_budget
 from finance_assistant.domain.goals import evaluate_goal
 from finance_assistant.domain.models import (
@@ -20,6 +25,14 @@ from finance_assistant.domain.models import (
     GoalEvaluation,
     SavingsGoal,
 )
+from finance_assistant.ingestion.runtime import (
+    FireflyCategoryWriteSettings,
+    FireflySyncRunner,
+    FireflySyncSettings,
+    run_firefly_sync_loop,
+)
+from finance_assistant.ingestion.service import IngestionResult
+from finance_assistant.integrations.firefly import FireflyCategoryClient
 from finance_assistant.integrations.firefly_webhook import (
     MAX_WEBHOOK_BYTES,
     FireflyWebhookReceiver,
@@ -38,18 +51,71 @@ def create_app(
     database_path: Path | str | None = None,
     demo_mode: bool = False,
     allowed_hosts: frozenset[str] = frozenset({"127.0.0.1", "localhost", "::1"}),
+    firefly_sync_settings: FireflySyncSettings | None = None,
+    firefly_category_write_settings: FireflyCategoryWriteSettings | None = None,
+    category_suggestion_settings: CategorySuggestionSettings | None = None,
+    category_updater: (
+        Callable[[str, str | None, str | None], Awaitable[None]] | None
+    ) = None,
+    owner_name_aliases: tuple[str, ...] = (),
 ) -> FastAPI:
     """Build the API with an explicitly configured webhook boundary."""
 
     state = SQLiteDerivedState(database_path) if database_path else None
     if state is not None:
         state.migrate_up()
+    suggestion_runner = (
+        CategorySuggestionRunner(state=state, settings=category_suggestion_settings)
+        if state is not None and category_suggestion_settings is not None
+        else None
+    )
+
+    async def configured_category_updater(
+        transaction_id: str,
+        expected_category: str | None,
+        category: str | None,
+    ) -> None:
+        if firefly_category_write_settings is None:
+            raise RuntimeError("reviewed Firefly category writes are disabled")
+        async with FireflyCategoryClient(
+            base_url=f"{firefly_category_write_settings.base_url}/api/v1",
+            token=firefly_category_write_settings.token,
+        ) as client:
+            await client.set_category(
+                transaction_id=transaction_id,
+                expected_category=expected_category,
+                category=category,
+            )
 
     @asynccontextmanager
     async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
-        yield
-        if state is not None:
-            state.close()
+        sync_task: asyncio.Task[None] | None = None
+        if state is not None and firefly_sync_settings is not None:
+            sync_runner = FireflySyncRunner(state=state, settings=firefly_sync_settings)
+
+            async def sync_and_suggest() -> IngestionResult:
+                result = await sync_runner()
+                if suggestion_runner is not None:
+                    await suggestion_runner()
+                return result
+
+            sync_task = asyncio.create_task(
+                run_firefly_sync_loop(
+                    sync_and_suggest,
+                    interval_seconds=firefly_sync_settings.interval_seconds,
+                )
+            )
+        try:
+            yield
+        finally:
+            if sync_task is not None:
+                sync_task.cancel()
+                try:
+                    await sync_task
+                except asyncio.CancelledError:
+                    pass
+            if state is not None:
+                state.close()
 
     application = FastAPI(
         title="Personal Finance Assistant",
@@ -117,6 +183,16 @@ def create_app(
         state=state,
         demo_mode=demo_mode,
         csrf_token=new_csrf_token(),
+        owner_name_aliases=owner_name_aliases,
+        category_updater=(
+            category_updater
+            or (
+                configured_category_updater
+                if firefly_category_write_settings is not None
+                else None
+            )
+        ),
+        suggestion_runner=suggestion_runner,
     )
     application.include_router(web_router)
     return application
@@ -192,8 +268,28 @@ async def receive_firefly_webhook(request: Request) -> dict[str, str]:
     return {"status": "accepted" if accepted else "duplicate"}
 
 
+_sync_settings = FireflySyncSettings.from_environment(os.environ)
+_category_write_settings = FireflyCategoryWriteSettings.from_environment(os.environ)
+_category_suggestion_settings = CategorySuggestionSettings.from_environment(os.environ)
+
+
+def _owner_name_aliases(raw: str | None) -> tuple[str, ...]:
+    if not raw:
+        return ()
+    aliases = tuple(item.strip() for item in raw.split(",") if item.strip())
+    if len(aliases) > 16 or any(len(item) > 100 for item in aliases):
+        raise ValueError(
+            "PFA_OWNER_NAME_ALIASES contains too many or oversized aliases"
+        )
+    return tuple(dict.fromkeys(aliases))
+
+
 app = create_app(
     webhook_secret=os.getenv("PFA_FIREFLY_WEBHOOK_SECRET"),
     database_path=os.getenv("PFA_DATABASE_PATH"),
     demo_mode=os.getenv("PFA_DEMO_MODE", "false").casefold() == "true",
+    firefly_sync_settings=_sync_settings,
+    firefly_category_write_settings=_category_write_settings,
+    category_suggestion_settings=_category_suggestion_settings,
+    owner_name_aliases=_owner_name_aliases(os.getenv("PFA_OWNER_NAME_ALIASES")),
 )

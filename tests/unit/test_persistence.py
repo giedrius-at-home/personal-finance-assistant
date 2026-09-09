@@ -128,6 +128,36 @@ def test_projection_delete_retains_lineage_and_privacy_purge_removes_it(
     state.close()
 
 
+def test_complete_snapshot_prunes_missing_current_and_retains_lineage(
+    tmp_path: Path,
+) -> None:
+    state = SQLiteDerivedState(tmp_path / "state.sqlite3")
+    state.migrate_up()
+    current = account()
+    missing = current.model_copy(
+        update={
+            "account_id": "firefly:missing-account",
+            "name": "Synthetic missing cash",
+            "canonical_owner": current.canonical_owner.model_copy(
+                update={"external_id": "missing-account"}
+            ),
+        }
+    )
+    state.upsert_many((current, missing), observed_at=NOW)
+
+    assert (
+        state.delete_missing_current((current,), source_system=SourceSystem.FIREFLY_III)
+        == 1
+    )
+    assert state.list_accounts() == (current,)
+    assert state.version_count(missing.canonical_owner) == 1
+    assert (
+        state.delete_missing_current((current,), source_system=SourceSystem.FIREFLY_III)
+        == 0
+    )
+    state.close()
+
+
 def test_migration_is_reversible_only_before_state_exists(tmp_path: Path) -> None:
     state = SQLiteDerivedState(tmp_path / "empty.sqlite3")
     state.migrate_up()

@@ -3,9 +3,10 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
-from finance_assistant.api import create_app
+from finance_assistant.api import _owner_name_aliases, create_app
 from finance_assistant.categorisation_service import CategoryProposal, ProposalStatus
 from finance_assistant.domain.alerting import AlertPolicy, budget_alert_candidate
 from finance_assistant.domain.canonical import (
@@ -16,10 +17,16 @@ from finance_assistant.domain.canonical import (
 from finance_assistant.domain.categorisation import CategorisationMethod
 from finance_assistant.domain.models import BudgetWindow, Currency, Money
 from finance_assistant.persistence.sqlite import SQLiteDerivedState
+from finance_assistant.web import format_money
 
 NOW = datetime(2026, 9, 2, tzinfo=UTC)
 SAME_ORIGIN = {"origin": "http://testserver"}
 EUR = Currency(code="EUR", minor_unit=2)
+
+
+def test_money_display_uses_currency_precision_without_negative_zero() -> None:
+    assert format_money(Decimal("77.470000000000"), EUR) == "77.47"
+    assert format_money(Decimal("-0.00"), EUR) == "0.00"
 
 
 def proposal(name: str) -> CategoryProposal:
@@ -55,10 +62,27 @@ def test_demo_dashboard_is_invented_responsive_and_no_store() -> None:
     assert response.status_code == 200
     assert "Invented demo data" in response.text
     assert "Northstar Bicycle Repair" in response.text
+    assert "133.20 spent" in response.text
+    assert "2266.80 weekly cash flow · 2400.00 income" in response.text
+    assert "10300.00 EUR" in response.text
+    assert "Cash accounts" in response.text
+    assert "Invented current account" in response.text
+    assert "Invented portfolio" in response.text
     assert "writes disabled" in response.text
     assert response.headers["cache-control"] == "no-store"
     assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
     assert response.cookies["pfa_csrf"]
+
+
+def test_owner_name_alias_environment_is_bounded_and_deduplicated() -> None:
+    assert _owner_name_aliases(None) == ()
+    assert _owner_name_aliases(" Synthetic Owner, S Owner, Synthetic Owner ") == (
+        "Synthetic Owner",
+        "S Owner",
+    )
+
+    with pytest.raises(ValueError, match="oversized"):
+        _owner_name_aliases("x" * 101)
 
 
 def test_dashboard_json_uses_the_same_bounded_view() -> None:
@@ -212,6 +236,38 @@ def test_review_approve_reject_and_correct_lifecycle(tmp_path: Path) -> None:
     }
     assert checked.list_corrections()[0].approved_category == "Transport"
     checked.close()
+
+
+def test_reviewed_categories_are_written_to_firefly_before_local_approval(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "state.sqlite3"
+    seeded = SQLiteDerivedState(path)
+    seeded.migrate_up()
+    item = proposal("journal-1")
+    seeded.record_proposal(item)
+    seeded.close()
+    writes: list[tuple[str, str | None, str | None]] = []
+
+    async def update(
+        transaction_id: str,
+        expected_category: str | None,
+        category: str | None,
+    ) -> None:
+        writes.append((transaction_id, expected_category, category))
+
+    with TestClient(create_app(database_path=path, category_updater=update)) as client:
+        dashboard = client.get("/v1/dashboard").json()
+        assert dashboard["upstream_writes"] == "reviewed categories only"
+        token = client.get("/dashboard").cookies["pfa_csrf"]
+        response = client.post(
+            f"/review/{item.proposal_id}/approve",
+            data={"csrf_token": token},
+            headers=SAME_ORIGIN,
+        )
+
+    assert response.status_code == 200
+    assert writes == [("journal-1", None, "Groceries")]
 
 
 def test_review_failures_are_bounded_and_do_not_mutate_demo() -> None:

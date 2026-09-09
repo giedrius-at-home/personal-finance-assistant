@@ -14,7 +14,14 @@ services:
       PFA_RESEARCH_USER_AGENT: ${PFA_RESEARCH_USER_AGENT:-personal-finance-assistant/0.1 (https://github.com/giedrius-at-home/personal-finance-assistant)}
       PFA_OLLAMA_BASE_URL: ${PFA_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       PFA_OLLAMA_MODEL: ${PFA_OLLAMA_MODEL:-qwen3:8b}
+      PFA_CATEGORY_SUGGESTIONS_ENABLED: ${PFA_CATEGORY_SUGGESTIONS_ENABLED:-false}
+      PFA_CATEGORY_SUGGESTION_BATCH_SIZE: ${PFA_CATEGORY_SUGGESTION_BATCH_SIZE:-20}
       PFA_FIREFLY_BASE_URL: http://firefly:8080
+      PFA_FIREFLY_API_TOKEN: ${PFA_FIREFLY_API_TOKEN:-}
+      PFA_FIREFLY_SYNC_ENABLED: ${PFA_FIREFLY_SYNC_ENABLED:-false}
+      PFA_FIREFLY_SYNC_INTERVAL_SECONDS: ${PFA_FIREFLY_SYNC_INTERVAL_SECONDS:-86400}
+      PFA_FIREFLY_CATEGORY_WRITES_ENABLED: ${PFA_FIREFLY_CATEGORY_WRITES_ENABLED:-false}
+      PFA_OWNER_NAME_ALIASES: ${PFA_OWNER_NAME_ALIASES:-}
       PFA_FIREFLY_WEBHOOK_SECRET: ${PFA_FIREFLY_WEBHOOK_SECRET:-}
       PFA_GHOSTFOLIO_BASE_URL: http://ghostfolio:3333
     ports:
@@ -103,12 +110,22 @@ services:
       CAN_POST_AUTOIMPORT: "false"
       CAN_POST_FILES: "false"
       ENABLE_MAIL_REPORT: "false"
+      SSL_MODE: mixed
+      FIREFLY_III_ACCESS_TOKEN: ${PFA_IMPORTER_FIREFLY_ACCESS_TOKEN:-}
+      ENABLE_BANKING_APP_ID: ${PFA_ENABLE_BANKING_APP_ID:-}
+      ENABLE_BANKING_PRIVATE_KEY_FILE: /run/secrets/enable-banking-private-key.pem
     depends_on:
       firefly:
         condition: service_healthy
     ports:
       - "127.0.0.1:${PFA_IMPORTER_PORT:?Run make bootstrap}:8080"
+      - "127.0.0.1:${PFA_IMPORTER_HTTPS_PORT:-8444}:8443"
     restart: unless-stopped
+    secrets:
+      - source: importer_enable_banking_private_key
+        target: enable-banking-private-key.pem
+    volumes:
+      - importer_tls:/etc/ssl/private
     networks:
       - application
 
@@ -215,6 +232,13 @@ volumes:
   firefly_db:
   firefly_upload:
   ghostfolio_db:
+  importer_tls:
+
+secrets:
+  # /dev/null keeps first-time setups usable before Enable Banking is enabled.
+  # Configure an ignored owner-only PEM path to inject the real key read-only.
+  importer_enable_banking_private_key:
+    file: ${PFA_ENABLE_BANKING_PRIVATE_KEY_PATH:-/dev/null}
 
 networks:
   application:

@@ -252,6 +252,36 @@ async def test_propose_abstains_without_calibration_and_none_for_transfers(
 
 
 @pytest.mark.anyio
+async def test_review_only_mode_preserves_a_valid_uncalibrated_model_suggestion(
+    store,
+) -> None:
+    model = QwenCategoriser(
+        backend=FakeBackend([model_result("dining")]),
+        vocabulary=VOCAB,
+        model="qwen3:8b",
+    )
+    service = CategorisationService(
+        store=store,
+        model=model,
+        vocabulary=VOCAB,
+        baseline_rules=BASELINE,
+        calibration_policy=POLICY,
+        model_version="qwen3:8b",
+        review_model_suggestions=True,
+        clock=lambda: NOW,
+    )
+
+    suggestion = await service.propose(
+        source=source(), description="Local Cafe", kind=TransactionKind.OUTFLOW
+    )
+
+    assert suggestion is not None
+    assert suggestion.method is CategorisationMethod.MODEL
+    assert suggestion.proposed_category == "dining"
+    assert suggestion.status is ProposalStatus.PENDING
+
+
+@pytest.mark.anyio
 async def test_propose_automates_only_enabled_categories(store) -> None:
     service = make_service(
         store,

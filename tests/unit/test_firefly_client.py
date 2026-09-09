@@ -5,7 +5,11 @@ import httpx2
 import pytest
 
 from finance_assistant.integrations._http import UpstreamProtocolError
-from finance_assistant.integrations.firefly import FireflyClient
+from finance_assistant.integrations.firefly import (
+    FireflyCategoryClient,
+    FireflyCategoryConflictError,
+    FireflyClient,
+)
 
 
 @pytest.fixture
@@ -83,6 +87,7 @@ async def test_firefly_accounts_preserve_exact_decimal_strings() -> None:
                     "currency_code": "EUR",
                     "currency_decimal_places": 2,
                     "current_balance": "123.45",
+                    "include_net_worth": False,
                 },
             }
         ],
@@ -96,9 +101,12 @@ async def test_firefly_accounts_preserve_exact_decimal_strings() -> None:
             }
         },
     }
-    transport = httpx2.MockTransport(
-        lambda _request: httpx2.Response(200, json=payload)
-    )
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        assert request.url.params["type"] == "asset"
+        return httpx2.Response(200, json=payload)
+
+    transport = httpx2.MockTransport(handler)
 
     async with FireflyClient(
         base_url="http://firefly.test/api/v1",
@@ -108,6 +116,7 @@ async def test_firefly_accounts_preserve_exact_decimal_strings() -> None:
         accounts = await client.list_accounts()
 
     assert accounts[0].attributes.current_balance == Decimal("123.45")
+    assert accounts[0].attributes.include_net_worth is False
 
 
 @pytest.mark.anyio
@@ -166,6 +175,97 @@ async def test_firefly_transaction_range_and_schema() -> None:
     assert split.transaction_journal_id == "journal-1"
 
 
+def transaction_document(category: str | None) -> dict[str, object]:
+    return {
+        "data": {
+            "type": "transactions",
+            "id": "journal-1",
+            "attributes": {
+                "transactions": [
+                    {
+                        "transaction_journal_id": "journal-1",
+                        "type": "Withdrawal",
+                        "date": "2026-01-02T12:00:00+00:00",
+                        "currency_code": "EUR",
+                        "currency_decimal_places": 2,
+                        "amount": "12.34",
+                        "description": "Synthetic merchant",
+                        "source_id": "asset-1",
+                        "destination_id": "expense-1",
+                        "category_name": category,
+                    }
+                ]
+            },
+        }
+    }
+
+
+def test_firefly_normalizes_an_empty_category() -> None:
+    document = transaction_document("")
+    split = document["data"]["attributes"]["transactions"][0]  # type: ignore[index]
+    from finance_assistant.integrations.firefly import FireflyTransactionSplit
+
+    assert FireflyTransactionSplit.model_validate(split).category_name is None
+
+
+@pytest.mark.anyio
+async def test_reviewed_category_write_targets_only_the_exact_journal() -> None:
+    methods: list[str] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        methods.append(request.method)
+        assert request.url.path == "/api/v1/transactions/journal-1"
+        assert request.headers["authorization"] == "Bearer synthetic-token"
+        if request.method == "GET":
+            return httpx2.Response(200, json=transaction_document(None))
+        payload = __import__("json").loads(request.content)
+        assert payload == {
+            "apply_rules": False,
+            "fire_webhooks": True,
+            "transactions": [
+                {
+                    "transaction_journal_id": "journal-1",
+                    "category_name": "Groceries",
+                }
+            ],
+        }
+        return httpx2.Response(200, json=transaction_document("Groceries"))
+
+    async with FireflyCategoryClient(
+        base_url="http://firefly.test/api/v1",
+        token="synthetic-token",
+        transport=httpx2.MockTransport(handler),
+    ) as client:
+        await client.set_category(
+            transaction_id="journal-1",
+            expected_category=None,
+            category="Groceries",
+        )
+
+    assert methods == ["GET", "PUT"]
+
+
+@pytest.mark.anyio
+async def test_reviewed_category_write_refuses_stale_preview() -> None:
+    client = FireflyCategoryClient(
+        base_url="http://firefly.test/api/v1",
+        token="synthetic-token",
+        transport=httpx2.MockTransport(
+            lambda _request: httpx2.Response(
+                200, json=transaction_document("Manually changed")
+            )
+        ),
+    )
+
+    with pytest.raises(FireflyCategoryConflictError, match="changed"):
+        await client.set_category(
+            transaction_id="journal-1",
+            expected_category=None,
+            category="Groceries",
+        )
+    await client.aclose()
+
+
 @pytest.mark.anyio
 async def test_firefly_rejects_invalid_range_and_pagination() -> None:
     client = FireflyClient(
@@ -215,7 +315,7 @@ async def test_firefly_piggy_bank_contract_and_pagination() -> None:
             json={
                 "data": [
                     {
-                        "type": "piggy_banks",
+                        "type": "piggy-banks",
                         "id": f"synthetic-piggy-{page}",
                         "attributes": {
                             "name": "Synthetic emergency fund",

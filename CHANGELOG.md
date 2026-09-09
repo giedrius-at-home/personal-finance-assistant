@@ -8,12 +8,29 @@ project intends to use semantic versioning for its own releases.
 
 ### Changed
 
+- Made Firefly the authoritative category source for dashboard reporting and
+  added opt-in, owner-reviewed, category-only updates with stale-preview
+  conflict detection; local model suggestions still cannot write automatically.
+- Added bounded local-Qwen suggestion generation for recent uncategorised
+  non-transfer transactions, with explicit opt-in and a dashboard trigger.
+- Pruned deleted Firefly accounts and transactions from the current dashboard
+  after complete syncs, added configurable owner-name transfer recognition, and
+  made cash-account balances and pay-cycle context clearer on the dashboard.
+- Formatted dashboard money at each currency's declared precision and honored
+  Firefly's per-account net-worth inclusion preference.
 - Retained SQLite as the supported local single-owner v1 derived-state database
   after prototype review, with explicit single-writer, practical-validation,
   recovery, and future migration triggers recorded in ADR 0010.
 
 ### Added
 
+- Durable, configurable importer HTTPS with a persisted local certificate,
+  read-only injection of ignored Enable Banking credentials, separate durable
+  Firefly importer authentication, and documented per-bank recovery/rotation.
+- Disabled-by-default Firefly polling inside the single gateway writer, with an
+  immediate startup sync, configurable daily interval, asset-account filtering,
+  idempotent derived-state updates, credential-safe logging, and shutdown-safe
+  cancellation.
 - An owner-scoped native macOS launcher with a source-controlled icon that can
   start Colima and the existing local containers, wait for loopback health, and
   open the dashboard without reading the repository or embedding credentials or
