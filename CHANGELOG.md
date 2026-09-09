@@ -38,6 +38,11 @@ project intends to use semantic versioning for its own releases.
 
 ### Fixed
 
+- Added an explicit confirmed resolution for blocked CSV previews so owners can
+  import only definitely new rows while leaving possible duplicates and
+  unreadable rows unchanged.
+- Stopped guessing a CSV provider from transaction descriptions and rejected
+  confident filename/account mismatches before staging an import.
 - Passed the selected Firefly source account ID—not its internal canonical ID—
   from the dashboard CSV form, so explicit account selection bypasses ambiguous
   bank-name detection correctly.

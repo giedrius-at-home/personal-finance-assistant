@@ -188,8 +188,21 @@ def install_web_routes(
         if csv_import_coordinator is None or demo_mode:
             raise HTTPException(status_code=409, detail="CSV imports are disabled")
         preview_id = _one(values, "preview_id", max_length=128)
+        resolution_values = values.get("resolution", ["strict"])
+        if len(resolution_values) != 1 or resolution_values[0] not in {
+            "strict",
+            "skip_flagged",
+        }:
+            raise HTTPException(status_code=422, detail="invalid CSV resolution")
+        skip_flagged = resolution_values[0] == "skip_flagged"
+        if skip_flagged and values.get("confirm_skip") != ["on"]:
+            raise HTTPException(
+                status_code=422, detail="confirm that flagged rows should be skipped"
+            )
         try:
-            imported = await csv_import_coordinator.commit(preview_id)
+            imported = await csv_import_coordinator.commit(
+                preview_id, skip_flagged=skip_flagged
+            )
         except CsvImportConflictError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
         except (FireflyCsvImportWriteError, UpstreamError) as error:

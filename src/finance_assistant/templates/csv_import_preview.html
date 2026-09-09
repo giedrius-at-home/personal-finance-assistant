@@ -29,7 +29,8 @@
     {% if preview.row_count > preview.rows|length %}<p class="muted">Showing the first {{ preview.rows|length }} of {{ preview.row_count }} rows.</p>{% endif %}
     <div class="row import-actions">
       <a class="button secondary" href="/dashboard">Cancel</a>
-      {% if preview.committable %}<form method="post" action="/imports/csv/commit"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="preview_id" value="{{ preview.preview_id }}"><button>Import {{ preview.new_count }} new transaction{% if preview.new_count != 1 %}s{% endif %}</button></form>{% endif %}
+      {% if preview.committable %}<form method="post" action="/imports/csv/commit"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="preview_id" value="{{ preview.preview_id }}"><input type="hidden" name="resolution" value="strict"><button>Import {{ preview.new_count }} new transaction{% if preview.new_count != 1 %}s{% endif %}</button></form>
+      {% else %}<form method="post" action="/imports/csv/commit" class="flagged-resolution"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="preview_id" value="{{ preview.preview_id }}"><input type="hidden" name="resolution" value="skip_flagged"><label><span><input name="confirm_skip" type="checkbox" required> I reviewed this preview and want to skip {{ preview.possible_duplicate_count + preview.rejected_count }} flagged row{% if preview.possible_duplicate_count + preview.rejected_count != 1 %}s{% endif %}.</span><small>Only the {{ preview.new_count }} rows marked new will be imported. Possible duplicates and unreadable rows will remain unchanged.</small></label><button>Import {{ preview.new_count }} new transaction{% if preview.new_count != 1 %}s{% endif %}</button></form>{% endif %}
     </div>
   </article>
 </main></body></html>

@@ -152,6 +152,17 @@ def test_provider_neutral_parser_handles_common_exports(
     assert detect_bank_label(filename, rows) != "Connected bank CSV"
 
 
+def test_generic_filename_does_not_guess_bank_from_transaction_descriptions() -> None:
+    rows, rejected = parse_bank_csv(
+        b"Date,Amount,Currency,Description\n"
+        b"2026-09-01,-1.00,EUR,Transfer mentioning ABN AMRO\n",
+        filename="statement.csv",
+    )
+
+    assert rejected == 0
+    assert detect_bank_label("statement.csv", rows) == "Connected bank CSV"
+
+
 def test_parser_rejects_unsafe_or_unmappable_files() -> None:
     with pytest.raises(CsvImportError, match="non-empty"):
         parse_bank_csv(b"", filename="empty.csv")
@@ -170,7 +181,7 @@ def test_parser_rejects_unsafe_or_unmappable_files() -> None:
 @pytest.mark.anyio
 async def test_preview_classifies_existing_possible_and_new_rows() -> None:
     client = FakeClient(
-        accounts=(account(),),
+        accounts=(account(name="ABN AMRO · EUR"),),
         transactions=(
             transaction("Synthetic exact"),
             transaction("Synthetic other", amount="50.00"),
@@ -199,6 +210,24 @@ async def test_preview_classifies_existing_possible_and_new_rows() -> None:
 
 
 @pytest.mark.anyio
+async def test_preview_rejects_confident_bank_and_account_name_mismatch() -> None:
+    client = FakeClient(
+        accounts=(account(name="Trade Republic · EUR"),),
+    )
+    coordinator = CsvImportCoordinator(client_factory=lambda: client)
+
+    with pytest.raises(CsvImportConflictError, match="bank does not match"):
+        await coordinator.preview(
+            content=(
+                b"Date,Amount,Currency,Description\n"
+                b"2026-09-01,-1.00,EUR,Synthetic merchant\n"
+            ),
+            filename="abn-amro.csv",
+            account_id="asset-1",
+        )
+
+
+@pytest.mark.anyio
 async def test_exact_preview_commits_only_new_rows_once() -> None:
     existing_row = ParsedCsvRow(
         line_number=2,
@@ -212,7 +241,7 @@ async def test_exact_preview_commits_only_new_rows_once() -> None:
         existing_row, account_id="asset-1", bank_label="ABN AMRO"
     )
     client = FakeClient(
-        accounts=(account(),),
+        accounts=(account(name="ABN AMRO · EUR"),),
         transactions=(
             transaction("Synthetic exact", external_id=existing_external_id),
         ),
@@ -258,6 +287,29 @@ async def test_identical_rows_without_provider_reference_require_attention() -> 
         CsvRowStatus.POSSIBLE_DUPLICATE,
     )
     assert not preview.committable
+
+
+@pytest.mark.anyio
+async def test_owner_can_explicitly_skip_flagged_rows_and_import_only_new() -> None:
+    payload = (
+        b"Date,Amount,Currency,Description\n"
+        b"invalid,-3.00,EUR,Synthetic invalid\n"
+        b"2026-09-01,-1.00,EUR,Synthetic repeated\n"
+        b"2026-09-01,-1.00,EUR,Synthetic repeated\n"
+        b"2026-09-02,-2.00,EUR,Synthetic new\n"
+    )
+    client = FakeClient(accounts=(account(),))
+    coordinator = CsvImportCoordinator(client_factory=lambda: client)
+    preview = await coordinator.preview(
+        content=payload, filename="bank.csv", account_id="asset-1"
+    )
+
+    assert preview.rejected_count == 1
+    assert preview.possible_duplicate_count == 1
+    assert preview.new_count == 2
+    assert await coordinator.commit(preview.preview_id, skip_flagged=True) == 2
+    assert len(client.writes) == 2
+    assert all(row.description != "Synthetic repeated" for row, _ in client.writes[1:])
 
 
 @pytest.mark.anyio

@@ -42,7 +42,7 @@ EUR = Currency(code="EUR", minor_unit=2)
 class StubCsvCoordinator:
     def __init__(self) -> None:
         self.preview_calls: list[tuple[bytes, str, str]] = []
-        self.commit_calls: list[str] = []
+        self.commit_calls: list[tuple[str, bool]] = []
 
     async def preview(
         self, *, content: bytes, filename: str, account_id: str
@@ -68,8 +68,8 @@ class StubCsvCoordinator:
             ),
         )
 
-    async def commit(self, preview_id: str) -> int:
-        self.commit_calls.append(preview_id)
+    async def commit(self, preview_id: str, *, skip_flagged: bool = False) -> int:
+        self.commit_calls.append((preview_id, skip_flagged))
         return 1
 
 
@@ -93,10 +93,10 @@ class RaisingCsvCoordinator(StubCsvCoordinator):
             content=content, filename=filename, account_id=account_id
         )
 
-    async def commit(self, preview_id: str) -> int:
+    async def commit(self, preview_id: str, *, skip_flagged: bool = False) -> int:
         if self.commit_error is not None:
             raise self.commit_error
-        return await super().commit(preview_id)
+        return await super().commit(preview_id, skip_flagged=skip_flagged)
 
 
 def test_money_display_uses_currency_precision_without_negative_zero() -> None:
@@ -272,7 +272,7 @@ def test_csv_upload_requires_preview_and_exact_owner_commit(tmp_path: Path) -> N
     assert coordinator.preview_calls == [
         (b"safe synthetic CSV", "synthetic.csv", "asset-1")
     ]
-    assert coordinator.commit_calls == ["p" * 43]
+    assert coordinator.commit_calls == [("p" * 43, False)]
 
 
 def test_csv_upload_rejects_cross_origin_and_oversized_files(tmp_path: Path) -> None:
@@ -305,6 +305,74 @@ def test_csv_upload_rejects_cross_origin_and_oversized_files(tmp_path: Path) -> 
 
     assert foreign.status_code == 403
     assert oversized.status_code == 413
+
+
+def test_blocked_csv_preview_offers_confirmed_skip_resolution(tmp_path: Path) -> None:
+    class FlaggedCsvCoordinator(StubCsvCoordinator):
+        async def preview(
+            self, *, content: bytes, filename: str, account_id: str
+        ) -> CsvImportPreview:
+            self.preview_calls.append((content, filename, account_id))
+            return CsvImportPreview(
+                preview_id="f" * 43,
+                bank_label="Synthetic bank",
+                account_name="Synthetic account",
+                row_count=3,
+                new_count=1,
+                duplicate_count=0,
+                possible_duplicate_count=1,
+                rejected_count=1,
+                rows=(
+                    CsvPreviewRow(
+                        booked_on=date(2026, 9, 1),
+                        amount=Decimal("-1.25"),
+                        currency="EUR",
+                        description="Synthetic merchant",
+                        status=CsvRowStatus.NEW,
+                    ),
+                ),
+            )
+
+    coordinator = FlaggedCsvCoordinator()
+    with TestClient(
+        create_app(
+            database_path=tmp_path / "state.sqlite3",
+            csv_import_coordinator=coordinator,  # type: ignore[arg-type]
+        )
+    ) as client:
+        token = client.get("/dashboard").cookies["pfa_csrf"]
+        preview = client.post(
+            "/imports/csv/preview",
+            data={"csrf_token": token, "account_id": "asset-1"},
+            files={"upload": ("synthetic.csv", b"safe synthetic CSV", "text/csv")},
+            headers=SAME_ORIGIN,
+        )
+        assert preview.status_code == 200
+        assert "skip 2 flagged rows" in preview.text
+        unconfirmed = client.post(
+            "/imports/csv/commit",
+            data={
+                "csrf_token": token,
+                "preview_id": "f" * 43,
+                "resolution": "skip_flagged",
+            },
+            headers=SAME_ORIGIN,
+        )
+        assert unconfirmed.status_code == 422
+        committed = client.post(
+            "/imports/csv/commit",
+            data={
+                "csrf_token": token,
+                "preview_id": "f" * 43,
+                "resolution": "skip_flagged",
+                "confirm_skip": "on",
+            },
+            headers=SAME_ORIGIN,
+            follow_redirects=False,
+        )
+
+    assert committed.status_code == 303
+    assert coordinator.commit_calls == [("f" * 43, True)]
 
 
 def test_csv_routes_fail_closed_and_render_refresh_status(tmp_path: Path) -> None:

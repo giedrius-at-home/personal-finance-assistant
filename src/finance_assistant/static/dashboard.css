@@ -234,6 +234,23 @@ label {
 .import-actions {
   margin-top: 1rem;
 }
+.flagged-resolution {
+  display: grid;
+  gap: 0.7rem;
+  flex: 1 1 28rem;
+  padding: 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff8e8;
+}
+.flagged-resolution label span {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+.flagged-resolution input[type="checkbox"] {
+  margin-top: 0.2rem;
+}
 .full {
   grid-column: 1/-1;
 }

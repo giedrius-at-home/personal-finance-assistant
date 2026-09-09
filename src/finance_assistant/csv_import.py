@@ -194,6 +194,7 @@ class CsvImportCoordinator:
         async with self._client_factory() as client:
             accounts = await client.list_accounts()
             account = _one_account(accounts, account_id, bank_label=bank_label)
+            _validate_account_bank(account, bank_label=bank_label)
             _validate_account_currency(rows, account)
             existing = await client.list_transactions(
                 start=min(row.booked_on for row in rows),
@@ -236,9 +237,9 @@ class CsvImportCoordinator:
         )
         return preview
 
-    async def commit(self, preview_id: str) -> int:
+    async def commit(self, preview_id: str, *, skip_flagged: bool = False) -> int:
         staged = self._store.pop(preview_id, now=self._clock())
-        if not staged.preview.committable:
+        if not staged.preview.committable and not skip_flagged:
             raise CsvImportConflictError(
                 "CSV preview contains rejected or possible duplicate rows"
             )
@@ -375,10 +376,6 @@ def detect_bank_label(filename: str, rows: tuple[ParsedCsvRow, ...]) -> str:
     }
     for marker, label in labels.items():
         if marker in normalized:
-            return label
-    descriptions = " ".join(row.description.casefold() for row in rows[:20])
-    for marker, label in labels.items():
-        if marker in descriptions:
             return label
     return "Connected bank CSV"
 
@@ -587,6 +584,17 @@ def _validate_account_currency(
     if any(row.currency != account.attributes.currency_code for row in rows):
         raise CsvImportConflictError(
             "CSV currency does not match the selected Firefly account"
+        )
+
+
+def _validate_account_bank(account: FireflyAccount, *, bank_label: str) -> None:
+    """Reject a confident filename/account mismatch before staging any rows."""
+
+    if bank_label == "Connected bank CSV":
+        return
+    if _normalize_header(bank_label) not in _normalize_header(account.attributes.name):
+        raise CsvImportConflictError(
+            "CSV bank does not match the selected Firefly account"
         )
 
 
