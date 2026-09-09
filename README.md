@@ -6,6 +6,10 @@ form to see cycle income and spending. Account history and category coverage
 come from Firefly; last successful Firefly refresh is distinct from a bank CSV
 import. See [operations](docs/OPERATIONS.md#account-health-and-payday-overview).
 
+Saved Firefly subscriptions also appear with expected dates, cost ranges and
+linked-payment evidence. Until payday is configured, the panel covers the next
+30 days. Expected costs are forecasts, separate from recorded spending.
+
 [![CI](https://github.com/giedrius-at-home/personal-finance-assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/giedrius-at-home/personal-finance-assistant/actions/workflows/ci.yml)
 
 Local-first personal finance intelligence layer for Firefly III and Ghostfolio,

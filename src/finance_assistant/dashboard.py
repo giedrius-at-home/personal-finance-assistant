@@ -40,6 +40,7 @@ from finance_assistant.domain.reporting import (
 )
 from finance_assistant.domain.settings import OwnerSettings
 from finance_assistant.persistence.sqlite import SQLiteDerivedState
+from finance_assistant.subscriptions import SubscriptionReport, subscription_report
 
 
 class ReviewItem(StrictModel):
@@ -83,6 +84,7 @@ class DashboardView(StrictModel):
     last_firefly_refresh: AwareDatetime | None = None
     last_firefly_attempt: AwareDatetime | None = None
     firefly_refresh_failed: bool = False
+    subscriptions: SubscriptionReport
     review_items: tuple[ReviewItem, ...] = Field(max_length=100)
     taxonomy: tuple[TaxonomyRecommendation, ...]
     settings: OwnerSettings
@@ -165,6 +167,13 @@ class DashboardService:
             if self.state and not self.demo_mode
             else (None, None, False)
         )
+        cash = cash_overview(
+            accounts,
+            transactions,
+            as_of=now,
+            timezone=settings.timezone,
+            payday_day=settings.payday_day,
+        )
         return DashboardView(
             generated_at=now,
             data_mode="invented demo" if self.demo_mode else "local derived state",
@@ -172,15 +181,17 @@ class DashboardService:
             last_firefly_refresh=last_success,
             last_firefly_attempt=last_attempt,
             firefly_refresh_failed=refresh_failed,
+            subscriptions=subscription_report(
+                self.state.load_subscriptions()
+                if self.state and not self.demo_mode
+                else None,
+                now=now,
+                timezone=settings.timezone,
+                next_payday=cash.next_payday,
+            ),
             weekly=weekly,
             net_worth=net_worth_report(accounts, as_of=now),
-            cash_overview=cash_overview(
-                accounts,
-                transactions,
-                as_of=now,
-                timezone=settings.timezone,
-                payday_day=settings.payday_day,
-            ),
+            cash_overview=cash,
             review_items=tuple(
                 _review_item(item, transactions_by_source.get(item.source.identity))
                 for item in proposals

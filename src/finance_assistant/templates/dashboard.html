@@ -35,7 +35,19 @@
   </div>
   <p class="muted">Observed through {{ view.cash_overview.through_date }}. Payday is your chosen calendar date, not a confirmed salary payment; weekends and holidays are not adjusted. Cash flow is income minus spending, not your available balance.</p>
   {% else %}<p>Choose your usual monthly payday below to see income and spending from payday to payday.</p>{% endif %}
-  <p class="notice"><strong>Spending allowance not available yet.</strong> Upcoming bills, protected savings and statement completeness still need to be verified before we can estimate what is available to spend.</p>
+  <p class="notice"><strong>Spending allowance not available yet.</strong> Your saved subscriptions are shown below. Payment matching, protected savings and statement completeness still need to be verified before we can estimate what is available to spend.</p>
+</section>
+<section class="card cash-overview" aria-label="Subscriptions and bills">
+  <div class="eyebrow">Saved in Firefly</div><h2>Subscriptions &amp; upcoming bills</h2>
+  {% if view.subscriptions.fetched_at %}
+  <p>Expected payments through {{ view.subscriptions.through_date }}{% if not view.cash_overview.next_payday %} (next 30 days){% else %} (before payday){% endif %}.</p>
+  {% if view.subscriptions.stale or view.firefly_refresh_failed %}<p class="notice">Subscription data needs a refresh. The schedule may be incomplete; expected-cost totals are withheld.</p>
+  {% else %}{% for cost in view.subscriptions.expected_costs %}<p><strong>{{ cost.amount|money(cost.currency) }} {{ cost.currency.code }}</strong> expected at the configured upper limits.</p>{% else %}<p>No expected dates returned in this window. This does not confirm every bill is paid.</p>{% endfor %}{% endif %}
+  <div class="table-scroll"><table><thead><tr><th>Subscription</th><th>Expected cost per payment</th><th>Expected dates</th><th>Linked payment evidence</th></tr></thead><tbody>
+  {% for bill in view.subscriptions.rows %}<tr><td>{{ bill.name }}<br><small>{{ bill.frequency }}</small></td><td>{{ bill.amount_min|money(bill.currency) }} – {{ bill.amount_max|money(bill.currency) }} {{ bill.currency.code }}</td><td>{% for date in bill.expected_dates %}{{ date }}{% if not loop.last %}<br>{% endif %}{% else %}No date in this window{% endfor %}</td><td>{% if bill.last_matched_on %}Last linked payment: {{ bill.last_matched_on }}{% else %}No linked payment in the checked period{% endif %}</td></tr>{% else %}<tr><td colspan="4">No active subscriptions in this snapshot.</td></tr>{% endfor %}
+  </tbody></table></div>
+  <p class="muted">Schedules and payment links come from Firefly. Configured ranges are estimates, not additional spending. Missing links do not prove a bill is unpaid; a previous linked payment does not prove the next one is paid.</p>
+  {% else %}<p>Subscriptions will appear after a successful Firefly refresh.</p>{% endif %}
 </section>
 <section class="card cash-overview" aria-label="Account data health">
   <div class="eyebrow">Can I rely on these figures?</div><h2>Account data health</h2>

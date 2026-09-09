@@ -35,6 +35,7 @@ from finance_assistant.domain.canonical import (
 from finance_assistant.domain.categorisation import CalibrationExample
 from finance_assistant.domain.models import AlertSeverity, BudgetEvaluation, Money
 from finance_assistant.domain.settings import OwnerSettings, SettingsPreview
+from finance_assistant.subscriptions import SubscriptionSnapshot
 
 CanonicalRecord = CanonicalAccount | CanonicalTransaction
 RecordKind = Literal["account", "transaction"]
@@ -285,6 +286,19 @@ DROP TABLE IF EXISTS firefly_sync_health;
 DELETE FROM schema_migrations WHERE version = 7;
 """
 
+MIGRATION_8_UP = """
+CREATE TABLE subscription_snapshot (
+    singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+    payload_json TEXT NOT NULL
+);
+INSERT INTO schema_migrations(version, applied_at) VALUES (8, CURRENT_TIMESTAMP);
+"""
+
+MIGRATION_8_DOWN = """
+DROP TABLE IF EXISTS subscription_snapshot;
+DELETE FROM schema_migrations WHERE version = 8;
+"""
+
 
 def _serialize(record: CanonicalRecord) -> str:
     return json.dumps(
@@ -368,6 +382,8 @@ class SQLiteDerivedState:
                 self._connection.executescript(MIGRATION_6_UP)
             if version < 7:
                 self._connection.executescript(MIGRATION_7_UP)
+            if version < 8:
+                self._connection.executescript(MIGRATION_8_UP)
 
     def migrate_down(self) -> None:
         """Reverse the prototype schema only when no financial state exists."""
@@ -390,12 +406,14 @@ class SQLiteDerivedState:
                           OR EXISTS(SELECT 1 FROM notification_attempts)
                           OR EXISTS(SELECT 1 FROM category_proposals)
                           OR EXISTS(SELECT 1 FROM category_corrections)
-                          OR EXISTS(SELECT 1 FROM settings_history)"""
+                          OR EXISTS(SELECT 1 FROM settings_history)
+                          OR EXISTS(SELECT 1 FROM subscription_snapshot)"""
             ).fetchone()[0]
             if populated:
                 raise PersistenceConflictError(
                     "refusing to migrate down populated state"
                 )
+            self._connection.executescript(MIGRATION_8_DOWN)
             self._connection.executescript(MIGRATION_7_DOWN)
             self._connection.executescript(MIGRATION_6_DOWN)
             self._connection.executescript(MIGRATION_5_DOWN)
@@ -431,6 +449,21 @@ class SQLiteDerivedState:
             datetime.fromisoformat(row[1]),
             bool(row[2]),
         )
+
+    def save_subscriptions(self, snapshot: SubscriptionSnapshot) -> None:
+        with self._lock, self._connection:
+            self._connection.execute(
+                "INSERT INTO subscription_snapshot VALUES (1, ?) "
+                "ON CONFLICT(singleton) DO UPDATE SET "
+                "payload_json = excluded.payload_json",
+                (snapshot.model_dump_json(),),
+            )
+
+    def load_subscriptions(self) -> SubscriptionSnapshot | None:
+        row = self._connection.execute(
+            "SELECT payload_json FROM subscription_snapshot WHERE singleton = 1"
+        ).fetchone()
+        return SubscriptionSnapshot.model_validate_json(row[0]) if row else None
 
     def upsert(self, record: CanonicalRecord, *, observed_at: datetime) -> bool:
         """Insert/update one projection; return false for an exact replay."""

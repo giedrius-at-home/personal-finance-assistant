@@ -36,6 +36,10 @@ async def test_runner_records_success_then_failure_without_claiming_new_success(
     monkeypatch.setattr(
         "finance_assistant.ingestion.runtime.IngestionService.ingest", ingest
     )
+    monkeypatch.setattr(
+        "finance_assistant.ingestion.runtime.FireflyClient.list_bills",
+        AsyncMock(return_value=()),
+    )
     runner = FireflySyncRunner(
         state=state,
         settings=FireflySyncSettings(

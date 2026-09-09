@@ -49,6 +49,9 @@ project intends to use semantic versioning for its own releases.
 
 ### Added
 
+- Read-only Firefly subscription ingestion and an upcoming-bills panel using
+  Firefly-calculated expected dates, configured cost ranges and linked-payment
+  evidence; stale totals are withheld and missing links are not called unpaid.
 - An account-health panel with observed history, saved-category coverage and
   durable Firefly refresh outcomes, plus configurable monthly payday cash flow.
   Bank statement completeness and reconciliation remain explicitly unverified;

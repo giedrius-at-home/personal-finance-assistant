@@ -42,10 +42,28 @@ upcoming commitments, protected cash and coverage have been established.
 ## Consequences
 
 The dashboard can give useful pay-cycle context with explainable limits.
-Confirmed bills/subscriptions, balance observations and import receipts are
+Matched subscription payments, balance observations and import receipts are
 follow-ups needed for an available-to-spend forecast. The LLM remains
 suggestion-only. No new financial data is sent to external services.
 
 Schema 7 is additive. Older code can ignore its status table; downgrading a
 populated database remains disallowed. Existing settings JSON defaults payday
 to unset. The separate weekly report retains its current behavior in this PR.
+
+## Subscription evidence
+
+Use the existing Firefly subscriptions via the read-only bills endpoint with an
+explicit date window. Reuse Firefly's calculated expected dates and linked
+payment dates rather than duplicating its recurrence or matching engine.
+Store a bounded typed snapshot in the additive schema-8 table; omit notes and
+transaction identifiers. Replace only after a validated fetch, so deleted bills
+disappear while failed fetches retain last-known evidence. The health flag makes
+failures visible.
+
+Display configured cost ranges and upper-bound totals for distinct expected
+dates through the day before payday (or the next 30 days when unset), respecting
+active state and end dates. This is schedule evidence, not verified outstanding
+debt. Payment dates are shown as historical links, not used to infer that a
+future bill was paid. Missing links remain explicit. Stale/out-of-window totals
+and totals after a failed refresh are withheld in the UI. Do not present an
+available-to-spend number until the other planning inputs are verified.

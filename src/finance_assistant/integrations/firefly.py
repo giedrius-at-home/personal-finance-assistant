@@ -175,6 +175,29 @@ class FireflyBudgetLimit(FireflyModel):
     attributes: FireflyBudgetLimitAttributes
 
 
+class FireflyBillPayment(FireflyModel):
+    date: AwareDatetime
+
+
+class FireflyBillAttributes(FireflyModel):
+    name: str = Field(min_length=1, max_length=256)
+    active: bool
+    currency_code: str = Field(min_length=3, max_length=3)
+    currency_decimal_places: int = Field(ge=0, le=16)
+    amount_min: FiniteDecimal
+    amount_max: FiniteDecimal
+    repeat_freq: str = Field(min_length=1, max_length=32)
+    end_date: AwareDatetime | None = None
+    pay_dates: tuple[AwareDatetime, ...]
+    paid_dates: tuple[FireflyBillPayment, ...]
+
+
+class FireflyBill(FireflyModel):
+    type: str = Field(pattern="^bills$")
+    id: str = Field(min_length=1, max_length=128)
+    attributes: FireflyBillAttributes
+
+
 class FireflyClient:
     """Authenticated client exposing only read operations required for ingestion."""
 
@@ -241,6 +264,15 @@ class FireflyClient:
 
     async def list_piggy_banks(self) -> tuple[FireflyPiggyBank, ...]:
         return await self._paginate("piggy-banks", FireflyPiggyBank)
+
+    async def list_bills(self, *, start: date, end: date) -> tuple[FireflyBill, ...]:
+        if start > end:
+            raise ValueError("start cannot be after end")
+        return await self._paginate(
+            "bills",
+            FireflyBill,
+            params={"start": start.isoformat(), "end": end.isoformat()},
+        )
 
     async def list_budget_limits(
         self, *, start: date, end: date

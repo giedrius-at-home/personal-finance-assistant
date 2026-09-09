@@ -325,6 +325,33 @@ Gateway startup adds the schema-7 refresh-status table. It stores timestamps
 and a boolean outcome only. It does not migrate, rewrite or reconcile financial
 records. The old application can ignore this additive table during rollback.
 
+### Saved subscriptions
+
+Each successful Firefly refresh now reads subscriptions using the `/bills`
+endpoint. The local snapshot retains names, configured ranges/currencies,
+active/end state, Firefly-generated expected dates and payment dates only;
+notes, transaction identifiers and unused fields are discarded. Schema 8
+adds a single replaceable snapshot row. Full replacement removes deleted bills;
+a failed fetch retains the previous snapshot and flags the refresh as failed.
+
+The request covers the previous 31 days through the next 35 days. Displayed
+expected dates stop the day before configured payday, or 30 days ahead if
+payday is unset. Expected totals use configured upper bounds, once per distinct
+date and separately per currency. Inactive/expired subscriptions are excluded.
+Firefly can return a date beyond the requested period, so the dashboard filters
+the returned dates to its display window and each subscription's end date.
+
+An old snapshot (over two days), insufficient requested coverage, or a failed
+Firefly refresh withholds the displayed cost totals. The underlying schedule
+still needs owner review: Firefly generates dates using its recurrence and
+linked-payment behavior, and may cap results for frequent recurring bills.
+
+Payment evidence refers to links within the fetched period. A missing link does
+not prove non-payment; an earlier payment does not prove the next payment was
+made. Match payments to subscriptions in Firefly and allow the normal source
+refresh to update the dashboard. This feature does not create payment links,
+alter transactions or subtract forecasts from bank balances.
+
 ## Alert scheduling and macOS delivery
 
 Policy version `2026-09-v1` evaluates after a successful source event and against
