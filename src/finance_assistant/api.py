@@ -17,6 +17,7 @@ from finance_assistant.categorisation_runtime import (
     CategorySuggestionRunner,
     CategorySuggestionSettings,
 )
+from finance_assistant.csv_import import CsvImportCoordinator
 from finance_assistant.domain.alerts import evaluate_budget
 from finance_assistant.domain.goals import evaluate_goal
 from finance_assistant.domain.models import (
@@ -25,14 +26,22 @@ from finance_assistant.domain.models import (
     GoalEvaluation,
     SavingsGoal,
 )
+from finance_assistant.domain.research import (
+    MerchantResearchRequest,
+    MerchantResearchResult,
+)
 from finance_assistant.ingestion.runtime import (
     FireflyCategoryWriteSettings,
+    FireflyCsvImportSettings,
     FireflySyncRunner,
     FireflySyncSettings,
     run_firefly_sync_loop,
 )
 from finance_assistant.ingestion.service import IngestionResult
-from finance_assistant.integrations.firefly import FireflyCategoryClient
+from finance_assistant.integrations.firefly import (
+    FireflyCategoryClient,
+    FireflyCsvImportClient,
+)
 from finance_assistant.integrations.firefly_webhook import (
     MAX_WEBHOOK_BYTES,
     FireflyWebhookReceiver,
@@ -41,6 +50,8 @@ from finance_assistant.integrations.firefly_webhook import (
     WebhookPayloadError,
 )
 from finance_assistant.persistence.sqlite import SQLiteDerivedState
+from finance_assistant.research import RestrictedResearchGateway
+from finance_assistant.research_cache import ResearchCache
 from finance_assistant.web import install_web_routes, new_csrf_token
 
 
@@ -53,11 +64,22 @@ def create_app(
     allowed_hosts: frozenset[str] = frozenset({"127.0.0.1", "localhost", "::1"}),
     firefly_sync_settings: FireflySyncSettings | None = None,
     firefly_category_write_settings: FireflyCategoryWriteSettings | None = None,
+    firefly_csv_import_settings: FireflyCsvImportSettings | None = None,
     category_suggestion_settings: CategorySuggestionSettings | None = None,
     category_updater: (
         Callable[[str, str | None, str | None], Awaitable[None]] | None
     ) = None,
+    csv_import_coordinator: CsvImportCoordinator | None = None,
     owner_name_aliases: tuple[str, ...] = (),
+    research_enabled: bool = False,
+    research_cache_path: Path | str | None = None,
+    research_user_agent: str = (
+        "personal-finance-assistant/0.1 "
+        "(https://github.com/giedrius-at-home/personal-finance-assistant)"
+    ),
+    merchant_researcher: (
+        Callable[[MerchantResearchRequest], Awaitable[MerchantResearchResult]] | None
+    ) = None,
 ) -> FastAPI:
     """Build the API with an explicitly configured webhook boundary."""
 
@@ -69,6 +91,43 @@ def create_app(
         if state is not None and category_suggestion_settings is not None
         else None
     )
+    sync_runner = (
+        FireflySyncRunner(state=state, settings=firefly_sync_settings)
+        if state is not None and firefly_sync_settings is not None
+        else None
+    )
+    sync_lock = asyncio.Lock()
+    research_cache: ResearchCache | None = None
+    research_gateway: RestrictedResearchGateway | None = None
+    configured_merchant_researcher = merchant_researcher
+    if configured_merchant_researcher is None and research_enabled:
+        if research_cache_path is None:
+            raise ValueError("research_cache_path is required when research is enabled")
+        research_cache = ResearchCache(research_cache_path)
+        research_gateway = RestrictedResearchGateway(
+            enabled=True,
+            cache=research_cache,
+            user_agent=research_user_agent,
+        )
+        configured_merchant_researcher = research_gateway.merchant
+
+    async def sync_and_suggest() -> IngestionResult:
+        if sync_runner is None:
+            raise RuntimeError("Firefly sync is disabled")
+        async with sync_lock:
+            result = await sync_runner()
+            if suggestion_runner is not None:
+                await suggestion_runner()
+            return result
+
+    configured_csv_importer = csv_import_coordinator
+    if configured_csv_importer is None and firefly_csv_import_settings is not None:
+        configured_csv_importer = CsvImportCoordinator(
+            client_factory=lambda: FireflyCsvImportClient(
+                base_url=f"{firefly_csv_import_settings.base_url}/api/v1",
+                token=firefly_csv_import_settings.token,
+            )
+        )
 
     async def configured_category_updater(
         transaction_id: str,
@@ -90,15 +149,7 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
         sync_task: asyncio.Task[None] | None = None
-        if state is not None and firefly_sync_settings is not None:
-            sync_runner = FireflySyncRunner(state=state, settings=firefly_sync_settings)
-
-            async def sync_and_suggest() -> IngestionResult:
-                result = await sync_runner()
-                if suggestion_runner is not None:
-                    await suggestion_runner()
-                return result
-
+        if sync_runner is not None and firefly_sync_settings is not None:
             sync_task = asyncio.create_task(
                 run_firefly_sync_loop(
                     sync_and_suggest,
@@ -116,6 +167,10 @@ def create_app(
                     pass
             if state is not None:
                 state.close()
+            if research_gateway is not None:
+                await research_gateway.aclose()
+            if research_cache is not None:
+                research_cache.close()
 
     application = FastAPI(
         title="Personal Finance Assistant",
@@ -149,7 +204,7 @@ def create_app(
         response = await call_next(request)
         response.headers["Cache-Control"] = "no-store"
         response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; style-src 'self'; img-src 'self'; "
+            "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; "
             "form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
         )
         response.headers["Referrer-Policy"] = "no-referrer"
@@ -193,6 +248,9 @@ def create_app(
             )
         ),
         suggestion_runner=suggestion_runner,
+        csv_import_coordinator=configured_csv_importer,
+        csv_post_import_sync=sync_and_suggest if sync_runner is not None else None,
+        merchant_researcher=configured_merchant_researcher,
     )
     application.include_router(web_router)
     return application
@@ -270,6 +328,7 @@ async def receive_firefly_webhook(request: Request) -> dict[str, str]:
 
 _sync_settings = FireflySyncSettings.from_environment(os.environ)
 _category_write_settings = FireflyCategoryWriteSettings.from_environment(os.environ)
+_csv_import_settings = FireflyCsvImportSettings.from_environment(os.environ)
 _category_suggestion_settings = CategorySuggestionSettings.from_environment(os.environ)
 
 
@@ -290,6 +349,14 @@ app = create_app(
     demo_mode=os.getenv("PFA_DEMO_MODE", "false").casefold() == "true",
     firefly_sync_settings=_sync_settings,
     firefly_category_write_settings=_category_write_settings,
+    firefly_csv_import_settings=_csv_import_settings,
     category_suggestion_settings=_category_suggestion_settings,
     owner_name_aliases=_owner_name_aliases(os.getenv("PFA_OWNER_NAME_ALIASES")),
+    research_enabled=os.getenv("PFA_RESEARCH_ENABLED", "false").casefold() == "true",
+    research_cache_path=os.getenv("PFA_RESEARCH_CACHE_PATH"),
+    research_user_agent=os.getenv(
+        "PFA_RESEARCH_USER_AGENT",
+        "personal-finance-assistant/0.1 "
+        "(https://github.com/giedrius-at-home/personal-finance-assistant)",
+    ),
 )

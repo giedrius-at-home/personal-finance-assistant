@@ -70,22 +70,29 @@ The current implementation provides pure functions and HTTP contracts for:
 - durable alert lifecycle and daily evaluation leases that bound duplicate,
   concurrent, restart, and desktop-sleep behavior;
 - deterministic merchant normalization, a versioned category vocabulary, and
-  exact/normalized baseline rules with fail-closed conflict handling;
+  exact/normalized baseline rules with fail-closed conflict handling, including
+  bounded local supervision rebuilt from current categorized Firefly history;
 - a constrained local-only Ollama/Qwen client and adapter with identifier-redacted
   merchant features, JSON-isolated untrusted text, bounded schema-validated output,
   and abstention on unapproved primary or alternative categories;
 - versioned confidence calibration gated on owner-approved correction holdouts,
   durable categorisation proposals, and preview-token batch approval/reversal
   through a typed write port that stays disabled in Phase 4;
+  suggestions superseded by later direct Firefly categories are retired;
 - an opt-in host-side macOS adapter that receives only pre-rendered minimal text.
 - a server-rendered localhost dashboard and typed JSON projection built from the
-  same deterministic reporting service, with bounded review items and no client
-  JavaScript or third-party resources;
+  same deterministic reporting service, with bounded review items and one
+  first-party progressive-enhancement script but no third-party resources;
+  category reviews join the proposal to its exact canonical transaction so the
+  localhost owner sees its full description, signed amount, currency, and date;
 - ISO-week cash-flow reports that model refunds and transfers explicitly, keep
   currencies separate, and bind output to a stable evidence hash;
 - net-worth aggregation that counts each canonical account once, exposes linked
   mirrors as excluded evidence, and withholds a combined total for stale or
   mixed-currency state;
+- a provider-neutral, in-memory CSV staging boundary with semantic column
+  detection, explicit account selection, duplicate/ambiguity classification,
+  exact owner confirmation, and narrow Firefly transaction creation;
 - versioned owner policy settings with an exact preview token, explicit apply,
   audit history, and last-write-safe rollback.
 - a disabled-by-default public research boundary with internally constructed
@@ -97,8 +104,9 @@ The current implementation provides pure functions and HTTP contracts for:
 Upstream DTOs remain inside `finance_assistant.integrations`; conversion into
 canonical domain records occurs in the ingestion application layer. This keeps
 upstream schema drift from silently changing deterministic domain logic.
-No client has a write method, and failures never include response bodies or
-credentials.
+Write-capable clients are separately opt-in and narrowly limited to reviewed
+category updates or exact owner-confirmed CSV transactions. Failures never
+include response bodies or credentials.
 
 SQLite is the selected derived-state database for the local, single-owner v1.
 ADR 0010 records its single-writer constraint and the operational triggers for

@@ -81,6 +81,56 @@ async def test_generate_posts_pinned_model_and_returns_response_text() -> None:
 
 
 @pytest.mark.anyio
+async def test_embed_posts_bounded_local_inputs_and_validates_vectors() -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        assert request.url.path == "/api/embed"
+        body = json.loads(request.content)
+        assert body == {
+            "model": "synthetic-embed",
+            "input": ["synthetic bakery", "synthetic airline"],
+            "truncate": False,
+        }
+        return httpx2.Response(
+            200,
+            json={"embeddings": [[1.0, 0.0], [0.0, 1.0]]},
+            headers={"content-type": "application/json"},
+        )
+
+    async with OllamaClient(
+        base_url="http://127.0.0.1:11434",
+        model="synthetic-embed",
+        transport=httpx2.MockTransport(handler),
+    ) as client:
+        vectors = await client.embed(("synthetic bakery", "synthetic airline"))
+
+    assert vectors == ((1.0, 0.0), (0.0, 1.0))
+
+
+@pytest.mark.anyio
+async def test_embed_rejects_invalid_inputs_and_inconsistent_dimensions() -> None:
+    async with OllamaClient(
+        base_url="http://127.0.0.1:11434", model="synthetic-embed"
+    ) as client:
+        with pytest.raises(ValueError):
+            await client.embed(())
+
+    def inconsistent(_request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(
+            200,
+            json={"embeddings": [[1.0, 0.0], [1.0]]},
+            headers={"content-type": "application/json"},
+        )
+
+    async with OllamaClient(
+        base_url="http://127.0.0.1:11434",
+        model="synthetic-embed",
+        transport=httpx2.MockTransport(inconsistent),
+    ) as client:
+        with pytest.raises(OllamaProtocolError, match="dimensions"):
+            await client.embed(("one", "two"))
+
+
+@pytest.mark.anyio
 async def test_generate_rejects_non_json_and_missing_response() -> None:
     def missing_response(request: httpx2.Request) -> httpx2.Response:
         return httpx2.Response(

@@ -79,6 +79,12 @@ remove the combined total, and every report carries deterministic evidence.
 Policy settings use preview/confirm, versioned audit history, and rollback.
 Browser mutations are same-origin POSTs protected by CSRF; Firefly category
 writes and notifications remain disabled by default.
+The server-rendered dashboard progressively refreshes its main region while
+visible and applies category-review actions in place. It uses one local script,
+no third-party browser resources or storage, and retains normal navigation when
+JavaScript is unavailable or an exact preview is required. Review cards show the
+full Firefly description, signed amount, currency, and transaction date only in
+the localhost owner interface, and display a visible success or failure toast.
 
 Phase 6 adds disabled-by-default public research and an opt-in STDIO MCP server
 for Codex. Research accepts only sanitized public business names or validated
@@ -97,7 +103,18 @@ When reviewed category writes are enabled separately, Firefly remains the
 authoritative category store and the next dashboard sync reads its value back.
 Local Qwen suggestion generation is also separately opt-in and processes a
 bounded batch of recent uncategorised, non-transfer transactions after each
-Firefly sync or when the owner requests suggestions from the dashboard.
+Firefly sync or when the owner requests suggestions from the dashboard. The
+current categorized Firefly history supplies a bounded, versioned vocabulary,
+conflict-safe normalized merchant rules, and local-only categorized examples;
+the model still cannot write or approve a category. Pending suggestions are retired
+when the corresponding transaction has since been categorized directly in
+Firefly.
+
+The dashboard also has a disabled-by-default provider-neutral CSV resync path.
+It accepts common bank export layouts, auto-detects or explicitly selects one
+connected Firefly asset account, stages an exact preview, skips confirmed
+duplicates, and blocks ambiguous repeats. Only the owner's confirmation creates
+transactions, after which Firefly rules run and the dashboard refreshes.
 
 ## Quick start
 
@@ -125,6 +142,8 @@ dedicated personal access token, place it only in the ignored `.env`, and set:
 PFA_FIREFLY_API_TOKEN=<owner-only token>
 PFA_FIREFLY_SYNC_ENABLED=true
 PFA_FIREFLY_SYNC_INTERVAL_SECONDS=86400
+# Optional: enable exact preview/confirm CSV imports from the dashboard.
+PFA_FIREFLY_CSV_IMPORTS_ENABLED=true
 # Optional: comma-separated aliases that identify transfers between your accounts.
 PFA_OWNER_NAME_ALIASES=<full name>,<abbreviated name>
 ```

@@ -8,6 +8,20 @@ project intends to use semantic versioning for its own releases.
 
 ### Changed
 
+- Made the dashboard category inbox a pending-only work queue while retaining
+  resolved proposals in the local audit history.
+- Added optional local embedding retrieval over bounded, identifier-redacted,
+  owner-approved Firefly examples; pending reviews are regenerated after a
+  classifier upgrade while existing Firefly categories remain untouched.
+- Taught the local categorizer to use recognizable merchant identity and
+  ordinary business type as evidence, with lower confidence or abstention when
+  either is unclear.
+- Added first-party progressive dashboard refresh and in-place category review
+  actions with visible result toasts and full transaction context, while
+  preserving server-rendered fallback and exact preview screens.
+- Rebuilt category vocabularies, conflict-safe merchant rules, and bounded local
+  Qwen examples from current categorized Firefly history after each sync while
+  preserving owner review as the only approval path.
 - Made Firefly the authoritative category source for dashboard reporting and
   added opt-in, owner-reviewed, category-only updates with stale-preview
   conflict detection; local model suggestions still cannot write automatically.
@@ -22,8 +36,26 @@ project intends to use semantic versioning for its own releases.
   after prototype review, with explicit single-writer, practical-validation,
   recovery, and future migration triggers recorded in ADR 0010.
 
+### Fixed
+
+- Added an explicit confirmed resolution for blocked CSV previews so owners can
+  import only definitely new rows while leaving possible duplicates and
+  unreadable rows unchanged.
+- Stopped guessing a CSV provider from transaction descriptions and rejected
+  confident filename/account mismatches before staging an import.
+- Passed the selected Firefly source account ID—not its internal canonical ID—
+  from the dashboard CSV form, so explicit account selection bypasses ambiguous
+  bank-name detection correctly.
+
 ### Added
 
+- An explicit dashboard merchant-research action that accepts only a validated
+  public store name, uses the existing allowlisted and cache-backed research
+  boundary, labels results untrusted, and never submits transaction text.
+- A disabled-by-default, provider-neutral dashboard CSV resync flow with
+  semantic bank-export parsing, automatic or explicit account targeting,
+  exact preview/confirm, duplicate and ambiguity protection, Firefly rule
+  application, and an immediate derived-dashboard refresh.
 - Durable, configurable importer HTTPS with a persisted local certificate,
   read-only injection of ignored Enable Banking credentials, separate durable
   Firefly importer authentication, and documented per-bank recovery/rotation.

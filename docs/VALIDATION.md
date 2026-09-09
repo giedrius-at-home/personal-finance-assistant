@@ -84,6 +84,13 @@ approval, write-conflict rollback, idempotent reversal, restart
 persistence, and unavailable-model degradation. The Phase 4 write port must
 remain disabled in CI and production validation.
 
+CSV resync changes must prove size and row bounds, common delimiter/date/decimal
+and debit-credit layouts, explicit or unambiguous account selection, stable
+opaque identities, exact and possible-duplicate separation, repeated-row
+ambiguity, preview expiry, Firefly recheck-before-write, transfer creation only
+for exact asset-account IBAN matches, rule application, CSRF/same-origin
+protection, and disabled-by-default operation. Fixtures must be wholly synthetic.
+
 Phase 5 dashboard/reporting changes must prove deterministic output under input
 reordering, ISO-week timezone boundaries, refunds, transfer exclusion, explicit
 currency separation, linked-account deduplication, stale-valuation fail-closed
@@ -91,8 +98,13 @@ behaviour, and sparse/duplicate-like/overloaded taxonomy signals. Browser tests
 must cover the invented empty/filled views, narrow-screen layout, semantic
 controls, exact review decisions, settings preview/apply/rollback, invalid Host,
 cross-origin and missing-CSRF rejection, no-store/CSP headers, and the absence of
-third-party requests. Screenshots and console/network observations must contain
-invented data only and stay in pull-request evidence rather than the repository.
+third-party requests. Progressive updates must retain server-rendered fallback,
+pause during edits, serialize requests, avoid browser storage, and leave exact
+CSV/settings previews as normal navigation. Review tests must confirm the exact
+canonical transaction supplies the full description, signed amount, currency,
+and date, while missing/deleted transactions fail closed to proposal-only
+context. Screenshots and console/network observations must contain invented data
+only and stay in pull-request evidence rather than the repository.
 
 Phase 6 changes must prove that private/query-like merchant inputs are rejected,
 market identifiers and questions are enumerated, URLs are internally built, and
