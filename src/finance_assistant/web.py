@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hmac
 import secrets
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 from urllib.parse import parse_qs
 
@@ -15,14 +17,37 @@ from pydantic import TypeAdapter, ValidationError
 
 from finance_assistant.categorisation_service import ProposalStatus
 from finance_assistant.dashboard import DashboardService, DashboardView
+from finance_assistant.domain.canonical import (
+    SourceEntity,
+    SourceReference,
+    SourceSystem,
+)
+from finance_assistant.domain.models import Currency
 from finance_assistant.domain.settings import OwnerSettings, SettingsPreview
+from finance_assistant.integrations.firefly import (
+    FireflyCategoryConflictError,
+    FireflyCategoryWriteError,
+)
 from finance_assistant.persistence.sqlite import (
     PersistenceConflictError,
     SQLiteDerivedState,
 )
 
+CategoryUpdater = Callable[[str, str | None, str | None], Awaitable[None]]
+SuggestionRunner = Callable[[], Awaitable[int]]
+
 MAX_FORM_BYTES = 8_192
 TEMPLATES = Jinja2Templates(directory=Path(__file__).parent / "templates")
+
+
+def format_money(amount: Decimal, currency: Currency) -> str:
+    """Render exact money using the currency's declared minor unit."""
+
+    normalized = abs(amount) if amount == 0 else amount
+    return f"{normalized:.{currency.minor_unit}f}"
+
+
+TEMPLATES.env.filters["money"] = format_money
 
 
 def install_web_routes(
@@ -31,8 +56,18 @@ def install_web_routes(
     state: SQLiteDerivedState | None,
     demo_mode: bool,
     csrf_token: str,
+    owner_name_aliases: tuple[str, ...] = (),
+    category_updater: CategoryUpdater | None = None,
+    suggestion_runner: SuggestionRunner | None = None,
 ) -> None:
-    service = DashboardService(state, demo_mode=demo_mode)
+    service = DashboardService(
+        state,
+        demo_mode=demo_mode,
+        owner_name_aliases=owner_name_aliases,
+        upstream_writes=(
+            "reviewed categories only" if category_updater is not None else "disabled"
+        ),
+    )
 
     @router.get("/", include_in_schema=False)
     async def index() -> RedirectResponse:
@@ -63,6 +98,16 @@ def install_web_routes(
     async def dashboard_json() -> DashboardView:
         return service.view(now=datetime.now(UTC))
 
+    @router.post("/review/suggest", include_in_schema=False)
+    async def suggest(request: Request) -> RedirectResponse:
+        await _verified_form(request, csrf_token)
+        if state is None or demo_mode or suggestion_runner is None:
+            raise HTTPException(
+                status_code=409, detail="local category suggestions are disabled"
+            )
+        await suggestion_runner()
+        return RedirectResponse("/dashboard", status_code=status.HTTP_303_SEE_OTHER)
+
     @router.post("/review/{proposal_id}/{decision}", include_in_schema=False)
     async def review(
         proposal_id: str, decision: str, request: Request
@@ -73,8 +118,30 @@ def install_web_routes(
                 status_code=409, detail="demo and empty-state reviews are read-only"
             )
         if decision == "approve":
+            proposal = state.get_pending(proposal_id)
+            if proposal is None or proposal.proposed_category is None:
+                raise HTTPException(
+                    status_code=409, detail="proposal is no longer approvable"
+                )
             token = state.preview_batch((proposal_id,))
-            state.approve_batch((proposal_id,), preview_token=token)
+            transaction_id = _firefly_transaction_id(proposal.source)
+            if category_updater is not None:
+                await _update_category(
+                    category_updater,
+                    transaction_id,
+                    proposal.original_category,
+                    proposal.proposed_category,
+                )
+            try:
+                state.approve_batch((proposal_id,), preview_token=token)
+            except Exception:
+                if category_updater is not None:
+                    await category_updater(
+                        transaction_id,
+                        proposal.proposed_category,
+                        proposal.original_category,
+                    )
+                raise
         elif decision == "reject":
             if not state.resolve_proposal(proposal_id, status=ProposalStatus.REJECTED):
                 raise HTTPException(
@@ -87,18 +154,33 @@ def install_web_routes(
                 raise HTTPException(
                     status_code=409, detail="proposal is no longer pending"
                 )
+            if category_updater is not None:
+                transaction_id = _firefly_transaction_id(proposal.source)
+                await _update_category(
+                    category_updater,
+                    transaction_id,
+                    proposal.original_category,
+                    category,
+                )
             from finance_assistant.categorisation_service import source_identity
             from finance_assistant.domain.categorisation import CalibrationExample
 
-            state.record_correction(
-                CalibrationExample(
-                    source_identity=source_identity(proposal.source),
-                    feature_hash=proposal.feature_hash,
-                    normalized_merchant=proposal.normalized_merchant,
-                    approved_category=category,
+            try:
+                state.record_correction(
+                    CalibrationExample(
+                        source_identity=source_identity(proposal.source),
+                        feature_hash=proposal.feature_hash,
+                        normalized_merchant=proposal.normalized_merchant,
+                        approved_category=category,
+                    )
                 )
-            )
-            state.resolve_proposal(proposal_id, status=ProposalStatus.CORRECTED)
+                state.resolve_proposal(proposal_id, status=ProposalStatus.CORRECTED)
+            except Exception:
+                if category_updater is not None:
+                    await category_updater(
+                        transaction_id, category, proposal.original_category
+                    )
+                raise
         else:
             raise HTTPException(status_code=404, detail="unknown review decision")
         return RedirectResponse("/dashboard", status_code=status.HTTP_303_SEE_OTHER)
@@ -204,3 +286,31 @@ def _settings(values: dict[str, list[str]]) -> OwnerSettings:
 
 def new_csrf_token() -> str:
     return secrets.token_urlsafe(32)
+
+
+async def _update_category(
+    updater: CategoryUpdater,
+    transaction_id: str,
+    expected_category: str | None,
+    category: str | None,
+) -> None:
+    try:
+        await updater(transaction_id, expected_category, category)
+    except FireflyCategoryConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except FireflyCategoryWriteError as error:
+        raise HTTPException(
+            status_code=503, detail="Firefly could not save the reviewed category"
+        ) from error
+
+
+def _firefly_transaction_id(source: SourceReference) -> str:
+    if (
+        source.system is not SourceSystem.FIREFLY_III
+        or source.entity is not SourceEntity.TRANSACTION
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="only Firefly transaction categories can be updated",
+        )
+    return source.external_id

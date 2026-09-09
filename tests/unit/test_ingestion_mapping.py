@@ -38,7 +38,11 @@ def firefly_currency(code: str = "EUR", places: int = 2) -> FireflyCurrency:
 
 
 def firefly_account(
-    account_id: str, balance: str = "125.50", currency: str = "EUR"
+    account_id: str,
+    balance: str = "125.50",
+    currency: str = "EUR",
+    *,
+    include_net_worth: bool = True,
 ) -> FireflyAccount:
     return FireflyAccount.model_validate(
         {
@@ -50,10 +54,21 @@ def firefly_account(
                 "currency_code": currency,
                 "currency_decimal_places": 2,
                 "current_balance": balance,
+                "include_net_worth": include_net_worth,
                 "updated_at": NOW.isoformat(),
             },
         }
     )
+
+
+def test_firefly_net_worth_preference_is_preserved() -> None:
+    records = build_canonical_accounts(
+        firefly_accounts=(firefly_account("cash", include_net_worth=False),),
+        ghostfolio_accounts=(),
+        currencies=CurrencyRegistry((Currency(code="EUR", minor_unit=2),)),
+    )
+
+    assert records[0].include_net_worth is False
 
 
 def ghostfolio_account(
@@ -74,7 +89,11 @@ def ghostfolio_account(
 
 
 def transaction(
-    kind: str, source: str | None, destination: str | None
+    kind: str,
+    source: str | None,
+    destination: str | None,
+    *,
+    category: str | None = None,
 ) -> FireflyTransaction:
     return FireflyTransaction.model_validate(
         {
@@ -93,6 +112,7 @@ def transaction(
                         "description": f"Synthetic {kind}",
                         "source_id": source,
                         "destination_id": destination,
+                        "category_name": category,
                     }
                 ],
             },
@@ -168,7 +188,7 @@ def test_transactions_map_all_directions_including_transfer() -> None:
     )
     records = build_canonical_transactions(
         (
-            transaction("Withdrawal", "asset-1", "expense-1"),
+            transaction("Withdrawal", "asset-1", "expense-1", category="Groceries"),
             transaction("Deposit", "revenue-1", "asset-1"),
             transaction("Transfer", "asset-1", "asset-2"),
         ),
@@ -182,6 +202,7 @@ def test_transactions_map_all_directions_including_transfer() -> None:
         TransactionKind.TRANSFER,
     ]
     assert records[2].counterparty_account_id == "firefly:asset-2"
+    assert records[0].category == "Groceries"
 
 
 def test_malformed_transaction_ownership_and_duplicates_fail_closed() -> None:

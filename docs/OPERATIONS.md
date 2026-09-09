@@ -149,6 +149,118 @@ backup/restore delay. Also verify restart and desktop-sleep recovery. These are
 decision inputs: do not add a second writer process or move the database to a
 network filesystem as an attempted workaround.
 
+## Firefly dashboard synchronization
+
+Dashboard synchronization is disabled by default. Create a dedicated Firefly
+personal access token through **Options → Remote access and tokens**, copy it
+directly into the ignored owner-only `.env`, and never place it in a command,
+log, screenshot, issue, pull request, or chat message:
+
+```dotenv
+PFA_FIREFLY_API_TOKEN=<owner-only token>
+PFA_FIREFLY_SYNC_ENABLED=true
+PFA_FIREFLY_SYNC_INTERVAL_SECONDS=86400
+```
+
+Apply the setting without recreating the financial databases:
+
+```bash
+docker compose --env-file .env up --build --detach gateway
+```
+
+The gateway fetches a full read-only Firefly snapshot immediately at startup
+and then once per interval. Upserts are idempotent, Firefly remains the source
+of truth, and no second SQLite writer is introduced. The log records only
+aggregate counts and exception class names. Confirm success through the owner
+dashboard and aggregate-only logs; do not enable response-body debug logging.
+
+The minimum supported interval is five minutes. Daily polling is the normal
+default. Revoke the token from Firefly and set sync to `false` before retiring
+the integration. A revoked or expired token leaves the last valid derived
+snapshot available while later polls fail without changing it.
+
+## Data Importer and Enable Banking
+
+The importer publishes HTTP on `127.0.0.1:${PFA_IMPORTER_PORT}` and HTTPS on
+`127.0.0.1:${PFA_IMPORTER_HTTPS_PORT}`. The HTTPS listener uses a self-signed
+certificate. The browser warning is expected on first use; verify the URL is
+exactly local before accepting it. The certificate and private key live in the
+`importer_tls` Docker volume so routine container recreation does not cause an
+unexpected certificate change.
+
+For durable authentication, create a dedicated Firefly personal access token
+for the importer. Do not reuse the dashboard token. Store only the token and
+the Enable Banking application ID in the ignored owner-only `.env`:
+
+```dotenv
+PFA_IMPORTER_HTTPS_PORT=8444
+PFA_IMPORTER_FIREFLY_ACCESS_TOKEN=<dedicated importer token>
+PFA_ENABLE_BANKING_APP_ID=<restricted application ID>
+PFA_ENABLE_BANKING_PRIVATE_KEY_PATH=./credentials/enable-banking.pem
+```
+
+Create `credentials/` with mode `0700`, copy the matching Enable Banking PEM to
+that path with mode `0600`, and retain the original only in encrypted storage.
+Compose injects the PEM into the importer as a read-only secret file. If the
+path setting is empty, an empty `/dev/null` secret is used so setups that do not
+use Enable Banking still start. Never paste PEM contents into Compose, `.env`,
+logs, issues, chat, or screenshots.
+
+Register these exact callbacks with the respective local applications, using
+the configured HTTPS port:
+
+- Firefly OAuth fallback: `https://localhost:8444/callback`
+- Enable Banking: `https://localhost:8444/eb-callback`
+
+The personal access token is the normal durable Firefly authentication path;
+the OAuth callback remains documented for manual recovery. In Enable Banking
+restricted/personal mode, link the account in the Enable Banking portal before
+starting consent in the importer. The consent lifetime is selected by the bank
+and may be shorter than requested.
+
+Data Importer 2.3.4 may initially display 90 days even when a bank accepts only
+89. Submit the bank-supported value. The current runtime-only 89-day adjustment
+is lost if the importer container is recreated; this repository does not patch
+or fork the upstream image. Reapply the reviewed workaround or wait for an
+upstream release before planned recreation.
+
+Importer browser sessions are intentionally not persisted. In Data Importer
+2.3.4 they can contain Firefly access/refresh tokens, Enable Banking session
+tokens, and an uploaded private key. Explicit secret injection avoids retaining
+that mixed secret cache. Closing or recreating the importer may therefore
+require a fresh bank consent, but not re-entry of the configured application
+ID, PEM, or Firefly token. The TLS certificate is persisted separately.
+
+Download a separate importer configuration for each bank and store it outside
+the repository in encrypted local storage. A configuration can contain account
+metadata or provider session references. Import different banks sequentially;
+multiple accounts from one bank may be selected in one job. During an active
+2.3.4 session, begin another bank at
+`https://localhost:8444/new-import/eb`. Do not use **Start over** merely to
+switch banks: that action flushes all session credentials.
+
+CSV remains the reliable fallback for providers whose open-banking feed is
+incomplete. Keep exports and mapping configurations outside Git, review the
+preview totals before submission, and leave the bill field unmapped unless the
+referenced Firefly bill already exists. Firefly duplicate detection makes
+repeat imports safer, but every submission should still be reviewed.
+
+Back up `.env`, the Enable Banking PEM, and per-bank configurations only to an
+encrypted owner-controlled destination. The ordinary application backup does
+not copy these credentials or importer browser sessions. To rotate or revoke:
+
+1. revoke the old Firefly token and create a replacement with a distinct name;
+2. replace only the corresponding ignored `.env` value;
+3. replace the PEM and application ID together when rotating Enable Banking;
+4. update the registered callbacks if the HTTPS port changes;
+5. recreate only the importer and confirm authentication without logging
+   response bodies; and
+6. delete superseded local keys/configurations and revoke old bank consents.
+
+Use `docker compose --env-file .env up --detach importer` only after the ignored
+credential files are ready. Recreating the importer does not delete Firefly
+transactions, but it does discard the current non-persisted browser session.
+
 ## Routine commands
 
 ```bash
@@ -256,6 +368,27 @@ changes accept URL-encoded POSTs only, require the process CSRF cookie/token and
 same-origin requests, and return no-store responses. A process restart
 invalidates open forms. Settings are shown once more as an exact preview before
 apply and can be rolled back only while that revision is still current.
+
+Firefly is the authoritative category store. To allow reviewed categories to
+be copied from the dashboard to Firefly, enable the narrow write path in the
+ignored `.env` file:
+
+```dotenv
+PFA_FIREFLY_CATEGORY_WRITES_ENABLED=true
+PFA_CATEGORY_SUGGESTIONS_ENABLED=true
+PFA_CATEGORY_SUGGESTION_BATCH_SIZE=20
+```
+
+This uses the configured Firefly API token but permits only a category update
+for the exact transaction under review. Before writing, the gateway reads the
+transaction and checks that its category still matches the proposal preview.
+A manual Firefly change therefore causes a conflict instead of being
+overwritten. Rejecting a suggestion never writes upstream. Local Qwen output
+cannot bypass owner approval, create transactions, alter amounts or accounts,
+or run Firefly rules. Disable the setting or revoke the token to stop writes.
+Suggestion generation requires the configured Ollama model to be installed and
+running locally. It examines only a bounded batch of uncategorised,
+non-transfer transactions and creates pending reviews; it never approves them.
 
 ## macOS application launcher
 

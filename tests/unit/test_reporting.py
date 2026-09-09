@@ -90,6 +90,32 @@ def test_weekly_report_separates_currency_transfers_and_refunds() -> None:
     )
 
 
+def test_weekly_report_treats_owner_name_aliases_as_transfers() -> None:
+    owner_outflow = transaction("owner-out", TransactionKind.OUTFLOW, "40").model_copy(
+        update={"description": "Payment to Synthetic Owner"}
+    )
+    owner_inflow = transaction("owner-in", TransactionKind.INFLOW, "25").model_copy(
+        update={"description": "Transfer from S Owner"}
+    )
+
+    report = weekly_report(
+        (
+            owner_outflow,
+            owner_inflow,
+            transaction("spend", TransactionKind.OUTFLOW, "10"),
+        ),
+        as_of=NOW,
+        timezone="Europe/Amsterdam",
+        owner_name_aliases=("Synthetic Owner", "S Owner"),
+    )
+
+    currency = report.currencies[0]
+    assert currency.transfer_count == 2
+    assert currency.income == 0
+    assert currency.spending == 10
+    assert currency.net_cash_flow == -10
+
+
 def test_net_worth_counts_mirrors_once_and_fails_closed_when_stale() -> None:
     account = CanonicalAccount(
         account_id="portfolio",
@@ -114,6 +140,25 @@ def test_net_worth_counts_mirrors_once_and_fails_closed_when_stale() -> None:
     assert report.components[0].excluded_mirror_count == 1
     assert report.total is None
     assert report.reasons == ("stale valuations prevent a combined total",)
+
+
+def test_net_worth_honors_source_exclusion() -> None:
+    excluded = CanonicalAccount(
+        account_id="excluded",
+        name="Excluded synthetic account",
+        balance=Money(amount="999", currency=EUR),
+        canonical_owner=source("excluded").model_copy(
+            update={"entity": SourceEntity.ACCOUNT}
+        ),
+        include_net_worth=False,
+    )
+
+    report = net_worth_report((excluded,), as_of=NOW)
+
+    assert report.components == ()
+    assert report.currency_totals == ()
+    assert report.total is None
+    assert report.reasons == ("source settings exclude 1 account from net worth",)
 
 
 def test_taxonomy_signals_are_deterministic_and_reject_duplicate_input() -> None:

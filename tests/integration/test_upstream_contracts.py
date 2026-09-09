@@ -24,16 +24,14 @@ def local_environment(required_key: str) -> dict[str, str]:
 
     env_file = ROOT / ".env"
     required = os.environ.get("PFA_REQUIRE_UPSTREAM_CONTRACTS") == "1"
+    if not required:
+        pytest.skip("live upstream contracts are opt-in")
     if not env_file.is_file():
-        if required:
-            pytest.fail("live contracts require .env; run make bootstrap first")
-        pytest.skip("local upstream configuration is unavailable")
+        pytest.fail("live contracts require .env; run make bootstrap first")
     environment = load_env(env_file)
     if not environment.get(required_key):
         message = "live contracts require configured synthetic API credentials"
-        if required:
-            pytest.fail(message)
-        pytest.skip(message)
+        pytest.fail(message)
     return environment
 
 

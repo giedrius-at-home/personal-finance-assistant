@@ -146,6 +146,7 @@ def build_canonical_accounts(
             SourceSystem.FIREFLY_III, firefly_account.id, attributes.updated_at
         )
         linked: tuple[SourceReference, ...] = ()
+        include_net_worth = attributes.include_net_worth
         configured_link = link_map.get(firefly_account.id)
         if configured_link is not None:
             mirror = ghostfolio[configured_link.ghostfolio_account_id]
@@ -161,6 +162,7 @@ def build_canonical_accounts(
                 account_id = f"ghostfolio:{mirror.id}"
                 name = mirror.name or f"Ghostfolio {mirror.id}"
                 balance = mirror.value
+                include_net_worth = True
             else:
                 linked = (mirror_reference,)
                 account_id = f"firefly:{firefly_account.id}"
@@ -177,6 +179,7 @@ def build_canonical_accounts(
                 balance=Money(amount=balance, currency=currency),
                 canonical_owner=owner,
                 linked_sources=linked,
+                include_net_worth=include_net_worth,
             )
         )
 
@@ -246,6 +249,7 @@ def _map_split(
             account_ids[counterparty] if counterparty is not None else None
         ),
         description=split.description,
+        category=split.category_name,
     )
 
 

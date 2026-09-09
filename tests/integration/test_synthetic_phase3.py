@@ -23,7 +23,7 @@ NOW = datetime(2026, 9, 2, 18, tzinfo=UTC)
 def piggy(target_date: str, revision: str) -> FireflyPiggyBank:
     return FireflyPiggyBank.model_validate(
         {
-            "type": "piggy_banks",
+            "type": "piggy-banks",
             "id": "synthetic-emergency-fund",
             "attributes": {
                 "name": "Synthetic emergency fund",

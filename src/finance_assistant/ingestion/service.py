@@ -12,6 +12,7 @@ from finance_assistant.domain.canonical import (
     CanonicalAccount,
     CanonicalSavingsGoal,
     CanonicalTransaction,
+    SourceSystem,
 )
 from finance_assistant.domain.models import StrictModel
 from finance_assistant.ingestion.goals import build_savings_goals
@@ -59,6 +60,13 @@ class DerivedState(Protocol):
 
     def list_accounts(self) -> tuple[CanonicalAccount, ...]: ...
 
+    def delete_missing_current(
+        self,
+        records: tuple[CanonicalAccount | CanonicalTransaction, ...],
+        *,
+        source_system: SourceSystem,
+    ) -> int: ...
+
     def upsert_goal(
         self, goal: CanonicalSavingsGoal, *, observed_at: datetime
     ) -> bool: ...
@@ -80,7 +88,7 @@ class IngestionService:
         self,
         *,
         firefly: FireflyReader,
-        ghostfolio: GhostfolioReader,
+        ghostfolio: GhostfolioReader | None = None,
         state: DerivedState,
         links: tuple[AccountLink, ...] = (),
         clock: Callable[[], datetime] | None = None,
@@ -99,7 +107,9 @@ class IngestionService:
         )
         accounts = build_canonical_accounts(
             firefly_accounts=await self._firefly.list_accounts(),
-            ghostfolio_accounts=await self._ghostfolio.list_accounts(),
+            ghostfolio_accounts=(
+                await self._ghostfolio.list_accounts() if self._ghostfolio else ()
+            ),
             currencies=currencies,
             links=self._links,
         )
@@ -112,8 +122,13 @@ class IngestionService:
             await self._firefly.list_piggy_banks(), currencies=currencies
         )
         observed_at = self._clock()
-        changed = self._state.upsert_many(
-            (*accounts, *transactions), observed_at=observed_at
+        snapshot: tuple[CanonicalAccount | CanonicalTransaction, ...] = (
+            *accounts,
+            *transactions,
+        )
+        changed = self._state.upsert_many(snapshot, observed_at=observed_at)
+        changed += self._state.delete_missing_current(
+            snapshot, source_system=SourceSystem.FIREFLY_III
         )
         changed += sum(
             self._state.upsert_goal(goal, observed_at=observed_at)

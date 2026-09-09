@@ -20,6 +20,7 @@ from finance_assistant.domain.canonical import (
     SourceSystem,
     TransactionKind,
 )
+from finance_assistant.domain.categorisation import normalize_merchant
 from finance_assistant.domain.goals import evaluate_goal
 from finance_assistant.domain.models import (
     AlertSeverity,
@@ -90,6 +91,7 @@ def weekly_report(
     alert_severities: tuple[AlertSeverity, ...] = (),
     as_of: datetime,
     timezone: str,
+    owner_name_aliases: tuple[str, ...] = (),
 ) -> WeeklyReport:
     """Aggregate one local ISO week without converting or mixing currencies."""
 
@@ -118,13 +120,27 @@ def weekly_report(
         lambda: defaultdict(int)
     )
     included = 0
+    normalized_aliases = tuple(
+        alias
+        for raw_alias in owner_name_aliases
+        if (alias := normalize_merchant(raw_alias))
+    )
     for transaction in transactions:
         occurred = transaction.occurred_at.astimezone(zone).date()
         if not start <= occurred <= end:
             continue
         included += 1
         currency = transaction.amount.currency
-        if transaction.kind is TransactionKind.TRANSFER:
+        description = (
+            normalize_merchant(transaction.description)
+            if transaction.description
+            else ""
+        )
+        owner_movement = any(
+            re.search(rf"(?<!\\w){re.escape(alias)}(?!\\w)", description)
+            for alias in normalized_aliases
+        )
+        if transaction.kind is TransactionKind.TRANSFER or owner_movement:
             transfers[currency] += 1
         elif transaction.kind is TransactionKind.INFLOW:
             income[currency] += transaction.amount.amount
@@ -256,7 +272,14 @@ def net_worth_report(
     totals: dict[Currency, Decimal] = defaultdict(Decimal)
     reasons: list[str] = []
     has_stale = False
-    for account in sorted(accounts, key=lambda item: item.account_id):
+    included_accounts = tuple(item for item in accounts if item.include_net_worth)
+    excluded_count = len(accounts) - len(included_accounts)
+    if excluded_count:
+        account_label = "account" if excluded_count == 1 else "accounts"
+        reasons.append(
+            f"source settings exclude {excluded_count} {account_label} from net worth"
+        )
+    for account in sorted(included_accounts, key=lambda item: item.account_id):
         updated_at = account.canonical_owner.source_updated_at
         stale = updated_at is None or as_of - updated_at > stale_after
         if stale:

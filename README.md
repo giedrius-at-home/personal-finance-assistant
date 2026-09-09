@@ -64,20 +64,20 @@ durable cooldown/escalation/resolution state, offline-safe daily scheduling, and
 an opt-in native macOS notification adapter. Delivery remains disabled until the
 owner explicitly enables and tests macOS notification permission.
 
-Phase 4 adds explainable, review-only transaction categorisation: deterministic
+Phase 4 adds explainable, review-first transaction categorisation: deterministic
 merchant normalization and baseline rules, a constrained local-only Ollama/Qwen
 adapter with a versioned category vocabulary, confidence calibration and
 abstention gated on owner-approved correction holdouts, and durable preview/approve/
-reversal workflows. No production Firefly write path is activated in this phase;
-model output can never invent categories and always flows through preview and
-audit.
+reversal workflows. Model output can never invent categories and always flows
+through owner review and audit. An optional category-only adapter can copy an
+exact approved decision to Firefly; unreviewed model output has no write path.
 
 Phase 5 adds a localhost owner dashboard and matching typed JSON view for the
 category inbox, weekly cash flow, savings progress, alerts, and net worth.
 Currency totals never mix, linked accounts are counted once, stale valuations
 remove the combined total, and every report carries deterministic evidence.
 Policy settings use preview/confirm, versioned audit history, and rollback.
-Browser mutations are same-origin POSTs protected by CSRF; upstream category
+Browser mutations are same-origin POSTs protected by CSRF; Firefly category
 writes and notifications remain disabled by default.
 
 Phase 6 adds disabled-by-default public research and an opt-in STDIO MCP server
@@ -88,6 +88,16 @@ cache. The Codex tool surface exposes only currency-separated reports, goal
 progress without identifiers, alert/taxonomy counts, and those bounded public
 queries. It cannot read raw transactions, execute SQL, mutate either ledger,
 move money, recommend personalized trades, or accept arbitrary URLs.
+
+The owner dashboard can optionally poll Firefly III into its local derived
+state. Polling runs inside the single gateway writer, starts immediately with
+the gateway, and repeats daily by default. It is disabled until an owner adds a
+dedicated token to the ignored `.env` file and opts in explicitly.
+When reviewed category writes are enabled separately, Firefly remains the
+authoritative category store and the next dashboard sync reads its value back.
+Local Qwen suggestion generation is also separately opt-in and processes a
+bounded batch of recent uncategorised, non-transfer transactions after each
+Firefly sync or when the owner requests suggestions from the dashboard.
 
 ## Quick start
 
@@ -108,6 +118,27 @@ make doctor
 make install-macos-app
 ```
 
+To populate and refresh the owner dashboard from Firefly III, create a
+dedicated personal access token, place it only in the ignored `.env`, and set:
+
+```dotenv
+PFA_FIREFLY_API_TOKEN=<owner-only token>
+PFA_FIREFLY_SYNC_ENABLED=true
+PFA_FIREFLY_SYNC_INTERVAL_SECONDS=86400
+# Optional: comma-separated aliases that identify transfers between your accounts.
+PFA_OWNER_NAME_ALIASES=<full name>,<abbreviated name>
+```
+
+Recreate only the gateway with `docker compose up --build --detach gateway`.
+The first read-only sync runs at startup. Never commit or paste the token into
+logs, shell arguments, issues, or chat.
+
+Each successful full Firefly sync removes current dashboard projections that no
+longer exist upstream while retaining immutable source-version history. Owner
+name aliases are matched locally against normalized transaction descriptions;
+matching inflows and outflows are reported as transfers and excluded from cash
+flow income, spending, and category totals.
+
 The generated `.env` is owner-readable only, ignored by Git, and never
 overwritten by `make bootstrap`. All browser endpoints bind to loopback:
 
@@ -115,6 +146,7 @@ overwritten by `make bootstrap`. All browser endpoints bind to loopback:
 - owner dashboard: <http://127.0.0.1:8000/dashboard>
 - Firefly III: <http://127.0.0.1:8080>
 - Firefly III Data Importer: <http://127.0.0.1:8081>
+- Firefly III Data Importer HTTPS: <https://localhost:8444> (self-signed)
 - Ghostfolio: <http://127.0.0.1:3333>
 
 After `make install-macos-app`, open **Personal Finance Assistant** from

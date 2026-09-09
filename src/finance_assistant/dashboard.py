@@ -83,9 +83,18 @@ class DashboardView(StrictModel):
 class DashboardService:
     """Build the HTML and JSON dashboard from the same deterministic view."""
 
-    def __init__(self, state: SQLiteDerivedState | None, *, demo_mode: bool = False):
+    def __init__(
+        self,
+        state: SQLiteDerivedState | None,
+        *,
+        demo_mode: bool = False,
+        owner_name_aliases: tuple[str, ...] = (),
+        upstream_writes: str = "disabled",
+    ):
         self.state = state
         self.demo_mode = demo_mode
+        self.owner_name_aliases = owner_name_aliases
+        self.upstream_writes = upstream_writes
 
     def view(self, *, now: datetime) -> DashboardView:
         if now.tzinfo is None:
@@ -124,6 +133,7 @@ class DashboardService:
             alert_severities=severities,
             as_of=now,
             timezone=settings.timezone,
+            owner_name_aliases=self.owner_name_aliases,
         )
         aggregates = tuple(
             CategoryAggregate(
@@ -137,6 +147,7 @@ class DashboardService:
         return DashboardView(
             generated_at=now,
             data_mode="invented demo" if self.demo_mode else "local derived state",
+            upstream_writes=self.upstream_writes,
             weekly=weekly,
             net_worth=net_worth_report(accounts, as_of=now),
             review_items=tuple(_review_item(item) for item in proposals),
@@ -176,11 +187,16 @@ def _assignments(
         if item.proposed_category is not None
         and item.status in {ProposalStatus.PENDING, ProposalStatus.APPROVED}
     }
-    return tuple(
-        CategoryAssignment(transaction_id=item.transaction_id, category=category)
-        for item in transactions
-        if (category := by_source.get(item.source.identity)) is not None
-    )
+    assignments: list[CategoryAssignment] = []
+    for item in transactions:
+        category = item.category or by_source.get(item.source.identity)
+        if category is not None:
+            assignments.append(
+                CategoryAssignment(
+                    transaction_id=item.transaction_id, category=category
+                )
+            )
+    return tuple(assignments)
 
 
 def _merge_aggregates(

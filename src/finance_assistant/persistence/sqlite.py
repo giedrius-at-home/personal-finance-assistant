@@ -30,6 +30,7 @@ from finance_assistant.domain.canonical import (
     CanonicalSavingsGoal,
     CanonicalTransaction,
     SourceReference,
+    SourceSystem,
 )
 from finance_assistant.domain.categorisation import CalibrationExample
 from finance_assistant.domain.models import AlertSeverity, BudgetEvaluation, Money
@@ -430,6 +431,47 @@ class SQLiteDerivedState:
     ) -> int:
         return sum(self.upsert(record, observed_at=observed_at) for record in records)
 
+    def delete_missing_current(
+        self,
+        records: Iterable[CanonicalRecord],
+        *,
+        source_system: SourceSystem,
+    ) -> int:
+        """Remove projections absent from a complete source snapshot.
+
+        Immutable ``source_versions`` remain available for audit and recovery.
+        The caller must only use this after validating a complete upstream
+        snapshot, so a partial fetch can never erase current projections.
+        """
+
+        seen: dict[RecordKind, set[str]] = {"account": set(), "transaction": set()}
+        for record in records:
+            kind, _canonical_id, source = _record_parts(record)
+            if source.system is source_system:
+                seen[kind].add(source.external_id)
+
+        removed = 0
+        with self._lock, self._connection:
+            for kind in ("account", "transaction"):
+                current = self._connection.execute(
+                    "SELECT canonical_id, external_id FROM canonical_records "
+                    "WHERE record_kind = ? AND source_system = ?",
+                    (kind, source_system.value),
+                ).fetchall()
+                missing = [
+                    (kind, row["canonical_id"])
+                    for row in current
+                    if row["external_id"] not in seen[kind]
+                ]
+                if missing:
+                    self._connection.executemany(
+                        "DELETE FROM canonical_records "
+                        "WHERE record_kind = ? AND canonical_id = ?",
+                        missing,
+                    )
+                    removed += len(missing)
+        return removed
+
     def list_accounts(self) -> tuple[CanonicalAccount, ...]:
         rows = self._connection.execute(
             "SELECT payload_json FROM canonical_records "
@@ -728,6 +770,17 @@ class SQLiteDerivedState:
         if row is None:
             return None
         return TypeAdapter(CategoryProposal).validate_json(row["payload_json"])
+
+    def category_proposal_exists(self, source: SourceReference) -> bool:
+        """Return whether this exact upstream transaction already had a review."""
+
+        row = self._connection.execute(
+            "SELECT 1 FROM category_proposals "
+            "WHERE source_system = ? AND source_entity = ? AND external_id = ? "
+            "LIMIT 1",
+            (source.system.value, source.entity.value, source.external_id),
+        ).fetchone()
+        return row is not None
 
     def preview_batch(self, proposal_ids: tuple[str, ...]) -> str:
         return _batch_token(self._require_pending(proposal_ids))

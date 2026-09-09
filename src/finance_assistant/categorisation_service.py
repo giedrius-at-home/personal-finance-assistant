@@ -2,8 +2,8 @@
 
 This module joins the deterministic baseline, the constrained local model
 adapter, confidence calibration, and the durable review/correction workflow.
-Nothing here writes to Firefly; the write port is disabled by default and the
-model output has no direct upstream path.
+The model output has no direct upstream path. A separate, disabled-by-default
+adapter may apply only an exact owner-reviewed category.
 """
 
 from __future__ import annotations
@@ -124,7 +124,7 @@ class ModelBackend(Protocol):
 
 
 class CategoryWritePort(Protocol):
-    """Typed upstream write boundary; no production Firefly path in Phase 4."""
+    """Typed upstream write boundary for exact reviewed decisions."""
 
     def apply(self, proposal: CategoryProposal) -> CategoryWriteResult: ...
 
@@ -293,6 +293,7 @@ class CategorisationService:
         prompt_version: str = DEFAULT_PROMPT_VERSION,
         calibration_report: CalibrationReport | None = None,
         write_port: CategoryWritePort | None = None,
+        review_model_suggestions: bool = False,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._store = store
@@ -314,6 +315,7 @@ class CategorisationService:
             else frozenset()
         )
         self._write_port = write_port or DisabledCategoryWritePort()
+        self._review_model_suggestions = review_model_suggestions
         self._clock = clock or (lambda: datetime.now(UTC))
 
     async def propose(
@@ -353,6 +355,16 @@ class CategorisationService:
             return CategorisationOutcome(
                 method=CategorisationMethod.ABSTAIN,
                 reasons=(result.abstention or "model abstained",),
+            )
+        if self._review_model_suggestions:
+            suggestion = result.category
+            return CategorisationOutcome(
+                method=CategorisationMethod.MODEL,
+                category=suggestion.category,
+                confidence=suggestion.confidence,
+                runner_up=suggestion.runner_up,
+                runner_up_confidence=suggestion.runner_up_confidence,
+                reasons=(suggestion.reason,),
             )
         return automation_decision(
             result.category,

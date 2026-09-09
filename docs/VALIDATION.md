@@ -61,6 +61,12 @@ currency precision, transfers, updates, malformed-contract rejection, ambiguous
 ownership rejection, idempotent persistence, immutable source lineage, and
 exact reconciliation without implicit rounding.
 
+Production polling changes must additionally prove disabled-by-default startup,
+required secret/config validation, immediate first execution, bounded intervals,
+failure isolation, cancellation on shutdown, asset-account filtering, and
+content-free logs. Runtime validation records counts only and confirms a second
+sync changes no unchanged projections.
+
 Goal and alert changes must additionally prove piggy-bank and budget-limit
 contracts, ineligible-goal reasons, forecasts, policy boundaries, exact aggregate
 evidence, concurrent deduplication, cooldown expiry, severity escalation,
@@ -138,6 +144,13 @@ A pull request records:
 No credentials, real financial data, account identifiers, bank exports, model
 prompts containing personal data, or unredacted service logs may appear in
 validation evidence.
+
+Importer changes must also prove that both default and configured HTTPS ports
+render through `docker compose config`, the PEM is mounted read-only, the TLS
+volume survives importer recreation, and the browser session directory is not
+mounted. Validate callbacks with synthetic credentials only. Evidence may name
+paths and report file modes, but must never include application IDs, tokens,
+PEM contents, bank configurations, or session-file output.
 
 ## Historical baseline
 
