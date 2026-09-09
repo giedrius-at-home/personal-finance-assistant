@@ -106,6 +106,7 @@ class DashboardService:
         settings = self.state.get_settings() if self.state else OwnerSettings()
         if self.demo_mode:
             accounts, transactions, goals, proposals = _demo_records(now)
+            assignment_proposals = proposals
             severities: tuple[AlertSeverity, ...] = (AlertSeverity.HEADS_UP,)
             safe: tuple[Money, ...] = (Money(amount="420", currency=_EUR),)
             revisions: tuple[SettingsRevision, ...] = ()
@@ -113,7 +114,10 @@ class DashboardService:
             accounts = self.state.list_accounts() if self.state else ()
             transactions = self.state.list_transactions() if self.state else ()
             goals = self.state.list_goals() if self.state else ()
-            proposals = self.state.list_proposals(limit=100) if self.state else ()
+            proposals = self.state.list_pending(limit=100) if self.state else ()
+            assignment_proposals = (
+                self.state.list_proposals(limit=500) if self.state else ()
+            )
             alerts = self.state.list_active_alerts(limit=100) if self.state else ()
             severities = tuple(item[2] for item in alerts)
             safe = self.state.list_safe_to_spend() if self.state else ()
@@ -128,7 +132,7 @@ class DashboardService:
                 )
                 for item in (self.state.list_settings_revisions() if self.state else ())
             )
-        assignments = _assignments(transactions, proposals)
+        assignments = _assignments(transactions, assignment_proposals)
         weekly = weekly_report(
             transactions,
             assignments=assignments,

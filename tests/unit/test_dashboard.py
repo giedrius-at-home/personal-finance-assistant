@@ -484,6 +484,9 @@ def test_review_approve_reject_and_correct_lifecycle(tmp_path: Path) -> None:
         assert "Category suggestion rejected" in rejected.text
         assert "Category correction saved successfully" in corrected.text
         assert empty.status_code == 422
+        remaining = client.get("/v1/dashboard").json()["review_items"]
+        assert [entry["proposal_id"] for entry in remaining] == [items[3].proposal_id]
+        assert remaining[0]["status"] == "pending"
 
     checked = SQLiteDerivedState(path)
     checked.migrate_up()

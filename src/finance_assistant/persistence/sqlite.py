@@ -765,10 +765,13 @@ class SQLiteDerivedState:
                 ),
             )
 
-    def list_pending(self) -> tuple[CategoryProposal, ...]:
+    def list_pending(self, *, limit: int = 500) -> tuple[CategoryProposal, ...]:
+        if not 1 <= limit <= 500:
+            raise ValueError("pending proposal limit must be between 1 and 500")
         rows = self._connection.execute(
             "SELECT payload_json FROM category_proposals "
-            "WHERE status = 'pending' ORDER BY created_at"
+            "WHERE status = 'pending' ORDER BY created_at LIMIT ?",
+            (limit,),
         ).fetchall()
         adapter = TypeAdapter(CategoryProposal)
         return tuple(adapter.validate_json(row["payload_json"]) for row in rows)

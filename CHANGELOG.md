@@ -8,6 +8,8 @@ project intends to use semantic versioning for its own releases.
 
 ### Changed
 
+- Made the dashboard category inbox a pending-only work queue while retaining
+  resolved proposals in the local audit history.
 - Added optional local embedding retrieval over bounded, identifier-redacted,
   owner-approved Firefly examples; pending reviews are regenerated after a
   classifier upgrade while existing Firefly categories remain untouched.
