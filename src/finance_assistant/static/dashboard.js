@@ -56,9 +56,13 @@ async function submitLive(form) {
   for (const button of form.querySelectorAll("button")) button.disabled = true;
   status("Saving…");
   try {
+    const body = new URLSearchParams();
+    for (const [key, value] of new FormData(form)) {
+      if (typeof value === "string") body.append(key, value);
+    }
     const response = await fetch(form.action, {
       method: "POST",
-      body: new FormData(form),
+      body,
       credentials: "same-origin",
       cache: "no-store",
       headers: { Accept: "text/html" },

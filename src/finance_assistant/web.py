@@ -234,7 +234,9 @@ def install_web_routes(
                     status_code=409, detail="proposal is no longer pending"
                 )
         elif decision == "correct":
-            category = _one(values, "category", max_length=128)
+            category = _one(values, "category", max_length=128).strip()
+            if not category:
+                raise HTTPException(status_code=422, detail="category cannot be empty")
             proposal = state.get_pending(proposal_id)
             if proposal is None:
                 raise HTTPException(

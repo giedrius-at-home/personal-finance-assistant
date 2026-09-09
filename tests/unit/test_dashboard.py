@@ -157,6 +157,8 @@ def test_dashboard_live_updates_are_local_and_progressively_enhanced() -> None:
     assert "http://" not in script.text
     assert "https://" not in script.text
     assert "liveSuccess" in script.text
+    assert "new URLSearchParams()" in script.text
+    assert "body: new FormData(form)" not in script.text
     assert "Firefly did not confirm the category" in script.text
 
 
@@ -434,7 +436,8 @@ def test_review_approve_reject_and_correct_lifecycle(tmp_path: Path) -> None:
     seeded = SQLiteDerivedState(path)
     seeded.migrate_up()
     items = tuple(
-        proposal(name) for name in ("Synthetic A", "Synthetic B", "Synthetic C")
+        proposal(name)
+        for name in ("Synthetic A", "Synthetic B", "Synthetic C", "Synthetic D")
     )
     for item in items:
         seeded.record_proposal(item)
@@ -459,7 +462,12 @@ def test_review_approve_reject_and_correct_lifecycle(tmp_path: Path) -> None:
         )
         corrected = client.post(
             f"/review/{items[2].proposal_id}/correct",
-            data={"csrf_token": token, "category": "Transport"},
+            data={"csrf_token": token, "category": " Transport "},
+            headers=SAME_ORIGIN,
+        )
+        empty = client.post(
+            f"/review/{items[3].proposal_id}/correct",
+            data={"csrf_token": token, "category": "   "},
             headers=SAME_ORIGIN,
         )
         assert (
@@ -468,6 +476,7 @@ def test_review_approve_reject_and_correct_lifecycle(tmp_path: Path) -> None:
         assert "Category approval saved successfully" in approved.text
         assert "Category suggestion rejected" in rejected.text
         assert "Category correction saved successfully" in corrected.text
+        assert empty.status_code == 422
 
     checked = SQLiteDerivedState(path)
     checked.migrate_up()
@@ -476,6 +485,7 @@ def test_review_approve_reject_and_correct_lifecycle(tmp_path: Path) -> None:
         items[0].proposal_id: ProposalStatus.APPROVED,
         items[1].proposal_id: ProposalStatus.REJECTED,
         items[2].proposal_id: ProposalStatus.CORRECTED,
+        items[3].proposal_id: ProposalStatus.PENDING,
     }
     assert checked.list_corrections()[0].approved_category == "Transport"
     checked.close()
