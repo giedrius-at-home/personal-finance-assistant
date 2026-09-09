@@ -14,6 +14,7 @@ services:
       PFA_RESEARCH_USER_AGENT: ${PFA_RESEARCH_USER_AGENT:-personal-finance-assistant/0.1 (https://github.com/giedrius-at-home/personal-finance-assistant)}
       PFA_OLLAMA_BASE_URL: ${PFA_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       PFA_OLLAMA_MODEL: ${PFA_OLLAMA_MODEL:-qwen3:8b}
+      PFA_OLLAMA_EMBEDDING_MODEL: ${PFA_OLLAMA_EMBEDDING_MODEL:-}
       PFA_CATEGORY_SUGGESTIONS_ENABLED: ${PFA_CATEGORY_SUGGESTIONS_ENABLED:-false}
       PFA_CATEGORY_SUGGESTION_BATCH_SIZE: ${PFA_CATEGORY_SUGGESTION_BATCH_SIZE:-20}
       PFA_FIREFLY_BASE_URL: http://firefly:8080

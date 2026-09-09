@@ -402,6 +402,8 @@ ignored `.env` file:
 PFA_FIREFLY_CATEGORY_WRITES_ENABLED=true
 PFA_CATEGORY_SUGGESTIONS_ENABLED=true
 PFA_CATEGORY_SUGGESTION_BATCH_SIZE=20
+PFA_OLLAMA_MODEL=qwen3:14b
+PFA_OLLAMA_EMBEDDING_MODEL=embeddinggemma
 ```
 
 This uses the configured Firefly API token but permits only a category update
@@ -418,6 +420,13 @@ Each Firefly sync also rebuilds the approved vocabulary and conflict-safe
 normalized merchant examples from current categorized Firefly transactions.
 Identifiers are redacted before local model use. A merchant with conflicting
 historical categories does not become a deterministic rule.
+When an embedding model is configured, the gateway retrieves a bounded,
+category-diverse set of similar owner-approved examples for each merchant. The
+normalized text and ephemeral vectors stay within local Ollama and are not
+written to the database. If retrieval is unavailable, categorization falls back
+to the existing balanced example set. Changing the classifier supersedes old
+pending suggestions so they can be regenerated; it never overwrites an already
+categorized Firefly transaction.
 Pending dashboard suggestions are marked superseded when a later Firefly sync
 shows that the same transaction was categorized directly in Firefly.
 

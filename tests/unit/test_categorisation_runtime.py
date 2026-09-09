@@ -7,6 +7,7 @@ from finance_assistant.categorisation_runtime import (
     CategorySuggestionRunner,
     CategorySuggestionSettings,
     build_category_history_context,
+    retrieve_category_examples,
 )
 from finance_assistant.categorisation_service import ProposalStatus
 from finance_assistant.domain.canonical import (
@@ -33,10 +34,36 @@ def test_category_suggestion_settings_are_bounded() -> None:
     settings = CategorySuggestionSettings.from_environment(environment)
     assert settings is not None
     assert settings.batch_size == 20
+    assert settings.embedding_model is None
+
+    rag_settings = CategorySuggestionSettings.from_environment(
+        {**environment, "PFA_OLLAMA_EMBEDDING_MODEL": "synthetic-embed"}
+    )
+    assert rag_settings is not None
+    assert rag_settings.embedding_model == "synthetic-embed"
 
     with pytest.raises(ValueError, match="between 1 and 100"):
         CategorySuggestionSettings.from_environment(
             {**environment, "PFA_CATEGORY_SUGGESTION_BATCH_SIZE": "101"}
+        )
+    with pytest.raises(ValueError, match="must be true or false"):
+        CategorySuggestionSettings.from_environment(
+            {**environment, "PFA_CATEGORY_SUGGESTIONS_ENABLED": "yes"}
+        )
+    with pytest.raises(ValueError, match="URL and model"):
+        CategorySuggestionSettings.from_environment(
+            {
+                "PFA_CATEGORY_SUGGESTIONS_ENABLED": "true",
+                "PFA_OLLAMA_BASE_URL": "http://localhost:11434",
+            }
+        )
+    with pytest.raises(ValueError, match="must be an integer"):
+        CategorySuggestionSettings.from_environment(
+            {**environment, "PFA_CATEGORY_SUGGESTION_BATCH_SIZE": "many"}
+        )
+    with pytest.raises(ValueError, match="oversized"):
+        CategorySuggestionSettings.from_environment(
+            {**environment, "PFA_OLLAMA_EMBEDDING_MODEL": "x" * 129}
         )
 
 
@@ -146,6 +173,35 @@ def test_firefly_history_builds_dynamic_vocabulary_and_conflict_safe_rules() -> 
     ]
     assert ("synthetic bakery number", "Food") in history.examples
     assert all(merchant != "conflicted shop" for merchant, _ in history.examples)
+    assert history.retrieval_examples == (("synthetic bakery number", "Food"),)
+
+
+@pytest.mark.anyio
+async def test_local_rag_retrieves_similar_diverse_category_examples() -> None:
+    class FakeEmbeddings:
+        async def embed(self, inputs: tuple[str, ...]) -> tuple[tuple[float, ...], ...]:
+            assert inputs == ("bakery one", "bakery two", "airline", "new bakery")
+            return (
+                (1.0, 0.0),
+                (0.9, 0.1),
+                (0.0, 1.0),
+                (1.0, 0.0),
+            )
+
+    retrieved = await retrieve_category_examples(
+        FakeEmbeddings(),  # type: ignore[arg-type]
+        queries=("new bakery",),
+        corpus=(
+            ("bakery one", "Food"),
+            ("bakery two", "Food"),
+            ("airline", "Travel"),
+        ),
+    )
+
+    assert retrieved["new bakery"][:2] == (
+        ("bakery one", "Food"),
+        ("bakery two", "Food"),
+    )
 
 
 @pytest.mark.anyio
@@ -199,4 +255,127 @@ async def test_runner_reuses_a_firefly_category_without_calling_the_model(
     proposal = state.list_pending()[0]
     assert proposal.proposed_category == "Food"
     assert proposal.method.value == "baseline"
+    state.close()
+
+
+@pytest.mark.anyio
+async def test_runner_regenerates_pending_suggestions_after_model_upgrade(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class FakeOllama:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        async def __aenter__(self) -> FakeOllama:
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            pass
+
+        async def generate(self, _prompt: str, *, system: str | None = None) -> str:
+            return (
+                '{"category":"Groceries","confidence":0.96,'
+                '"runner_up":"Shopping","runner_up_confidence":0.02,'
+                '"reason":"synthetic evidence"}'
+            )
+
+    monkeypatch.setattr(
+        "finance_assistant.categorisation_runtime.OllamaClient", FakeOllama
+    )
+    state = SQLiteDerivedState(tmp_path / "state.sqlite3")
+    state.migrate_up()
+    now = datetime(2026, 9, 7, tzinfo=UTC)
+    state.upsert(
+        synthetic_transaction(
+            external_id="upgrade", description="Synthetic Unknown", category=None
+        ),
+        observed_at=now,
+    )
+    assert (
+        await CategorySuggestionRunner(
+            state=state,
+            settings=CategorySuggestionSettings(
+                base_url="http://localhost:11434", model="small-model"
+            ),
+        )()
+        == 1
+    )
+    assert (
+        await CategorySuggestionRunner(
+            state=state,
+            settings=CategorySuggestionSettings(
+                base_url="http://localhost:11434", model="larger-model"
+            ),
+        )()
+        == 1
+    )
+
+    proposals = state.list_proposals()
+    assert {item.model_version: item.status for item in proposals} == {
+        "small-model": ProposalStatus.SUPERSEDED,
+        "larger-model": ProposalStatus.PENDING,
+    }
+    state.close()
+
+
+@pytest.mark.anyio
+async def test_runner_uses_local_retrieval_context_when_configured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[str, tuple[str, ...] | str]] = []
+
+    class FakeOllama:
+        def __init__(self, *, model: str, **_kwargs: object) -> None:
+            self.model = model
+
+        async def __aenter__(self) -> FakeOllama:
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            pass
+
+        async def embed(self, inputs: tuple[str, ...]) -> tuple[tuple[float, ...], ...]:
+            calls.append((self.model, inputs))
+            return ((1.0, 0.0), (1.0, 0.0))
+
+        async def generate(self, prompt: str, *, system: str | None = None) -> str:
+            calls.append((self.model, prompt))
+            assert '"merchant":"reviewed bakery"' in prompt
+            return (
+                '{"category":"Food","confidence":0.96,'
+                '"runner_up":"Dining","runner_up_confidence":0.02,'
+                '"reason":"retrieved synthetic evidence"}'
+            )
+
+    monkeypatch.setattr(
+        "finance_assistant.categorisation_runtime.OllamaClient", FakeOllama
+    )
+    state = SQLiteDerivedState(tmp_path / "state.sqlite3")
+    state.migrate_up()
+    now = datetime(2026, 9, 7, tzinfo=UTC)
+    for transaction in (
+        synthetic_transaction(
+            external_id="history", description="Reviewed Bakery", category="Food"
+        ),
+        synthetic_transaction(
+            external_id="candidate", description="New Bakery", category=None
+        ),
+    ):
+        state.upsert(transaction, observed_at=now)
+
+    count = await CategorySuggestionRunner(
+        state=state,
+        settings=CategorySuggestionSettings(
+            base_url="http://localhost:11434",
+            model="larger-model",
+            embedding_model="synthetic-embed",
+        ),
+    )()
+
+    assert count == 1
+    assert calls[0] == (
+        "synthetic-embed",
+        ("reviewed bakery", "new bakery"),
+    )
+    assert state.list_pending()[0].proposed_category == "Food"
     state.close()

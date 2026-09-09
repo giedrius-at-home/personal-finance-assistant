@@ -8,6 +8,9 @@ project intends to use semantic versioning for its own releases.
 
 ### Changed
 
+- Added optional local embedding retrieval over bounded, identifier-redacted,
+  owner-approved Firefly examples; pending reviews are regenerated after a
+  classifier upgrade while existing Firefly categories remain untouched.
 - Taught the local categorizer to use recognizable merchant identity and
   ordinary business type as evidence, with lower confidence or abstention when
   either is unclear.
