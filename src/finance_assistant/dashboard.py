@@ -57,6 +57,10 @@ class ReviewItem(StrictModel):
     vocabulary_version: str
     status: ProposalStatus
     source_updated_at: AwareDatetime | None
+    transaction_description: str | None = Field(default=None, max_length=1024)
+    transaction_amount: Decimal | None = None
+    transaction_currency: Currency | None = None
+    transaction_occurred_at: AwareDatetime | None = None
 
 
 class SettingsRevision(StrictModel):
@@ -144,20 +148,33 @@ class DashboardService:
             for currency in weekly.currencies
             for item in currency.categories
         )
+        transactions_by_source = {
+            transaction.source.identity: transaction for transaction in transactions
+        }
         return DashboardView(
             generated_at=now,
             data_mode="invented demo" if self.demo_mode else "local derived state",
             upstream_writes=self.upstream_writes,
             weekly=weekly,
             net_worth=net_worth_report(accounts, as_of=now),
-            review_items=tuple(_review_item(item) for item in proposals),
+            review_items=tuple(
+                _review_item(item, transactions_by_source.get(item.source.identity))
+                for item in proposals
+            ),
             taxonomy=taxonomy_recommendations(_merge_aggregates(aggregates)),
             settings=settings,
             settings_revisions=revisions,
         )
 
 
-def _review_item(proposal: CategoryProposal) -> ReviewItem:
+def _review_item(
+    proposal: CategoryProposal, transaction: CanonicalTransaction | None
+) -> ReviewItem:
+    signed_amount: Decimal | None = None
+    if transaction is not None:
+        signed_amount = transaction.amount.amount
+        if transaction.kind is TransactionKind.OUTFLOW:
+            signed_amount = -signed_amount
     return ReviewItem(
         proposal_id=proposal.proposal_id,
         merchant=proposal.normalized_merchant,
@@ -174,6 +191,10 @@ def _review_item(proposal: CategoryProposal) -> ReviewItem:
         vocabulary_version=proposal.vocabulary_version,
         status=proposal.status,
         source_updated_at=proposal.source.source_updated_at,
+        transaction_description=(transaction.description if transaction else None),
+        transaction_amount=signed_amount,
+        transaction_currency=(transaction.amount.currency if transaction else None),
+        transaction_occurred_at=(transaction.occurred_at if transaction else None),
     )
 
 

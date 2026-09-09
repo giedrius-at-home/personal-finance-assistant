@@ -58,12 +58,26 @@ small {
   background: #fff3d9;
 }
 .live-status {
-  min-height: 1.45rem;
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 10;
+  max-width: min(28rem, calc(100vw - 2rem));
   margin: 0;
-  color: var(--muted);
-  font-size: 0.85rem;
+  padding: 0.8rem 1rem;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--green);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: 0 8px 28px #25372d29;
+  font-size: 0.9rem;
+}
+.live-status:empty {
+  display: none;
 }
 .live-status[data-state="error"] {
+  border-left-color: var(--red);
   color: var(--red);
 }
 .section-heading {
@@ -138,6 +152,10 @@ ul {
 }
 .review:first-of-type {
   border-top: 0;
+}
+.review-amount {
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
 }
 button,
 .button {

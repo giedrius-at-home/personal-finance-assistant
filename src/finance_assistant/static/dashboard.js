@@ -51,6 +51,8 @@ async function submitLive(form) {
   if (requestInFlight) return;
   requestInFlight = true;
   form.dataset.submitting = "true";
+  const successMessage = form.dataset.liveSuccess || "Saved successfully.";
+  let responseStatus = 0;
   for (const button of form.querySelectorAll("button")) button.disabled = true;
   status("Saving…");
   try {
@@ -61,13 +63,21 @@ async function submitLive(form) {
       cache: "no-store",
       headers: { Accept: "text/html" },
     });
+    responseStatus = response.status;
     if (!response.ok) throw new Error("dashboard action failed");
     replaceDashboard(await response.text());
-    status("Saved and updated.");
+    const serverMessage = document.querySelector("#live-status")?.textContent?.trim();
+    if (!serverMessage) status(successMessage);
   } catch (_error) {
     delete form.dataset.submitting;
     for (const button of form.querySelectorAll("button")) button.disabled = false;
-    status("Could not confirm the update. Refresh before retrying.", "error");
+    if (responseStatus === 409) {
+      status("This item changed before it could be saved. Refresh and try again.", "error");
+    } else if (responseStatus === 503) {
+      status("Firefly did not confirm the category. Refresh before retrying.", "error");
+    } else {
+      status("Could not confirm the update. Refresh before retrying.", "error");
+    }
   } finally {
     requestInFlight = false;
   }

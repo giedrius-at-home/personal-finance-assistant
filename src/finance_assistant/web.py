@@ -98,6 +98,7 @@ def install_web_routes(
                 and not demo_mode,
                 "csv_import_accounts": state.list_accounts() if state else (),
                 "csv_import_status": _import_status(request),
+                "action_status": _action_status(request),
             },
         )
         response.set_cookie(
@@ -121,7 +122,10 @@ def install_web_routes(
                 status_code=409, detail="local category suggestions are disabled"
             )
         await suggestion_runner()
-        return RedirectResponse("/dashboard", status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(
+            "/dashboard?notice=suggestions",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
 
     @router.post(
         "/imports/csv/preview", response_class=HTMLResponse, include_in_schema=False
@@ -265,7 +269,10 @@ def install_web_routes(
                 raise
         else:
             raise HTTPException(status_code=404, detail="unknown review decision")
-        return RedirectResponse("/dashboard", status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(
+            f"/dashboard?notice=category-{decision}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
 
     @router.post(
         "/settings/preview", response_class=HTMLResponse, include_in_schema=False
@@ -360,6 +367,15 @@ def _import_status(request: Request) -> str | None:
     if request.query_params.get("csv_refreshed") == "false":
         return f"{message} Dashboard refresh will retry on the next sync."
     return message
+
+
+def _action_status(request: Request) -> str | None:
+    return {
+        "suggestions": "Category suggestions refreshed.",
+        "category-approve": "Category approval saved successfully.",
+        "category-reject": "Category suggestion rejected.",
+        "category-correct": "Category correction saved successfully.",
+    }.get(request.query_params.get("notice", ""))
 
 
 def _one(values: dict[str, list[str]], key: str, *, max_length: int) -> str:

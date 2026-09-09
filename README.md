@@ -82,7 +82,9 @@ writes and notifications remain disabled by default.
 The server-rendered dashboard progressively refreshes its main region while
 visible and applies category-review actions in place. It uses one local script,
 no third-party browser resources or storage, and retains normal navigation when
-JavaScript is unavailable or an exact preview is required.
+JavaScript is unavailable or an exact preview is required. Review cards show the
+full Firefly description, signed amount, currency, and transaction date only in
+the localhost owner interface, and display a visible success or failure toast.
 
 Phase 6 adds disabled-by-default public research and an opt-in STDIO MCP server
 for Codex. Research accepts only sanitized public business names or validated

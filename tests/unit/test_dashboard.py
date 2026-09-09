@@ -129,6 +129,7 @@ def test_demo_dashboard_is_invented_responsive_and_no_store() -> None:
     assert response.status_code == 200
     assert "Invented demo data" in response.text
     assert "Northstar Bicycle Repair" in response.text
+    assert "86.40 EUR" in response.text
     assert "133.20 spent" in response.text
     assert "2266.80 weekly cash flow · 2400.00 income" in response.text
     assert "10300.00 EUR" in response.text
@@ -155,6 +156,8 @@ def test_dashboard_live_updates_are_local_and_progressively_enhanced() -> None:
     assert "sessionStorage" not in script.text
     assert "http://" not in script.text
     assert "https://" not in script.text
+    assert "liveSuccess" in script.text
+    assert "Firefly did not confirm the category" in script.text
 
 
 def test_owner_name_alias_environment_is_bounded_and_deduplicated() -> None:
@@ -175,6 +178,10 @@ def test_dashboard_json_uses_the_same_bounded_view() -> None:
     payload = response.json()
     assert payload["data_mode"] == "invented demo"
     assert len(payload["review_items"]) == 3
+    assert payload["review_items"][0]["transaction_description"]
+    assert payload["review_items"][0]["transaction_amount"]
+    assert payload["review_items"][0]["transaction_currency"]["code"] == "EUR"
+    assert payload["review_items"][0]["transaction_occurred_at"]
     assert payload["upstream_writes"] == "disabled"
 
 
@@ -434,6 +441,11 @@ def test_review_approve_reject_and_correct_lifecycle(tmp_path: Path) -> None:
     seeded.close()
 
     with TestClient(create_app(database_path=path)) as client:
+        missing_context = client.get("/v1/dashboard").json()["review_items"][0]
+        assert missing_context["transaction_description"] is None
+        assert missing_context["transaction_amount"] is None
+        assert missing_context["transaction_currency"] is None
+        assert missing_context["transaction_occurred_at"] is None
         token = client.get("/dashboard").cookies["pfa_csrf"]
         approved = client.post(
             f"/review/{items[0].proposal_id}/approve",
@@ -453,6 +465,9 @@ def test_review_approve_reject_and_correct_lifecycle(tmp_path: Path) -> None:
         assert (
             approved.status_code == rejected.status_code == corrected.status_code == 200
         )
+        assert "Category approval saved successfully" in approved.text
+        assert "Category suggestion rejected" in rejected.text
+        assert "Category correction saved successfully" in corrected.text
 
     checked = SQLiteDerivedState(path)
     checked.migrate_up()

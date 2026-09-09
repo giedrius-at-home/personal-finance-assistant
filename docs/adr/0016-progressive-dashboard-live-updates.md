@@ -26,6 +26,13 @@ cookie, then replace the dashboard region with the server response. CSV and
 settings preview/confirmation flows retain normal navigation because the owner
 must inspect a separate exact preview.
 
+Show an accessible fixed confirmation or failure toast after each live action so
+the result remains visible at the owner's current scroll position. Category
+review cards join each proposal to its exact canonical transaction and show the
+full description, signed amount, currency, and date. This sensitive context is
+limited to the loopback owner dashboard and is not logged or sent to a third
+party.
+
 Serve the script locally, permit scripts only from `'self'` in CSP, use no
 third-party assets, retain no financial data in browser storage, and leave all
 calculations and authorization on the server. Without JavaScript, every form and

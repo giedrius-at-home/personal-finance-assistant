@@ -100,8 +100,11 @@ controls, exact review decisions, settings preview/apply/rollback, invalid Host,
 cross-origin and missing-CSRF rejection, no-store/CSP headers, and the absence of
 third-party requests. Progressive updates must retain server-rendered fallback,
 pause during edits, serialize requests, avoid browser storage, and leave exact
-CSV/settings previews as normal navigation. Screenshots and console/network observations must contain
-invented data only and stay in pull-request evidence rather than the repository.
+CSV/settings previews as normal navigation. Review tests must confirm the exact
+canonical transaction supplies the full description, signed amount, currency,
+and date, while missing/deleted transactions fail closed to proposal-only
+context. Screenshots and console/network observations must contain invented data
+only and stay in pull-request evidence rather than the repository.
 
 Phase 6 changes must prove that private/query-like merchant inputs are rejected,
 market identifiers and questions are enumerated, URLs are internally built, and

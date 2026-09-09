@@ -9,7 +9,8 @@ project intends to use semantic versioning for its own releases.
 ### Changed
 
 - Added first-party progressive dashboard refresh and in-place category review
-  actions while preserving server-rendered fallback and exact preview screens.
+  actions with visible result toasts and full transaction context, while
+  preserving server-rendered fallback and exact preview screens.
 - Rebuilt category vocabularies, conflict-safe merchant rules, and bounded local
   Qwen examples from current categorized Firefly history after each sync while
   preserving owner review as the only approval path.

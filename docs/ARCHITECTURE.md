@@ -83,6 +83,8 @@ The current implementation provides pure functions and HTTP contracts for:
 - a server-rendered localhost dashboard and typed JSON projection built from the
   same deterministic reporting service, with bounded review items and one
   first-party progressive-enhancement script but no third-party resources;
+  category reviews join the proposal to its exact canonical transaction so the
+  localhost owner sees its full description, signed amount, currency, and date;
 - ISO-week cash-flow reports that model refunds and transfers explicitly, keep
   currencies separate, and bind output to a stable evidence hash;
 - net-worth aggregation that counts each canonical account once, exposes linked
