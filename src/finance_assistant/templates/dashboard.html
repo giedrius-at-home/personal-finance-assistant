@@ -21,6 +21,8 @@
   {% for component in view.net_worth.components %}<article class="account-card"><h3>{{ component.label }}</h3><div class="account-balance">{{ component.amount|money(component.currency) }} <span>{{ component.currency.code }}</span></div>{% if component.stale %}<small>Balance may be stale</small>{% endif %}</article>{% else %}<article class="account-card"><p class="muted">No accounts imported yet.</p></article>{% endfor %}
   </div>
 </section>
+{% include 'monthly_spending.html' %}
+{% include 'time_trends.html' %}
 <section class="card cash-overview" aria-label="Until payday">
   <div class="eyebrow">Your pay cycle</div>
   <div class="row"><h2>Until payday</h2><a href="#payday-setting">Set monthly payday</a></div>
@@ -37,16 +39,16 @@
   {% else %}<p>Choose your usual monthly payday below to see income and spending from payday to payday.</p>{% endif %}
   <p class="notice"><strong>Spending allowance not available yet.</strong> Your saved subscriptions are shown below. Payment matching, protected savings and statement completeness still need to be verified before we can estimate what is available to spend.</p>
 </section>
-<section class="card cash-overview" aria-label="Subscriptions and bills">
+    <section id="subscriptions" class="card cash-overview" aria-label="Subscriptions and bills">
   <div class="eyebrow">Saved in Firefly</div><h2>Subscriptions &amp; upcoming bills</h2>
   {% if view.subscriptions.fetched_at %}
   <p>Expected payments through {{ view.subscriptions.through_date }}{% if not view.cash_overview.next_payday %} (next 30 days){% else %} (before payday){% endif %}.</p>
   {% if view.subscriptions.stale or view.firefly_refresh_failed %}<p class="notice">Subscription data needs a refresh. The schedule may be incomplete; expected-cost totals are withheld.</p>
   {% else %}{% for cost in view.subscriptions.expected_costs %}<p><strong>{{ cost.amount|money(cost.currency) }} {{ cost.currency.code }}</strong> expected at the configured upper limits.</p>{% else %}<p>No expected dates returned in this window. This does not confirm every bill is paid.</p>{% endfor %}{% endif %}
-  <div class="table-scroll"><table><thead><tr><th>Subscription</th><th>Expected cost per payment</th><th>Expected dates</th><th>Linked payment evidence</th></tr></thead><tbody>
-  {% for bill in view.subscriptions.rows %}<tr><td>{{ bill.name }}<br><small>{{ bill.frequency }}</small></td><td>{{ bill.amount_min|money(bill.currency) }} – {{ bill.amount_max|money(bill.currency) }} {{ bill.currency.code }}</td><td>{% for date in bill.expected_dates %}{{ date }}{% if not loop.last %}<br>{% endif %}{% else %}No date in this window{% endfor %}</td><td>{% if bill.last_matched_on %}Last linked payment: {{ bill.last_matched_on }}{% else %}No linked payment in the checked period{% endif %}</td></tr>{% else %}<tr><td colspan="4">No active subscriptions in this snapshot.</td></tr>{% endfor %}
+  <div class="table-scroll"><table><thead><tr><th>Subscription</th><th>Expected cost per payment</th><th>Expected dates</th><th>Firefly link evidence</th><th>Recorded subscription spending</th></tr></thead><tbody>
+  {% for bill in view.subscriptions.rows %}<tr><td>{{ bill.name }}<br><small>{{ bill.frequency }}</small></td><td>{{ bill.amount_min|money(bill.currency) }}{% if bill.amount_min != bill.amount_max %} – {{ bill.amount_max|money(bill.currency) }}{% endif %} {{ bill.currency.code }}</td><td>{% for date in bill.expected_dates %}{{ date }}{% if not loop.last %}<br>{% endif %}{% else %}No date in this window{% endfor %}</td><td>{% if bill.native_payment_count %}<strong>{{ bill.native_payment_count }} direct transaction link{% if bill.native_payment_count != 1 %}s{% endif %}</strong><br>{% endif %}{% if bill.last_matched_on %}Firefly bill match date: {{ bill.last_matched_on }}{% elif not bill.native_payment_count %}No native Firefly link in the checked data{% endif %}</td><td>{% if bill.native_payment_count or bill.category_payment_count %}<strong>{{ bill.recorded_spending|money(bill.currency) }} {{ bill.currency.code }}</strong> across {{ bill.native_payment_count + bill.category_payment_count }} unique record{% if bill.native_payment_count + bill.category_payment_count != 1 %}s{% endif %}<br><small>Last recorded {{ bill.last_recorded_on }}{% if bill.category_payment_count %} · {{ bill.category_payment_count }} exact category-name match{% if bill.category_payment_count != 1 %}es{% endif %}{% endif %}</small>{% else %}No transaction or exact category-name evidence in this period{% endif %}</td></tr>{% else %}<tr><td colspan="5">No active subscriptions in this snapshot.</td></tr>{% endfor %}
   </tbody></table></div>
-  <p class="muted">Schedules and payment links come from Firefly. Configured ranges are estimates, not additional spending. Missing links do not prove a bill is unpaid; a previous linked payment does not prove the next one is paid.</p>
+  <p class="muted">Recorded evidence covers {{ view.subscriptions.evidence_start }} – {{ view.cash_overview.through_date }}. Direct links and Firefly bill match dates come from Firefly. An exact category-name match is weaker evidence from your own category naming, shown only when one saved subscription has that name. No amount or fuzzy merchant matching is used. Recorded payments are already included in monthly spending and trends; they are not added again. Missing evidence does not prove a bill is unpaid, and prior evidence does not prove the next payment is made.</p>
   {% else %}<p>Subscriptions will appear after a successful Firefly refresh.</p>{% endif %}
 </section>
 <section class="card cash-overview" aria-label="Account data health">

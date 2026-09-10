@@ -61,6 +61,9 @@ jobs:
       - name: Run tests
         run: uv run pytest --cov=finance_assistant --cov-report=term-missing
 
+      - name: Test dashboard interactions with synthetic DOM doubles
+        run: node --test tests/javascript/dashboard.test.cjs
+
   container:
     name: Container build
     runs-on: ubuntu-latest

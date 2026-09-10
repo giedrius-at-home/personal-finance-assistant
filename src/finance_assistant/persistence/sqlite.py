@@ -35,6 +35,7 @@ from finance_assistant.domain.canonical import (
 from finance_assistant.domain.categorisation import CalibrationExample
 from finance_assistant.domain.models import AlertSeverity, BudgetEvaluation, Money
 from finance_assistant.domain.settings import OwnerSettings, SettingsPreview
+from finance_assistant.domain.spending_groups import GroupMapping
 from finance_assistant.subscriptions import SubscriptionSnapshot
 
 CanonicalRecord = CanonicalAccount | CanonicalTransaction
@@ -294,6 +295,22 @@ CREATE TABLE subscription_snapshot (
 INSERT INTO schema_migrations(version, applied_at) VALUES (8, CURRENT_TIMESTAMP);
 """
 
+MIGRATION_9_UP = """
+CREATE TABLE spending_group_history (
+    category TEXT NOT NULL,
+    revision INTEGER NOT NULL CHECK(revision > 0),
+    group_name TEXT,
+    reviewed_at TEXT NOT NULL,
+    PRIMARY KEY(category, revision)
+);
+INSERT INTO schema_migrations(version, applied_at) VALUES (9, CURRENT_TIMESTAMP);
+"""
+
+MIGRATION_9_DOWN = """
+DROP TABLE spending_group_history;
+DELETE FROM schema_migrations WHERE version = 9;
+"""
+
 MIGRATION_8_DOWN = """
 DROP TABLE IF EXISTS subscription_snapshot;
 DELETE FROM schema_migrations WHERE version = 8;
@@ -384,6 +401,8 @@ class SQLiteDerivedState:
                 self._connection.executescript(MIGRATION_7_UP)
             if version < 8:
                 self._connection.executescript(MIGRATION_8_UP)
+            if version < 9:
+                self._connection.executescript(MIGRATION_9_UP)
 
     def migrate_down(self) -> None:
         """Reverse the prototype schema only when no financial state exists."""
@@ -407,12 +426,14 @@ class SQLiteDerivedState:
                           OR EXISTS(SELECT 1 FROM category_proposals)
                           OR EXISTS(SELECT 1 FROM category_corrections)
                           OR EXISTS(SELECT 1 FROM settings_history)
-                          OR EXISTS(SELECT 1 FROM subscription_snapshot)"""
+                          OR EXISTS(SELECT 1 FROM subscription_snapshot)
+                          OR EXISTS(SELECT 1 FROM spending_group_history)"""
             ).fetchone()[0]
             if populated:
                 raise PersistenceConflictError(
                     "refusing to migrate down populated state"
                 )
+            self._connection.executescript(MIGRATION_9_DOWN)
             self._connection.executescript(MIGRATION_8_DOWN)
             self._connection.executescript(MIGRATION_7_DOWN)
             self._connection.executescript(MIGRATION_6_DOWN)
@@ -449,6 +470,38 @@ class SQLiteDerivedState:
             datetime.fromisoformat(row[1]),
             bool(row[2]),
         )
+
+    def list_group_mappings(self) -> tuple[GroupMapping, ...]:
+        rows = self._connection.execute(
+            "SELECT category, group_name, revision FROM spending_group_history AS h "
+            "WHERE revision = (SELECT MAX(revision) FROM spending_group_history "
+            "WHERE category = h.category) ORDER BY category"
+        ).fetchall()
+        return tuple(
+            GroupMapping(category=r[0], group=r[1], revision=r[2]) for r in rows
+        )
+
+    def save_group_mapping(self, mapping: GroupMapping, *, now: datetime) -> None:
+        """Append a reviewed revision, including unassignment; reject stale forms."""
+        if now.tzinfo is None:
+            raise ValueError("now must be timezone-aware")
+        with self._lock, self._connection:
+            cursor = self._connection.execute(
+                "INSERT INTO spending_group_history"
+                "(category, revision, group_name, reviewed_at) "
+                "SELECT ?, ?, ?, ? WHERE COALESCE((SELECT MAX(revision) "
+                "FROM spending_group_history WHERE category = ?), 0) = ?",
+                (
+                    mapping.category,
+                    mapping.revision + 1,
+                    mapping.group,
+                    now.astimezone(UTC).isoformat(),
+                    mapping.category,
+                    mapping.revision,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise PersistenceConflictError("spending group changed since review")
 
     def save_subscriptions(self, snapshot: SubscriptionSnapshot) -> None:
         with self._lock, self._connection:

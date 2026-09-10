@@ -306,3 +306,34 @@ td {
     max-width: 100%;
   }
 }
+/* Monthly groups reuse the existing local dashboard palette and cards. */
+.spending-currency { margin-block: 1.5rem; }
+.spending-group { border-top: 1px solid #d5dcd5; padding-block: 1rem; }
+.spending-group summary { cursor: pointer; font-size: 1rem; }
+.group-label { display: inline-block; min-width: 12rem; font-weight: 700; }
+.spending-group progress { width: 100%; height: .5rem; accent-color: #176b50; }
+.group-mapping { display: flex; align-items: end; flex-wrap: wrap; gap: .75rem; padding-block: .8rem; }
+.group-mapping[hidden] { display: none; }
+.group-mapping label { flex: 1 1 18rem; overflow-wrap: anywhere; }
+.group-mapping select { width: 100%; }
+.group-suggestion-status { flex-basis: 100%; }
+.mapping-evidence { display: block; color: var(--green); margin-block: .2rem; }
+/* Time trends stay readable as tables when charts are unavailable. */
+.trend-panels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.5rem; }
+.trend-panel { min-width: 0; }
+.trend-figure { margin: 1rem 0; }
+.trend-plot { width: 100%; height: auto; display: block; }
+.chart-zero { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 2 4; }
+.chart-series { fill: none; stroke: var(--green); stroke-width: 2; }
+.chart-series circle { fill: var(--card); }
+.chart-series polyline, .chart-series circle { vector-effect: non-scaling-stroke; }
+.chart-series.series-1 { stroke: #365f96; stroke-dasharray: 6 4; }
+.chart-labels, .chart-legend { display: flex; justify-content: space-between; gap: .5rem; flex-wrap: wrap; }
+.chart-labels { padding-inline: 6.67%; }
+.chart-legend { justify-content: flex-start; gap: 1rem; margin-top: .75rem; font-size: .875rem; }
+.legend-0 { color: var(--green); border-bottom: 2px solid; }
+.legend-1 { color: #365f96; border-bottom: 2px dashed; }
+.weekday-trends { margin-block: 1.5rem; }
+.weekday-summary { background: var(--paper); }
+.trend-panel summary, .weekday-trends summary { cursor: pointer; font-weight: 600; }
+@media (max-width: 760px) { .trend-panels { grid-template-columns: minmax(0, 1fr); } }

@@ -1,6 +1,6 @@
 .PHONY: backup bootstrap check codex-tools compose-config demo doctor down format \
 	install-macos-app lint logs pull purge-research-cache restore run security setup \
-	status stop test upstream-contracts up versions
+	status stop test test-dashboard upstream-contracts up versions
 
 setup:
 	uv sync --all-extras --dev
@@ -27,7 +27,10 @@ upstream-contracts:
 	PFA_REQUIRE_UPSTREAM_CONTRACTS=1 uv run pytest -m upstream_contract \
 		tests/integration/test_upstream_contracts.py
 
-check: lint security test
+test-dashboard:
+	node --test tests/javascript/dashboard.test.cjs
+
+check: lint security test test-dashboard
 
 run:
 	uv run uvicorn --app-dir src finance_assistant.api:app --reload

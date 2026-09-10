@@ -96,6 +96,47 @@ JavaScript is unavailable or an exact preview is required. Review cards show the
 full Firefly description, signed amount, currency, and transaction date only in
 the localhost owner interface, and display a visible success or failure toast.
 
+**Monthly spending** adds a broad group above existing store categories. Open
+**Manage store groups**, search for a confirmed Firefly expense category, choose
+a group and select **Save group**. Choose **Needs a group** to undo an assignment.
+Changes regroup history locally; Firefly categories and transactions are unchanged.
+When local category suggestions are enabled, **Ask local model** offers a choice
+using the category and bounded reviewed examples. Review it and save separately;
+suggestions never apply automatically or contact public search providers.
+
+Expand a group to see stores, spending and refunds. Transfers and income are
+excluded; ungrouped expenses remain visible, and currencies stay separate.
+Shares use gross purchases; totals subtract refunds. The comparison uses equal
+calendar-day counts, with shorter months clamped and today's partial data labelled.
+Missing prior evidence is not assumed to mean zero spending. Import completeness
+remains unverified. These figures are not balances or an allowance: salary arriving
+late in a month may fund the next month's bills. Category-wide grouping does not
+introduce individual-purchase overrides; keep that detail in Firefly categories.
+See [ADR 0019](docs/adr/0019-reviewed-monthly-spending-groups.md).
+
+**Spending over time** shows five historical months plus the current partial month,
+with an expandable group-by-month table, cumulative daily comparison against the
+previous month, and recorded weekday/weekend patterns. Missing currency-months
+appear as gaps rather than assumed zero; refunds can lower totals and daily lines.
+Weekday averages use dates with recorded purchases, not all calendar days. These
+are patterns in imported records, not proof of bank coverage or purchase behaviour.
+Time-of-day analysis is withheld because existing timestamps do not reliably
+distinguish booking dates/placeholders from real purchase times. Charts stay local
+and have exact-value table alternatives; no model or external service is involved.
+See [ADR 0020](docs/adr/0020-recorded-spending-time-trends.md).
+
+Saved subscriptions also show recorded payment evidence for the current and five
+previous calendar months. A native Firefly bill ID is direct evidence. When absent,
+the dashboard can show a weaker match only if the Firefly category is exactly the
+name of one unique active subscription. It never matches on amount, merchant text or
+date proximity. These are the same expense records already counted in monthly trends,
+not additional costs. Missing evidence does not prove non-payment.
+
+The group editor marks exact subscription-name categories and offers
+**Subscriptions & recurring** as a reviewed broad group. It does not assign them
+automatically or change Firefly. See
+[ADR 0021](docs/adr/0021-subscription-payment-evidence.md).
+
 Phase 6 adds disabled-by-default public research and an opt-in STDIO MCP server
 for Codex. Research accepts only sanitized public business names or validated
 market identifiers, constructs exact-allowlisted Wikipedia/SEC URLs internally,

@@ -301,6 +301,48 @@ make down         # remove containers and networks while retaining volumes
 Never use `docker compose down --volumes` after introducing data. That command
 deletes the databases and Firefly uploads.
 
+## Monthly spending groups
+
+The adjacent **Spending over time** section is read-only and needs no additional
+configuration. Expand monthly values to inspect group totals across six months,
+daily values for exact comparison dates, or weekday patterns for the weekday/weekend
+summary. Charts have equivalent data tables and do not require browser scripting.
+They refresh with the normal dashboard; open details remain open.
+
+No-record months are gaps, not zero. Existing records do not establish complete
+statement coverage. The current month and current day remain partial; the daily
+comparison stops at the prior month's last day where shorter. Weekday averages
+condition on dates with recorded purchases. Booking-date uncertainty is visible;
+hourly patterns are unavailable until purchase-time provenance is implemented.
+No source mutations, model requests, notifications or schema changes occur.
+
+Open **Monthly spending → Manage store groups**. A reviewed group applies to
+the exact Firefly category across recorded history, not to individual purchases.
+Search the list, choose a group and save. The success message confirms persistence;
+**Needs a group** reverses the mapping with a new audit revision. Old tabs receive
+a conflict instead of overwriting newer choices. Unmapped expenses remain in totals.
+
+Optional **Ask local model** uses the existing `PFA_CATEGORY_SUGGESTIONS_ENABLED`,
+`PFA_OLLAMA_BASE_URL` and `PFA_OLLAMA_MODEL` configuration. It sends only the category
+and up to 48 reviewed group examples to local Ollama, with a single bounded attempt.
+It never saves or performs public research. A failed or uncertain suggestion leaves
+manual selection available. No full transaction reclassification is triggered.
+
+Mappings and immutable revisions live in `spending_group_history` in the existing
+derived SQLite database (schema 9). Include this database in the normal local backup;
+do not export real mappings into Git. Migration adds a table without modifying ledger
+projections. Schema teardown refuses populated history. Changing a Firefly category
+name requires reviewing its new mapping; old mapping revisions remain for audit.
+
+Calendar-month reports use the owner's timezone and confirmed Firefly records only.
+Comparison windows have equal calendar-day counts, capped by the shorter month.
+Today's partial day and missing imports can distort comparisons; no prior records
+means comparison unavailable. No expected salary, protected-savings allowance or
+bank completeness claim is inferred from these totals.
+
+`make check` includes dependency-free dashboard interaction tests using Node.js
+(`node --test`); use a supported Node LTS in addition to the Python environment.
+
 ## Account health and payday overview
 
 Open the dashboard and use **Set monthly payday**. Enter your usual day of the
@@ -351,6 +393,22 @@ not prove non-payment; an earlier payment does not prove the next payment was
 made. Match payments to subscriptions in Firefly and allow the normal source
 refresh to update the dashboard. This feature does not create payment links,
 alter transactions or subtract forecasts from bank balances.
+
+The dashboard also checks recorded outflows from the current and five previous
+calendar months. A transaction's Firefly `bill_id` is direct evidence. Without it,
+an exact, case-insensitive category-name match is displayed only when one active
+subscription has that name. Duplicate names disable fallback matching. Currency must
+match. Amounts, descriptions, nearby dates and the model are never used. Native
+matches take precedence, so a record is counted once. Recorded amounts are the same
+payments already present in monthly spending and trends; never add them to expected
+costs or subtract both from a balance.
+
+The next normal full sync populates newly supported native bill IDs. No migration is
+required; legacy canonical payloads default to no native link. The subscription
+snapshot continues to discard transaction-group identifiers and notes. Evidence is
+owner-local and absent from aggregate MCP tools and logs. To group exact-name
+categories, choose **Subscriptions & recurring** in **Manage store groups** and save
+each reviewed choice. The match badge is evidence, not an automatic assignment.
 
 ## Alert scheduling and macOS delivery
 

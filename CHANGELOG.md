@@ -8,6 +8,25 @@ project intends to use semantic versioning for its own releases.
 
 ### Changed
 
+- Connected saved Firefly subscriptions to six months of recorded payment evidence,
+  preferring native bill IDs and otherwise accepting only a unique exact category-
+  name match. The dashboard labels evidence strength and never adds payments twice.
+- Added a reviewed `Subscriptions & recurring` spending group and marks categories
+  that exactly match one saved subscription without assigning them automatically.
+
+- Added read-only six-month spending/group trends, cumulative daily previous-month
+  comparisons and recorded weekday/weekend summaries, with local SVG charts and
+  exact-value tables. Missing periods remain gaps and the current month is partial.
+- Withheld hourly patterns until purchase-time provenance is reliable; weekday
+  averages explicitly use recorded purchase-active dates, not assumed coverage.
+
+- Added currency-separated calendar-month spending groups with expandable
+  store categories, gross-purchase shares, refund-aware totals and equal-day
+  previous-month comparisons, without changing Firefly transactions.
+- Added reviewed, revision-protected store-to-group mappings and optional local
+  model suggestions that require a separate save; preserved open sections,
+  search and unsaved group choices during dashboard updates.
+
 - Made the dashboard category inbox a pending-only work queue while retaining
   resolved proposals in the local audit history.
 - Added optional local embedding retrieval over bounded, identifier-redacted,
