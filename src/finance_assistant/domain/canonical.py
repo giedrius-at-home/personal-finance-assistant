@@ -104,6 +104,7 @@ class CanonicalTransaction(StrictModel):
     )
     description: str | None = Field(default=None, max_length=1024)
     category: str | None = Field(default=None, min_length=1, max_length=128)
+    subscription_id: str | None = Field(default=None, min_length=1, max_length=128)
 
     @model_validator(mode="after")
     def validate_transaction(self) -> CanonicalTransaction:

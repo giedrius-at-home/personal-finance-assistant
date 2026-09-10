@@ -206,6 +206,7 @@ class DashboardService:
                 self.state.load_subscriptions()
                 if self.state and not self.demo_mode
                 else None,
+                transactions,
                 now=now,
                 timezone=settings.timezone,
                 next_payday=cash.next_payday,
