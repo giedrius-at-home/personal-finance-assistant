@@ -294,6 +294,29 @@ def test_dashboard_shows_category_evidence_and_recurring_group_without_mutation(
     state.close()
 
 
+def test_dashboard_shows_one_expected_cost_when_bill_limits_are_equal(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "state.sqlite3"
+    state = SQLiteDerivedState(path)
+    state.migrate_up()
+    b = bill()
+    equal_cost = b.model_copy(
+        update={
+            "attributes": b.attributes.model_copy(
+                update={"amount_max": b.attributes.amount_min}
+            )
+        }
+    )
+    state.save_subscriptions(snapshot((equal_cost,)))
+    state.close()
+
+    with TestClient(create_app(database_path=path)) as client:
+        page = client.get("/dashboard")
+        assert "5.00 EUR" in page.text
+        assert "5.00 – 5.00 EUR" not in page.text
+
+
 @pytest.mark.anyio
 async def test_bill_client_passes_date_window_and_validates_response() -> None:
     def handler(request: httpx2.Request) -> httpx2.Response:
