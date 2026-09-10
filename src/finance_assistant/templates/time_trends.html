@@ -1,0 +1,70 @@
+{% macro plot(series, labels, names, currency, title) %}
+{% set chart = trend_chart(series) %}
+<figure class="trend-figure">
+  {% if chart.has_data %}
+  <div class="chart-range"><small>{{ chart.minimum|money(currency) }} to {{ chart.maximum|money(currency) }} {{ currency.code }}</small></div>
+  <svg class="trend-plot" viewBox="0 0 600 220" role="img" aria-label="{{ title }}. Exact values are in the table below.">
+    <title>{{ title }}</title>
+    <line class="chart-zero" x1="40" x2="560" y1="{{ chart.zero_y }}" y2="{{ chart.zero_y }}"></line>
+    {% for line in chart.series %}{% set series_index = loop.index0 %}
+    <g class="chart-series series-{{ series_index }}">
+      {% for segment in line.segments %}<polyline points="{{ segment }}"></polyline>{% endfor %}
+      {% for point in line.points %}<circle cx="{{ point.x }}" cy="{{ point.y }}" r="3"><title>{{ names[series_index] }} · {{ labels[point.index] }}: {{ point.value|money(currency) }} {{ currency.code }}</title></circle>{% endfor %}
+    </g>
+    {% endfor %}
+  </svg>
+  <div class="chart-labels">{% for label in labels %}{% if labels|length <= 6 or loop.first or loop.last %}<small>{{ label.strftime('%b') if label.strftime is defined else label }}</small>{% endif %}{% endfor %}</div>
+  <figcaption class="chart-legend">{% for name in names %}<span class="legend-{{ loop.index0 }}">{{ name }}</span>{% endfor %}</figcaption>
+  {% else %}<p class="muted">No expense/refund records in this comparison window. No line or assumed zero is shown.</p>{% endif %}
+</figure>
+{% endmacro %}
+{% set trends = view.time_trends %}
+<section class="card" id="spending-time-trends" aria-label="Spending over time">
+  <div class="eyebrow">Patterns in your records</div>
+  <div class="row"><h2>Spending over time</h2><small>{{ trends.start }} – {{ trends.through }} · {{ trends.timezone }}</small></div>
+  <p class="muted">Confirmed Firefly spending minus refunds. Income and transfers are excluded. Missing periods appear as gaps, not zero; import coverage is unverified even where records exist.</p>
+  {% for item in trends.currencies %}
+  <h3>{{ item.currency.code }}</h3>
+  <div class="trend-panels">
+    <article class="trend-panel">
+      <h3>Six-month trend</h3>
+      {% set labels = item.months|map(attribute='start')|list %}
+      {{ plot([item.months|map(attribute='spending')|list], labels, ['Recorded net spending'], item.currency, 'Six-month recorded spending') }}
+      <p class="muted">The final point is month-to-date, not a full month. A lower partial-month total does not prove spending has fallen.</p>
+      <details id="trend-months-{{ item.currency.code }}-{{ item.currency.minor_unit }}">
+        <summary>Monthly values and group trends</summary>
+        <div class="table-scroll"><table>
+          <caption>Net spending by month and reviewed group · {{ item.currency.code }}</caption>
+          <thead><tr><th>Group</th>{% for month in item.months %}<th>{{ month.start.strftime('%b %Y') }}{% if month.partial_month %}<br><small>through {{ month.through.day }} · partial</small>{% endif %}</th>{% endfor %}</tr></thead>
+          <tbody><tr><th>All recorded spending</th>{% for month in item.months %}<td>{% if month.spending is not none %}{{ month.spending|money(item.currency) }}<br><small>{{ month.record_count }} records</small>{% else %}No records{% endif %}</td>{% endfor %}</tr>
+          {% for group in item.groups %}<tr><th>{{ group.group.value if group.group else 'Needs a group' }}</th>{% for value in group.values %}<td>{% if value is not none %}{{ value|money(item.currency) }}{% else %}—{% endif %}</td>{% endfor %}</tr>{% endfor %}
+          </tbody>
+        </table></div>
+        <p class="muted">A dash means no expense/refund records for that currency-month. Zero means no net recorded spending in that group; neither confirms complete bank coverage. Groups use your current reviewed mappings across all six months.</p>
+      </details>
+    </article>
+    <article class="trend-panel">
+      <h3>Daily spending comparison</h3>
+      {% set days = item.daily|map(attribute='day')|list %}
+      {{ plot([item.daily|map(attribute='current')|list, item.daily|map(attribute='previous')|list], days, ['This month — solid', 'Previous month — dashed'], item.currency, 'Cumulative recorded spending by day of month') }}
+      <p class="muted">Cumulative recorded spending by day of month. Refunds can make a line fall. Today is partial; the previous month stops at its last day when shorter.</p>
+      <details id="trend-days-{{ item.currency.code }}-{{ item.currency.minor_unit }}">
+        <summary>Daily values and exact dates</summary>
+        <div class="table-scroll"><table><thead><tr><th>This month</th><th>Cumulative spending</th><th>Previous month</th><th>Cumulative spending</th></tr></thead><tbody>
+        {% for point in item.daily %}<tr><td>{{ point.current_on }}</td><td>{% if point.current is not none %}{{ point.current|money(item.currency) }}{% else %}No records in this window{% endif %}</td><td>{{ point.previous_on or 'Outside previous month' }}</td><td>{% if point.previous is not none %}{{ point.previous|money(item.currency) }}{% elif point.previous_on %}No records in this window{% else %}—{% endif %}</td></tr>{% endfor %}
+        </tbody></table></div>
+        <p class="muted">Zero or flat stretches describe the records we have, not verified no-spend days. Lines are withheld when the corresponding comparison window has no expense/refund evidence.</p>
+      </details>
+    </article>
+  </div>
+  <details class="weekday-trends" id="trend-weekdays-{{ item.currency.code }}-{{ item.currency.minor_unit }}">
+    <summary>Recorded weekday patterns · weekdays versus weekends</summary>
+    <p>Based on Firefly dates across the six-month window, including this partial month. Bank booking dates may differ from purchase dates. Refunds stay on their own recorded date.</p>
+    <div class="table-scroll"><table><thead><tr><th>Recorded day</th><th>Net spending</th><th>Purchases before refunds</th><th>Purchases</th><th>Dates with purchases</th><th>Average purchases per active date</th></tr></thead><tbody>
+      {% for day in item.weekdays + item.day_types %}<tr{% if loop.index > 7 %} class="weekday-summary"{% endif %}><th>{{ day.label }}</th><td>{% if day.spending is not none %}{{ day.spending|money(item.currency) }} {{ item.currency.code }}{% else %}No records{% endif %}</td><td>{% if day.spending is not none %}{{ day.gross|money(item.currency) }}{% else %}—{% endif %}</td><td>{{ day.purchase_count }}</td><td>{{ day.purchase_days }}</td><td>{% if day.average_purchase_day is not none %}{{ day.average_purchase_day|money(item.currency) }}{% else %}—{% endif %}</td></tr>{% endfor %}
+    </tbody></table></div>
+    <p class="muted">The average divides purchases before refunds by distinct dates with at least one purchase, not all calendar days. It is conditional on the imported records; it is not a daily allowance or proof of a spending habit.</p>
+  </details>
+  {% else %}<p>No expense or refund records in the last six months yet. Import your bank history to see trends.</p>{% endfor %}
+  <p class="notice"><strong>Time-of-day analysis unavailable.</strong> The current imports do not reliably distinguish actual purchase times from booking dates or placeholder times. We won’t turn those into misleading morning/evening patterns.</p>
+</section>

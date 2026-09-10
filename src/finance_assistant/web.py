@@ -53,6 +53,7 @@ from finance_assistant.persistence.sqlite import (
     SQLiteDerivedState,
 )
 from finance_assistant.spending_group_suggestions import GroupSuggestion
+from finance_assistant.trend_charts import trend_chart
 
 CategoryUpdater = Callable[[str, str | None, str | None], Awaitable[None]]
 SuggestionRunner = Callable[[], Awaitable[int]]
@@ -72,6 +73,7 @@ def format_money(amount: Decimal, currency: Currency) -> str:
 
 
 TEMPLATES.env.filters["money"] = format_money
+TEMPLATES.env.globals["trend_chart"] = trend_chart
 
 
 def install_web_routes(
