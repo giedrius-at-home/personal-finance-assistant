@@ -1,4 +1,6 @@
 import asyncio
+from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 from pydantic import SecretStr
@@ -7,10 +9,52 @@ from finance_assistant.ingestion.reconciliation import ReconciliationReport
 from finance_assistant.ingestion.runtime import (
     FireflyCategoryWriteSettings,
     FireflyCsvImportSettings,
+    FireflySyncRunner,
     FireflySyncSettings,
     run_firefly_sync_loop,
 )
 from finance_assistant.ingestion.service import IngestionResult
+from finance_assistant.persistence.sqlite import SQLiteDerivedState
+
+
+@pytest.mark.anyio
+async def test_runner_records_success_then_failure_without_claiming_new_success(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = SQLiteDerivedState(tmp_path / "state.sqlite3")
+    state.migrate_up()
+    result = IngestionResult(
+        accounts_seen=0,
+        transactions_seen=0,
+        goals_seen=0,
+        goals_ineligible=0,
+        projections_changed=0,
+        reconciliation=ReconciliationReport(matched=True, entries=()),
+    )
+    ingest = AsyncMock(return_value=result)
+    monkeypatch.setattr(
+        "finance_assistant.ingestion.runtime.IngestionService.ingest", ingest
+    )
+    monkeypatch.setattr(
+        "finance_assistant.ingestion.runtime.FireflyClient.list_bills",
+        AsyncMock(return_value=()),
+    )
+    runner = FireflySyncRunner(
+        state=state,
+        settings=FireflySyncSettings(
+            base_url="http://firefly.test", token=SecretStr("synthetic-token")
+        ),
+    )
+    assert await runner() == result
+    success, _, failed = state.firefly_sync_health()
+    assert success is not None and not failed
+    ingest.side_effect = RuntimeError("synthetic failure")
+    with pytest.raises(RuntimeError, match="synthetic failure"):
+        await runner()
+    last_success, attempt, failed = state.firefly_sync_health()
+    assert last_success == success and attempt is not None and failed
+    state.close()
 
 
 def test_firefly_sync_settings_are_disabled_by_default() -> None:

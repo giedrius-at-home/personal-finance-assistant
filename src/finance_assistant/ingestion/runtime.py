@@ -6,12 +6,15 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from pydantic import SecretStr
 
 from finance_assistant.ingestion.service import IngestionResult, IngestionService
 from finance_assistant.integrations.firefly import FireflyClient
 from finance_assistant.persistence.sqlite import SQLiteDerivedState
+from finance_assistant.subscriptions import SubscriptionSnapshot
 
 # Uvicorn installs a dedicated handler and does not configure arbitrary module
 # loggers. Reuse its error logger so content-free poll outcomes are observable.
@@ -134,11 +137,31 @@ class FireflySyncRunner:
         self._settings = settings
 
     async def __call__(self) -> IngestionResult:
-        async with FireflyClient(
-            base_url=f"{self._settings.base_url}/api/v1",
-            token=self._settings.token,
-        ) as firefly:
-            return await IngestionService(firefly=firefly, state=self._state).ingest()
+        try:
+            async with FireflyClient(
+                base_url=f"{self._settings.base_url}/api/v1",
+                token=self._settings.token,
+            ) as firefly:
+                now = datetime.now(UTC)
+                today = now.astimezone(
+                    ZoneInfo(self._state.get_settings().timezone)
+                ).date()
+                start, end = today - timedelta(days=31), today + timedelta(days=35)
+                subscriptions = SubscriptionSnapshot(
+                    fetched_at=now,
+                    start=start,
+                    end=end,
+                    bills=await firefly.list_bills(start=start, end=end),
+                )
+                result = await IngestionService(
+                    firefly=firefly, state=self._state
+                ).ingest()
+                self._state.save_subscriptions(subscriptions)
+        except Exception:
+            self._state.record_firefly_sync(success=False, now=datetime.now(UTC))
+            raise
+        self._state.record_firefly_sync(success=True, now=datetime.now(UTC))
+        return result
 
 
 async def run_firefly_sync_loop(

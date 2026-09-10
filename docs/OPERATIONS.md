@@ -301,6 +301,57 @@ make down         # remove containers and networks while retaining volumes
 Never use `docker compose down --volumes` after introducing data. That command
 deletes the databases and Firefly uploads.
 
+## Account health and payday overview
+
+Open the dashboard and use **Set monthly payday**. Enter your usual day of the
+month, choose **Preview settings**, and apply the reviewed change. Leave it
+blank if unknown; a day beyond the end of a month uses that month's final day.
+This is a calendar assumption, not confirmation that salary arrived. Weekends
+and holidays are not adjusted. Settings can be rolled back using their history.
+
+The new cycle view includes observed Firefly income, spending net of refunds
+and explicitly typed transfers, separately per currency. It does not infer
+internal transfers from the owner's name. Existing weekly reporting remains
+separate and may differ when its legacy owner-name heuristic is involved.
+
+Account health shows available record dates and category coverage; those are
+not a guarantee of a complete statement. The timestamp for a successful
+Firefly-to-dashboard refresh is persisted even when no records changed. A
+failed refresh is shown without source-error text. Bank import time, statement
+completeness and bank balance reconciliation remain unverified until dedicated
+evidence is connected. No new spending allowance is calculated yet.
+
+Gateway startup adds the schema-7 refresh-status table. It stores timestamps
+and a boolean outcome only. It does not migrate, rewrite or reconcile financial
+records. The old application can ignore this additive table during rollback.
+
+### Saved subscriptions
+
+Each successful Firefly refresh now reads subscriptions using the `/bills`
+endpoint. The local snapshot retains names, configured ranges/currencies,
+active/end state, Firefly-generated expected dates and payment dates only;
+notes, transaction identifiers and unused fields are discarded. Schema 8
+adds a single replaceable snapshot row. Full replacement removes deleted bills;
+a failed fetch retains the previous snapshot and flags the refresh as failed.
+
+The request covers the previous 31 days through the next 35 days. Displayed
+expected dates stop the day before configured payday, or 30 days ahead if
+payday is unset. Expected totals use configured upper bounds, once per distinct
+date and separately per currency. Inactive/expired subscriptions are excluded.
+Firefly can return a date beyond the requested period, so the dashboard filters
+the returned dates to its display window and each subscription's end date.
+
+An old snapshot (over two days), insufficient requested coverage, or a failed
+Firefly refresh withholds the displayed cost totals. The underlying schedule
+still needs owner review: Firefly generates dates using its recurrence and
+linked-payment behavior, and may cap results for frequent recurring bills.
+
+Payment evidence refers to links within the fetched period. A missing link does
+not prove non-payment; an earlier payment does not prove the next payment was
+made. Match payments to subscriptions in Firefly and allow the normal source
+refresh to update the dashboard. This feature does not create payment links,
+alter transactions or subtract forecasts from bank balances.
+
 ## Alert scheduling and macOS delivery
 
 Policy version `2026-09-v1` evaluates after a successful source event and against

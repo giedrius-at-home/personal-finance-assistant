@@ -104,6 +104,58 @@ def test_money_display_uses_currency_precision_without_negative_zero() -> None:
     assert format_money(Decimal("-0.00"), EUR) == "0.00"
 
 
+def test_payday_settings_preview_apply_reload_and_rollback(tmp_path: Path) -> None:
+    path = tmp_path / "state.sqlite3"
+    with TestClient(create_app(database_path=path)) as client:
+        page = client.get("/dashboard")
+        assert "Account data health" in page.text
+        assert "Spending allowance not available yet" in page.text
+        token = page.cookies["pfa_csrf"]
+        settings = {
+            "csrf_token": token,
+            "timezone": "Europe/Amsterdam",
+            "evaluation_hour": "18",
+            "heads_up_spent_ratio": "0.65",
+            "heads_up_pace_ratio": "1.25",
+            "heads_up_cooldown_hours": "168",
+            "warning_cooldown_hours": "72",
+            "critical_cooldown_hours": "24",
+            "payday_day": "25",
+        }
+        preview = client.post("/settings/preview", data=settings, headers=SAME_ORIGIN)
+        assert preview.status_code == 200
+        preview_token = preview.text.split('name="preview_token" value="')[1].split(
+            '"'
+        )[0]
+        response = client.post(
+            "/settings/apply",
+            data={**settings, "preview_token": preview_token},
+            headers=SAME_ORIGIN,
+        )
+        assert response.status_code == 200
+        report = client.get("/v1/dashboard").json()
+        assert report["settings"]["payday_day"] == 25
+        assert report["cash_overview"]["next_payday"] is not None
+        invalid = client.post(
+            "/settings/preview",
+            data={**settings, "payday_day": "32"},
+            headers=SAME_ORIGIN,
+        )
+        assert invalid.status_code == 422
+    with TestClient(create_app(database_path=path)) as client:
+        token = client.get("/dashboard").cookies["pfa_csrf"]
+        report = client.get("/v1/dashboard").json()
+        assert report["settings"]["payday_day"] == 25
+        revision = report["settings_revisions"][0]["revision_id"]
+        response = client.post(
+            f"/settings/{revision}/rollback",
+            data={"csrf_token": token},
+            headers=SAME_ORIGIN,
+        )
+        assert response.status_code == 200
+        assert client.get("/v1/dashboard").json()["settings"]["payday_day"] is None
+
+
 def proposal(name: str) -> CategoryProposal:
     return CategoryProposal(
         proposal_id=hashlib.sha256(name.encode()).hexdigest(),
