@@ -114,6 +114,17 @@ late in a month may fund the next month's bills. Category-wide grouping does not
 introduce individual-purchase overrides; keep that detail in Firefly categories.
 See [ADR 0019](docs/adr/0019-reviewed-monthly-spending-groups.md).
 
+**Spending over time** shows five historical months plus the current partial month,
+with an expandable group-by-month table, cumulative daily comparison against the
+previous month, and recorded weekday/weekend patterns. Missing currency-months
+appear as gaps rather than assumed zero; refunds can lower totals and daily lines.
+Weekday averages use dates with recorded purchases, not all calendar days. These
+are patterns in imported records, not proof of bank coverage or purchase behaviour.
+Time-of-day analysis is withheld because existing timestamps do not reliably
+distinguish booking dates/placeholders from real purchase times. Charts stay local
+and have exact-value table alternatives; no model or external service is involved.
+See [ADR 0020](docs/adr/0020-recorded-spending-time-trends.md).
+
 Phase 6 adds disabled-by-default public research and an opt-in STDIO MCP server
 for Codex. Research accepts only sanitized public business names or validated
 market identifiers, constructs exact-allowlisted Wikipedia/SEC URLs internally,

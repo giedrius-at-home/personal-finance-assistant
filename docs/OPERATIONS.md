@@ -303,6 +303,19 @@ deletes the databases and Firefly uploads.
 
 ## Monthly spending groups
 
+The adjacent **Spending over time** section is read-only and needs no additional
+configuration. Expand monthly values to inspect group totals across six months,
+daily values for exact comparison dates, or weekday patterns for the weekday/weekend
+summary. Charts have equivalent data tables and do not require browser scripting.
+They refresh with the normal dashboard; open details remain open.
+
+No-record months are gaps, not zero. Existing records do not establish complete
+statement coverage. The current month and current day remain partial; the daily
+comparison stops at the prior month's last day where shorter. Weekday averages
+condition on dates with recorded purchases. Booking-date uncertainty is visible;
+hourly patterns are unavailable until purchase-time provenance is implemented.
+No source mutations, model requests, notifications or schema changes occur.
+
 Open **Monthly spending → Manage store groups**. A reviewed group applies to
 the exact Firefly category across recorded history, not to individual purchases.
 Search the list, choose a group and save. The success message confirms persistence;

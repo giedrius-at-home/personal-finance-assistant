@@ -40,6 +40,7 @@ from finance_assistant.domain.reporting import (
 )
 from finance_assistant.domain.settings import OwnerSettings
 from finance_assistant.domain.spending_groups import MonthlySpending, monthly_spending
+from finance_assistant.domain.time_trends import TimeTrends, time_trends
 from finance_assistant.persistence.sqlite import SQLiteDerivedState
 from finance_assistant.subscriptions import SubscriptionReport, subscription_report
 
@@ -87,6 +88,7 @@ class DashboardView(StrictModel):
     firefly_refresh_failed: bool = False
     subscriptions: SubscriptionReport
     monthly_spending: MonthlySpending
+    time_trends: TimeTrends
     review_items: tuple[ReviewItem, ...] = Field(max_length=100)
     taxonomy: tuple[TaxonomyRecommendation, ...]
     settings: OwnerSettings
@@ -176,12 +178,21 @@ class DashboardService:
             timezone=settings.timezone,
             payday_day=settings.payday_day,
         )
+        group_mappings = (
+            self.state.list_group_mappings()
+            if self.state and not self.demo_mode
+            else ()
+        )
         return DashboardView(
+            time_trends=time_trends(
+                transactions,
+                group_mappings,
+                as_of=now,
+                timezone=settings.timezone,
+            ),
             monthly_spending=monthly_spending(
                 transactions,
-                self.state.list_group_mappings()
-                if self.state and not self.demo_mode
-                else (),
+                group_mappings,
                 as_of=now,
                 timezone=settings.timezone,
             ),

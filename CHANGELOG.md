@@ -8,6 +8,12 @@ project intends to use semantic versioning for its own releases.
 
 ### Changed
 
+- Added read-only six-month spending/group trends, cumulative daily previous-month
+  comparisons and recorded weekday/weekend summaries, with local SVG charts and
+  exact-value tables. Missing periods remain gaps and the current month is partial.
+- Withheld hourly patterns until purchase-time provenance is reliable; weekday
+  averages explicitly use recorded purchase-active dates, not assumed coverage.
+
 - Added currency-separated calendar-month spending groups with expandable
   store categories, gross-purchase shares, refund-aware totals and equal-day
   previous-month comparisons, without changing Firefly transactions.
