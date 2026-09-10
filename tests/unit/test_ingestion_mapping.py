@@ -94,6 +94,7 @@ def transaction(
     destination: str | None,
     *,
     category: str | None = None,
+    bill_id: str | None = None,
 ) -> FireflyTransaction:
     return FireflyTransaction.model_validate(
         {
@@ -113,11 +114,28 @@ def transaction(
                         "source_id": source,
                         "destination_id": destination,
                         "category_name": category,
+                        "bill_id": bill_id,
                     }
                 ],
             },
         }
     )
+
+
+def test_firefly_subscription_link_is_preserved_without_the_bill_name() -> None:
+    records = build_canonical_accounts(
+        firefly_accounts=(firefly_account("cash"),),
+        ghostfolio_accounts=(),
+        currencies=CurrencyRegistry.from_firefly((firefly_currency(),)),
+        links=(),
+    )
+    mapped = build_canonical_transactions(
+        (transaction("withdrawal", "cash", "expense", bill_id="synthetic-bill"),),
+        currencies=CurrencyRegistry.from_firefly((firefly_currency(),)),
+        accounts=records,
+    )
+    assert mapped[0].subscription_id == "synthetic-bill"
+    assert "bill" not in (mapped[0].description or "")
 
 
 def test_currency_registry_rejects_conflicting_or_unknown_metadata() -> None:

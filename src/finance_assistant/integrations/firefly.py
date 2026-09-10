@@ -102,9 +102,13 @@ class FireflyTransactionSplit(FireflyModel):
     source_id: str | None = Field(default=None, min_length=1, max_length=128)
     destination_id: str | None = Field(default=None, min_length=1, max_length=128)
     category_name: str | None = Field(default=None, min_length=1, max_length=128)
+    bill_id: str | None = Field(default=None, min_length=1, max_length=128)
+    bill_name: str | None = Field(default=None, min_length=1, max_length=256)
     external_id: str | None = Field(default=None, min_length=1, max_length=256)
 
-    @field_validator("category_name", "external_id", mode="before")
+    @field_validator(
+        "category_name", "external_id", "bill_id", "bill_name", mode="before"
+    )
     @classmethod
     def normalize_empty_category(cls, value: object) -> object:
         return None if value == "" else value

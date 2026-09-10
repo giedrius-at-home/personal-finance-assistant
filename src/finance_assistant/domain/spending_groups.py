@@ -20,6 +20,7 @@ from finance_assistant.domain.models import Currency, StrictModel
 
 
 class SpendingGroup(StrEnum):
+    SUBSCRIPTIONS = "Subscriptions & recurring"
     GROCERIES = "Groceries"
     DINING = "Eating out"
     HOME = "Home & household"

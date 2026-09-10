@@ -34,7 +34,7 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="category" value="{{ mapping.category }}">
       <input type="hidden" name="revision" value="{{ mapping.revision }}">
-      <label>{{ mapping.category }}<select name="group" {% if view.data_mode == 'invented demo' %}disabled{% endif %}><option value="unassigned" {% if mapping.group is none %}selected{% endif %}>Needs a group</option>{% for choice in spending_groups %}<option value="{{ choice.value }}" {% if mapping.group == choice %}selected{% endif %}>{{ choice.value }}</option>{% endfor %}</select></label>
+      <label>{{ mapping.category }}{% if mapping.category in view.subscriptions.category_matched_names %}<small class="mapping-evidence">Exact match to one saved Firefly subscription</small>{% endif %}<select name="group" {% if view.data_mode == 'invented demo' %}disabled{% endif %}><option value="unassigned" {% if mapping.group is none %}selected{% endif %}>Needs a group</option>{% for choice in spending_groups %}<option value="{{ choice.value }}" {% if mapping.group == choice %}selected{% endif %}>{{ choice.value }}</option>{% endfor %}</select></label>
       <button {% if view.data_mode == 'invented demo' %}disabled{% endif %}>Save group</button>
       {% if group_suggestions_enabled %}<button type="button" data-suggest-group>Ask local model</button>{% endif %}
       <small class="group-suggestion-status" aria-live="polite"></small>

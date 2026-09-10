@@ -250,6 +250,7 @@ def _map_split(
         ),
         description=split.description,
         category=split.category_name,
+        subscription_id=split.bill_id,
     )
 
 

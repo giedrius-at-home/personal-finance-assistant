@@ -317,6 +317,7 @@ td {
 .group-mapping label { flex: 1 1 18rem; overflow-wrap: anywhere; }
 .group-mapping select { width: 100%; }
 .group-suggestion-status { flex-basis: 100%; }
+.mapping-evidence { display: block; color: var(--green); margin-block: .2rem; }
 /* Time trends stay readable as tables when charts are unavailable. */
 .trend-panels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.5rem; }
 .trend-panel { min-width: 0; }

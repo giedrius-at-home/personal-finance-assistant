@@ -394,6 +394,22 @@ made. Match payments to subscriptions in Firefly and allow the normal source
 refresh to update the dashboard. This feature does not create payment links,
 alter transactions or subtract forecasts from bank balances.
 
+The dashboard also checks recorded outflows from the current and five previous
+calendar months. A transaction's Firefly `bill_id` is direct evidence. Without it,
+an exact, case-insensitive category-name match is displayed only when one active
+subscription has that name. Duplicate names disable fallback matching. Currency must
+match. Amounts, descriptions, nearby dates and the model are never used. Native
+matches take precedence, so a record is counted once. Recorded amounts are the same
+payments already present in monthly spending and trends; never add them to expected
+costs or subtract both from a balance.
+
+The next normal full sync populates newly supported native bill IDs. No migration is
+required; legacy canonical payloads default to no native link. The subscription
+snapshot continues to discard transaction-group identifiers and notes. Evidence is
+owner-local and absent from aggregate MCP tools and logs. To group exact-name
+categories, choose **Subscriptions & recurring** in **Manage store groups** and save
+each reviewed choice. The match badge is evidence, not an automatic assignment.
+
 ## Alert scheduling and macOS delivery
 
 Policy version `2026-09-v1` evaluates after a successful source event and against

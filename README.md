@@ -125,6 +125,18 @@ distinguish booking dates/placeholders from real purchase times. Charts stay loc
 and have exact-value table alternatives; no model or external service is involved.
 See [ADR 0020](docs/adr/0020-recorded-spending-time-trends.md).
 
+Saved subscriptions also show recorded payment evidence for the current and five
+previous calendar months. A native Firefly bill ID is direct evidence. When absent,
+the dashboard can show a weaker match only if the Firefly category is exactly the
+name of one unique active subscription. It never matches on amount, merchant text or
+date proximity. These are the same expense records already counted in monthly trends,
+not additional costs. Missing evidence does not prove non-payment.
+
+The group editor marks exact subscription-name categories and offers
+**Subscriptions & recurring** as a reviewed broad group. It does not assign them
+automatically or change Firefly. See
+[ADR 0021](docs/adr/0021-subscription-payment-evidence.md).
+
 Phase 6 adds disabled-by-default public research and an opt-in STDIO MCP server
 for Codex. Research accepts only sanitized public business names or validated
 market identifiers, constructs exact-allowlisted Wikipedia/SEC URLs internally,
