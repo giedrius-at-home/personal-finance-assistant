@@ -34,6 +34,13 @@ asset-account creation instructions and embedded Firefly tokens from the runtime
 configuration. Preserve classic duplicate detection and saved rule behavior; use
 only booked transactions and a rolling 30-day overlap. Do not force balances.
 
+Validate transaction pagination before invoking the writing CLI: repeated
+continuation tokens or an unfinished 50-page scan block that bank. Some feeds
+ignore date filters and repeat the same page; the upstream CLI otherwise repeats
+that page up to its cap and can report a misleading success. This validation adds
+one read-only traversal before importing and preserves upstream duplicate rejection.
+The pinned version is checked before invoking its internal command/status API.
+
 Swedbank or any other expired consent blocks only that bank. Upstream exit 73 alone
 is not treated as success because importer 2.3.4 can use it after conversion errors.
 Clean duplicate-only runs require completed conversion and submission stages with

@@ -9,12 +9,13 @@ expect($normalized['pending_transactions'] === false && $normalized['date_range_
 expect($normalized['date_range'] === 'range' && $normalized['date_not_before'] !== '' && $normalized['date_not_after'] !== '');
 $response = function (string $system, string $path): array {
     if (str_starts_with($path, 'sessions/')) { return ['status'=>'AUTHORIZED','accounts'=>['synthetic-source']]; }
+    if (str_contains($path, '/transactions?')) { return ['transactions'=>[], 'continuation_key'=>null]; }
     if ($system === 'bank') { return ['account_id'=>['iban'=>'SYNTHETIC-IBAN']]; }
     return ['data'=>['attributes'=>['iban'=>'SYNTHETIC-IBAN','type'=>'asset','active'=>true]]];
 };
-bankPreflight($fixture, $response);
+bankPreflight($normalized, $response);
 foreach (['expired','wrong_iban','missing_source','new_target','duplicates_off'] as $case) {
-    $c = $fixture;
+    $c = $normalized;
     if ($case === 'new_target') { $c['accounts']['synthetic-source'] = 0; }
     if ($case === 'duplicates_off') { $c['ignore_duplicate_transactions'] = false; }
     $rejected = false;
@@ -37,3 +38,11 @@ expect(!completedBankImport(73, ['status'=>'conv_errored'], $submission));
 expect(!completedBankImport(0, $conversion + ['warnings'=>['synthetic network failure']], $submission));
 expect(!completedBankImport(0, $conversion, $submission + ['errors'=>['synthetic invalid field']]));
 expect(!completedBankImport(1, $conversion, $submission));
+$calls = 0;
+try {
+    verifyBankPages('synthetic-source', $normalized, function () use (&$calls) { $calls++; return ['transactions'=>[], 'continuation_key'=>'synthetic-loop']; });
+    throw new LogicException('Expected repeated pagination to fail');
+} catch (RuntimeException $e) { expect($e->getMessage() === 'provider_pagination_error' && $calls === 2); }
+$calls = 0;
+verifyBankPages('synthetic-source', $normalized, function () use (&$calls) { $calls++; return ['transactions'=>[], 'continuation_key'=>$calls === 1 ? 'synthetic-next' : null]; });
+expect($calls === 2);

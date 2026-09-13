@@ -60,7 +60,27 @@ function bankPreflight(array $c, callable $get): void
             || ($ledger['active'] ?? false) !== true) {
             throw new RuntimeException('mapping_mismatch');
         }
+        verifyBankPages($source, $c, $get);
     }
+}
+
+function verifyBankPages(string $source, array $c, callable $get): void
+{
+    $base = 'accounts/'.rawurlencode($source).'/transactions?'.http_build_query([
+        'date_from' => $c['date_not_before'], 'date_to' => $c['date_not_after'],
+    ]);
+    $key = ''; $seen = [];
+    for ($page = 0; $page < 50; $page++) {
+        $data = $get('bank', $base.($key === '' ? '' : '&continuation_key='.rawurlencode($key)));
+        if (!isset($data['transactions']) || !is_array($data['transactions'])) {
+            throw new RuntimeException('upstream_unavailable');
+        }
+        $key = (string)($data['continuation_key'] ?? '');
+        if ($key === '') { return; }
+        if (isset($seen[$key])) { throw new RuntimeException('provider_pagination_error'); }
+        $seen[$key] = true;
+    }
+    throw new RuntimeException('provider_pagination_error');
 }
 
 function bankWorkerMain(): void
@@ -70,10 +90,15 @@ function bankWorkerMain(): void
     $phase = 'preflight';
     ob_start();
     try {
+        if (function_exists('pcntl_async_signals')) {
+            pcntl_async_signals(true);
+            pcntl_signal(SIGTERM, static function (): void { throw new RuntimeException('worker_stopped'); });
+        }
         require '/var/www/html/vendor/autoload.php';
         $app = require '/var/www/html/bootstrap/app.php';
         $kernel = $app->make(Illuminate\Contracts\Console\Kernel::class);
         $kernel->bootstrap();
+        if (config('importer.version') !== '2.3.4') { throw new RuntimeException('unsupported_importer_version'); }
         config(['eb.private_key' => '/run/secrets/enable-banking-private-key.pem', 'logging.default' => 'null', 'importer.import_dir_allowlist' => ['/tmp'], 'importer.ignore_duplicate_errors' => true]);
         $input = json_decode(file_get_contents('php://stdin'), true, 512, JSON_THROW_ON_ERROR);
         $c = normalizedBankConfiguration($input['configuration']);
@@ -113,7 +138,7 @@ function bankWorkerMain(): void
             }
         }
     } catch (Throwable $e) {
-        $safe = ['reauthorization_required', 'mapping_mismatch', 'invalid_configuration', 'invalid_mapping', 'rate_limited', 'upstream_unavailable'];
+        $safe = ['reauthorization_required', 'mapping_mismatch', 'invalid_configuration', 'invalid_mapping', 'rate_limited', 'upstream_unavailable', 'provider_pagination_error', 'unsupported_importer_version'];
         $result = ['status' => in_array($e->getMessage(), $safe, true) ? $e->getMessage() : 'failed'];
         $result['phase'] = $phase;
         $result['exception_type'] = (new ReflectionClass($e))->getShortName();

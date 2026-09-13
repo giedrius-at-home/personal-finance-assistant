@@ -227,6 +227,13 @@ does not block the others. Status/log output contains only bank labels, timestam
 fixed status codes and numeric upstream exit codes. `last_success` means the CLI
 completed, not that new transactions arrived or bank coverage is complete.
 
+`provider_pagination_error` means the API repeated a continuation token or did not
+finish within the supported page limit. The scheduler stops before the writing
+CLI runs and retries hourly. This is a provider-feed problem, not evidence that
+the bank had no transactions; CSV remains the fallback until the feed is repaired.
+The adapter checks the pinned importer version and performs a read-only page scan
+before importing, so allow for those additional provider requests.
+
 The import retains existing exact account mappings and duplicate detection, disables
 old asset-account creation instructions, imports booked transactions only, and
 uses a rolling 30-day window. Missing or changed mappings stop that bank. Unexpected

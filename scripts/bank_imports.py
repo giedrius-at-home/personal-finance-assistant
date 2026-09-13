@@ -40,6 +40,8 @@ STATUSES = frozenset(
         "upstream_unavailable",
         "runtime_unavailable",
         "missing_config",
+        "provider_pagination_error",
+        "unsupported_importer_version",
     }
 )
 
