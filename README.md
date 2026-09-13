@@ -165,6 +165,13 @@ the model still cannot write or approve a category. Pending suggestions are reti
 when the corresponding transaction has since been categorized directly in
 Firefly.
 
+Bank API imports are separate from this dashboard polling. On macOS, the opt-in
+`scripts/bank_imports.py` scheduler reuses saved Enable Banking configurations for
+ABN AMRO, Revolut, Swedbank and Trade Republic, verifies consent and exact account
+identity, and invokes the existing importer daily. Expired consents require bank
+reauthorization. Provider support and freshness are not guaranteed by a successful
+dashboard refresh. See [scheduled bank imports](docs/OPERATIONS.md#scheduled-bank-api-imports-macos).
+
 The dashboard also has a disabled-by-default provider-neutral CSV resync path.
 It accepts common bank export layouts, auto-detects or explicitly selects one
 connected Firefly asset account, stages an exact preview, skips confirmed

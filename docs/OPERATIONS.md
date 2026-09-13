@@ -192,6 +192,69 @@ owner aliases inside transaction descriptions are never used as proof of a
 transfer, because doing so can silently remove genuine income or spending from
 cash-flow reports.
 
+## Scheduled bank API imports (macOS)
+
+Firefly maintenance cron is not a bank importer. The optional host scheduler uses
+the existing Data Importer container and saved bank consent configurations.
+Save `abnamro.json`, `revolut.json`, `swedbank.json` and `traderepublic.json` from
+the importer into Downloads. These files contain secrets; do not paste them into
+chat, commit them, or include them in screenshots. Keep an encrypted backup.
+
+```bash
+uv run python scripts/bank_imports.py install
+uv run python scripts/bank_imports.py check
+```
+
+Installation stages private copies under
+`~/Library/Application Support/Personal Finance Assistant/Bank Imports/data/`
+and writes `~/Library/LaunchAgents/local.personal-finance-assistant.bank-imports.plist`.
+It also installs standalone copies of the adapters beside that data directory,
+so scheduled runs do not read the Documents folder or depend on a Git checkout.
+It does not start imports until the agent is loaded. `check` performs read-only
+consent and exact IBAN checks without recording import success. Review its results
+and take a database backup before the first import.
+
+```bash
+uv run python scripts/bank_imports.py run --force
+launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/local.personal-finance-assistant.bank-imports.plist"
+uv run python scripts/bank_imports.py status
+```
+
+The agent checks every 15 minutes, imports each bank daily, and retries failures
+hourly. A lock prevents overlapping scheduled/manual runs. Mac login and running
+Docker are required; sleep delays the next attempt. A bank with expired consent
+does not block the others. Status/log output contains only bank labels, timestamps,
+fixed status codes and numeric upstream exit codes. `last_success` means the CLI
+completed, not that new transactions arrived or bank coverage is complete.
+
+`provider_pagination_error` means the API repeated a continuation token or did not
+finish within the supported page limit. The scheduler stops before the writing
+CLI runs and retries hourly. This is a provider-feed problem, not evidence that
+the bank had no transactions; CSV remains the fallback until the feed is repaired.
+The adapter checks the pinned importer version and performs a read-only page scan
+before importing, so allow for those additional provider requests.
+
+The import retains existing exact account mappings and duplicate detection, disables
+old asset-account creation instructions, imports booked transactions only, and
+uses a rolling 30-day window. Missing or changed mappings stop that bank. Unexpected
+upstream output is discarded. Never run simultaneous browser imports for the same
+bank while its scheduled import is in progress.
+
+To renew consent, use the importer bank authorization flow and download a fresh
+configuration. Stop the agent with the command below before reinstalling private
+copies; run `check` again, then bootstrap it. Do not use **Start over** to switch banks.
+
+```bash
+launchctl bootout "gui/$(id -u)/local.personal-finance-assistant.bank-imports"
+```
+
+Set `PFA_FIREFLY_SYNC_INTERVAL_SECONDS=300` and
+`PFA_FIREFLY_INCREMENTAL_LOOKBACK_DAYS=30` in the private `.env` and recreate only
+the gateway to display imported ledger records within five minutes. This is a
+separate read-only polling cadence. Keep the repository adapter files available
+for upgrades: stop the agent, rerun `install`, then bootstrap it again. See
+[ADR 0023](adr/0023-scheduled-bank-api-imports.md).
+
 ## Data Importer and Enable Banking
 
 The importer publishes HTTP on `127.0.0.1:${PFA_IMPORTER_PORT}` and HTTPS on
@@ -693,3 +756,43 @@ cache.
 - If Ollama is unavailable, confirm it uses the local model directory and listens
   on `127.0.0.1:11434`.
 - Record operational discoveries here rather than relying on shell history.
+
+### Trade Republic session-only evidence capture (not a ledger importer)
+
+`uv run --with pytr==0.4.10 python scripts/trade_republic_capture.py login`
+must run in an interactive native terminal. Phone number, PIN and any authenticator
+code are hidden prompts and are never saved. Only pytr's session cookies are saved
+in `~/Library/Application Support/Personal Finance Assistant/Trade Republic Sync/`
+(mode 700 directory, mode 600 files). Subsequent `capture` runs try those cookies
+without prompting or attempting a new login. An expired session returns
+`reauthorization_required`. A nonblocking file lock serializes session access.
+
+The helper reads account settings, cash and both timeline streams. Pagination
+must exhaust within 200 pages per stream; malformed pages, repeated cursors,
+nonadvancing pages and conflicting IDs fail closed. It retains timezone-aware
+raw events from the last 30 days plus corresponding details in an exclusive,
+uniquely named private capture. Raw API payloads and exception text never go to
+stdout. The 15-minute capture bound and per-WebSocket-response timeout prevent
+unbounded pagination or socket waits. Capture is read-only and never marks the
+bank scheduler successful or posts to Firefly.
+
+The simplified pytr JSON-lines transaction export cannot establish stable event
+identity, currency, booking status or reliable spending classification. A captured
+raw feed still requires schema/status verification, source-to-ledger identity,
+and reconciliation against existing Enable Banking transactions before a write
+adapter can be enabled. In particular, generic `Removal` is insufficient evidence
+of spending. The existing Enable Banking pagination guard remains active until a
+replacement is verified. Do not use first-page-only results as a complete sync.
+
+The read-only reconciliation prototype is
+`uv run python -m scripts.trade_republic_plan`. It compares a private capture with
+a complete private ledger snapshot (`ledger-preview.json` in the same directory).
+It verifies IBAN, currency, a single cash account, nonconflicting event account
+identifiers, matching header status and event status, and timezone-aware dates.
+Canceled events and zero-value card verifications are excluded. A description,
+signed amount and nearby date can identify a candidate existing record; amount
+alone never establishes overlap and one ledger record cannot cover two events.
+Every plan remains `reconciliation_required`, even when all descriptions match:
+this prototype does not establish native bank booking dates or a reviewed
+cross-provider migration baseline. It is deliberately not wired into the daily
+ledger scheduler. Review JSON is private and must never be committed.

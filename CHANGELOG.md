@@ -8,6 +8,12 @@ project intends to use semantic versioning for its own releases.
 
 ### Changed
 
+- Added an opt-in macOS bank API import scheduler with independent daily bank
+  cadence, hourly failure retries, private saved configurations, active-consent
+  and exact-account checks, and sanitized status output. Preserved upstream
+  duplicate detection and blocked automatic asset-account creation. Excluded
+  credentials from Docker build contexts.
+
 - Made Firefly projection refreshes atomic across accounts, transactions, eligible
   goals and subscriptions; removed missing goals and stale alert projections while
   retaining immutable source history.
@@ -67,6 +73,10 @@ project intends to use semantic versioning for its own releases.
   recovery, and future migration triggers recorded in ADR 0010.
 
 ### Fixed
+
+- Allowed consent-scoped, operator-verified account identity bindings when a bank
+  omits its IBAN after authorization, without overriding conflicting live details.
+  Avoided future API date bounds rejected by Swedbank; retained overlap recovery.
 
 - Kept pending category suggestions out of financial totals, failed category approval
   closed when Firefly writes are disabled, and removed unsafe compensating category

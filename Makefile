@@ -32,6 +32,10 @@ test-dashboard:
 
 check: lint security test test-dashboard
 
+.PHONY: test-bank-importer
+test-bank-importer:
+	uv run python scripts/check_bank_worker.py
+
 run:
 	uv run uvicorn --app-dir src finance_assistant.api:app --reload
 
