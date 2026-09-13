@@ -7,6 +7,7 @@ expect($normalized['accounts'] === $fixture['accounts']);
 expect($normalized['new_accounts'] === [] && $normalized['access_token'] === '');
 expect($normalized['pending_transactions'] === false && $normalized['date_range_number'] === 30);
 expect($normalized['date_range'] === 'range' && $normalized['date_not_before'] !== '' && $normalized['date_not_after'] !== '');
+expect($normalized['date_not_after'] === gmdate('Y-m-d'));
 $response = function (string $system, string $path): array {
     if (str_starts_with($path, 'sessions/')) { return ['status'=>'AUTHORIZED','accounts'=>['synthetic-source']]; }
     if (str_contains($path, '/transactions?')) { return ['transactions'=>[], 'continuation_key'=>null]; }
@@ -31,6 +32,27 @@ foreach (['expired','wrong_iban','missing_source','new_target','duplicates_off']
     expect($rejected);
 }
 echo "Bank worker synthetic tests passed\n";
+$bound = $normalized;
+$bound['pfa_verified_identity']['synthetic-source'] = ['target'=>42, 'sessions'=>['synthetic-consent'], 'iban_sha256'=>hash('sha256','SYNTHETIC-IBAN')];
+$missingDetails = function($system,$path) use($response) {
+    return $system === 'bank' && str_ends_with($path, '/details') ? ['account_id'=>null] : $response($system,$path);
+};
+bankPreflight($bound, $missingDetails);
+foreach (['absent','target','sessions','hash','live_conflict'] as $case) {
+    $c=$bound;
+    if ($case==='absent') unset($c['pfa_verified_identity']);
+    if ($case==='target') $c['pfa_verified_identity']['synthetic-source']['target']=43;
+    if ($case==='sessions') $c['pfa_verified_identity']['synthetic-source']['sessions']=['other-consent'];
+    if ($case==='hash') $c['pfa_verified_identity']['synthetic-source']['iban_sha256']='wrong';
+    $rejected=false;
+    try {
+        bankPreflight($c, function($system,$path) use($case,$missingDetails) {
+            if ($case==='live_conflict' && $system==='bank' && str_ends_with($path,'/details')) return ['account_id'=>['iban'=>'WRONG']];
+            return $missingDetails($system,$path);
+        });
+    } catch(RuntimeException $e) { $rejected=true; }
+    expect($rejected);
+}
 $conversion = ['status'=>'conv_done'];
 $submission = ['status'=>'submission_done'];
 expect(completedBankImport(73, $conversion, $submission));

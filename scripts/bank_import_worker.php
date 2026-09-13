@@ -31,7 +31,8 @@ function normalizedBankConfiguration(array $c): array
     $c['date_range_not_after_unit'] = '';
     $c['date_range_not_after_number'] = 0;
     $c['date_not_before'] = gmdate('Y-m-d', time() - 30 * 86400);
-    $c['date_not_after'] = gmdate('Y-m-d', time() + 86400);
+    // Swedbank rejects future dates; the API date_to is inclusive.
+    $c['date_not_after'] = gmdate('Y-m-d');
     return $c;
 }
 
@@ -56,7 +57,14 @@ function bankPreflight(array $c, callable $get): void
         $ledger = $get('ledger', 'accounts/'.$target)['data']['attributes'] ?? [];
         $iban = strtoupper(str_replace(' ', '', $details['account_id']['iban'] ?? ''));
         $ledgerIban = strtoupper(str_replace(' ', '', $ledger['iban'] ?? ''));
-        if ($iban === '' || $iban !== $ledgerIban || ($ledger['type'] ?? '') !== 'asset'
+        // Some banks only disclose the IBAN during authorization, not /details.
+        // An operator-verified binding is scoped to the exact source, target and consent.
+        $binding = $c['pfa_verified_identity'][$source] ?? [];
+        $bound = $iban === '' && $ledgerIban !== ''
+            && ($binding['target'] ?? null) === $target
+            && ($binding['sessions'] ?? null) === $c['enable_banking_sessions']
+            && ($binding['iban_sha256'] ?? '') === hash('sha256', $ledgerIban);
+        if ((!$bound && ($iban === '' || $iban !== $ledgerIban)) || ($ledger['type'] ?? '') !== 'asset'
             || ($ledger['active'] ?? false) !== true) {
             throw new RuntimeException('mapping_mismatch');
         }

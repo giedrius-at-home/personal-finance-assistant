@@ -74,6 +74,10 @@ project intends to use semantic versioning for its own releases.
 
 ### Fixed
 
+- Allowed consent-scoped, operator-verified account identity bindings when a bank
+  omits its IBAN after authorization, without overriding conflicting live details.
+  Avoided future API date bounds rejected by Swedbank; retained overlap recovery.
+
 - Kept pending category suggestions out of financial totals, failed category approval
   closed when Firefly writes are disabled, and removed unsafe compensating category
   rollbacks during concurrent reviews.

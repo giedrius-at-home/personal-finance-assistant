@@ -34,6 +34,14 @@ asset-account creation instructions and embedded Firefly tokens from the runtime
 configuration. Preserve classic duplicate detection and saved rule behavior; use
 only booked transactions and a rolling 30-day overlap. Do not force balances.
 
+If a bank omits the IBAN from subsequent account-details responses, an operator
+may record `pfa_verified_identity` only after matching the actual authorization
+screen IBAN to the existing ledger account. The binding records the exact source,
+target, consent list and SHA-256 of the normalized IBAN, in private configuration.
+It cannot override a conflicting live IBAN, expired consent, source not in consent,
+changed target, changed ledger IBAN, or inactive/non-asset account. Renewal needs
+new verification; never infer identity from the account name or balance.
+
 Validate transaction pagination before invoking the writing CLI: repeated
 continuation tokens or an unfinished 50-page scan block that bank. Some feeds
 ignore date filters and repeat the same page; the upstream CLI otherwise repeats
@@ -47,7 +55,10 @@ Clean duplicate-only runs require completed conversion and submission stages wit
 no warnings, errors or rate limits. Enable the upstream option to ignore narrowly
 recognized duplicate errors; duplicate rejection itself remains enabled.
 Resolve explicit date bounds in the adapter because the CLI does not calculate
-the browser's relative date range. The upper bound is the next UTC midnight.
+the browser's relative date range. The API upper bound is today (inclusive);
+Swedbank rejects tomorrow with ASPSP_ERROR. The pinned importer also applies a
+local midnight cutoff, so timestamped intraday records may arrive on the next run;
+the rolling overlap recovers them.
 Successful API access does not prove that a provider supplied complete bank data.
 
 ## Consequences
