@@ -11,6 +11,7 @@ from finance_assistant.csv_import import (
     CsvImportConflictError,
     CsvImportCoordinator,
     CsvImportError,
+    CsvRejectionReason,
     CsvRowStatus,
     ParsedCsvRow,
     csv_external_id,
@@ -112,6 +113,57 @@ class FakeClient:
         self.writes.append((row, external_id))
 
 
+class FailOnceClient(FakeClient):
+    def __init__(self) -> None:
+        super().__init__(accounts=(account(),))
+        self.failed = False
+
+    async def create_csv_transaction(
+        self,
+        *,
+        row: ParsedCsvRow,
+        account: FireflyAccount,
+        accounts: tuple[FireflyAccount, ...],
+        external_id: str,
+    ) -> None:
+        if len(self.writes) == 1 and not self.failed:
+            self.failed = True
+            raise RuntimeError("synthetic partial write failure")
+        await super().create_csv_transaction(
+            row=row,
+            account=account,
+            accounts=accounts,
+            external_id=external_id,
+        )
+        self.transactions = (
+            *self.transactions,
+            FireflyTransaction(
+                type="transactions",
+                id=f"created-{len(self.writes)}",
+                attributes=FireflyTransactionAttributes(
+                    transactions=(
+                        FireflyTransactionSplit(
+                            transaction_journal_id=f"created-{len(self.writes)}",
+                            type="withdrawal" if row.amount < 0 else "deposit",
+                            date=datetime.combine(
+                                row.booked_on, datetime.min.time(), tzinfo=UTC
+                            ),
+                            currency_code=row.currency,
+                            currency_decimal_places=2,
+                            amount=abs(row.amount),
+                            description=row.description,
+                            source_id=account.id if row.amount < 0 else "revenue-1",
+                            destination_id=(
+                                "expense-1" if row.amount < 0 else account.id
+                            ),
+                            external_id=external_id,
+                        ),
+                    )
+                ),
+            ),
+        )
+
+
 @pytest.mark.parametrize(
     ("filename", "payload", "expected_amounts"),
     [
@@ -207,6 +259,7 @@ async def test_preview_classifies_existing_possible_and_new_rows() -> None:
     assert not preview.committable
     with pytest.raises(CsvImportConflictError, match="possible duplicate"):
         await coordinator.commit(preview.preview_id)
+    assert await coordinator.commit(preview.preview_id, skip_flagged=True) == 1
 
 
 @pytest.mark.anyio
@@ -266,6 +319,27 @@ async def test_exact_preview_commits_only_new_rows_once() -> None:
     assert client.writes[0][1].startswith("pfa-csv-v1-")
     with pytest.raises(CsvImportConflictError, match="missing or expired"):
         await coordinator.commit(preview.preview_id)
+
+
+@pytest.mark.anyio
+async def test_partial_csv_failure_is_resumable_without_duplicate_writes() -> None:
+    client = FailOnceClient()
+    coordinator = CsvImportCoordinator(client_factory=lambda: client)
+    preview = await coordinator.preview(
+        content=(
+            b"Date,Amount,Currency,Description,Reference\n"
+            b"2026-09-01,-1.00,EUR,Synthetic one,one\n"
+            b"2026-09-02,-2.00,EUR,Synthetic two,two\n"
+        ),
+        filename="bank.csv",
+        account_id="asset-1",
+    )
+
+    with pytest.raises(RuntimeError, match="partial write"):
+        await coordinator.commit(preview.preview_id)
+
+    assert await coordinator.commit(preview.preview_id) == 1
+    assert [row.external_reference for row, _ in client.writes] == ["one", "two"]
 
 
 @pytest.mark.anyio
@@ -356,8 +430,11 @@ async def test_rejected_rows_currency_mismatch_and_expired_preview_block_commit(
         account_id="asset-1",
     )
     assert preview.rejected_count == 1
+    assert preview.rejected_rows[0].line_number == 2
+    assert preview.rejected_rows[0].reason is CsvRejectionReason.INVALID_DATE
     with pytest.raises(CsvImportConflictError, match="rejected"):
         await coordinator.commit(preview.preview_id)
+    assert await coordinator.commit(preview.preview_id, skip_flagged=True) == 1
 
     with pytest.raises(CsvImportConflictError, match="currency"):
         await coordinator.preview(

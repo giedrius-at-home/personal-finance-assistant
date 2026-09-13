@@ -8,6 +8,17 @@ project intends to use semantic versioning for its own releases.
 
 ### Changed
 
+- Made Firefly projection refreshes atomic across accounts, transactions, eligible
+  goals and subscriptions; removed missing goals and stale alert projections while
+  retaining immutable source history.
+- Replaced daily lifetime transaction downloads with a seven-day incremental window,
+  monthly calendar-year backfills, and bounded exponential failure retries.
+- Added opt-in Ghostfolio balance synchronization with explicit canonical ownership,
+  Firefly budget/goal alert evaluation, content-free readiness diagnostics, and
+  revision polling that avoids rebuilding an unchanged dashboard.
+- Expanded taxonomy health to a trailing twelve-month evidence window and stopped
+  treating owner-name text as proof of an internal transfer.
+
 - Connected saved Firefly subscriptions to six months of recorded payment evidence,
   preferring native bill IDs and otherwise accepting only a unique exact category-
   name match. The dashboard labels evidence strength and never adds payments twice.
@@ -47,8 +58,8 @@ project intends to use semantic versioning for its own releases.
 - Added bounded local-Qwen suggestion generation for recent uncategorised
   non-transfer transactions, with explicit opt-in and a dashboard trigger.
 - Pruned deleted Firefly accounts and transactions from the current dashboard
-  after complete syncs, added configurable owner-name transfer recognition, and
-  made cash-account balances and pay-cycle context clearer on the dashboard.
+  after complete syncs and made cash-account balances and pay-cycle context clearer
+  on the dashboard.
 - Formatted dashboard money at each currency's declared precision and honored
   Firefly's per-account net-worth inclusion preference.
 - Retained SQLite as the supported local single-owner v1 derived-state database
@@ -56,6 +67,15 @@ project intends to use semantic versioning for its own releases.
   recovery, and future migration triggers recorded in ADR 0010.
 
 ### Fixed
+
+- Kept pending category suggestions out of financial totals, failed category approval
+  closed when Firefly writes are disabled, and removed unsafe compensating category
+  rollbacks during concurrent reviews.
+- Made CSV commits retryable after validation, upstream, or partial-write failures;
+  exact prior writes are recognized on retry and sanitized line-level rejection
+  reasons are now shown without retaining rejected values.
+- Based balance freshness on the latest successful local observation rather than an
+  upstream account-edit timestamp.
 
 - Added an explicit confirmed resolution for blocked CSV previews so owners can
   import only definitely new rows while leaving possible duplicates and

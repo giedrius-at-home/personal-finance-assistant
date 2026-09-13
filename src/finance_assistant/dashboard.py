@@ -80,6 +80,9 @@ class DashboardView(StrictModel):
     generated_at: AwareDatetime
     data_mode: str
     upstream_writes: str = "disabled"
+    ghostfolio_sync_enabled: bool = False
+    notification_delivery_available: bool = False
+    budget_alerts_active: bool = False
     weekly: WeeklyReport
     net_worth: NetWorthReport
     cash_overview: CashOverview
@@ -103,13 +106,17 @@ class DashboardService:
         state: SQLiteDerivedState | None,
         *,
         demo_mode: bool = False,
-        owner_name_aliases: tuple[str, ...] = (),
         upstream_writes: str = "disabled",
+        ghostfolio_sync_enabled: bool = False,
+        notification_delivery_available: bool = False,
+        budget_alerts_active: bool = False,
     ):
         self.state = state
         self.demo_mode = demo_mode
-        self.owner_name_aliases = owner_name_aliases
         self.upstream_writes = upstream_writes
+        self.ghostfolio_sync_enabled = ghostfolio_sync_enabled
+        self.notification_delivery_available = notification_delivery_available
+        self.budget_alerts_active = budget_alerts_active
 
     def view(self, *, now: datetime) -> DashboardView:
         if now.tzinfo is None:
@@ -117,14 +124,18 @@ class DashboardService:
         settings = self.state.get_settings() if self.state else OwnerSettings()
         if self.demo_mode:
             accounts, transactions, goals, proposals = _demo_records(now)
+            account_observed_at: dict[str, datetime] = {}
             assignment_proposals = proposals
             severities: tuple[AlertSeverity, ...] = (AlertSeverity.HEADS_UP,)
             safe: tuple[Money, ...] = (Money(amount="420", currency=_EUR),)
             revisions: tuple[SettingsRevision, ...] = ()
         else:
-            accounts = self.state.list_accounts() if self.state else ()
-            transactions = self.state.list_transactions() if self.state else ()
-            goals = self.state.list_goals() if self.state else ()
+            if self.state:
+                accounts, transactions, goals, account_observed_at = (
+                    self.state.read_projection_snapshot()
+                )
+            else:
+                accounts, transactions, goals, account_observed_at = (), (), (), {}
             proposals = self.state.list_pending(limit=100) if self.state else ()
             assignment_proposals = (
                 self.state.list_proposals(limit=500) if self.state else ()
@@ -152,16 +163,9 @@ class DashboardService:
             alert_severities=severities,
             as_of=now,
             timezone=settings.timezone,
-            owner_name_aliases=self.owner_name_aliases,
         )
-        aggregates = tuple(
-            CategoryAggregate(
-                category=item.category,
-                transaction_count=item.transaction_count,
-                amount=abs(item.amount),
-            )
-            for currency in weekly.currencies
-            for item in currency.categories
+        aggregates = _taxonomy_aggregates(
+            transactions, assignments=assignments, as_of=now
         )
         transactions_by_source = {
             transaction.source.identity: transaction for transaction in transactions
@@ -199,6 +203,9 @@ class DashboardService:
             generated_at=now,
             data_mode="invented demo" if self.demo_mode else "local derived state",
             upstream_writes=self.upstream_writes,
+            ghostfolio_sync_enabled=self.ghostfolio_sync_enabled,
+            notification_delivery_available=self.notification_delivery_available,
+            budget_alerts_active=self.budget_alerts_active,
             last_firefly_refresh=last_success,
             last_firefly_attempt=last_attempt,
             firefly_refresh_failed=refresh_failed,
@@ -212,7 +219,11 @@ class DashboardService:
                 next_payday=cash.next_payday,
             ),
             weekly=weekly,
-            net_worth=net_worth_report(accounts, as_of=now),
+            net_worth=net_worth_report(
+                accounts,
+                as_of=now,
+                observed_at_by_account=account_observed_at or None,
+            ),
             cash_overview=cash,
             review_items=tuple(
                 _review_item(item, transactions_by_source.get(item.source.identity))
@@ -262,8 +273,7 @@ def _assignments(
     by_source = {
         item.source.identity: item.proposed_category
         for item in proposals
-        if item.proposed_category is not None
-        and item.status in {ProposalStatus.PENDING, ProposalStatus.APPROVED}
+        if item.proposed_category is not None and item.status is ProposalStatus.APPROVED
     }
     assignments: list[CategoryAssignment] = []
     for item in transactions:
@@ -290,6 +300,49 @@ def _merge_aggregates(
             category=name, transaction_count=counts[name], amount=amounts[name]
         )
         for name in sorted(counts, key=str.casefold)
+    )
+
+
+def _taxonomy_aggregates(
+    transactions: tuple[CanonicalTransaction, ...],
+    *,
+    assignments: tuple[CategoryAssignment, ...],
+    as_of: datetime,
+) -> tuple[CategoryAggregate, ...]:
+    """Build stable taxonomy evidence over twelve months of confirmed expenses."""
+
+    category_by_transaction = {
+        assignment.transaction_id: assignment.category for assignment in assignments
+    }
+    start = as_of - timedelta(days=365)
+    counts: Counter[str] = Counter()
+    amounts: dict[str, Decimal] = {}
+    for transaction in transactions:
+        if (
+            transaction.source.system is not SourceSystem.FIREFLY_III
+            or transaction.kind not in {TransactionKind.OUTFLOW, TransactionKind.REFUND}
+            or not start <= transaction.occurred_at <= as_of
+        ):
+            continue
+        category = transaction.category or category_by_transaction.get(
+            transaction.transaction_id
+        )
+        if category is None:
+            continue
+        counts[category] += 1
+        signed_amount = (
+            -transaction.amount.amount
+            if transaction.kind is TransactionKind.REFUND
+            else transaction.amount.amount
+        )
+        amounts[category] = amounts.get(category, Decimal()) + signed_amount
+    return tuple(
+        CategoryAggregate(
+            category=category,
+            transaction_count=counts[category],
+            amount=max(amounts[category], Decimal()),
+        )
+        for category in sorted(counts, key=str.casefold)
     )
 
 

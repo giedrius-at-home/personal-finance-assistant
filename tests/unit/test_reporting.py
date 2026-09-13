@@ -90,7 +90,7 @@ def test_weekly_report_separates_currency_transfers_and_refunds() -> None:
     )
 
 
-def test_weekly_report_treats_owner_name_aliases_as_transfers() -> None:
+def test_weekly_report_does_not_treat_owner_names_as_transfer_evidence() -> None:
     owner_outflow = transaction("owner-out", TransactionKind.OUTFLOW, "40").model_copy(
         update={"description": "Payment to Synthetic Owner"}
     )
@@ -106,14 +106,13 @@ def test_weekly_report_treats_owner_name_aliases_as_transfers() -> None:
         ),
         as_of=NOW,
         timezone="Europe/Amsterdam",
-        owner_name_aliases=("Synthetic Owner", "S Owner"),
     )
 
     currency = report.currencies[0]
-    assert currency.transfer_count == 2
-    assert currency.income == 0
-    assert currency.spending == 10
-    assert currency.net_cash_flow == -10
+    assert currency.transfer_count == 0
+    assert currency.income == 25
+    assert currency.spending == 50
+    assert currency.net_cash_flow == -25
 
 
 def test_net_worth_counts_mirrors_once_and_fails_closed_when_stale() -> None:
@@ -140,6 +139,14 @@ def test_net_worth_counts_mirrors_once_and_fails_closed_when_stale() -> None:
     assert report.components[0].excluded_mirror_count == 1
     assert report.total is None
     assert report.reasons == ("stale valuations prevent a combined total",)
+
+    observed = net_worth_report(
+        (account,),
+        as_of=NOW,
+        observed_at_by_account={account.account_id: NOW},
+    )
+    assert observed.components[0].stale is False
+    assert observed.total == 1000
 
 
 def test_net_worth_honors_source_exclusion() -> None:

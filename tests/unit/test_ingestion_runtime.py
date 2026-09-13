@@ -11,6 +11,7 @@ from finance_assistant.ingestion.runtime import (
     FireflyCsvImportSettings,
     FireflySyncRunner,
     FireflySyncSettings,
+    GhostfolioSyncSettings,
     run_firefly_sync_loop,
 )
 from finance_assistant.ingestion.service import IngestionResult
@@ -40,6 +41,15 @@ async def test_runner_records_success_then_failure_without_claiming_new_success(
         "finance_assistant.ingestion.runtime.FireflyClient.list_bills",
         AsyncMock(return_value=()),
     )
+    list_transactions = AsyncMock(return_value=())
+    monkeypatch.setattr(
+        "finance_assistant.ingestion.runtime.FireflyClient.list_transactions",
+        list_transactions,
+    )
+    monkeypatch.setattr(
+        "finance_assistant.ingestion.runtime.FireflyClient.list_budget_limits",
+        AsyncMock(return_value=()),
+    )
     runner = FireflySyncRunner(
         state=state,
         settings=FireflySyncSettings(
@@ -49,9 +59,12 @@ async def test_runner_records_success_then_failure_without_claiming_new_success(
     assert await runner() == result
     success, _, failed = state.firefly_sync_health()
     assert success is not None and not failed
+    assert state.last_full_firefly_sync() is not None
+    list_transactions.reset_mock()
     ingest.side_effect = RuntimeError("synthetic failure")
     with pytest.raises(RuntimeError, match="synthetic failure"):
         await runner()
+    list_transactions.assert_awaited_once()
     last_success, attempt, failed = state.firefly_sync_health()
     assert last_success == success and attempt is not None and failed
     state.close()
@@ -91,6 +104,59 @@ def test_firefly_sync_settings_validate_required_values() -> None:
                 "PFA_FIREFLY_SYNC_INTERVAL_SECONDS": "60",
             }
         )
+    with pytest.raises(ValueError, match="cash buffer must be a number"):
+        FireflySyncSettings.from_environment(
+            {
+                "PFA_FIREFLY_SYNC_ENABLED": "true",
+                "PFA_FIREFLY_API_TOKEN": "synthetic-token",
+                "PFA_FIREFLY_BASE_URL": "http://firefly.test",
+                "PFA_MINIMUM_CASH_BUFFER_EUR": "many",
+            }
+        )
+
+
+@pytest.mark.anyio
+async def test_optional_alert_failure_does_not_mark_valid_snapshot_failed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = SQLiteDerivedState(tmp_path / "state.sqlite3")
+    state.migrate_up()
+    result = IngestionResult(
+        accounts_seen=0,
+        transactions_seen=0,
+        goals_seen=0,
+        goals_ineligible=0,
+        projections_changed=0,
+        reconciliation=ReconciliationReport(matched=True, entries=()),
+    )
+    monkeypatch.setattr(
+        "finance_assistant.ingestion.runtime.IngestionService.ingest",
+        AsyncMock(return_value=result),
+    )
+    monkeypatch.setattr(
+        "finance_assistant.ingestion.runtime.FireflyClient.list_bills",
+        AsyncMock(return_value=()),
+    )
+    monkeypatch.setattr(
+        "finance_assistant.ingestion.runtime.FireflyClient.list_transactions",
+        AsyncMock(return_value=()),
+    )
+    monkeypatch.setattr(
+        "finance_assistant.ingestion.runtime._evaluate_alerts",
+        AsyncMock(side_effect=RuntimeError("synthetic alert failure")),
+    )
+    runner = FireflySyncRunner(
+        state=state,
+        settings=FireflySyncSettings(
+            base_url="http://firefly.test", token=SecretStr("synthetic-token")
+        ),
+    )
+
+    assert await runner() == result
+    success, _attempt, failed = state.firefly_sync_health()
+    assert success is not None and not failed
+    state.close()
 
 
 def test_firefly_sync_settings_keep_the_token_secret() -> None:
@@ -107,6 +173,30 @@ def test_firefly_sync_settings_keep_the_token_secret() -> None:
     assert settings.base_url == "http://firefly.test"
     assert settings.interval_seconds == 900
     assert settings.token == SecretStr("synthetic-token")
+    assert "synthetic-token" not in repr(settings)
+
+
+def test_ghostfolio_sync_is_opt_in_and_requires_explicit_link_ownership() -> None:
+    assert GhostfolioSyncSettings.from_environment({}) is None
+    with pytest.raises(ValueError, match="BEARER_TOKEN"):
+        GhostfolioSyncSettings.from_environment(
+            {
+                "PFA_GHOSTFOLIO_SYNC_ENABLED": "true",
+                "PFA_GHOSTFOLIO_BASE_URL": "http://ghostfolio.test",
+            }
+        )
+    settings = GhostfolioSyncSettings.from_environment(
+        {
+            "PFA_GHOSTFOLIO_SYNC_ENABLED": "true",
+            "PFA_GHOSTFOLIO_BASE_URL": "http://ghostfolio.test/",
+            "PFA_GHOSTFOLIO_BEARER_TOKEN": "synthetic-token",
+            "PFA_GHOSTFOLIO_ACCOUNT_LINKS": ("firefly-1:ghostfolio-1:firefly_iii"),
+        }
+    )
+
+    assert settings is not None
+    assert settings.base_url == "http://ghostfolio.test"
+    assert settings.links[0].firefly_account_id == "firefly-1"
     assert "synthetic-token" not in repr(settings)
 
 
@@ -200,7 +290,10 @@ async def test_sync_loop_contains_failures_and_retries(
             reconciliation=ReconciliationReport(matched=True, entries=()),
         )
 
-    async def no_wait(_seconds: float) -> None:
+    delays: list[float] = []
+
+    async def no_wait(seconds: float) -> None:
+        delays.append(seconds)
         if attempts >= 2:
             raise asyncio.CancelledError
 
@@ -208,3 +301,4 @@ async def test_sync_loop_contains_failures_and_retries(
     with pytest.raises(asyncio.CancelledError):
         await run_firefly_sync_loop(sync_once, interval_seconds=300)
     assert attempts == 2
+    assert delays == [300, 300]

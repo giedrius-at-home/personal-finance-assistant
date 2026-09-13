@@ -82,22 +82,27 @@ def install_web_routes(
     state: SQLiteDerivedState | None,
     demo_mode: bool,
     csrf_token: str,
-    owner_name_aliases: tuple[str, ...] = (),
     category_updater: CategoryUpdater | None = None,
     suggestion_runner: SuggestionRunner | None = None,
     csv_import_coordinator: CsvImportCoordinator | None = None,
     csv_post_import_sync: Callable[[], Awaitable[object]] | None = None,
     merchant_researcher: MerchantResearcher | None = None,
     group_suggester: Callable[[str], Awaitable[GroupSuggestion]] | None = None,
+    ghostfolio_sync_enabled: bool = False,
+    notification_delivery_available: bool = False,
+    budget_alerts_active: bool = False,
 ) -> None:
     group_suggestion_lock = asyncio.Lock()
+    category_review_locks: dict[str, asyncio.Lock] = {}
     service = DashboardService(
         state,
         demo_mode=demo_mode,
-        owner_name_aliases=owner_name_aliases,
         upstream_writes=(
             "reviewed categories only" if category_updater is not None else "disabled"
         ),
+        ghostfolio_sync_enabled=ghostfolio_sync_enabled,
+        notification_delivery_available=notification_delivery_available,
+        budget_alerts_active=budget_alerts_active,
     )
 
     @router.get("/", include_in_schema=False)
@@ -116,6 +121,9 @@ def install_web_routes(
                 "spending_groups": tuple(SpendingGroup),
                 "group_suggestions_enabled": group_suggester is not None
                 and not demo_mode,
+                "category_writes_enabled": category_updater is not None
+                and not demo_mode,
+                "notification_delivery_available": notification_delivery_available,
                 "csrf_token": csrf_token,
                 "csv_import_enabled": csv_import_coordinator is not None
                 and not demo_mode,
@@ -320,6 +328,36 @@ def install_web_routes(
             raise HTTPException(
                 status_code=409, detail="demo and empty-state reviews are read-only"
             )
+        if decision in {"approve", "correct"} and category_updater is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Firefly category writes are disabled; the review was not saved",
+            )
+        review_lock = category_review_locks.setdefault(proposal_id, asyncio.Lock())
+        if review_lock.locked():
+            raise HTTPException(
+                status_code=409, detail="this category review is already being saved"
+            )
+        try:
+            async with review_lock:
+                return await _apply_category_review(
+                    state=state,
+                    category_updater=category_updater,
+                    proposal_id=proposal_id,
+                    decision=decision,
+                    values=values,
+                )
+        finally:
+            category_review_locks.pop(proposal_id, None)
+
+    async def _apply_category_review(
+        *,
+        state: SQLiteDerivedState,
+        category_updater: CategoryUpdater | None,
+        proposal_id: str,
+        decision: str,
+        values: dict[str, list[str]],
+    ) -> RedirectResponse:
         if decision == "approve":
             proposal = state.get_pending(proposal_id)
             if proposal is None or proposal.proposed_category is None:
@@ -328,23 +366,17 @@ def install_web_routes(
                 )
             token = state.preview_batch((proposal_id,))
             transaction_id = _firefly_transaction_id(proposal.source)
-            if category_updater is not None:
-                await _update_category(
-                    category_updater,
-                    transaction_id,
-                    proposal.original_category,
-                    proposal.proposed_category,
-                )
-            try:
-                state.approve_batch((proposal_id,), preview_token=token)
-            except Exception:
-                if category_updater is not None:
-                    await category_updater(
-                        transaction_id,
-                        proposal.proposed_category,
-                        proposal.original_category,
-                    )
-                raise
+            if category_updater is None:  # guarded at the HTTP boundary
+                raise RuntimeError("category updater invariant violated")
+            await _update_category(
+                category_updater,
+                transaction_id,
+                proposal.original_category,
+                proposal.proposed_category,
+            )
+            # A failed local commit deliberately remains pending. Retrying is safe:
+            # the Firefly client treats an already-applied exact category as success.
+            state.approve_batch((proposal_id,), preview_token=token)
         elif decision == "reject":
             if not state.resolve_proposal(proposal_id, status=ProposalStatus.REJECTED):
                 raise HTTPException(
@@ -359,33 +391,30 @@ def install_web_routes(
                 raise HTTPException(
                     status_code=409, detail="proposal is no longer pending"
                 )
-            if category_updater is not None:
-                transaction_id = _firefly_transaction_id(proposal.source)
-                await _update_category(
-                    category_updater,
-                    transaction_id,
-                    proposal.original_category,
-                    category,
-                )
+            if category_updater is None:  # guarded at the HTTP boundary
+                raise RuntimeError("category updater invariant violated")
+            transaction_id = _firefly_transaction_id(proposal.source)
+            await _update_category(
+                category_updater,
+                transaction_id,
+                proposal.original_category,
+                category,
+            )
             from finance_assistant.categorisation_service import source_identity
             from finance_assistant.domain.categorisation import CalibrationExample
 
-            try:
-                state.record_correction(
-                    CalibrationExample(
-                        source_identity=source_identity(proposal.source),
-                        feature_hash=proposal.feature_hash,
-                        normalized_merchant=proposal.normalized_merchant,
-                        approved_category=category,
-                    )
+            state.record_correction(
+                CalibrationExample(
+                    source_identity=source_identity(proposal.source),
+                    feature_hash=proposal.feature_hash,
+                    normalized_merchant=proposal.normalized_merchant,
+                    approved_category=category,
                 )
-                state.resolve_proposal(proposal_id, status=ProposalStatus.CORRECTED)
-            except Exception:
-                if category_updater is not None:
-                    await category_updater(
-                        transaction_id, category, proposal.original_category
-                    )
-                raise
+            )
+            if not state.resolve_proposal(proposal_id, status=ProposalStatus.CORRECTED):
+                raise HTTPException(
+                    status_code=409, detail="proposal is no longer pending"
+                )
         else:
             raise HTTPException(status_code=404, detail="unknown review decision")
         return RedirectResponse(
@@ -403,6 +432,11 @@ def install_web_routes(
                 status_code=409, detail="settings require persistent local state"
             )
         desired = _settings(values)
+        if desired.notifications_enabled and not notification_delivery_available:
+            raise HTTPException(
+                status_code=409,
+                detail="host notification delivery is not installed",
+            )
         preview = state.preview_settings(desired)
         return TEMPLATES.TemplateResponse(
             request=request,
@@ -418,6 +452,11 @@ def install_web_routes(
                 status_code=409, detail="settings require persistent local state"
             )
         desired = _settings(values)
+        if desired.notifications_enabled and not notification_delivery_available:
+            raise HTTPException(
+                status_code=409,
+                detail="host notification delivery is not installed",
+            )
         preview = SettingsPreview(
             token=_one(values, "preview_token", max_length=64),
             before=state.get_settings(),

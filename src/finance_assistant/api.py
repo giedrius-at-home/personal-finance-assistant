@@ -10,7 +10,7 @@ from pathlib import Path
 from fastapi import APIRouter, FastAPI, HTTPException, Request, status
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import RequestResponseEndpoint
-from starlette.responses import PlainTextResponse, Response
+from starlette.responses import JSONResponse, PlainTextResponse, Response
 
 from finance_assistant import __version__
 from finance_assistant.categorisation_runtime import (
@@ -35,6 +35,7 @@ from finance_assistant.ingestion.runtime import (
     FireflyCsvImportSettings,
     FireflySyncRunner,
     FireflySyncSettings,
+    GhostfolioSyncSettings,
     run_firefly_sync_loop,
 )
 from finance_assistant.ingestion.service import IngestionResult
@@ -70,12 +71,12 @@ def create_app(
     firefly_sync_settings: FireflySyncSettings | None = None,
     firefly_category_write_settings: FireflyCategoryWriteSettings | None = None,
     firefly_csv_import_settings: FireflyCsvImportSettings | None = None,
+    ghostfolio_sync_settings: GhostfolioSyncSettings | None = None,
     category_suggestion_settings: CategorySuggestionSettings | None = None,
     category_updater: (
         Callable[[str, str | None, str | None], Awaitable[None]] | None
     ) = None,
     csv_import_coordinator: CsvImportCoordinator | None = None,
-    owner_name_aliases: tuple[str, ...] = (),
     research_enabled: bool = False,
     research_cache_path: Path | str | None = None,
     research_user_agent: str = (
@@ -97,7 +98,11 @@ def create_app(
         else None
     )
     sync_runner = (
-        FireflySyncRunner(state=state, settings=firefly_sync_settings)
+        FireflySyncRunner(
+            state=state,
+            settings=firefly_sync_settings,
+            ghostfolio_settings=ghostfolio_sync_settings,
+        )
         if state is not None and firefly_sync_settings is not None
         else None
     )
@@ -231,6 +236,33 @@ def create_app(
         return response
 
     application.add_api_route("/health", health, methods=["GET"], tags=["system"])
+
+    def readiness() -> JSONResponse:
+        if state is not None and not state.integrity_ok():
+            return JSONResponse(
+                {"status": "not_ready", "reason": "local_state"}, status_code=503
+            )
+        if state is not None and firefly_sync_settings is not None:
+            last_success, _last_attempt, failed = state.firefly_sync_health()
+            if last_success is None or failed:
+                return JSONResponse(
+                    {"status": "degraded", "reason": "upstream_refresh"},
+                    status_code=503,
+                )
+        return JSONResponse({"status": "ready"})
+
+    application.add_api_route("/ready", readiness, methods=["GET"], tags=["system"])
+
+    def dashboard_revision() -> JSONResponse:
+        revision = state.dashboard_revision() if state is not None else "demo"
+        return JSONResponse({"revision": revision})
+
+    application.add_api_route(
+        "/v1/dashboard-revision",
+        dashboard_revision,
+        methods=["GET"],
+        tags=["system"],
+    )
     application.add_api_route(
         "/v1/goals/evaluate",
         goal_evaluation,
@@ -256,7 +288,6 @@ def create_app(
         state=state,
         demo_mode=demo_mode,
         csrf_token=new_csrf_token(),
-        owner_name_aliases=owner_name_aliases,
         category_updater=(
             category_updater
             or (
@@ -272,6 +303,9 @@ def create_app(
         group_suggester=configured_group_suggester
         if category_suggestion_settings is not None
         else None,
+        ghostfolio_sync_enabled=ghostfolio_sync_settings is not None,
+        notification_delivery_available=False,
+        budget_alerts_active=firefly_sync_settings is not None,
     )
     application.include_router(web_router)
     return application
@@ -350,18 +384,8 @@ async def receive_firefly_webhook(request: Request) -> dict[str, str]:
 _sync_settings = FireflySyncSettings.from_environment(os.environ)
 _category_write_settings = FireflyCategoryWriteSettings.from_environment(os.environ)
 _csv_import_settings = FireflyCsvImportSettings.from_environment(os.environ)
+_ghostfolio_sync_settings = GhostfolioSyncSettings.from_environment(os.environ)
 _category_suggestion_settings = CategorySuggestionSettings.from_environment(os.environ)
-
-
-def _owner_name_aliases(raw: str | None) -> tuple[str, ...]:
-    if not raw:
-        return ()
-    aliases = tuple(item.strip() for item in raw.split(",") if item.strip())
-    if len(aliases) > 16 or any(len(item) > 100 for item in aliases):
-        raise ValueError(
-            "PFA_OWNER_NAME_ALIASES contains too many or oversized aliases"
-        )
-    return tuple(dict.fromkeys(aliases))
 
 
 app = create_app(
@@ -371,8 +395,8 @@ app = create_app(
     firefly_sync_settings=_sync_settings,
     firefly_category_write_settings=_category_write_settings,
     firefly_csv_import_settings=_csv_import_settings,
+    ghostfolio_sync_settings=_ghostfolio_sync_settings,
     category_suggestion_settings=_category_suggestion_settings,
-    owner_name_aliases=_owner_name_aliases(os.getenv("PFA_OWNER_NAME_ALIASES")),
     research_enabled=os.getenv("PFA_RESEARCH_ENABLED", "false").casefold() == "true",
     research_cache_path=os.getenv("PFA_RESEARCH_CACHE_PATH"),
     research_user_agent=os.getenv(

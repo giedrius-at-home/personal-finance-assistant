@@ -34,6 +34,7 @@ from finance_assistant.integrations.firefly import (
     FireflyTransaction,
 )
 from finance_assistant.integrations.ghostfolio import GhostfolioAccount
+from finance_assistant.subscriptions import SubscriptionSnapshot
 
 
 class FireflyReader(Protocol):
@@ -51,25 +52,18 @@ class GhostfolioReader(Protocol):
 
 
 class DerivedState(Protocol):
-    def upsert_many(
+    def replace_source_snapshot(
         self,
         records: tuple[CanonicalAccount | CanonicalTransaction, ...],
+        goals: tuple[CanonicalSavingsGoal, ...],
         *,
+        source_systems: tuple[SourceSystem, ...],
         observed_at: datetime,
+        complete_transactions: bool = True,
+        subscriptions: SubscriptionSnapshot | None = None,
     ) -> int: ...
 
     def list_accounts(self) -> tuple[CanonicalAccount, ...]: ...
-
-    def delete_missing_current(
-        self,
-        records: tuple[CanonicalAccount | CanonicalTransaction, ...],
-        *,
-        source_system: SourceSystem,
-    ) -> int: ...
-
-    def upsert_goal(
-        self, goal: CanonicalSavingsGoal, *, observed_at: datetime
-    ) -> bool: ...
 
 
 class IngestionResult(StrictModel):
@@ -92,12 +86,18 @@ class IngestionService:
         state: DerivedState,
         links: tuple[AccountLink, ...] = (),
         clock: Callable[[], datetime] | None = None,
+        transactions: tuple[FireflyTransaction, ...] | None = None,
+        complete_transactions: bool = True,
+        subscriptions: SubscriptionSnapshot | None = None,
     ) -> None:
         self._firefly = firefly
         self._ghostfolio = ghostfolio
         self._state = state
         self._links = links
         self._clock = clock or (lambda: datetime.now(UTC))
+        self._transactions = transactions
+        self._complete_transactions = complete_transactions
+        self._subscriptions = subscriptions
 
     async def ingest(self) -> IngestionResult:
         """Validate the full snapshot before changing any derived projection."""
@@ -114,7 +114,11 @@ class IngestionService:
             links=self._links,
         )
         transactions = build_canonical_transactions(
-            await self._firefly.list_transactions(),
+            (
+                self._transactions
+                if self._transactions is not None
+                else await self._firefly.list_transactions()
+            ),
             currencies=currencies,
             accounts=accounts,
         )
@@ -126,13 +130,17 @@ class IngestionService:
             *accounts,
             *transactions,
         )
-        changed = self._state.upsert_many(snapshot, observed_at=observed_at)
-        changed += self._state.delete_missing_current(
-            snapshot, source_system=SourceSystem.FIREFLY_III
-        )
-        changed += sum(
-            self._state.upsert_goal(goal, observed_at=observed_at)
-            for goal in goal_report.goals
+        changed = self._state.replace_source_snapshot(
+            snapshot,
+            goal_report.goals,
+            source_systems=(
+                (SourceSystem.FIREFLY_III, SourceSystem.GHOSTFOLIO)
+                if self._ghostfolio is not None
+                else (SourceSystem.FIREFLY_III,)
+            ),
+            observed_at=observed_at,
+            complete_transactions=self._complete_transactions,
+            subscriptions=self._subscriptions,
         )
         observations = tuple(
             BalanceObservation(

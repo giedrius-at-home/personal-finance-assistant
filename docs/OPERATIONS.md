@@ -160,6 +160,9 @@ log, screenshot, issue, pull request, or chat message:
 PFA_FIREFLY_API_TOKEN=<owner-only token>
 PFA_FIREFLY_SYNC_ENABLED=true
 PFA_FIREFLY_SYNC_INTERVAL_SECONDS=86400
+PFA_FIREFLY_INCREMENTAL_LOOKBACK_DAYS=7
+PFA_FIREFLY_FULL_REFRESH_DAYS=30
+PFA_MINIMUM_CASH_BUFFER_EUR=0
 ```
 
 Apply the setting without recreating the financial databases:
@@ -168,16 +171,26 @@ Apply the setting without recreating the financial databases:
 docker compose --env-file .env up --build --detach gateway
 ```
 
-The gateway fetches a full read-only Firefly snapshot immediately at startup
-and then once per interval. Upserts are idempotent, Firefly remains the source
-of truth, and no second SQLite writer is introduced. The log records only
-aggregate counts and exception class names. Confirm success through the owner
-dashboard and aggregate-only logs; do not enable response-body debug logging.
+The gateway fetches a full read-only Firefly snapshot immediately at startup.
+Later intervals fetch a configurable recent overlap window; a periodic full
+refresh revalidates lifetime history in bounded yearly slices. Only a complete
+full refresh removes local projections missing upstream. Upserts are idempotent,
+Firefly remains the source of truth, and no second SQLite writer is introduced.
+Accounts, transactions, goals, subscriptions, and their observation timestamps
+become visible atomically. Failed polls retry with bounded backoff. The log
+records only aggregate counts and exception class names. Confirm success through
+the owner dashboard and aggregate-only logs; do not enable response-body debug
+logging.
 
 The minimum supported interval is five minutes. Daily polling is the normal
 default. Revoke the token from Firefly and set sync to `false` before retiring
 the integration. A revoked or expired token leaves the last valid derived
 snapshot available while later polls fail without changing it.
+
+Internal transfers must be represented by Firefly as transfers. Names or account
+owner aliases inside transaction descriptions are never used as proof of a
+transfer, because doing so can silently remove genuine income or spending from
+cash-flow reports.
 
 ## Data Importer and Enable Banking
 
@@ -351,10 +364,9 @@ blank if unknown; a day beyond the end of a month uses that month's final day.
 This is a calendar assumption, not confirmation that salary arrived. Weekends
 and holidays are not adjusted. Settings can be rolled back using their history.
 
-The new cycle view includes observed Firefly income, spending net of refunds
-and explicitly typed transfers, separately per currency. It does not infer
-internal transfers from the owner's name. Existing weekly reporting remains
-separate and may differ when its legacy owner-name heuristic is involved.
+The cycle and weekly views include observed Firefly income, spending net of refunds,
+and explicitly typed transfers separately per currency. Neither view treats an owner
+name in transaction text as proof of an internal transfer.
 
 Account health shows available record dates and category coverage; those are
 not a guarantee of a complete statement. The timestamp for a successful
@@ -424,11 +436,27 @@ request notification permission for the invoking terminal/application. Denial,
 non-macOS execution, timeout, and command failure are recorded only as content-free
 outcomes. A non-delivered attempt becomes retryable after one hour.
 
-No launch agent is installed automatically in Phase 3. The scheduling and native
-delivery components are ready for the local review application in Phase 5, where
-the owner can enable them and tune policy without hidden background processes.
-Until then, evaluations are invoked explicitly by the application/test boundary;
-merging this phase does not begin sending notifications.
+Budget and goal alert evidence is refreshed after successful Firefly ingestion and is
+shown on the dashboard. Native notification delivery still requires a separate
+owner-installed macOS host agent because `osascript` cannot run inside the Linux
+gateway. Until that boundary exists, the dashboard labels delivery unavailable and
+refuses to enable the notification setting instead of silently accepting it.
+
+### Optional Ghostfolio balance synchronization
+
+Enable read-only portfolio balance ingestion only after creating or rotating the
+ignored bearer token:
+
+```dotenv
+PFA_GHOSTFOLIO_SYNC_ENABLED=true
+PFA_GHOSTFOLIO_BEARER_TOKEN=<owner-local token>
+PFA_GHOSTFOLIO_ACCOUNT_LINKS=<firefly-id>:<ghostfolio-id>:firefly_iii
+```
+
+Use `ghostfolio` as the final field only when Ghostfolio is the canonical valuation.
+Multiple links are comma-separated. These IDs and the token belong only in `.env`;
+never paste them into issues, logs, documentation, or commits. Leave links empty only
+when the Ghostfolio accounts have no representation in Firefly.
 
 ## Backup
 

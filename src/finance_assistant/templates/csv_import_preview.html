@@ -23,9 +23,10 @@
     <p class="notice"><strong>Import blocked.</strong> Resolve rejected or possible duplicate rows before committing so legitimate repeated payments are not silently lost.</p>
     {% endif %}
     <div class="table-scroll"><table>
-      <thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Status</th></tr></thead>
-      <tbody>{% for row in preview.rows %}<tr><td>{{ row.booked_on }}</td><td>{{ row.description }}</td><td>{{ row.amount }} {{ row.currency }}</td><td>{{ row.status.value|replace('_', ' ') }}</td></tr>{% endfor %}</tbody>
+      <thead><tr><th>CSV line</th><th>Date</th><th>Description</th><th>Amount</th><th>Status</th></tr></thead>
+      <tbody>{% for row in preview.rows %}<tr><td>{{ row.line_number }}</td><td>{{ row.booked_on }}</td><td>{{ row.description }}</td><td>{{ row.amount }} {{ row.currency }}</td><td>{{ row.status.value|replace('_', ' ') }}</td></tr>{% endfor %}</tbody>
     </table></div>
+    {% if preview.rejected_rows %}<h2>Unreadable rows</h2><p class="muted">Only the line number and a sanitized reason are retained; rejected field values are not stored.</p><ul>{% for row in preview.rejected_rows %}<li>Line {{ row.line_number }}: {{ row.reason.value }}</li>{% endfor %}</ul>{% endif %}
     {% if preview.row_count > preview.rows|length %}<p class="muted">Showing the first {{ preview.rows|length }} of {{ preview.row_count }} rows.</p>{% endif %}
     <div class="row import-actions">
       <a class="button secondary" href="/dashboard">Cancel</a>

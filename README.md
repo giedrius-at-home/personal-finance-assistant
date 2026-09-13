@@ -148,8 +148,12 @@ move money, recommend personalized trades, or accept arbitrary URLs.
 
 The owner dashboard can optionally poll Firefly III into its local derived
 state. Polling runs inside the single gateway writer, starts immediately with
-the gateway, and repeats daily by default. It is disabled until an owner adds a
-dedicated token to the ignored `.env` file and opts in explicitly.
+the gateway, refreshes a recent overlap window daily by default, and periodically
+revalidates lifetime history in bounded yearly slices. Failed polls retry with
+bounded backoff instead of leaving the dashboard stale for a full day. Each
+successful refresh publishes accounts, transactions, goals, and subscriptions as
+one atomic local snapshot. It is disabled until an owner adds a dedicated token
+to the ignored `.env` file and opts in explicitly.
 When reviewed category writes are enabled separately, Firefly remains the
 authoritative category store and the next dashboard sync reads its value back.
 Local Qwen suggestion generation is also separately opt-in and processes a
@@ -174,7 +178,7 @@ Prerequisites:
 - Python 3.14+
 - [uv](https://docs.astral.sh/uv/)
 - Docker with Compose
-- Ollama with `qwen3:8b`, optional until model integration is implemented
+- Ollama with `qwen3:8b`, optional unless local category suggestions are enabled
 
 ```bash
 make setup
@@ -193,10 +197,11 @@ dedicated personal access token, place it only in the ignored `.env`, and set:
 PFA_FIREFLY_API_TOKEN=<owner-only token>
 PFA_FIREFLY_SYNC_ENABLED=true
 PFA_FIREFLY_SYNC_INTERVAL_SECONDS=86400
+PFA_FIREFLY_INCREMENTAL_LOOKBACK_DAYS=7
+PFA_FIREFLY_FULL_REFRESH_DAYS=30
+PFA_MINIMUM_CASH_BUFFER_EUR=0
 # Optional: enable exact preview/confirm CSV imports from the dashboard.
 PFA_FIREFLY_CSV_IMPORTS_ENABLED=true
-# Optional: comma-separated aliases that identify transfers between your accounts.
-PFA_OWNER_NAME_ALIASES=<full name>,<abbreviated name>
 ```
 
 Recreate only the gateway with `docker compose up --build --detach gateway`.
@@ -204,10 +209,16 @@ The first read-only sync runs at startup. Never commit or paste the token into
 logs, shell arguments, issues, or chat.
 
 Each successful full Firefly sync removes current dashboard projections that no
-longer exist upstream while retaining immutable source-version history. Owner
-name aliases are matched locally against normalized transaction descriptions;
-matching inflows and outflows are reported as transfers and excluded from cash
-flow income, spending, and category totals.
+longer exist upstream while retaining immutable source-version history. An
+incremental sync never treats absence from its partial window as deletion.
+Transactions are excluded from income and spending as internal transfers only
+when Firefly explicitly represents them as transfers; a person's name in a
+description is not sufficient financial evidence.
+
+Optional Ghostfolio balance ingestion is also disabled by default. It requires a
+separate ignored bearer token and explicit account links that identify whether
+Firefly III or Ghostfolio owns each canonical balance. See
+[Operations](docs/OPERATIONS.md#optional-ghostfolio-balance-synchronization).
 
 The generated `.env` is owner-readable only, ignored by Git, and never
 overwritten by `make bootstrap`. All browser endpoints bind to loopback:
