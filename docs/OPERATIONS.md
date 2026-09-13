@@ -756,3 +756,43 @@ cache.
 - If Ollama is unavailable, confirm it uses the local model directory and listens
   on `127.0.0.1:11434`.
 - Record operational discoveries here rather than relying on shell history.
+
+### Trade Republic session-only evidence capture (not a ledger importer)
+
+`uv run --with pytr==0.4.10 python scripts/trade_republic_capture.py login`
+must run in an interactive native terminal. Phone number, PIN and any authenticator
+code are hidden prompts and are never saved. Only pytr's session cookies are saved
+in `~/Library/Application Support/Personal Finance Assistant/Trade Republic Sync/`
+(mode 700 directory, mode 600 files). Subsequent `capture` runs try those cookies
+without prompting or attempting a new login. An expired session returns
+`reauthorization_required`. A nonblocking file lock serializes session access.
+
+The helper reads account settings, cash and both timeline streams. Pagination
+must exhaust within 200 pages per stream; malformed pages, repeated cursors,
+nonadvancing pages and conflicting IDs fail closed. It retains timezone-aware
+raw events from the last 30 days plus corresponding details in an exclusive,
+uniquely named private capture. Raw API payloads and exception text never go to
+stdout. The 15-minute capture bound and per-WebSocket-response timeout prevent
+unbounded pagination or socket waits. Capture is read-only and never marks the
+bank scheduler successful or posts to Firefly.
+
+The simplified pytr JSON-lines transaction export cannot establish stable event
+identity, currency, booking status or reliable spending classification. A captured
+raw feed still requires schema/status verification, source-to-ledger identity,
+and reconciliation against existing Enable Banking transactions before a write
+adapter can be enabled. In particular, generic `Removal` is insufficient evidence
+of spending. The existing Enable Banking pagination guard remains active until a
+replacement is verified. Do not use first-page-only results as a complete sync.
+
+The read-only reconciliation prototype is
+`uv run python -m scripts.trade_republic_plan`. It compares a private capture with
+a complete private ledger snapshot (`ledger-preview.json` in the same directory).
+It verifies IBAN, currency, a single cash account, nonconflicting event account
+identifiers, matching header status and event status, and timezone-aware dates.
+Canceled events and zero-value card verifications are excluded. A description,
+signed amount and nearby date can identify a candidate existing record; amount
+alone never establishes overlap and one ledger record cannot cover two events.
+Every plan remains `reconciliation_required`, even when all descriptions match:
+this prototype does not establish native bank booking dates or a reviewed
+cross-provider migration baseline. It is deliberately not wired into the daily
+ledger scheduler. Review JSON is private and must never be committed.
