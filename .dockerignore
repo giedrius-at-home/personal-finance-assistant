@@ -5,6 +5,7 @@ data
 backups
 exports
 work
+credentials
 tests
 *.csv
 *.ofx

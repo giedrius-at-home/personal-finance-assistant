@@ -80,6 +80,9 @@ jobs:
       - name: Build local image
         run: docker build --tag personal-finance-assistant:ci .
 
+      - name: Test bank importer adapter with synthetic data and no network
+        run: python scripts/check_bank_worker.py
+
       - name: Smoke-test the built dashboard container
         run: |
           docker run --detach --name pfa-smoke --publish 127.0.0.1:18000:8000 \

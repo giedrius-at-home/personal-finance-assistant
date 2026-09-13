@@ -192,6 +192,62 @@ owner aliases inside transaction descriptions are never used as proof of a
 transfer, because doing so can silently remove genuine income or spending from
 cash-flow reports.
 
+## Scheduled bank API imports (macOS)
+
+Firefly maintenance cron is not a bank importer. The optional host scheduler uses
+the existing Data Importer container and saved bank consent configurations.
+Save `abnamro.json`, `revolut.json`, `swedbank.json` and `traderepublic.json` from
+the importer into Downloads. These files contain secrets; do not paste them into
+chat, commit them, or include them in screenshots. Keep an encrypted backup.
+
+```bash
+uv run python scripts/bank_imports.py install
+uv run python scripts/bank_imports.py check
+```
+
+Installation stages private copies under
+`~/Library/Application Support/Personal Finance Assistant/Bank Imports/data/`
+and writes `~/Library/LaunchAgents/local.personal-finance-assistant.bank-imports.plist`.
+It also installs standalone copies of the adapters beside that data directory,
+so scheduled runs do not read the Documents folder or depend on a Git checkout.
+It does not start imports until the agent is loaded. `check` performs read-only
+consent and exact IBAN checks without recording import success. Review its results
+and take a database backup before the first import.
+
+```bash
+uv run python scripts/bank_imports.py run --force
+launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/local.personal-finance-assistant.bank-imports.plist"
+uv run python scripts/bank_imports.py status
+```
+
+The agent checks every 15 minutes, imports each bank daily, and retries failures
+hourly. A lock prevents overlapping scheduled/manual runs. Mac login and running
+Docker are required; sleep delays the next attempt. A bank with expired consent
+does not block the others. Status/log output contains only bank labels, timestamps,
+fixed status codes and numeric upstream exit codes. `last_success` means the CLI
+completed, not that new transactions arrived or bank coverage is complete.
+
+The import retains existing exact account mappings and duplicate detection, disables
+old asset-account creation instructions, imports booked transactions only, and
+uses a rolling 30-day window. Missing or changed mappings stop that bank. Unexpected
+upstream output is discarded. Never run simultaneous browser imports for the same
+bank while its scheduled import is in progress.
+
+To renew consent, use the importer bank authorization flow and download a fresh
+configuration. Stop the agent with the command below before reinstalling private
+copies; run `check` again, then bootstrap it. Do not use **Start over** to switch banks.
+
+```bash
+launchctl bootout "gui/$(id -u)/local.personal-finance-assistant.bank-imports"
+```
+
+Set `PFA_FIREFLY_SYNC_INTERVAL_SECONDS=300` and
+`PFA_FIREFLY_INCREMENTAL_LOOKBACK_DAYS=30` in the private `.env` and recreate only
+the gateway to display imported ledger records within five minutes. This is a
+separate read-only polling cadence. Keep the repository adapter files available
+for upgrades: stop the agent, rerun `install`, then bootstrap it again. See
+[ADR 0023](adr/0023-scheduled-bank-api-imports.md).
+
 ## Data Importer and Enable Banking
 
 The importer publishes HTTP on `127.0.0.1:${PFA_IMPORTER_PORT}` and HTTPS on
