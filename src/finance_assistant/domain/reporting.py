@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 from collections import defaultdict
+from collections.abc import Mapping
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
@@ -20,7 +21,6 @@ from finance_assistant.domain.canonical import (
     SourceSystem,
     TransactionKind,
 )
-from finance_assistant.domain.categorisation import normalize_merchant
 from finance_assistant.domain.goals import evaluate_goal
 from finance_assistant.domain.models import (
     AlertSeverity,
@@ -91,7 +91,6 @@ def weekly_report(
     alert_severities: tuple[AlertSeverity, ...] = (),
     as_of: datetime,
     timezone: str,
-    owner_name_aliases: tuple[str, ...] = (),
 ) -> WeeklyReport:
     """Aggregate one local ISO week without converting or mixing currencies."""
 
@@ -120,27 +119,13 @@ def weekly_report(
         lambda: defaultdict(int)
     )
     included = 0
-    normalized_aliases = tuple(
-        alias
-        for raw_alias in owner_name_aliases
-        if (alias := normalize_merchant(raw_alias))
-    )
     for transaction in transactions:
         occurred = transaction.occurred_at.astimezone(zone).date()
         if not start <= occurred <= end:
             continue
         included += 1
         currency = transaction.amount.currency
-        description = (
-            normalize_merchant(transaction.description)
-            if transaction.description
-            else ""
-        )
-        owner_movement = any(
-            re.search(rf"(?<!\\w){re.escape(alias)}(?!\\w)", description)
-            for alias in normalized_aliases
-        )
-        if transaction.kind is TransactionKind.TRANSFER or owner_movement:
+        if transaction.kind is TransactionKind.TRANSFER:
             transfers[currency] += 1
         elif transaction.kind is TransactionKind.INFLOW:
             income[currency] += transaction.amount.amount
@@ -260,6 +245,7 @@ def net_worth_report(
     *,
     as_of: datetime,
     stale_after: timedelta = timedelta(days=2),
+    observed_at_by_account: Mapping[str, datetime] | None = None,
 ) -> NetWorthReport:
     """Count every canonical account once and expose stale/ownership evidence."""
 
@@ -280,7 +266,11 @@ def net_worth_report(
             f"source settings exclude {excluded_count} {account_label} from net worth"
         )
     for account in sorted(included_accounts, key=lambda item: item.account_id):
-        updated_at = account.canonical_owner.source_updated_at
+        updated_at = (
+            observed_at_by_account.get(account.account_id)
+            if observed_at_by_account is not None
+            else account.canonical_owner.source_updated_at
+        )
         stale = updated_at is None or as_of - updated_at > stale_after
         if stale:
             has_stale = True

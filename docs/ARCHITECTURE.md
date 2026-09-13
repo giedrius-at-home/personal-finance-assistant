@@ -119,11 +119,16 @@ transactions.
 
 Optional Firefly polling runs as a background task inside the gateway process,
 so SQLite retains one write-capable process. The task performs an immediate
-read-only snapshot at startup and repeats at the configured interval. It uses
-only Firefly asset accounts, transactions, currencies, and piggy banks; errors
-are isolated from HTTP availability and logged by exception type without raw
-upstream content or credentials. ADR 0011 records this production ingestion
-boundary.
+complete read-only snapshot, then bounded recent-window refreshes and periodic
+calendar-year history backfills. Accounts, transactions, eligible goals and the
+subscription snapshot commit as one generation. Errors retry with bounded backoff,
+remain isolated from HTTP availability, and are logged by exception type without
+raw upstream content or credentials. ADR 0022 records the strengthened boundary.
+
+Ghostfolio account balances join the same snapshot only when its read-only sync is
+explicitly enabled. Any mirror must be configured in the ignored `.env` with both
+source IDs and the selected canonical owner; names and balances are never used to
+infer ownership. Investment activities are not imported as cash transactions.
 
 The Data Importer receives durable Firefly and Enable Banking credentials only
 through ignored owner-only configuration and a read-only PEM secret. Its local

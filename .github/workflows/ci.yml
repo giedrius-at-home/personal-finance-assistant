@@ -51,7 +51,7 @@ jobs:
           uv run ruff check .
 
       - name: Check types
-        run: uv run mypy src
+        run: uv run mypy src scripts
 
       - name: Run security checks
         run: |
@@ -79,3 +79,18 @@ jobs:
 
       - name: Build local image
         run: docker build --tag personal-finance-assistant:ci .
+
+      - name: Smoke-test the built dashboard container
+        run: |
+          docker run --detach --name pfa-smoke --publish 127.0.0.1:18000:8000 \
+            --env PFA_DEMO_MODE=true personal-finance-assistant:ci
+          trap 'docker rm --force pfa-smoke >/dev/null 2>&1 || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:18000/health >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:18000/ready >/dev/null
+          curl --fail --silent http://127.0.0.1:18000/dashboard | \
+            grep --quiet 'Invented demo data'

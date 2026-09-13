@@ -79,6 +79,24 @@ def test_repeated_import_is_idempotent_and_update_preserves_lineage(
     state.close()
 
 
+def test_unchanged_account_refreshes_observation_without_new_version(
+    tmp_path: Path,
+) -> None:
+    state = SQLiteDerivedState(tmp_path / "state.sqlite3")
+    state.migrate_up()
+    unchanged = account()
+    state.upsert(unchanged, observed_at=NOW)
+
+    later = NOW + timedelta(days=1)
+    assert not state.upsert(unchanged, observed_at=later)
+    accounts, _transactions, _goals, observations = state.read_projection_snapshot()
+
+    assert accounts == (unchanged,)
+    assert observations[unchanged.account_id] == later
+    assert state.version_count(unchanged.canonical_owner) == 1
+    state.close()
+
+
 def test_source_cannot_silently_change_canonical_owner(tmp_path: Path) -> None:
     state = SQLiteDerivedState(tmp_path / "state.sqlite3")
     state.migrate_up()
@@ -173,6 +191,49 @@ def test_complete_snapshot_prunes_missing_current_and_retains_lineage(
         state.delete_missing_current((current,), source_system=SourceSystem.FIREFLY_III)
         == 0
     )
+    state.close()
+
+
+def test_atomic_snapshot_rolls_back_all_projection_changes_on_conflict(
+    tmp_path: Path,
+) -> None:
+    state = SQLiteDerivedState(tmp_path / "state.sqlite3")
+    state.migrate_up()
+    initial = account()
+    state.upsert(initial, observed_at=NOW)
+    updated = account("200", "r2")
+    conflicting = initial.model_copy(update={"account_id": "firefly:conflict"})
+
+    with pytest.raises(PersistenceConflictError, match="different canonical owner"):
+        state.replace_source_snapshot(
+            (updated, conflicting),
+            (),
+            source_systems=(SourceSystem.FIREFLY_III,),
+            observed_at=NOW + timedelta(hours=1),
+        )
+
+    assert state.list_accounts() == (initial,)
+    state.close()
+
+
+def test_snapshot_removes_missing_goals_but_retains_goal_history(
+    tmp_path: Path,
+) -> None:
+    state = SQLiteDerivedState(tmp_path / "state.sqlite3")
+    state.migrate_up()
+    goal = canonical_goal()
+    state.upsert_goal(goal, observed_at=NOW)
+
+    changed = state.replace_source_snapshot(
+        (),
+        (),
+        source_systems=(SourceSystem.FIREFLY_III,),
+        observed_at=NOW + timedelta(hours=1),
+    )
+
+    assert changed == 1
+    assert state.list_goals() == ()
+    assert state.goal_version_count(goal.source) == 1
     state.close()
 
 

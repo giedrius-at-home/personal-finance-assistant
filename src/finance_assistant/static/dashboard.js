@@ -2,6 +2,7 @@
 
 const REFRESH_INTERVAL_MS = 20_000;
 let requestInFlight = false;
+let lastRevision = null;
 
 function status(message, state = "ready") {
   const node = document.querySelector("#live-status");
@@ -110,6 +111,27 @@ async function refreshDashboard({ quiet = false } = {}) {
     if (!quiet) status("Could not refresh. The current view is unchanged.", "error");
   } finally {
     requestInFlight = false;
+  }
+}
+
+async function pollDashboardRevision() {
+  if (requestInFlight || document.hidden || ownerIsEditing()) return;
+  try {
+    const response = await fetch("/v1/dashboard-revision", {
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) return;
+    const revision = (await response.json()).revision;
+    if (lastRevision === null) {
+      lastRevision = revision;
+    } else if (revision !== lastRevision) {
+      await refreshDashboard({ quiet: true });
+      lastRevision = revision;
+    }
+  } catch (_error) {
+    // Background polling is best effort; explicit refresh still reports failures.
   }
 }
 
@@ -226,4 +248,4 @@ document.addEventListener("visibilitychange", () => {
   if (!document.hidden) void refreshDashboard();
 });
 
-window.setInterval(() => void refreshDashboard({ quiet: true }), REFRESH_INTERVAL_MS);
+window.setInterval(() => void pollDashboardRevision(), REFRESH_INTERVAL_MS);

@@ -80,8 +80,9 @@ rejection of unapproved
 categories and prompt injection, loopback-only model connectivity, bounded
 structured output, abstention on timeout/absence/schema drift, identity-separated
 holdout precision with dataset/model/vocabulary binding, preview-token batch
-approval, write-conflict rollback, idempotent reversal, restart
-persistence, and unavailable-model degradation. The Phase 4 write port must
+approval, idempotent recovery after an upstream/local split failure without an
+unsafe compensating write, idempotent reversal, restart persistence, and
+unavailable-model degradation. The Phase 4 write port must
 remain disabled in CI and production validation.
 
 CSV resync changes must prove size and row bounds, common delimiter/date/decimal
@@ -152,6 +153,13 @@ A pull request records:
 - synthetic fixtures or probes used;
 - security, privacy, failure-mode, and recovery checks;
 - known limitations and deferred follow-up Issues.
+
+Projection-integrity changes must inject a mid-snapshot conflict and prove that no
+partial generation becomes visible. CSV tests must fail after a synthetic partial
+write, retry the same preview, and prove exact prior writes are not duplicated.
+Runtime tests must cover short failure retry, incremental lookback, periodic complete
+refresh state, and content-free readiness/revision responses. Container CI must boot
+the built image and fetch health, readiness, and the invented dashboard.
 
 No credentials, real financial data, account identifiers, bank exports, model
 prompts containing personal data, or unredacted service logs may appear in

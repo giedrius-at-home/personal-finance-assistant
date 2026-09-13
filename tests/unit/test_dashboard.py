@@ -2,11 +2,12 @@ import hashlib
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
 
-from finance_assistant.api import _owner_name_aliases, create_app
+from finance_assistant.api import create_app
 from finance_assistant.categorisation_service import CategoryProposal, ProposalStatus
 from finance_assistant.csv_import import (
     CsvImportConflictError,
@@ -15,12 +16,15 @@ from finance_assistant.csv_import import (
     CsvPreviewRow,
     CsvRowStatus,
 )
+from finance_assistant.dashboard import _assignments, _taxonomy_aggregates
 from finance_assistant.domain.alerting import AlertPolicy, budget_alert_candidate
 from finance_assistant.domain.canonical import (
     CanonicalAccount,
+    CanonicalTransaction,
     SourceEntity,
     SourceReference,
     SourceSystem,
+    TransactionKind,
 )
 from finance_assistant.domain.categorisation import CategorisationMethod
 from finance_assistant.domain.models import BudgetWindow, Currency, Money
@@ -59,6 +63,7 @@ class StubCsvCoordinator:
             rejected_count=0,
             rows=(
                 CsvPreviewRow(
+                    line_number=2,
                     booked_on=date(2026, 9, 1),
                     amount=Decimal("-1.25"),
                     currency="EUR",
@@ -141,7 +146,17 @@ def test_payday_settings_preview_apply_reload_and_rollback(tmp_path: Path) -> No
             data={**settings, "payday_day": "32"},
             headers=SAME_ORIGIN,
         )
+        unavailable = client.post(
+            "/settings/apply",
+            data={
+                **settings,
+                "notifications_enabled": "on",
+                "preview_token": "synthetic-stale-preview",
+            },
+            headers=SAME_ORIGIN,
+        )
         assert invalid.status_code == 422
+        assert unavailable.status_code == 409
     with TestClient(create_app(database_path=path)) as client:
         token = client.get("/dashboard").cookies["pfa_csrf"]
         report = client.get("/v1/dashboard").json()
@@ -179,6 +194,48 @@ def proposal(name: str) -> CategoryProposal:
         normalized_merchant=name,
         created_at=NOW,
     )
+
+
+def test_pending_category_suggestions_do_not_change_financial_assignments() -> None:
+    suggestion = proposal("synthetic-source")
+    transaction = CanonicalTransaction(
+        transaction_id="synthetic-transaction",
+        source=suggestion.source,
+        account_id="synthetic-account",
+        occurred_at=NOW,
+        kind=TransactionKind.OUTFLOW,
+        amount=Money(amount="1", currency=EUR),
+    )
+
+    assert _assignments((transaction,), (suggestion,)) == ()
+    approved = suggestion.model_copy(update={"status": ProposalStatus.APPROVED})
+    assert _assignments((transaction,), (approved,))[0].category == "Groceries"
+
+
+def test_taxonomy_evidence_nets_refunds_and_ignores_pending_suggestions() -> None:
+    source = proposal("taxonomy-source").source
+    outflow = CanonicalTransaction(
+        transaction_id="taxonomy-outflow",
+        source=source,
+        account_id="synthetic-account",
+        occurred_at=NOW,
+        kind=TransactionKind.OUTFLOW,
+        amount=Money(amount="10", currency=EUR),
+        category="Groceries",
+    )
+    refund = outflow.model_copy(
+        update={
+            "transaction_id": "taxonomy-refund",
+            "source": source.model_copy(update={"external_id": "taxonomy-refund"}),
+            "kind": TransactionKind.REFUND,
+            "amount": Money(amount="4", currency=EUR),
+        }
+    )
+
+    aggregates = _taxonomy_aggregates((outflow, refund), assignments=(), as_of=NOW)
+
+    assert aggregates[0].transaction_count == 2
+    assert aggregates[0].amount == Decimal("6")
 
 
 def test_demo_dashboard_is_invented_responsive_and_no_store() -> None:
@@ -220,17 +277,6 @@ def test_dashboard_live_updates_are_local_and_progressively_enhanced() -> None:
     assert "new URLSearchParams()" in script.text
     assert "body: new FormData(form)" not in script.text
     assert "Firefly did not confirm the category" in script.text
-
-
-def test_owner_name_alias_environment_is_bounded_and_deduplicated() -> None:
-    assert _owner_name_aliases(None) == ()
-    assert _owner_name_aliases(" Synthetic Owner, S Owner, Synthetic Owner ") == (
-        "Synthetic Owner",
-        "S Owner",
-    )
-
-    with pytest.raises(ValueError, match="oversized"):
-        _owner_name_aliases("x" * 101)
 
 
 def test_dashboard_json_uses_the_same_bounded_view() -> None:
@@ -376,6 +422,7 @@ def test_blocked_csv_preview_offers_confirmed_skip_resolution(tmp_path: Path) ->
                 rejected_count=1,
                 rows=(
                     CsvPreviewRow(
+                        line_number=2,
                         booked_on=date(2026, 9, 1),
                         amount=Decimal("-1.25"),
                         currency="EUR",
@@ -591,7 +638,16 @@ def test_review_approve_reject_and_correct_lifecycle(tmp_path: Path) -> None:
         seeded.record_proposal(item)
     seeded.close()
 
-    with TestClient(create_app(database_path=path)) as client:
+    async def update_category(
+        _transaction_id: str,
+        _expected_category: str | None,
+        _category: str | None,
+    ) -> None:
+        return None
+
+    with TestClient(
+        create_app(database_path=path, category_updater=update_category)
+    ) as client:
         missing_context = client.get("/v1/dashboard").json()["review_items"][0]
         assert missing_context["transaction_description"] is None
         assert missing_context["transaction_amount"] is None
@@ -642,6 +698,35 @@ def test_review_approve_reject_and_correct_lifecycle(tmp_path: Path) -> None:
     checked.close()
 
 
+def test_category_approval_fails_closed_when_firefly_writes_are_disabled(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "state.sqlite3"
+    seeded = SQLiteDerivedState(path)
+    seeded.migrate_up()
+    item = proposal("Synthetic disabled review")
+    seeded.record_proposal(item)
+    seeded.close()
+
+    with TestClient(create_app(database_path=path)) as client:
+        page = client.get("/dashboard")
+        token = page.cookies["pfa_csrf"]
+        response = client.post(
+            f"/review/{item.proposal_id}/approve",
+            data={"csrf_token": token},
+            headers=SAME_ORIGIN,
+        )
+
+        assert "Approve exact preview" not in page.text
+        assert "Enable reviewed Firefly category writes" in page.text
+        assert response.status_code == 409
+
+    checked = SQLiteDerivedState(path)
+    checked.migrate_up()
+    assert checked.get_pending(item.proposal_id) is not None
+    checked.close()
+
+
 def test_owner_triggered_merchant_research_sends_only_validated_public_name(
     tmp_path: Path,
 ) -> None:
@@ -669,7 +754,11 @@ def test_owner_triggered_merchant_research_sends_only_validated_public_name(
         )
 
     with TestClient(
-        create_app(database_path=path, merchant_researcher=research)
+        create_app(
+            database_path=path,
+            merchant_researcher=research,
+            category_updater=AsyncMock(return_value=None),
+        )
     ) as client:
         page = client.get("/dashboard")
         token = page.cookies["pfa_csrf"]

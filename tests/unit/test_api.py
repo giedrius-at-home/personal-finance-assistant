@@ -20,6 +20,18 @@ def test_health_does_not_expose_configuration() -> None:
     assert response.json() == {"status": "ok", "version": "0.1.0"}
 
 
+def test_readiness_and_dashboard_revision_are_content_free(tmp_path: Path) -> None:
+    with TestClient(create_app(database_path=tmp_path / "state.sqlite3")) as local:
+        ready = local.get("/ready")
+        revision = local.get("/v1/dashboard-revision")
+
+    assert ready.status_code == 200
+    assert ready.json() == {"status": "ready"}
+    assert revision.status_code == 200
+    assert set(revision.json()) == {"revision"}
+    assert len(revision.json()["revision"]) == 64
+
+
 def test_goal_endpoint() -> None:
     response = client.post(
         "/v1/goals/evaluate",

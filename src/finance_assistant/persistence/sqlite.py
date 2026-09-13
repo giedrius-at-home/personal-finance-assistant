@@ -311,6 +311,15 @@ DROP TABLE spending_group_history;
 DELETE FROM schema_migrations WHERE version = 9;
 """
 
+MIGRATION_10_UP = """
+ALTER TABLE firefly_sync_health ADD COLUMN last_full_success TEXT;
+INSERT INTO schema_migrations(version, applied_at) VALUES (10, CURRENT_TIMESTAMP);
+"""
+
+MIGRATION_10_DOWN = """
+DELETE FROM schema_migrations WHERE version = 10;
+"""
+
 MIGRATION_8_DOWN = """
 DROP TABLE IF EXISTS subscription_snapshot;
 DELETE FROM schema_migrations WHERE version = 8;
@@ -377,6 +386,36 @@ class SQLiteDerivedState:
     def close(self) -> None:
         self._connection.close()
 
+    def integrity_ok(self) -> bool:
+        """Run a bounded readiness check without returning stored content."""
+
+        with self._lock:
+            row = self._connection.execute("PRAGMA quick_check(1)").fetchone()
+        return row is not None and row[0] == "ok"
+
+    def dashboard_revision(self) -> str:
+        """Return an opaque revision of dashboard inputs, never source values."""
+
+        queries = (
+            "SELECT COUNT(*), COALESCE(MAX(updated_at), '') FROM canonical_records",
+            "SELECT COUNT(*), COALESCE(MAX(updated_at), '') FROM canonical_goals",
+            "SELECT COUNT(*), COALESCE(MAX(updated_at), '') FROM category_proposals",
+            "SELECT COUNT(*), COALESCE(MAX(applied_at), '') FROM settings_history",
+            "SELECT COUNT(*), COALESCE(MAX(reviewed_at), '') "
+            "FROM spending_group_history",
+            "SELECT COUNT(*), COALESCE(MAX(updated_at), '') FROM alert_lifecycle",
+            "SELECT COUNT(*), COALESCE(MAX(last_attempt), '') FROM firefly_sync_health",
+        )
+        with self._lock:
+            evidence = [
+                tuple(self._connection.execute(query).fetchone()) for query in queries
+            ]
+            subscription = self._connection.execute(
+                "SELECT payload_json FROM subscription_snapshot WHERE singleton = 1"
+            ).fetchone()
+        payload = repr((evidence, subscription[0] if subscription else None))
+        return hashlib.sha256(payload.encode()).hexdigest()
+
     def migrate_up(self) -> None:
         with self._lock:
             existing = self._connection.execute(
@@ -403,6 +442,8 @@ class SQLiteDerivedState:
                 self._connection.executescript(MIGRATION_8_UP)
             if version < 9:
                 self._connection.executescript(MIGRATION_9_UP)
+            if version < 10:
+                self._connection.executescript(MIGRATION_10_UP)
 
     def migrate_down(self) -> None:
         """Reverse the prototype schema only when no financial state exists."""
@@ -433,6 +474,7 @@ class SQLiteDerivedState:
                 raise PersistenceConflictError(
                     "refusing to migrate down populated state"
                 )
+            self._connection.executescript(MIGRATION_10_DOWN)
             self._connection.executescript(MIGRATION_9_DOWN)
             self._connection.executescript(MIGRATION_8_DOWN)
             self._connection.executescript(MIGRATION_7_DOWN)
@@ -443,20 +485,38 @@ class SQLiteDerivedState:
             self._connection.executescript(MIGRATION_2_DOWN)
             self._connection.executescript(MIGRATION_1_DOWN)
 
-    def record_firefly_sync(self, *, success: bool, now: datetime) -> None:
+    def record_firefly_sync(
+        self, *, success: bool, now: datetime, full_snapshot: bool = False
+    ) -> None:
         """Persist only refresh timestamps and outcome, never source content."""
         if now.tzinfo is None:
             raise ValueError("now must be timezone-aware")
         stamp = now.astimezone(UTC).isoformat()
         with self._lock, self._connection:
             self._connection.execute(
-                """INSERT INTO firefly_sync_health VALUES (1, ?, ?, ?)
+                """INSERT INTO firefly_sync_health(
+                       singleton, last_success, last_attempt, failed,
+                       last_full_success) VALUES (1, ?, ?, ?, ?)
                    ON CONFLICT(singleton) DO UPDATE SET
                      last_success = COALESCE(excluded.last_success, last_success),
                      last_attempt = excluded.last_attempt,
-                     failed = excluded.failed""",
-                (stamp if success else None, stamp, int(not success)),
+                     failed = excluded.failed,
+                     last_full_success = COALESCE(
+                         excluded.last_full_success, last_full_success
+                     )""",
+                (
+                    stamp if success else None,
+                    stamp,
+                    int(not success),
+                    stamp if success and full_snapshot else None,
+                ),
             )
+
+    def last_full_firefly_sync(self) -> datetime | None:
+        row = self._connection.execute(
+            "SELECT last_full_success FROM firefly_sync_health WHERE singleton = 1"
+        ).fetchone()
+        return datetime.fromisoformat(row[0]) if row and row[0] else None
 
     def firefly_sync_health(self) -> tuple[datetime | None, datetime | None, bool]:
         row = self._connection.execute(
@@ -523,6 +583,10 @@ class SQLiteDerivedState:
 
         if observed_at.tzinfo is None:
             raise ValueError("observed_at must be timezone-aware")
+        with self._lock, self._connection:
+            return self._upsert_record(record, observed_at=observed_at)
+
+    def _upsert_record(self, record: CanonicalRecord, *, observed_at: datetime) -> bool:
         kind, canonical_id, source = _record_parts(record)
         payload = _serialize(record)
         content_hash = hashlib.sha256(payload.encode()).hexdigest()
@@ -532,67 +596,78 @@ class SQLiteDerivedState:
             if isinstance(record, CanonicalAccount)
             else (source,)
         )
-        with self._lock, self._connection:
-            existing = self._connection.execute(
-                """SELECT canonical_id, content_hash FROM canonical_records
-                   WHERE source_system = ? AND source_entity = ? AND external_id = ?""",
-                source_identity,
-            ).fetchone()
-            if existing is not None and existing["canonical_id"] != canonical_id:
-                raise PersistenceConflictError(
-                    "source identity already has a different canonical owner"
-                )
-            for reference in lineage:
-                self._connection.execute(
-                    """INSERT OR IGNORE INTO source_versions(
-                           source_system, source_entity, external_id, content_hash,
-                           source_revision, source_updated_at, observed_at,
-                           record_kind, canonical_id, payload_json
-                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        *_identity(reference),
-                        content_hash,
-                        reference.source_revision,
-                        (
-                            reference.source_updated_at.isoformat()
-                            if reference.source_updated_at
-                            else None
-                        ),
-                        observed_at.astimezone(UTC).isoformat(),
-                        kind,
-                        canonical_id,
-                        payload,
-                    ),
-                )
-            if existing is not None and existing["content_hash"] == content_hash:
-                return False
+        existing = self._connection.execute(
+            """SELECT canonical_id, content_hash FROM canonical_records
+               WHERE source_system = ? AND source_entity = ? AND external_id = ?""",
+            source_identity,
+        ).fetchone()
+        if existing is not None and existing["canonical_id"] != canonical_id:
+            raise PersistenceConflictError(
+                "source identity already has a different canonical owner"
+            )
+        for reference in lineage:
             self._connection.execute(
-                """INSERT INTO canonical_records(
-                       record_kind, canonical_id, source_system, source_entity,
-                       external_id, content_hash, payload_json, updated_at
-                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                   ON CONFLICT(record_kind, canonical_id) DO UPDATE SET
-                       source_system = excluded.source_system,
-                       source_entity = excluded.source_entity,
-                       external_id = excluded.external_id,
-                       content_hash = excluded.content_hash,
-                       payload_json = excluded.payload_json,
-                       updated_at = excluded.updated_at""",
+                """INSERT OR IGNORE INTO source_versions(
+                       source_system, source_entity, external_id, content_hash,
+                       source_revision, source_updated_at, observed_at,
+                       record_kind, canonical_id, payload_json
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
+                    *_identity(reference),
+                    content_hash,
+                    reference.source_revision,
+                    (
+                        reference.source_updated_at.isoformat()
+                        if reference.source_updated_at
+                        else None
+                    ),
+                    observed_at.astimezone(UTC).isoformat(),
                     kind,
                     canonical_id,
-                    *source_identity,
-                    content_hash,
                     payload,
-                    observed_at.astimezone(UTC).isoformat(),
                 ),
             )
+        if existing is not None and existing["content_hash"] == content_hash:
+            if kind == "account":
+                self._connection.execute(
+                    "UPDATE canonical_records SET updated_at = ? "
+                    "WHERE record_kind = ? AND canonical_id = ?",
+                    (observed_at.astimezone(UTC).isoformat(), kind, canonical_id),
+                )
+            return False
+        self._connection.execute(
+            """INSERT INTO canonical_records(
+                   record_kind, canonical_id, source_system, source_entity,
+                   external_id, content_hash, payload_json, updated_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(record_kind, canonical_id) DO UPDATE SET
+                   source_system = excluded.source_system,
+                   source_entity = excluded.source_entity,
+                   external_id = excluded.external_id,
+                   content_hash = excluded.content_hash,
+                   payload_json = excluded.payload_json,
+                   updated_at = excluded.updated_at""",
+            (
+                kind,
+                canonical_id,
+                *source_identity,
+                content_hash,
+                payload,
+                observed_at.astimezone(UTC).isoformat(),
+            ),
+        )
         return True
 
     def upsert_many(
         self, records: Iterable[CanonicalRecord], *, observed_at: datetime
     ) -> int:
-        return sum(self.upsert(record, observed_at=observed_at) for record in records)
+        if observed_at.tzinfo is None:
+            raise ValueError("observed_at must be timezone-aware")
+        with self._lock, self._connection:
+            return sum(
+                self._upsert_record(record, observed_at=observed_at)
+                for record in records
+            )
 
     def delete_missing_current(
         self,
@@ -651,6 +726,47 @@ class SQLiteDerivedState:
         adapter = TypeAdapter(CanonicalTransaction)
         return tuple(adapter.validate_json(row["payload_json"]) for row in rows)
 
+    def read_projection_snapshot(
+        self,
+    ) -> tuple[
+        tuple[CanonicalAccount, ...],
+        tuple[CanonicalTransaction, ...],
+        tuple[CanonicalSavingsGoal, ...],
+        dict[str, datetime],
+    ]:
+        """Read one internally consistent dashboard projection generation."""
+
+        with self._lock:
+            record_rows = self._connection.execute(
+                "SELECT record_kind, canonical_id, payload_json, updated_at "
+                "FROM canonical_records ORDER BY record_kind, canonical_id"
+            ).fetchall()
+            goal_rows = self._connection.execute(
+                "SELECT payload_json FROM canonical_goals ORDER BY goal_id"
+            ).fetchall()
+        account_adapter = TypeAdapter(CanonicalAccount)
+        transaction_adapter = TypeAdapter(CanonicalTransaction)
+        goal_adapter = TypeAdapter(CanonicalSavingsGoal)
+        accounts = tuple(
+            account_adapter.validate_json(row["payload_json"])
+            for row in record_rows
+            if row["record_kind"] == "account"
+        )
+        transactions = tuple(
+            transaction_adapter.validate_json(row["payload_json"])
+            for row in record_rows
+            if row["record_kind"] == "transaction"
+        )
+        observed_at = {
+            str(row["canonical_id"]): datetime.fromisoformat(row["updated_at"])
+            for row in record_rows
+            if row["record_kind"] == "account"
+        }
+        goals = tuple(
+            goal_adapter.validate_json(row["payload_json"]) for row in goal_rows
+        )
+        return accounts, transactions, goals, observed_at
+
     def version_count(self, source: SourceReference) -> int:
         row = self._connection.execute(
             """SELECT COUNT(*) AS count FROM source_versions
@@ -664,58 +780,161 @@ class SQLiteDerivedState:
 
         if observed_at.tzinfo is None:
             raise ValueError("observed_at must be timezone-aware")
+        with self._lock, self._connection:
+            return self._upsert_goal(goal, observed_at=observed_at)
+
+    def _upsert_goal(
+        self, goal: CanonicalSavingsGoal, *, observed_at: datetime
+    ) -> bool:
         payload = json.dumps(
             goal.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
         )
         content_hash = hashlib.sha256(payload.encode()).hexdigest()
         identity = _identity(goal.source)
         timestamp = observed_at.astimezone(UTC).isoformat()
-        with self._lock, self._connection:
-            existing = self._connection.execute(
-                """SELECT goal_id, content_hash FROM canonical_goals
-                   WHERE source_system = ? AND source_entity = ? AND external_id = ?""",
-                identity,
-            ).fetchone()
-            if existing is not None and existing["goal_id"] != goal.goal.goal_id:
-                raise PersistenceConflictError(
-                    "piggy-bank source already has a different canonical goal"
-                )
-            self._connection.execute(
-                """INSERT OR IGNORE INTO goal_source_versions(
-                       source_system, source_entity, external_id, content_hash,
-                       source_revision, source_updated_at, observed_at, goal_id,
-                       payload_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        existing = self._connection.execute(
+            """SELECT goal_id, content_hash FROM canonical_goals
+               WHERE source_system = ? AND source_entity = ? AND external_id = ?""",
+            identity,
+        ).fetchone()
+        if existing is not None and existing["goal_id"] != goal.goal.goal_id:
+            raise PersistenceConflictError(
+                "piggy-bank source already has a different canonical goal"
+            )
+        self._connection.execute(
+            """INSERT OR IGNORE INTO goal_source_versions(
+                   source_system, source_entity, external_id, content_hash,
+                   source_revision, source_updated_at, observed_at, goal_id,
+                   payload_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                *identity,
+                content_hash,
+                goal.source.source_revision,
                 (
-                    *identity,
-                    content_hash,
-                    goal.source.source_revision,
-                    (
-                        goal.source.source_updated_at.isoformat()
-                        if goal.source.source_updated_at
-                        else None
-                    ),
-                    timestamp,
-                    goal.goal.goal_id,
-                    payload,
+                    goal.source.source_updated_at.isoformat()
+                    if goal.source.source_updated_at
+                    else None
                 ),
-            )
-            if existing is not None and existing["content_hash"] == content_hash:
-                return False
-            self._connection.execute(
-                """INSERT INTO canonical_goals(
-                       goal_id, source_system, source_entity, external_id,
-                       content_hash, payload_json, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)
-                   ON CONFLICT(goal_id) DO UPDATE SET
-                       source_system = excluded.source_system,
-                       source_entity = excluded.source_entity,
-                       external_id = excluded.external_id,
-                       content_hash = excluded.content_hash,
-                       payload_json = excluded.payload_json,
-                       updated_at = excluded.updated_at""",
-                (goal.goal.goal_id, *identity, content_hash, payload, timestamp),
-            )
+                timestamp,
+                goal.goal.goal_id,
+                payload,
+            ),
+        )
+        if existing is not None and existing["content_hash"] == content_hash:
+            return False
+        self._connection.execute(
+            """INSERT INTO canonical_goals(
+                   goal_id, source_system, source_entity, external_id,
+                   content_hash, payload_json, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(goal_id) DO UPDATE SET
+                   source_system = excluded.source_system,
+                   source_entity = excluded.source_entity,
+                   external_id = excluded.external_id,
+                   content_hash = excluded.content_hash,
+                   payload_json = excluded.payload_json,
+                   updated_at = excluded.updated_at""",
+            (goal.goal.goal_id, *identity, content_hash, payload, timestamp),
+        )
         return True
+
+    def replace_source_snapshot(
+        self,
+        records: Iterable[CanonicalRecord],
+        goals: Iterable[CanonicalSavingsGoal],
+        *,
+        source_systems: tuple[SourceSystem, ...],
+        observed_at: datetime,
+        complete_transactions: bool = True,
+        subscriptions: SubscriptionSnapshot | None = None,
+    ) -> int:
+        """Atomically replace validated source projections and Firefly goals."""
+
+        if observed_at.tzinfo is None:
+            raise ValueError("observed_at must be timezone-aware")
+        materialized_records = tuple(records)
+        materialized_goals = tuple(goals)
+        if not source_systems or len(set(source_systems)) != len(source_systems):
+            raise ValueError("source_systems must be non-empty and unique")
+        kinds: tuple[RecordKind, ...] = ("account", "transaction")
+        seen: dict[tuple[SourceSystem, RecordKind], set[str]] = {
+            (source_system, kind): set()
+            for source_system in source_systems
+            for kind in kinds
+        }
+        for record in materialized_records:
+            kind, _canonical_id, source = _record_parts(record)
+            key = (source.system, kind)
+            if key in seen:
+                seen[key].add(source.external_id)
+        seen_goals = {
+            goal.source.external_id
+            for goal in materialized_goals
+            if goal.source.system is SourceSystem.FIREFLY_III
+        }
+        with self._lock, self._connection:
+            changed = sum(
+                self._upsert_record(record, observed_at=observed_at)
+                for record in materialized_records
+            )
+            for source_system in source_systems:
+                for kind in kinds:
+                    if kind == "transaction" and not complete_transactions:
+                        continue
+                    current = self._connection.execute(
+                        "SELECT canonical_id, external_id FROM canonical_records "
+                        "WHERE record_kind = ? AND source_system = ?",
+                        (kind, source_system.value),
+                    ).fetchall()
+                    missing = [
+                        (kind, row["canonical_id"])
+                        for row in current
+                        if row["external_id"] not in seen[(source_system, kind)]
+                    ]
+                    if missing:
+                        self._connection.executemany(
+                            "DELETE FROM canonical_records "
+                            "WHERE record_kind = ? AND canonical_id = ?",
+                            missing,
+                        )
+                        changed += len(missing)
+            changed += sum(
+                self._upsert_goal(goal, observed_at=observed_at)
+                for goal in materialized_goals
+            )
+            current_goals = self._connection.execute(
+                "SELECT goal_id, external_id FROM canonical_goals "
+                "WHERE source_system = ?",
+                (SourceSystem.FIREFLY_III.value,),
+            ).fetchall()
+            missing_goals = [
+                str(row["goal_id"])
+                for row in current_goals
+                if row["external_id"] not in seen_goals
+            ]
+            for goal_id in missing_goals:
+                self._connection.execute(
+                    "DELETE FROM canonical_goals WHERE goal_id = ?", (goal_id,)
+                )
+                for table in (
+                    "notification_attempts",
+                    "alert_events",
+                    "alert_lifecycle",
+                ):
+                    self._connection.execute(
+                        f"DELETE FROM {table} "  # noqa: S608 - fixed table names
+                        "WHERE subject_kind = 'goal' AND subject_id = ?",  # nosec B608
+                        (goal_id,),
+                    )
+            changed += len(missing_goals)
+            if subscriptions is not None:
+                self._connection.execute(
+                    "INSERT INTO subscription_snapshot VALUES (1, ?) "
+                    "ON CONFLICT(singleton) DO UPDATE SET "
+                    "payload_json = excluded.payload_json",
+                    (subscriptions.model_dump_json(),),
+                )
+        return changed
 
     def list_goals(self) -> tuple[CanonicalSavingsGoal, ...]:
         rows = self._connection.execute(

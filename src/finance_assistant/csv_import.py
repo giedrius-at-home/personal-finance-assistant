@@ -45,6 +45,14 @@ class CsvRowStatus(StrEnum):
     POSSIBLE_DUPLICATE = "possible_duplicate"
 
 
+class CsvRejectionReason(StrEnum):
+    INVALID_DATE = "invalid date"
+    INVALID_AMOUNT = "invalid amount"
+    INVALID_CURRENCY = "invalid currency"
+    MISSING_DESCRIPTION = "missing description"
+    INVALID_ROW = "invalid row"
+
+
 class ParsedCsvRow(BaseModel):
     """Normalized transaction row retained only in the in-memory preview store."""
 
@@ -79,11 +87,21 @@ class CsvPreviewRow(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
+    line_number: int = Field(ge=2, le=MAX_CSV_ROWS + 1)
     booked_on: date
     amount: Decimal
     currency: str
     description: str
     status: CsvRowStatus
+
+
+class CsvRejectedRow(BaseModel):
+    """Sanitized rejection evidence that never retains uploaded field values."""
+
+    model_config = ConfigDict(frozen=True)
+
+    line_number: int = Field(ge=2, le=MAX_CSV_ROWS + 1)
+    reason: CsvRejectionReason
 
 
 class CsvImportPreview(BaseModel):
@@ -100,6 +118,9 @@ class CsvImportPreview(BaseModel):
     possible_duplicate_count: int = Field(ge=0)
     rejected_count: int = Field(ge=0)
     rows: tuple[CsvPreviewRow, ...] = Field(max_length=MAX_PREVIEW_ROWS)
+    rejected_rows: tuple[CsvRejectedRow, ...] = Field(
+        default=(), max_length=MAX_PREVIEW_ROWS
+    )
 
     @property
     def committable(self) -> bool:
@@ -148,25 +169,37 @@ class CsvPreviewStore:
 
     def __init__(self) -> None:
         self._items: dict[str, StagedCsvImport] = {}
+        self._in_progress: set[str] = set()
         self._lock = threading.Lock()
 
     def put(self, staged: StagedCsvImport) -> None:
         with self._lock:
             self._items[staged.preview.preview_id] = staged
 
-    def pop(self, preview_id: str, *, now: datetime) -> StagedCsvImport:
+    def begin(self, preview_id: str, *, now: datetime) -> StagedCsvImport:
         with self._lock:
-            staged = self._items.pop(preview_id, None)
             self._purge(now)
-        if staged is None or now - staged.created_at > PREVIEW_TTL:
-            raise CsvImportConflictError("CSV preview is missing or expired")
-        return staged
+            staged = self._items.get(preview_id)
+            if staged is None:
+                raise CsvImportConflictError("CSV preview is missing or expired")
+            if preview_id in self._in_progress:
+                raise CsvImportConflictError(
+                    "CSV preview import is already in progress"
+                )
+            self._in_progress.add(preview_id)
+            return staged
+
+    def release(self, preview_id: str, *, completed: bool) -> None:
+        with self._lock:
+            self._in_progress.discard(preview_id)
+            if completed:
+                self._items.pop(preview_id, None)
 
     def _purge(self, now: datetime) -> None:
         expired = [
             key
             for key, value in self._items.items()
-            if now - value.created_at > PREVIEW_TTL
+            if now - value.created_at > PREVIEW_TTL and key not in self._in_progress
         ]
         for key in expired:
             del self._items[key]
@@ -189,7 +222,7 @@ class CsvImportCoordinator:
     async def preview(
         self, *, content: bytes, filename: str, account_id: str
     ) -> CsvImportPreview:
-        rows, rejected = parse_bank_csv(content, filename=filename)
+        rows, rejected_rows = _parse_bank_csv_details(content, filename=filename)
         bank_label = detect_bank_label(filename, rows)
         async with self._client_factory() as client:
             accounts = await client.list_accounts()
@@ -210,13 +243,14 @@ class CsvImportCoordinator:
             preview_id=secrets.token_urlsafe(32),
             bank_label=bank_label,
             account_name=account.attributes.name,
-            row_count=len(rows) + rejected,
+            row_count=len(rows) + len(rejected_rows),
             new_count=statuses.count(CsvRowStatus.NEW),
             duplicate_count=statuses.count(CsvRowStatus.DUPLICATE),
             possible_duplicate_count=statuses.count(CsvRowStatus.POSSIBLE_DUPLICATE),
-            rejected_count=rejected,
+            rejected_count=len(rejected_rows),
             rows=tuple(
                 CsvPreviewRow(
+                    line_number=row.line_number,
                     booked_on=row.booked_on,
                     amount=row.amount,
                     currency=row.currency,
@@ -225,6 +259,7 @@ class CsvImportCoordinator:
                 )
                 for row, row_status in zip(rows, statuses, strict=True)
             )[:MAX_PREVIEW_ROWS],
+            rejected_rows=rejected_rows[:MAX_PREVIEW_ROWS],
         )
         self._store.put(
             StagedCsvImport(
@@ -238,44 +273,63 @@ class CsvImportCoordinator:
         return preview
 
     async def commit(self, preview_id: str, *, skip_flagged: bool = False) -> int:
-        staged = self._store.pop(preview_id, now=self._clock())
-        if not staged.preview.committable and not skip_flagged:
-            raise CsvImportConflictError(
-                "CSV preview contains rejected or possible duplicate rows"
-            )
-        async with self._client_factory() as client:
-            accounts = await client.list_accounts()
-            account = _one_account(
-                accounts, staged.account_id, bank_label=staged.preview.bank_label
-            )
-            existing = await client.list_transactions(
-                start=min(row.booked_on for row in staged.rows),
-                end=max(row.booked_on for row in staged.rows),
-            )
-            current_statuses = _classify_rows(
-                staged.rows,
-                account=account,
-                existing=existing,
-                bank_label=staged.preview.bank_label,
-            )
-            if current_statuses != staged.statuses:
+        staged = self._store.begin(preview_id, now=self._clock())
+        completed = False
+        try:
+            if not staged.preview.committable and not skip_flagged:
                 raise CsvImportConflictError(
-                    "Firefly changed after the CSV preview was created"
+                    "CSV preview contains rejected or possible duplicate rows"
                 )
-            imported = 0
-            for row, status_value in zip(staged.rows, staged.statuses, strict=True):
-                if status_value is not CsvRowStatus.NEW:
-                    continue
-                await client.create_csv_transaction(
-                    row=row,
+            async with self._client_factory() as client:
+                accounts = await client.list_accounts()
+                account = _one_account(
+                    accounts, staged.account_id, bank_label=staged.preview.bank_label
+                )
+                existing = await client.list_transactions(
+                    start=min(row.booked_on for row in staged.rows),
+                    end=max(row.booked_on for row in staged.rows),
+                )
+                current_statuses = _classify_rows(
+                    staged.rows,
                     account=account,
-                    accounts=accounts,
-                    external_id=csv_external_id(
-                        row, account_id=account.id, bank_label=staged.preview.bank_label
-                    ),
+                    existing=existing,
+                    bank_label=staged.preview.bank_label,
                 )
-                imported += 1
-        return imported
+                safe_replays = all(
+                    current is original
+                    or (
+                        original is CsvRowStatus.NEW
+                        and current is CsvRowStatus.DUPLICATE
+                    )
+                    for original, current in zip(
+                        staged.statuses, current_statuses, strict=True
+                    )
+                )
+                if not safe_replays:
+                    raise CsvImportConflictError(
+                        "Firefly changed after the CSV preview was created"
+                    )
+                imported = 0
+                for row, status_value in zip(
+                    staged.rows, current_statuses, strict=True
+                ):
+                    if status_value is not CsvRowStatus.NEW:
+                        continue
+                    await client.create_csv_transaction(
+                        row=row,
+                        account=account,
+                        accounts=accounts,
+                        external_id=csv_external_id(
+                            row,
+                            account_id=account.id,
+                            bank_label=staged.preview.bank_label,
+                        ),
+                    )
+                    imported += 1
+            completed = True
+            return imported
+        finally:
+            self._store.release(preview_id, completed=completed)
 
 
 HEADER_ALIASES: dict[str, frozenset[str]] = {
@@ -329,6 +383,15 @@ def parse_bank_csv(
 ) -> tuple[tuple[ParsedCsvRow, ...], int]:
     """Parse a bounded CSV using semantic headers instead of provider positions."""
 
+    rows, rejected = _parse_bank_csv_details(content, filename=filename)
+    return rows, len(rejected)
+
+
+def _parse_bank_csv_details(
+    content: bytes, *, filename: str
+) -> tuple[tuple[ParsedCsvRow, ...], tuple[CsvRejectedRow, ...]]:
+    """Parse rows and retain only sanitized line-level rejection reasons."""
+
     if not content or len(content) > MAX_CSV_BYTES:
         raise CsvImportError("CSV must be non-empty and no larger than 5 MiB")
     if not Path(filename).name.lower().endswith((".csv", ".txt")):
@@ -350,17 +413,35 @@ def parse_bank_csv(
     if "description" not in columns:
         raise CsvImportError("CSV needs a recognizable description column")
     rows: list[ParsedCsvRow] = []
-    rejected = 0
+    rejected: list[CsvRejectedRow] = []
     for line_number, raw in enumerate(reader, start=2):
         if line_number > MAX_CSV_ROWS + 1:
             raise CsvImportError("CSV contains more than 10000 data rows")
         try:
             rows.append(_parse_row(raw, columns=columns, line_number=line_number))
-        except CsvImportError, ValueError:
-            rejected += 1
+        except (CsvImportError, ValueError) as error:
+            rejected.append(
+                CsvRejectedRow(
+                    line_number=line_number,
+                    reason=_rejection_reason(error),
+                )
+            )
     if not rows:
         raise CsvImportError("CSV contains no valid transaction rows")
-    return tuple(rows), rejected
+    return tuple(rows), tuple(rejected)
+
+
+def _rejection_reason(error: Exception) -> CsvRejectionReason:
+    message = str(error).casefold()
+    if "date" in message:
+        return CsvRejectionReason.INVALID_DATE
+    if "amount" in message or "debit" in message or "credit" in message:
+        return CsvRejectionReason.INVALID_AMOUNT
+    if "currency" in message:
+        return CsvRejectionReason.INVALID_CURRENCY
+    if "description" in message:
+        return CsvRejectionReason.MISSING_DESCRIPTION
+    return CsvRejectionReason.INVALID_ROW
 
 
 def detect_bank_label(filename: str, rows: tuple[ParsedCsvRow, ...]) -> str:
