@@ -31,6 +31,14 @@ function normalizedBankConfiguration(array $c): array
     $c['date_range_not_after_unit'] = '';
     $c['date_range_not_after_number'] = 0;
     $c['date_not_before'] = gmdate('Y-m-d', time() - 30 * 86400);
+    if (isset($c['pfa_import_not_before'])) {
+        $cutoff = $c['pfa_import_not_before'];
+        if (!is_string($cutoff) || !preg_match('/^([0-9]{4})-([0-9]{2})-([0-9]{2})$/', $cutoff, $parts)
+            || !checkdate((int)$parts[2], (int)$parts[3], (int)$parts[1]) || $cutoff > gmdate('Y-m-d')) {
+            throw new RuntimeException('invalid_configuration');
+        }
+        $c['date_not_before'] = max($c['date_not_before'], $cutoff);
+    }
     // Swedbank rejects future dates; the API date_to is inclusive.
     $c['date_not_after'] = gmdate('Y-m-d');
     return $c;
@@ -121,6 +129,11 @@ function bankWorkerMain(): void
             }
             return json_decode((string)$r->getBody(), true, 512, JSON_THROW_ON_ERROR);
         };
+        // The pinned converter's upper bound is midnight. A same-day cutover
+        // has no completed conversion window; do not invent yesterday's overlap.
+        if ($c['date_not_before'] === $c['date_not_after'] && ($input['check_only'] ?? true) === false) {
+            $result = ['status'=>'waiting_for_completed_day'];
+        } else {
         bankPreflight($c, $get);
         if (($input['check_only'] ?? true) === true) {
             $result = ['status' => 'verified'];
@@ -144,6 +157,7 @@ function bankWorkerMain(): void
                 $result['submission_messages'] = count($job->submissionStatus->messages);
                 $result['status'] = completedBankImport($exit, $job->conversionStatus->toArray(), $job->submissionStatus->toArray()) ? 'success' : 'import_failed';
             }
+        }
         }
     } catch (Throwable $e) {
         $safe = ['reauthorization_required', 'mapping_mismatch', 'invalid_configuration', 'invalid_mapping', 'rate_limited', 'upstream_unavailable', 'provider_pagination_error', 'unsupported_importer_version'];
