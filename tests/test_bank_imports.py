@@ -133,3 +133,38 @@ def test_multiple_importer_containers_fail_closed(
     monkeypatch.setattr(banks.subprocess, "run", execute)
     assert banks.run_bank({}, check_only=False) == {"status": "runtime_unavailable"}
     assert len(calls) == 1
+
+
+def test_cutover_waits_until_next_utc_day():
+    previous = {
+        "status": "waiting_for_completed_day",
+        "last_attempt": "2026-09-14T05:00:00+00:00",
+    }
+    assert not banks.is_due(previous, datetime(2026, 9, 14, 23, tzinfo=UTC))
+    assert banks.is_due(previous, datetime(2026, 9, 15, tzinfo=UTC))
+
+
+def test_native_runner_uses_private_stdin_and_sanitizes_output(monkeypatch):
+    class Process:
+        returncode = 0
+
+        def __init__(self, command, **kwargs):
+            assert "synthetic-private-token" not in " ".join(command)
+            assert kwargs["start_new_session"] is True
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def communicate(self, content, timeout):
+            assert "synthetic-private-token" in content
+            assert timeout == 900
+            return json.dumps({"status": "success", "created": 0, "raw": "private"}), ""
+
+    monkeypatch.setattr(banks.shutil, "which", lambda _: "/synthetic/uv")
+    monkeypatch.setattr(banks.subprocess, "Popen", Process)
+    assert banks.run_native_bank(
+        {"token": "synthetic-private-token"}, check_only=True
+    ) == {"status": "success", "created": 0}

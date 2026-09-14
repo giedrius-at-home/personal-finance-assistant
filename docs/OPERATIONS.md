@@ -796,3 +796,40 @@ Every plan remains `reconciliation_required`, even when all descriptions match:
 this prototype does not establish native bank booking dates or a reviewed
 cross-provider migration baseline. It is deliberately not wired into the daily
 ledger scheduler. Review JSON is private and must never be committed.
+
+### Prospective cutover after reconciled history
+
+An owner-confirmed historical baseline can be preserved without importing it again.
+For Enable Banking accounts, `pfa_import_not_before` is a validated ISO date that
+clamps the normal 30-day overlap. If that date is today, the job reports
+`waiting_for_completed_day` and waits until the next UTC date: the pinned converter
+uses a midnight upper bound, so importing an empty first-day window is not useful.
+This is a waiting state, not a successful bank reconciliation.
+
+For Trade Republic, set `pfa_provider` to `pytr` and `pfa_pytr_cutoff` to an aware
+ISO timestamp in the existing private account configuration. The native adapter
+uses the existing asset, verifies the bank cash IBAN and currency, resumes private
+cookies without credentials, exhausts both timeline streams, and imports only
+executed events on or after the cutoff. The cutoff represents an owner-confirmed
+history boundary, not proof inferred from an ambiguous cross-provider match.
+The original provider configuration is archived before switching; the daily job
+uses exactly one source. No historical records or opening balances are rewritten.
+
+Native references are stable hashes of the source IBAN and provider event ID.
+Retries verify existing references before posting, and Firefly duplicate rejection
+remains enabled. Plans are validated completely before their first write. Ordinary
+card payments and interest are supported; bank transfers require an exact existing
+counterparty asset IBAN. Canceled and pending events are not posted. Unmapped
+transfers, investments, changed imported events and unrecognized events fail closed
+with a fixed review status; they must never be converted into generic spending.
+The latest native success is only a transaction-sync success: the separately
+reported bank/ledger balance equality must not be inferred from it.
+
+The capture scan retains a rolling overlap and extends back to the last successful
+run after a long absence. It never goes earlier than the approved cutoff. HTTP
+requests and WebSocket connections/responses have explicit timeouts, and the socket
+is closed before ending the event loop, consistent with
+[upstream pytr connection cleanup](https://github.com/pytr-org/pytr/releases).
+The scheduler isolates the native process group so timeout cleanup also stops uv's
+child process. New files `trade_republic_capture.py`, `trade_republic_sync.py` and
+`trade_republic_worker.php` must be deployed alongside the existing scheduler.

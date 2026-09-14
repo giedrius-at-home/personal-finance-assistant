@@ -9,7 +9,8 @@ import os
 import plistlib
 import re
 import shutil
-import subprocess  # nosec B404 - fixed Docker CLI; private input is never shell code
+import signal
+import subprocess  # nosec B404
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -29,6 +30,7 @@ PRIVATE = DEPLOY / "data"
 STATUSES = frozenset(
     {
         "verified",
+        "waiting_for_completed_day",
         "success",
         "failed",
         "import_failed",
@@ -42,6 +44,11 @@ STATUSES = frozenset(
         "missing_config",
         "provider_pagination_error",
         "unsupported_importer_version",
+        "event_review_required",
+        "transfer_mapping_required",
+        "legacy_overlap_after_cutoff",
+        "existing_event_changed",
+        "ledger_operation_failed",
     }
 )
 
@@ -61,6 +68,11 @@ def is_due(previous: dict[str, Any], now: datetime) -> bool:
     last = previous.get("last_attempt")
     if not isinstance(last, str):
         return True
+    if previous.get("status") == "waiting_for_completed_day":
+        return (
+            now.astimezone(UTC).date()
+            > datetime.fromisoformat(last).astimezone(UTC).date()
+        )
     delay = (
         timedelta(days=1) if previous.get("status") == "success" else timedelta(hours=1)
     )
@@ -69,6 +81,8 @@ def is_due(previous: dict[str, Any], now: datetime) -> bool:
 
 def run_bank(configuration: dict[str, Any], *, check_only: bool) -> dict[str, Any]:
     """Send secrets on stdin; never emit raw importer output or exception text."""
+    if configuration.get("pfa_provider") == "pytr":
+        return run_native_bank(configuration, check_only=check_only)
     docker = shutil.which("docker")
     if docker is None:
         return {"status": "runtime_unavailable"}
@@ -176,6 +190,61 @@ def run_bank(configuration: dict[str, Any], *, check_only: bool) -> dict[str, An
         return {"status": "runtime_unavailable"}
 
 
+def run_native_bank(
+    configuration: dict[str, Any], *, check_only: bool
+) -> dict[str, Any]:
+    """Run pinned native adapter with private stdin and bounded lifetime."""
+    uv = shutil.which("uv")
+    if uv is None:
+        return {"status": "runtime_unavailable"}
+    try:
+        command = [
+            uv,
+            "run",
+            "--no-project",
+            "--with",
+            "pytr==0.4.10",
+            "python",
+            str(Path(__file__).with_name("trade_republic_sync.py")),
+        ]
+        with subprocess.Popen(  # noqa: S603  # nosec B603
+            command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        ) as process:
+            try:
+                stdout, _ = process.communicate(
+                    json.dumps(
+                        {"configuration": configuration, "check_only": check_only}
+                    ),
+                    timeout=900,
+                )
+            except subprocess.TimeoutExpired:
+                os.killpg(process.pid, signal.SIGTERM)
+                try:
+                    process.communicate(timeout=10)
+                except subprocess.TimeoutExpired:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.communicate()
+                return {"status": "runtime_unavailable"}
+            returncode = process.returncode
+        decoded = json.loads(stdout)
+        if returncode != 0 or decoded.get("status") not in STATUSES:
+            return {"status": "failed"}
+        safe = {"status": decoded["status"]}
+        for field in ("converted", "created", "historical_preserved"):
+            if type(decoded.get(field)) is int:
+                safe[field] = decoded[field]
+        if type(decoded.get("bank_balance_equals_ledger")) is bool:
+            safe["bank_balance_equals_ledger"] = decoded["bank_balance_equals_ledger"]
+        return safe
+    except OSError, ValueError, AttributeError, subprocess.TimeoutExpired:
+        return {"status": "runtime_unavailable"}
+
+
 def run_cycle(
     *, force: bool = False, check_only: bool = False, selected_bank: str | None = None
 ) -> None:
@@ -198,6 +267,8 @@ def run_cycle(
             path = PRIVATE / (bank + ".json")
             try:
                 c = json.loads(path.read_text())
+                if c.get("pfa_provider") == "pytr":
+                    c["pfa_pytr_last_success"] = previous.get("last_success")
                 result = run_bank(c, check_only=check_only)
             except OSError, ValueError:
                 result = {"status": "missing_config"}
@@ -219,7 +290,13 @@ def install(downloads: Path) -> Path:
     PRIVATE.mkdir(parents=True, mode=0o700, exist_ok=True)
     PRIVATE.chmod(0o700)
     DEPLOY.chmod(0o700)
-    for filename in ("bank_imports.py", "bank_import_worker.php"):
+    for filename in (
+        "bank_imports.py",
+        "bank_import_worker.php",
+        "trade_republic_capture.py",
+        "trade_republic_sync.py",
+        "trade_republic_worker.php",
+    ):
         write_private(
             DEPLOY / filename, Path(__file__).with_name(filename).read_bytes()
         )

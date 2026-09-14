@@ -15,6 +15,7 @@ import logging
 import os
 import sys
 import uuid
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -38,6 +39,17 @@ def private_json(path: Path, value: Any) -> None:
         json.dump(value, f)
 
 
+def bound_http_requests(tr: Any) -> None:
+    """pytr's requests.Session has no default timeout; bound bank HTTP calls."""
+    original = tr._websession.request
+
+    def request(*args: Any, **kwargs: Any) -> Any:
+        kwargs.setdefault("timeout", (10, 30))
+        return original(*args, **kwargs)
+
+    tr._websession.request = request
+
+
 async def response(tr: Any, subscription: str) -> Any:
     received, _, payload = await asyncio.wait_for(tr.recv(), timeout=45)
     if received != subscription:
@@ -52,7 +64,9 @@ async def pages(tr: Any, kind: str) -> list[dict[str, Any]]:
     cursors: set[str] = set()
     events: dict[str, dict[str, Any]] = {}
     for _ in range(200):
-        payload = await response(tr, await tr.subscribe({"type": kind, "after": after}))
+        payload = await response(
+            tr, await asyncio.wait_for(tr.subscribe({"type": kind, "after": after}), 45)
+        )
         if (
             not isinstance(payload, dict)
             or not isinstance(payload.get("items"), list)
@@ -88,22 +102,57 @@ def recent(events: list[dict[str, Any]], cutoff: datetime) -> list[dict[str, Any
     return result
 
 
-async def capture(tr: Any) -> dict[str, Any]:
+async def capture(
+    tr: Any, *, all_history: bool = False, not_before: datetime | None = None
+) -> dict[str, Any]:
+    try:
+        return await collect_capture(tr, all_history=all_history, not_before=not_before)
+    finally:
+        # pytr requires closing its background WebSocket tasks before asyncio.run exits.
+        with suppress(Exception):
+            await asyncio.wait_for(tr.close(), 10)
+
+
+async def collect_capture(
+    tr: Any, *, all_history: bool = False, not_before: datetime | None = None
+) -> dict[str, Any]:
     started = datetime.now(UTC)
+    progress_path = PRIVATE / "progress.json"
+
+    def progress(phase: str, count: int = 0) -> None:
+        progress_path.write_text(json.dumps({"phase": phase, "count": count}))
+        progress_path.chmod(0o600)
+
+    progress("settings")
     settings = tr.settings()
-    cash = await response(tr, await tr.cash())
+    progress("cash_connect")
+    await asyncio.wait_for(tr._get_ws(), 45)
+    subscription = await asyncio.wait_for(tr.cash(), 45)
+    progress("cash_response")
+    cash = await response(tr, subscription)
     streams = {}
-    details = {}
+    details: dict[str, Any] = {}
     for kind in ("timelineTransactions", "timelineActivityLog"):
-        streams[kind] = recent(await pages(tr, kind), started - timedelta(days=30))
+        progress(kind)
+        fetched = await pages(tr, kind)
+        progress("details", len(details))
+        streams[kind] = recent(
+            fetched,
+            datetime.min.replace(tzinfo=UTC)
+            if all_history
+            else not_before or started - timedelta(days=30),
+        )
         for event in streams[kind]:
+            if len(details) % 25 == 0:
+                progress("details", len(details))
             action = event.get("action") or {}
             if action.get("type") == "timelineDetail":
                 if action.get("payload") != event["id"]:
                     raise CaptureError("detail_identity_mismatch")
                 if event["id"] not in details:
                     details[event["id"]] = await response(
-                        tr, await tr.timeline_detail_v2(event["id"])
+                        tr,
+                        await asyncio.wait_for(tr.timeline_detail_v2(event["id"]), 45),
                     )
     return {
         "version": 1,
@@ -115,6 +164,10 @@ async def capture(tr: Any) -> dict[str, Any]:
         "streams": streams,
         "details": details,
         "pagination_complete": True,
+        "history_scope": "all_available" if all_history else "bounded",
+        "requested_from": None
+        if all_history
+        else (not_before or started - timedelta(days=30)).isoformat(),
         "ledger_imported": False,
     }
 
@@ -122,6 +175,7 @@ async def capture(tr: Any) -> dict[str, Any]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("login", "capture"))
+    parser.add_argument("--all-history", action="store_true")
     args = parser.parse_args()
     os.umask(0o077)
     PRIVATE.mkdir(parents=True, mode=0o700, exist_ok=True)
@@ -151,6 +205,7 @@ def main() -> None:
             cookies_file=PRIVATE / "cookies.txt",
             use_v2_login=True,
         )
+        bound_http_requests(tr)
         if not tr.resume_websession():
             if args.action != "login":
                 raise CaptureError("reauthorization_required")
@@ -175,7 +230,9 @@ def main() -> None:
             "Session ready. Capturing read-only evidence; this can take a few minutes.",
             flush=True,
         )
-        evidence = asyncio.run(asyncio.wait_for(capture(tr), timeout=900))
+        evidence = asyncio.run(
+            asyncio.wait_for(capture(tr, all_history=args.all_history), timeout=900)
+        )
         private_json(PRIVATE / f"capture-{uuid.uuid4().hex}.json", evidence)
         tr.save_websession()
         print(

@@ -68,3 +68,13 @@ try {
 $calls = 0;
 verifyBankPages('synthetic-source', $normalized, function () use (&$calls) { $calls++; return ['transactions'=>[], 'continuation_key'=>$calls === 1 ? 'synthetic-next' : null]; });
 expect($calls === 2);
+
+$recentCutoff = gmdate('Y-m-d', time() - 86400);
+expect(normalizedBankConfiguration($fixture + ['pfa_import_not_before'=>$recentCutoff])['date_not_before'] === $recentCutoff);
+expect(normalizedBankConfiguration($fixture + ['pfa_import_not_before'=>'2000-01-01'])['date_not_before'] === $normalized['date_not_before']);
+foreach (['invalid', '2026-02-30', '2999-01-01'] as $badCutoff) {
+    $rejected=false;
+    try { normalizedBankConfiguration($fixture + ['pfa_import_not_before'=>$badCutoff]); }
+    catch (RuntimeException $e) { $rejected=$e->getMessage()==='invalid_configuration'; }
+    expect($rejected);
+}

@@ -82,6 +82,7 @@ def test_capture_mode_never_requests_credentials(monkeypatch, tmp_path, capsys):
 
     class Session:
         def __init__(self, **kwargs):
+            self._websession = types.SimpleNamespace(request=lambda *a, **k: None)
             assert kwargs["phone_no"] == "session-only"
             assert kwargs["pin"] == "unused"
             assert kwargs["cookies_file"] == tmp_path / "cookies.txt"
@@ -123,3 +124,38 @@ def test_provider_exception_never_leaks(monkeypatch, tmp_path, capsys):
     output = capsys.readouterr()
     assert "SENSITIVE" not in output.out + output.err
     assert json.loads(output.out)["status"] == "capture_failed"
+
+
+def test_capture_closes_socket_when_collection_fails(monkeypatch):
+    import scripts.trade_republic_capture as module
+
+    class Connection:
+        closed = False
+
+        async def close(self):
+            self.closed = True
+
+    async def fail(*args, **kwargs):
+        raise CaptureError("invalid_page")
+
+    connection = Connection()
+    monkeypatch.setattr(module, "collect_capture", fail)
+    with pytest.raises(CaptureError, match="invalid_page"):
+        asyncio.run(module.capture(connection))
+    assert connection.closed
+
+
+def test_http_requests_have_bounded_default_timeout():
+    import types
+
+    from scripts.trade_republic_capture import bound_http_requests
+
+    received = []
+    tr = types.SimpleNamespace(
+        _websession=types.SimpleNamespace(
+            request=lambda *args, **kwargs: received.append(kwargs)
+        )
+    )
+    bound_http_requests(tr)
+    tr._websession.request("GET", "synthetic")
+    assert received == [{"timeout": (10, 30)}]
