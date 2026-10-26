@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The main window may call the finance read commands and drag itself.",
+  "description": "The main window may call the finance commands (reads, and the owner's edits) and drag itself.",
   "windows": [
     "main"
   ],
@@ -13,6 +13,7 @@
     "allow-review",
     "allow-search-transactions",
     "allow-refresh",
+    "allow-save-budget-plan",
     "allow-status",
     "allow-update-status",
     "allow-check-for-updates",

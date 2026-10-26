@@ -4,6 +4,7 @@ const COMMANDS: &[&str] = &[
     "review",
     "search_transactions",
     "refresh",
+    "save_budget_plan",
     "status",
     "update_status",
     "check_for_updates",

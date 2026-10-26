@@ -9,6 +9,7 @@ mod update;
 
 use finance_core::service::Service;
 use finance_secrets::{Item, Secret};
+use finance_types::gateway::BudgetPlan;
 use finance_types::report::review::{TransactionSearchQuery, TransactionSearchResult};
 use finance_types::report::{Dashboard, ReviewReport};
 use finance_types::{DataStatus, UpdateStatus};
@@ -48,6 +49,11 @@ fn search_transactions(
 #[tauri::command(async)]
 fn refresh(service: State<'_, Service>) {
     service.refresh();
+}
+
+#[tauri::command(async)]
+fn save_budget_plan(service: State<'_, Service>, plan: BudgetPlan) -> Result<BudgetPlan, String> {
+    traced("save_budget_plan", service.save_budget_plan(plan))
 }
 
 #[tauri::command(async)]
@@ -131,6 +137,7 @@ fn main() {
             review,
             search_transactions,
             refresh,
+            save_budget_plan,
             status,
             update_status,
             check_for_updates,

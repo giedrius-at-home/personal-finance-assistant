@@ -115,6 +115,11 @@ impl Store {
         &self.conn
     }
 
+    /// The connection, for write transactions in `finance-core`.
+    pub fn connection_mut(&mut self) -> &mut Connection {
+        &mut self.conn
+    }
+
     /// `PRAGMA integrity_check` returned "ok".
     pub fn is_intact(&self) -> Result<bool> {
         let result: String = self

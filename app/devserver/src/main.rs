@@ -15,6 +15,11 @@ use serde::Deserialize;
 use serde_json::Value;
 
 #[derive(Deserialize)]
+struct PlanArgs {
+    plan: finance_types::gateway::BudgetPlan,
+}
+
+#[derive(Deserialize)]
 struct SearchArgs {
     query: TransactionSearchQuery,
 }
@@ -115,6 +120,10 @@ fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
         "refresh" => {
             service.refresh();
             Ok(Value::Null)
+        }
+        "save_budget_plan" => {
+            let a: PlanArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
+            ok(service.save_budget_plan(a.plan))
         }
         "search_transactions" => {
             let a: SearchArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;

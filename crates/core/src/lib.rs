@@ -24,6 +24,7 @@ pub mod subscriptions;
 pub mod text;
 pub mod transfers;
 pub mod trends;
+pub mod writes;
 
 pub use context::Ctx;
 pub use load::Snapshot;
@@ -36,6 +37,9 @@ pub enum Error {
     Sqlite(#[from] rusqlite::Error),
     #[error("stored value is not valid: {0}")]
     Invalid(String),
+    /// A request the owner can fix; the message is shown as is.
+    #[error("{0}")]
+    Rejected(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

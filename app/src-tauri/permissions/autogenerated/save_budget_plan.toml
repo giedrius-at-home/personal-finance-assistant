@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-save-budget-plan"
+description = "Enables the save_budget_plan command without any pre-configured scope."
+commands.allow = ["save_budget_plan"]
+
+[[permission]]
+identifier = "deny-save-budget-plan"
+description = "Denies the save_budget_plan command without any pre-configured scope."
+commands.deny = ["save_budget_plan"]
