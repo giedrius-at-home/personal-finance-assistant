@@ -170,6 +170,57 @@ fn apply_glass(window: &tauri::WebviewWindow) {
     }
 }
 
+#[tauri::command(async)]
+fn create_bill(
+    service: State<'_, Service>,
+    request: finance_types::gateway::BillCreateRequest,
+) -> Result<finance_types::gateway::BillSaved, String> {
+    traced("create_bill", service.create_bill(request))
+}
+
+#[tauri::command(async)]
+fn edit_bill(
+    service: State<'_, Service>,
+    request: finance_types::gateway::BillEditRequest,
+) -> Result<(), String> {
+    traced("edit_bill", service.edit_bill(request))
+}
+
+#[tauri::command(async)]
+fn archive_bill(
+    service: State<'_, Service>,
+    request: finance_types::gateway::BillRef,
+) -> Result<(), String> {
+    traced("archive_bill", service.archive_bill(request))
+}
+
+#[tauri::command(async)]
+fn save_subscription_categories(
+    service: State<'_, Service>,
+    request: finance_types::gateway::SubscriptionCategoriesRequest,
+) -> Result<finance_types::gateway::SubscriptionCategoryRule, String> {
+    traced(
+        "save_subscription_categories",
+        service.save_subscription_categories(request),
+    )
+}
+
+#[tauri::command(async)]
+fn link_bill_payment(
+    service: State<'_, Service>,
+    request: finance_types::gateway::BillMatchRequest,
+) -> Result<(), String> {
+    traced("link_bill_payment", service.link_bill_payment(request))
+}
+
+#[tauri::command(async)]
+fn decline_bill_match(
+    service: State<'_, Service>,
+    request: finance_types::gateway::BillMatchRequest,
+) -> Result<(), String> {
+    traced("decline_bill_match", service.decline_bill_match(request))
+}
+
 fn main() {
     let path = finance_storage::default_db_path().expect("application data folder");
     tauri::Builder::default()
@@ -194,6 +245,12 @@ fn main() {
             install_update,
             set_release_token,
             forget_release_token,
+            create_bill,
+            edit_bill,
+            archive_bill,
+            save_subscription_categories,
+            link_bill_payment,
+            decline_bill_match,
         ])
         .setup(|app| {
             update::schedule(app.handle().clone());

@@ -3,7 +3,7 @@
 use rust_decimal::{Decimal, RoundingStrategy};
 
 const MONTHS: [&str; 12] = [
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sept", "Oct", "Nov", "Dec",
 ];
 const MONTHS_LONG: [&str; 12] = [
     "January",

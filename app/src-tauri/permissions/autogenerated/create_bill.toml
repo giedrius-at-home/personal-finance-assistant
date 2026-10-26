@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-create-bill"
+description = "Enables the create_bill command without any pre-configured scope."
+commands.allow = ["create_bill"]
+
+[[permission]]
+identifier = "deny-create-bill"
+description = "Denies the create_bill command without any pre-configured scope."
+commands.deny = ["create_bill"]

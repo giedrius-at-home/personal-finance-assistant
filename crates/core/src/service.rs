@@ -167,6 +167,60 @@ impl Service {
         self.write(|w, snap| crate::writes::budget::save_budget_plan(w, snap, plan))
     }
 
+    pub fn create_bill(
+        &self,
+        request: finance_types::gateway::BillCreateRequest,
+    ) -> Result<finance_types::gateway::BillSaved, String> {
+        self.write(|w, snap| {
+            let checks = crate::writes::bills::Checks::new(snap, &w.now)?;
+            crate::writes::bills::create_bill(w, &checks, request)
+        })
+    }
+
+    pub fn edit_bill(
+        &self,
+        request: finance_types::gateway::BillEditRequest,
+    ) -> Result<(), String> {
+        self.write(|w, snap| {
+            let checks = crate::writes::bills::Checks::new(snap, &w.now)?;
+            crate::writes::bills::edit_bill(w, &checks, request)
+        })
+    }
+
+    pub fn archive_bill(&self, request: finance_types::gateway::BillRef) -> Result<(), String> {
+        self.write(|w, _| crate::writes::bills::archive_bill(w, request))
+    }
+
+    pub fn save_subscription_categories(
+        &self,
+        request: finance_types::gateway::SubscriptionCategoriesRequest,
+    ) -> Result<finance_types::gateway::SubscriptionCategoryRule, String> {
+        self.write(|w, snap| {
+            let checks = crate::writes::bills::Checks::new(snap, &w.now)?;
+            crate::writes::bills::save_subscription_categories(w, &checks, request)
+        })
+    }
+
+    pub fn link_bill_payment(
+        &self,
+        request: finance_types::gateway::BillMatchRequest,
+    ) -> Result<(), String> {
+        self.write(|w, snap| {
+            let checks = crate::writes::bills::Checks::new(snap, &w.now)?;
+            crate::writes::bills::link_bill_payment(w, &checks, request)
+        })
+    }
+
+    pub fn decline_bill_match(
+        &self,
+        request: finance_types::gateway::BillMatchRequest,
+    ) -> Result<(), String> {
+        self.write(|w, snap| {
+            let checks = crate::writes::bills::Checks::new(snap, &w.now)?;
+            crate::writes::bills::decline_bill_match(w, &checks, request)
+        })
+    }
+
     pub fn status(&self) -> Result<DataStatus, String> {
         self.read(|store, _| Ok(store.status()?))
     }

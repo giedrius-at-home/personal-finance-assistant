@@ -15,6 +15,12 @@ const COMMANDS: &[&str] = &[
     "install_update",
     "set_release_token",
     "forget_release_token",
+    "create_bill",
+    "edit_bill",
+    "archive_bill",
+    "save_subscription_categories",
+    "link_bill_payment",
+    "decline_bill_match",
 ];
 
 fn main() {

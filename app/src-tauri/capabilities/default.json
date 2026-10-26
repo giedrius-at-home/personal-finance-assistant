@@ -24,6 +24,12 @@
     "allow-install-update",
     "allow-set-release-token",
     "allow-forget-release-token",
-    "core:event:default"
+    "core:event:default",
+    "allow-create-bill",
+    "allow-edit-bill",
+    "allow-archive-bill",
+    "allow-save-subscription-categories",
+    "allow-link-bill-payment",
+    "allow-decline-bill-match"
   ]
 }
