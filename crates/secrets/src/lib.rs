@@ -5,6 +5,7 @@ use std::fmt;
 
 use zeroize::Zeroizing;
 
+#[cfg(target_os = "macos")]
 const SERVICE: &str = "local.giedrius.finance";
 
 /// Keychain items the app uses.
@@ -15,6 +16,7 @@ pub enum Item {
 }
 
 impl Item {
+    #[cfg(target_os = "macos")]
     fn account(self) -> &'static str {
         match self {
             Self::ReleaseToken => "github-release-token",
