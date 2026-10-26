@@ -20,6 +20,16 @@
     "allow-install-update",
     "allow-set-release-token",
     "allow-forget-release-token",
+    "allow-personal-transactions",
+    "allow-save-personal-choice",
+    "allow-set-transaction-category",
+    "allow-review-decisions",
+    "allow-review-batch",
+    "allow-review-category-options",
+    "allow-save-review-details",
+    "allow-audit-daily-review",
+    "allow-preview-consolidation",
+    "allow-apply-consolidation",
     "core:event:default"
   ]
 }

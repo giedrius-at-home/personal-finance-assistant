@@ -7,7 +7,7 @@ use std::sync::Mutex;
 
 use finance_storage::Store;
 use finance_types::DataStatus;
-use finance_types::report::review::{TransactionSearchQuery, TransactionSearchResult};
+use finance_types::report::review::{self as rv, TransactionSearchQuery, TransactionSearchResult};
 use finance_types::report::{Dashboard, ReviewReport};
 use jiff::Zoned;
 
@@ -169,5 +169,67 @@ impl Service {
 
     pub fn status(&self) -> Result<DataStatus, String> {
         self.read(|store, _| Ok(store.status()?))
+    }
+
+    // Transactions tab ------------------------------------------------------
+
+    pub fn personal_transactions(&self, query: &str) -> Result<rv::PersonalTransactions, String> {
+        self.read(|_, snap| crate::writes::transactions::personal_transactions(snap, query))
+    }
+
+    pub fn save_personal_choice(
+        &self,
+        choice: rv::PersonalChoice,
+    ) -> Result<rv::PersonalSaved, String> {
+        self.write(|w, snap| crate::writes::transactions::save_personal_choice(w, snap, choice))
+    }
+
+    pub fn set_transaction_category(
+        &self,
+        change: rv::CategoryChange,
+    ) -> Result<rv::CategorySaved, String> {
+        self.write(|w, snap| crate::writes::transactions::set_transaction_category(w, snap, change))
+    }
+
+    pub fn review_decisions(
+        &self,
+        decisions: Vec<rv::ReviewDecision>,
+    ) -> Result<rv::DecisionsSaved, String> {
+        self.write(|w, snap| crate::writes::review::review_decisions(w, snap, decisions))
+    }
+
+    pub fn review_batch(&self, items: Vec<rv::BatchDecision>) -> Result<rv::BatchSaved, String> {
+        self.write(|w, snap| crate::writes::review::review_batch(w, snap, items))
+    }
+
+    pub fn review_category_options(&self, proposal: &str) -> Result<rv::CategoryOptions, String> {
+        self.read(|store, snap| {
+            crate::writes::review::category_options(store.connection(), snap, proposal)
+        })
+    }
+
+    pub fn save_review_details(
+        &self,
+        details: rv::DetailsSave,
+    ) -> Result<finance_types::gateway::SavedDetails, String> {
+        self.write(|w, _| crate::writes::transactions::save_review_details(w, details))
+    }
+
+    pub fn audit_daily_review(&self, transaction: &str) -> Result<rv::Audited, String> {
+        self.write(|w, _| crate::writes::transactions::audit_daily_review(w, transaction))
+    }
+
+    pub fn preview_consolidation(
+        &self,
+        request: &rv::Consolidation,
+    ) -> Result<rv::ConsolidationPreview, String> {
+        self.read(|_, snap| crate::writes::transactions::preview_consolidation(snap, request))
+    }
+
+    pub fn apply_consolidation(
+        &self,
+        request: rv::Consolidation,
+    ) -> Result<rv::ConsolidationApplied, String> {
+        self.write(|w, snap| crate::writes::transactions::apply_consolidation(w, snap, request))
     }
 }

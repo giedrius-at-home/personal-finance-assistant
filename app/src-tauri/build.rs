@@ -11,6 +11,16 @@ const COMMANDS: &[&str] = &[
     "install_update",
     "set_release_token",
     "forget_release_token",
+    "personal_transactions",
+    "save_personal_choice",
+    "set_transaction_category",
+    "review_decisions",
+    "review_batch",
+    "review_category_options",
+    "save_review_details",
+    "audit_daily_review",
+    "preview_consolidation",
+    "apply_consolidation",
 ];
 
 fn main() {

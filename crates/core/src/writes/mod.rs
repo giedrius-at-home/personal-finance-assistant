@@ -58,3 +58,7 @@ pub fn invalid(message: impl Into<String>) -> Error {
 }
 
 pub mod budget;
+#[cfg(test)]
+mod fixture;
+pub mod review;
+pub mod transactions;

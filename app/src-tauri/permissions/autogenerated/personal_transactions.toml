@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-personal-transactions"
+description = "Enables the personal_transactions command without any pre-configured scope."
+commands.allow = ["personal_transactions"]
+
+[[permission]]
+identifier = "deny-personal-transactions"
+description = "Denies the personal_transactions command without any pre-configured scope."
+commands.deny = ["personal_transactions"]

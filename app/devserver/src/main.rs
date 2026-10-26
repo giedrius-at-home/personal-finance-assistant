@@ -129,6 +129,22 @@ fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
             let a: SearchArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
             ok(service.search(&a.query))
         }
+        "personal_transactions" => {
+            ok(service.personal_transactions(&arg::<String>(&args, "query")?))
+        }
+        "save_personal_choice" => ok(service.save_personal_choice(arg(&args, "choice")?)),
+        "set_transaction_category" => ok(service.set_transaction_category(arg(&args, "change")?)),
+        "review_decisions" => ok(service.review_decisions(arg(&args, "decisions")?)),
+        "review_batch" => ok(service.review_batch(arg(&args, "items")?)),
+        "review_category_options" => {
+            ok(service.review_category_options(&arg::<String>(&args, "proposal")?))
+        }
+        "save_review_details" => ok(service.save_review_details(arg(&args, "details")?)),
+        "audit_daily_review" => {
+            ok(service.audit_daily_review(&arg::<String>(&args, "transaction")?))
+        }
+        "preview_consolidation" => ok(service.preview_consolidation(&arg(&args, "request")?)),
+        "apply_consolidation" => ok(service.apply_consolidation(arg(&args, "request")?)),
         // Updates only exist in the app; show a plausible state for layout checks.
         "update_status" => {
             let available = std::env::var("DEV_FAKE_UPDATE").ok().map(|version| {
@@ -149,6 +165,12 @@ fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
         }
         _ => Err(format!("unknown command {cmd}")),
     }
+}
+
+/// One named command argument.
+fn arg<T: serde::de::DeserializeOwned>(args: &Value, name: &str) -> Result<T, String> {
+    serde_json::from_value(args.get(name).cloned().unwrap_or(Value::Null))
+        .map_err(|e| e.to_string())
 }
 
 fn mime(path: &str) -> &'static str {

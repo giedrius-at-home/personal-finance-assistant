@@ -61,6 +61,105 @@ fn status(service: State<'_, Service>) -> Result<DataStatus, String> {
     traced("status", service.status())
 }
 
+// Transactions tab.
+
+#[tauri::command(async)]
+fn personal_transactions(
+    service: State<'_, Service>,
+    query: String,
+) -> Result<rv::PersonalTransactions, String> {
+    traced(
+        "personal_transactions",
+        service.personal_transactions(&query),
+    )
+}
+
+#[tauri::command(async)]
+fn save_personal_choice(
+    service: State<'_, Service>,
+    choice: rv::PersonalChoice,
+) -> Result<rv::PersonalSaved, String> {
+    traced("save_personal_choice", service.save_personal_choice(choice))
+}
+
+#[tauri::command(async)]
+fn set_transaction_category(
+    service: State<'_, Service>,
+    change: rv::CategoryChange,
+) -> Result<rv::CategorySaved, String> {
+    traced(
+        "set_transaction_category",
+        service.set_transaction_category(change),
+    )
+}
+
+#[tauri::command(async)]
+fn review_decisions(
+    service: State<'_, Service>,
+    decisions: Vec<rv::ReviewDecision>,
+) -> Result<rv::DecisionsSaved, String> {
+    traced("review_decisions", service.review_decisions(decisions))
+}
+
+#[tauri::command(async)]
+fn review_batch(
+    service: State<'_, Service>,
+    items: Vec<rv::BatchDecision>,
+) -> Result<rv::BatchSaved, String> {
+    traced("review_batch", service.review_batch(items))
+}
+
+#[tauri::command(async)]
+fn review_category_options(
+    service: State<'_, Service>,
+    proposal: String,
+) -> Result<rv::CategoryOptions, String> {
+    traced(
+        "review_category_options",
+        service.review_category_options(&proposal),
+    )
+}
+
+#[tauri::command(async)]
+fn save_review_details(
+    service: State<'_, Service>,
+    details: rv::DetailsSave,
+) -> Result<finance_types::gateway::SavedDetails, String> {
+    traced("save_review_details", service.save_review_details(details))
+}
+
+#[tauri::command(async)]
+fn audit_daily_review(
+    service: State<'_, Service>,
+    transaction: String,
+) -> Result<rv::Audited, String> {
+    traced(
+        "audit_daily_review",
+        service.audit_daily_review(&transaction),
+    )
+}
+
+#[tauri::command(async)]
+fn preview_consolidation(
+    service: State<'_, Service>,
+    request: rv::Consolidation,
+) -> Result<rv::ConsolidationPreview, String> {
+    traced(
+        "preview_consolidation",
+        service.preview_consolidation(&request),
+    )
+}
+
+#[tauri::command(async)]
+fn apply_consolidation(
+    service: State<'_, Service>,
+    request: rv::Consolidation,
+) -> Result<rv::ConsolidationApplied, String> {
+    traced("apply_consolidation", service.apply_consolidation(request))
+}
+
+use finance_types::report::review as rv;
+
 #[tauri::command]
 fn update_status(app: AppHandle, updates: State<'_, Updates>) -> UpdateStatus {
     updates.status(&app)
@@ -144,6 +243,16 @@ fn main() {
             install_update,
             set_release_token,
             forget_release_token,
+            personal_transactions,
+            save_personal_choice,
+            set_transaction_category,
+            review_decisions,
+            review_batch,
+            review_category_options,
+            save_review_details,
+            audit_daily_review,
+            preview_consolidation,
+            apply_consolidation,
         ])
         .setup(|app| {
             update::schedule(app.handle().clone());
