@@ -121,6 +121,8 @@ fn main() {
     let path = finance_storage::default_db_path().expect("application data folder");
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
+        // Reopen with the size and position the owner left the window at.
+        .plugin(tauri_plugin_window_state::Builder::new().build())
         .manage(Db {
             path,
             store: Mutex::new(None),

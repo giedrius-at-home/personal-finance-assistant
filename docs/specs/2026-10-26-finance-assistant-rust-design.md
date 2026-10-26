@@ -139,8 +139,11 @@ One database at `~/Library/Application Support/Finance/finance.sqlite3`
   pots, goals, category proposals/corrections, spending groups, daily review,
   alerts, subscriptions, research cache, etc.) is kept and copied as is.
   `schema_migrations` continues from the current version.
-- New tables replace Firefly: `accounts`, `transactions`, `transaction_splits`,
-  `categories`, `bills`, `budget_limits`, `bank_connections`, `sync_runs`.
+- New tables replace Firefly: `accounts`, `categories`, `bills`, `transactions`
+  and `postings` (one signed row per account a transaction touches, so every
+  balance is an exact sum), a trigram FTS index `transactions_search`, and
+  `import_runs`. Phase 2 adds `bank_connections` and `sync_runs`; Firefly had
+  no budget limits in use, so none are migrated.
   Firefly-specific tables (`firefly_sync_health`, `webhook_deliveries`) are
   dropped after migration.
 - Money is `rust_decimal::Decimal` stored as TEXT (exact), never floats.
@@ -268,8 +271,9 @@ builds.
 
 - **Release pipeline**: pushing a version tag `vX.Y.Z` (created from `main`
   after CI passes) runs a GitHub Actions workflow on a macOS runner that
-  builds a universal `Finance.app`, signs it, packages the `.app.tar.gz` and
-  `.dmg`, signs the update archive with the Tauri updater key (Ed25519), and
+  builds an Apple-silicon `Finance.app`, packages the `.app.tar.gz` (no DMG:
+  creating one needs Finder automation, and updates do not use it), signs the
+  update archive with the Tauri updater key (Ed25519), and
   publishes a GitHub Release with `latest.json` (version, notes, URL,
   signature). Merges to `main` alone never ship anything.
 - **Code signing**: Developer ID signing and notarization if the owner has an
@@ -296,8 +300,9 @@ builds.
 Each phase ends with a working app.
 
 1. **Skeleton and data**: workspace, `types`, `storage` (hot), `secrets`,
-   Tauri + Leptos shell with glass, read-only Overview, Transactions and
-   Search screens. `migrate` copies all data from `laptopthree`; verification
+   Tauri + Leptos shell with glass, read-only Overview, Transactions (with
+   search), Accounts, Categories and Data screens. The Enable Banking key moves
+   to the Keychain in phase 2, when the app first uses it. `migrate` copies all data from `laptopthree`; verification
    passes. Release workflow and in-app updater (§10) work from the first
    tagged build. `laptopthree` stays the live system.
 2. **Bank sync**: `bank` crate, consent renewal, launchd headless sync,
