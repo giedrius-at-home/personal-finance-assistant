@@ -98,6 +98,12 @@ impl Store {
         Ok(())
     }
 
+    /// The connection, for the computations in `finance-core` that read the
+    /// gateway tables directly.
+    pub fn connection(&self) -> &Connection {
+        &self.conn
+    }
+
     /// `PRAGMA integrity_check` returned "ok".
     pub fn is_intact(&self) -> Result<bool> {
         let result: String = self

@@ -1247,6 +1247,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "finance-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "finance-storage",
+ "finance-types",
+ "jiff",
+ "regex",
+ "rusqlite",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "finance-devserver"
 version = "0.1.0"
 dependencies = [
@@ -1298,6 +1314,7 @@ version = "0.1.0"
 dependencies = [
  "rust_decimal",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
