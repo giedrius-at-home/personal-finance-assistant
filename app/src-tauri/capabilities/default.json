@@ -30,6 +30,8 @@
     "allow-archive-bill",
     "allow-save-subscription-categories",
     "allow-link-bill-payment",
-    "allow-decline-bill-match"
+    "allow-decline-bill-match",
+    "allow-create-planned-payment",
+    "allow-archive-planned-payment"
   ]
 }

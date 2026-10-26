@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-create-planned-payment"
+description = "Enables the create_planned_payment command without any pre-configured scope."
+commands.allow = ["create_planned_payment"]
+
+[[permission]]
+identifier = "deny-create-planned-payment"
+description = "Denies the create_planned_payment command without any pre-configured scope."
+commands.deny = ["create_planned_payment"]

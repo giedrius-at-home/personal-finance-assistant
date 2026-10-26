@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 
+use finance_types::gateway::PlannedPaymentRequest;
 use finance_types::gateway::{
     BILL_FREQUENCIES, BillCreateRequest, BillEditRequest, BillMatchRequest, BillRef, BillSaved,
     Direction, SubscriptionCategoriesRequest, SubscriptionCategoryRule,
@@ -28,33 +29,16 @@ use crate::ds::{
 use crate::pages::with_report;
 use crate::{ManageSection, format, state};
 
-// TEMP: provided by the Overview port (`finance_types::gateway::PlannedPaymentRequest`).
-#[derive(Clone, Debug, Serialize)]
-struct PlannedPaymentRequest {
-    name: String,
-    match_category: String,
-    direction: Direction,
-    amount: Decimal,
-    currency: String,
-    due_on: String,
-    account_id: String,
-    reimbursement_for: Option<String>,
-    match_description: Option<String>,
-}
-
 /// The single argument of the write commands.
 #[derive(Serialize)]
 struct Request<T: Serialize> {
     request: T,
 }
 
-/// `archive_planned_payment(plan_id)`: Tauri reads the camelCase key, the
-/// development server the Rust name.
+/// `archive_planned_payment(plan_id)`.
 #[derive(Serialize)]
 struct PlanIdArgs {
     plan_id: String,
-    #[serde(rename = "planId")]
-    plan_id_camel: String,
 }
 
 /// Screen state that outlives a dashboard reload.
@@ -488,7 +472,7 @@ fn create_form(
                     } else {
                         Direction::Outflow
                     },
-                    amount,
+                    amount: amount.to_string(),
                     currency,
                     due_on,
                     account_id: ui.account_id.get_untracked(),
@@ -743,7 +727,6 @@ fn archive_plan(ui: Ui, plan_id: String, name: String) {
     spawn_local(async move {
         let args = PlanIdArgs {
             plan_id: plan_id.clone(),
-            plan_id_camel: plan_id.clone(),
         };
         match invoke::<IgnoredAny>("archive_planned_payment", &args).await {
             Ok(_) => {

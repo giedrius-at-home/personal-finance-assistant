@@ -61,3 +61,4 @@ pub mod bills;
 pub mod budget;
 pub mod categories;
 pub mod groups;
+pub mod plans;

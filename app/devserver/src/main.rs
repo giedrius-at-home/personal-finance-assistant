@@ -20,6 +20,16 @@ struct PlanArgs {
 }
 
 #[derive(Deserialize)]
+struct PlannedPaymentArgs {
+    request: finance_types::gateway::PlannedPaymentRequest,
+}
+
+#[derive(Deserialize)]
+struct ArchivePlanArgs {
+    plan_id: String,
+}
+
+#[derive(Deserialize)]
 struct SearchArgs {
     query: TransactionSearchQuery,
 }
@@ -140,6 +150,14 @@ fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
         "apply_category_consolidation" => {
             let a: ConsolidateArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
             ok(service.apply_category_consolidation(&a.source, &a.target, a.token.as_deref()))
+        }
+        "create_planned_payment" => {
+            let a: PlannedPaymentArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
+            ok(service.create_planned_payment(&a.request))
+        }
+        "archive_planned_payment" => {
+            let a: ArchivePlanArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
+            ok(service.archive_planned_payment(&a.plan_id))
         }
         "search_transactions" => {
             let a: SearchArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;

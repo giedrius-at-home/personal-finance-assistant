@@ -21,6 +21,8 @@ const COMMANDS: &[&str] = &[
     "save_subscription_categories",
     "link_bill_payment",
     "decline_bill_match",
+    "create_planned_payment",
+    "archive_planned_payment",
 ];
 
 fn main() {
