@@ -71,6 +71,12 @@ pub struct Dashboard {
     pub bulk_payments: Vec<catalog::BulkPaymentSummary>,
     pub historical_uncategorized_count: u64,
     pub custom_spending_groups: Vec<String>,
+    pub time_trends: trends::TimeTrends,
+    /// Trends without bills and other fixed spending.
+    pub variable_time_trends: trends::TimeTrends,
+    pub spending_limits: Vec<crate::gateway::SpendingLimit>,
+    pub spending_nudges: Vec<trends::SpendingNudge>,
+    pub spending_forecasts: Vec<trends::SpendingForecast>,
 }
 
 /// The category review inbox (Transactions screen).

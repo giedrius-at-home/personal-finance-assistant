@@ -9,7 +9,9 @@ use jiff::Zoned;
 
 use crate::reporting::{self, ReportInputs};
 use crate::subscriptions::{BillWindow, budget_calendar_offset, subscription_report};
-use crate::{Ctx, Result, Snapshot, cash, catalog, groups, plans, review};
+use crate::{
+    Ctx, Result, Snapshot, cash, catalog, forecast, groups, limits, plans, review, trends,
+};
 
 /// The transactions spending reports count: bulk settlements left out and
 /// reimbursed amounts netted against what they repay.
@@ -18,7 +20,8 @@ pub fn spending_transactions(
     payments: &[finance_types::report::plans::PlannedPaymentView],
 ) -> Vec<crate::model::Tx> {
     let without = groups::without_settlements(&ctx.snap.transactions, &ctx.snap.details);
-    plans::net_spending_transactions(&without, payments)
+    let netted = plans::net_spending_transactions(&without, payments);
+    crate::personal::apply_personal_spending(netted, &ctx.snap.details)
 }
 
 pub fn dashboard(store: &Store, snap: &Snapshot, now: &Zoned) -> Result<Dashboard> {
@@ -43,6 +46,26 @@ pub fn dashboard(store: &Store, snap: &Snapshot, now: &Zoned) -> Result<Dashboar
     );
     let payments = plans::planned_payment_views(&ctx);
     let spending = spending_transactions(&ctx, &payments);
+
+    let fixed_categories =
+        groups::fixed_category_names(&snap.bills, &snap.group_mappings, &snap.subscription_rules);
+    let fixed_ids = groups::non_variable_ids(txs, &fixed_categories);
+    let time_trends =
+        trends::time_trends(&spending, &snap.group_mappings, &ctx.now, &HashSet::new());
+    let current_month = ctx.current_month();
+    let mut forecast_excluded = fixed_ids.clone();
+    forecast_excluded.extend(plans::paid_outflow_ids(&payments));
+    let spending_forecasts = forecast::spending_forecasts(
+        &spending,
+        &snap.group_mappings,
+        &ctx.now,
+        &forecast_excluded,
+        |t| ctx.resolver.month_of(t),
+        forecast::ForecastPeriod {
+            current_month,
+            period_start: ctx.resolver.period_start_date(current_month),
+        },
+    );
 
     let offset = budget_calendar_offset(&ctx);
     let current_subscriptions = subscription_report(&ctx, BillWindow::CalendarMonth(offset))?;
@@ -74,6 +97,16 @@ pub fn dashboard(store: &Store, snap: &Snapshot, now: &Zoned) -> Result<Dashboar
         bulk_payments: catalog::bulk_payment_summaries(txs, &snap.details),
         historical_uncategorized_count: catalog::historical_uncategorized_count(txs, &daily_ids),
         custom_spending_groups: snap.custom_groups.clone(),
+        variable_time_trends: trends::time_trends(
+            &spending,
+            &snap.group_mappings,
+            &ctx.now,
+            &fixed_ids,
+        ),
+        spending_limits: snap.spending_limits.clone(),
+        spending_nudges: limits::spending_nudges(&snap.spending_limits, &time_trends),
+        spending_forecasts,
+        time_trends,
         last_firefly_refresh: snap.sync_health.0.map(|t| t.to_string()),
         firefly_refresh_failed: snap.sync_health.2,
         subscriptions: current_subscriptions,
