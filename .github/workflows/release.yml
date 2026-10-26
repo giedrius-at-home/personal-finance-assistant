@@ -1,0 +1,70 @@
+name: Release
+
+# Pushing a tag vX.Y.Z builds, signs and publishes Finance.app. The installed
+# app finds the release through latest.json and verifies the update signature.
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Toolchain from rust-toolchain.toml
+        run: rustup show
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        with:
+          tool: trunk@0.22.1,cargo-binstall
+      - name: Install the Tauri CLI
+        run: cargo binstall -y --locked tauri-cli@2.12.4
+
+      - name: Tag must match the app version
+        run: |
+          version=$(python3 -c 'import json; print(json.load(open("app/src-tauri/tauri.conf.json"))["version"])')
+          test "v$version" = "$TAG" || { echo "tag $TAG does not match app version $version"; exit 1; }
+
+      - name: Test
+        run: cargo test --locked -p finance-storage
+
+      - name: Build and sign
+        working-directory: app/src-tauri
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: cargo tauri build --bundles app
+
+      - name: Publish release
+        run: |
+          bundle=target/release/bundle
+          gh release create "$TAG" --title "Finance $TAG" --generate-notes \
+            "$bundle/macos/Finance.app.tar.gz" \
+            "$bundle/macos/Finance.app.tar.gz.sig"
+
+      - name: Publish latest.json
+        run: |
+          # API asset URLs, because the repository is private: the app sends
+          # its token and Accept: application/octet-stream to download them.
+          url=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" \
+            --jq '.assets[] | select(.name == "Finance.app.tar.gz") | .url')
+          notes=$(gh release view "$TAG" --json body --jq .body)
+          SIG="$(cat target/release/bundle/macos/Finance.app.tar.gz.sig)" URL="$url" NOTES="$notes" \
+          python3 - <<'PY'
+          import datetime, json, os
+          entry = {"signature": os.environ["SIG"], "url": os.environ["URL"]}
+          manifest = {
+              "version": os.environ["TAG"].removeprefix("v"),
+              "notes": os.environ["NOTES"],
+              "pub_date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "platforms": {"darwin-aarch64": entry, "darwin-aarch64-app": entry},
+          }
+          json.dump(manifest, open("latest.json", "w"), indent=2)
+          PY
+          gh release upload "$TAG" latest.json

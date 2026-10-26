@@ -222,3 +222,26 @@ pub struct AccountCheck {
     pub postings: u64,
     pub sums: Vec<Money>,
 }
+
+/// A newer release the app can install.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AvailableUpdate {
+    pub version: String,
+    pub notes: Option<String>,
+    pub date: Option<String>,
+}
+
+/// What the app knows about updates right now.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UpdateStatus {
+    pub current_version: String,
+    /// A release token is stored in the Keychain.
+    pub token_set: bool,
+    pub checking: bool,
+    pub installing: bool,
+    /// Local time of the last finished check, `YYYY-MM-DD HH:MM`.
+    pub last_checked: Option<String>,
+    pub available: Option<AvailableUpdate>,
+    /// Short, data-free description of the last failure.
+    pub error: Option<String>,
+}

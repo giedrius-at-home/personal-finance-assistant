@@ -17,9 +17,14 @@ export async function dev_invoke(cmd, args) {
   if (!r.ok) throw body;
   return body;
 }
+export function listen(event, callback) {
+  if (window.__TAURI__ && window.__TAURI__.event) window.__TAURI__.event.listen(event, () => callback());
+}
 ")]
 extern "C" {
     fn in_tauri() -> bool;
+    /// Run `callback` whenever the backend emits `event` (no-op in a browser).
+    pub fn listen(event: &str, callback: &Closure<dyn FnMut()>);
     #[wasm_bindgen(catch)]
     async fn tauri_invoke(cmd: &str, args: JsValue) -> Result<JsValue, JsValue>;
     /// Development only: the loopback `finance-devserver`, used when the UI is

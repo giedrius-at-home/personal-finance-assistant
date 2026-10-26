@@ -6,6 +6,11 @@ const COMMANDS: &[&str] = &[
     "transactions",
     "category_totals",
     "status",
+    "update_status",
+    "check_for_updates",
+    "install_update",
+    "set_release_token",
+    "forget_release_token",
 ];
 
 fn main() {

@@ -6,7 +6,7 @@ mod icons;
 mod pages;
 mod widgets;
 
-use finance_types::{Facets, TxKind, TxQuery};
+use finance_types::{Facets, TxKind, TxQuery, UpdateStatus};
 use leptos::ev;
 use leptos::prelude::*;
 
@@ -132,6 +132,9 @@ pub struct AppState {
     pub facets: Loaded<Facets>,
     /// Bumped to ask the search box to take focus.
     pub focus_search: RwSignal<u32>,
+    pub updates: Loaded<UpdateStatus>,
+    /// Bumped to reload `updates`.
+    pub updates_changed: RwSignal<u32>,
 }
 
 impl AppState {
@@ -148,13 +151,25 @@ pub fn state() -> AppState {
 
 #[component]
 fn App() -> impl IntoView {
+    let updates_changed = RwSignal::new(0_u32);
     let app = AppState {
         page: RwSignal::new(Page::Overview),
         filters: RwSignal::new(Filters::default()),
         facets: load("facets", || NoArgs {}),
         focus_search: RwSignal::new(0),
+        updates: load("update_status", move || {
+            updates_changed.track();
+            NoArgs {}
+        }),
+        updates_changed,
     };
     provide_context(app);
+    // The backend announces every change in update state (check, install…).
+    let on_change = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
+        updates_changed.update(|n| *n += 1);
+    });
+    api::listen("update-status", &on_change);
+    on_change.forget();
 
     // ⌘1–5 switch screens, ⌘F searches transactions.
     let handle = window_event_listener(ev::keydown, move |e| {
@@ -227,6 +242,25 @@ fn Sidebar() -> impl IntoView {
                     })
                     .collect_view()}
             </ul>
+            {move || {
+                app.updates
+                    .data
+                    .get()
+                    .and_then(Result::ok)
+                    .and_then(|u| u.available)
+                    .map(|u| {
+                        view! {
+                            <button
+                                class="update-pill"
+                                title=format!("Version {} is ready to install", u.version)
+                                on:click=move |_| app.page.set(Page::Data)
+                            >
+                                <span class="dot accent"></span>
+                                <span class="nav-label">{format!("Update to {}", u.version)}</span>
+                            </button>
+                        }
+                    })
+            }}
             <div class="sidebar-foot">
                 {move || {
                     status

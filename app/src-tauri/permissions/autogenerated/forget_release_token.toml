@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-forget-release-token"
+description = "Enables the forget_release_token command without any pre-configured scope."
+commands.allow = ["forget_release_token"]
+
+[[permission]]
+identifier = "deny-forget-release-token"
+description = "Denies the forget_release_token command without any pre-configured scope."
+commands.deny = ["forget_release_token"]

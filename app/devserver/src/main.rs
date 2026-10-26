@@ -129,6 +129,24 @@ fn run(store: &Store, cmd: &str, args: Value) -> Result<Value, String> {
             let a: MonthArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
             ok(store.category_totals(&a.month))
         }
+        // Updates only exist in the app; show a plausible state for layout checks.
+        "update_status" => {
+            let available = std::env::var("DEV_FAKE_UPDATE").ok().map(|version| {
+                finance_types::AvailableUpdate {
+                    version,
+                    notes: Some("Faster search and a calmer chart.".into()),
+                    date: Some("2026-10-26".into()),
+                }
+            });
+            serde_json::to_value(finance_types::UpdateStatus {
+                current_version: "0.1.0".into(),
+                token_set: available.is_some(),
+                last_checked: Some("2026-10-26 21:00".into()),
+                available,
+                ..Default::default()
+            })
+            .map_err(|e| e.to_string())
+        }
         _ => Err(format!("unknown command {cmd}")),
     }
 }
