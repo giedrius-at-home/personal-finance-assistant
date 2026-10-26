@@ -4,7 +4,6 @@
 use finance_types::report::Currency;
 use finance_types::report::trends::CurrencyTrends;
 use leptos::prelude::*;
-use rust_decimal::Decimal;
 
 use crate::ds::charts::ProgressBar;
 use crate::ds::{

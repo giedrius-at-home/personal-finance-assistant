@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-decline-bill-match"
+description = "Enables the decline_bill_match command without any pre-configured scope."
+commands.allow = ["decline_bill_match"]
+
+[[permission]]
+identifier = "deny-decline-bill-match"
+description = "Denies the decline_bill_match command without any pre-configured scope."
+commands.deny = ["decline_bill_match"]

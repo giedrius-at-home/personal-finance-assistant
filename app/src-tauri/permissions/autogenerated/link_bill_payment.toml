@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-link-bill-payment"
+description = "Enables the link_bill_payment command without any pre-configured scope."
+commands.allow = ["link_bill_payment"]
+
+[[permission]]
+identifier = "deny-link-bill-payment"
+description = "Denies the link_bill_payment command without any pre-configured scope."
+commands.deny = ["link_bill_payment"]

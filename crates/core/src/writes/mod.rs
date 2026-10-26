@@ -57,4 +57,5 @@ pub fn invalid(message: impl Into<String>) -> Error {
     Error::Rejected(message.into())
 }
 
+pub mod bills;
 pub mod budget;

@@ -166,6 +166,68 @@ pub struct SubscriptionCategoryRule {
     pub updated_at: String,
 }
 
+/// How often a bill (recurring plan) repeats, with Firefly III's names.
+pub const BILL_FREQUENCIES: [&str; 5] = ["weekly", "monthly", "quarterly", "half-year", "yearly"];
+
+/// A new recurring plan (Python `/subscriptions/create`): the bill plus the
+/// one category whose payments mark it paid.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BillCreateRequest {
+    pub name: String,
+    pub match_category: String,
+    pub amount_min: Decimal,
+    pub amount_max: Decimal,
+    pub currency_code: String,
+    /// First pay date, `YYYY-MM-DD`.
+    pub date: String,
+    /// One of [`BILL_FREQUENCIES`].
+    pub repeat_freq: String,
+}
+
+/// New settings for a bill (Python `/subscriptions/edit`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BillEditRequest {
+    pub bill_id: String,
+    pub name: String,
+    pub amount_min: Decimal,
+    pub amount_max: Decimal,
+    pub repeat_freq: String,
+    /// A new schedule start; `None` keeps the current schedule.
+    #[serde(default)]
+    pub date: Option<String>,
+}
+
+/// One bill (Python `/subscriptions/archive`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BillRef {
+    pub bill_id: String,
+}
+
+/// The categories whose payments count as a bill's (Python
+/// `/subscriptions/categories`); `expected_revision` is the rule's revision
+/// the owner edited (0 when the bill had none).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubscriptionCategoriesRequest {
+    pub bill_id: String,
+    pub categories: Vec<String>,
+    pub expected_revision: u32,
+}
+
+/// A suggested bill payment the owner confirms or declines (Python
+/// `/subscriptions/link` and `/subscriptions/decline`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BillMatchRequest {
+    pub bill_id: String,
+    /// The ledger transaction id, as in `BillLinkCandidate::transaction_id`.
+    pub transaction_id: String,
+}
+
+/// The id of a bill just created.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BillSaved {
+    pub bill_id: String,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OwnerTag {
     pub label: String,

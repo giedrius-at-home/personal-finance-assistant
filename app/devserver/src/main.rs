@@ -147,6 +147,12 @@ fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
             })
             .map_err(|e| e.to_string())
         }
+        "create_bill" => ok(service.create_bill(request(args)?)),
+        "edit_bill" => ok(service.edit_bill(request(args)?)),
+        "archive_bill" => ok(service.archive_bill(request(args)?)),
+        "save_subscription_categories" => ok(service.save_subscription_categories(request(args)?)),
+        "link_bill_payment" => ok(service.link_bill_payment(request(args)?)),
+        "decline_bill_match" => ok(service.decline_bill_match(request(args)?)),
         _ => Err(format!("unknown command {cmd}")),
     }
 }
@@ -168,4 +174,15 @@ fn respond(stream: &mut TcpStream, status: &str, kind: &str, body: &[u8]) -> Res
         body.len()
     )?;
     stream.write_all(body).context("write body")
+}
+
+/// The `request` argument of a write command.
+fn request<T: serde::de::DeserializeOwned>(args: Value) -> Result<T, String> {
+    #[derive(Deserialize)]
+    struct Args<T> {
+        request: T,
+    }
+    serde_json::from_value::<Args<T>>(args)
+        .map(|a| a.request)
+        .map_err(|e| e.to_string())
 }
