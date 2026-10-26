@@ -2,6 +2,9 @@
 //! look follow the owner's web finance UI (personal-site `integrated-finance.tsx`).
 
 mod api;
+// The whole design system is ported so screens can follow the site; not
+// every screen uses every part.
+#[allow(dead_code)]
 mod ds;
 mod format;
 mod pages;
@@ -169,10 +172,10 @@ fn App() -> impl IntoView {
             }
         }
     });
-    if api::in_app() {
-        if let Some(root) = document().document_element() {
-            let _ = root.class_list().add_1("glass");
-        }
+    if api::in_app()
+        && let Some(root) = document().document_element()
+    {
+        let _ = root.class_list().add_1("glass");
     }
 
     // ⌘1–5 switch sections, ⌘R refreshes.
