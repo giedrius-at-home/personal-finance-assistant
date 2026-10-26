@@ -7,8 +7,6 @@ const COMMANDS: &[&str] = &[
     "save_budget_plan",
     "save_spending_group",
     "create_spending_group",
-    "preview_category_consolidation",
-    "apply_category_consolidation",
     "status",
     "update_status",
     "check_for_updates",

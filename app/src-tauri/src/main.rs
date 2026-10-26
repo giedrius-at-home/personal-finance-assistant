@@ -81,31 +81,6 @@ fn create_spending_group(service: State<'_, Service>, group: String) -> Result<S
 }
 
 #[tauri::command(async)]
-fn preview_category_consolidation(
-    service: State<'_, Service>,
-    source: String,
-    target: String,
-) -> Result<finance_types::report::catalog::ConsolidationPreview, String> {
-    traced(
-        "preview_category_consolidation",
-        service.preview_category_consolidation(&source, &target),
-    )
-}
-
-#[tauri::command(async)]
-fn apply_category_consolidation(
-    service: State<'_, Service>,
-    source: String,
-    target: String,
-    token: Option<String>,
-) -> Result<finance_types::report::catalog::ConsolidationResult, String> {
-    traced(
-        "apply_category_consolidation",
-        service.apply_category_consolidation(&source, &target, token.as_deref()),
-    )
-}
-
-#[tauri::command(async)]
 fn create_planned_payment(
     service: State<'_, Service>,
     request: finance_types::gateway::PlannedPaymentRequest,
@@ -441,8 +416,6 @@ fn main() {
             save_budget_plan,
             save_spending_group,
             create_spending_group,
-            preview_category_consolidation,
-            apply_category_consolidation,
             status,
             update_status,
             check_for_updates,

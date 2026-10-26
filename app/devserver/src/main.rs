@@ -163,14 +163,6 @@ fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
             let a: NewGroupArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
             ok(service.create_spending_group(&a.group))
         }
-        "preview_category_consolidation" => {
-            let a: ConsolidateArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
-            ok(service.preview_category_consolidation(&a.source, &a.target))
-        }
-        "apply_category_consolidation" => {
-            let a: ConsolidateArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
-            ok(service.apply_category_consolidation(&a.source, &a.target, a.token.as_deref()))
-        }
         "create_planned_payment" => {
             let a: PlannedPaymentArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
             ok(service.create_planned_payment(&a.request))
@@ -291,14 +283,6 @@ struct GroupArgs {
 #[derive(Deserialize)]
 struct NewGroupArgs {
     group: String,
-}
-
-#[derive(Deserialize)]
-struct ConsolidateArgs {
-    source: String,
-    target: String,
-    #[serde(default)]
-    token: Option<String>,
 }
 
 /// The `request` argument of a write command.

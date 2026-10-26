@@ -336,26 +336,6 @@ impl Service {
         self.write(|w, _| crate::writes::groups::create_spending_group(w, group))
     }
 
-    /// Category library: what consolidating `source` into `target` would change.
-    pub fn preview_category_consolidation(
-        &self,
-        source: &str,
-        target: &str,
-    ) -> Result<finance_types::report::catalog::ConsolidationPreview, String> {
-        self.read(|store, _| {
-            crate::writes::categories::preview_consolidation(store.connection(), source, target)
-        })
-    }
-
-    /// Category library: move `source`'s transactions to `target`.
-    pub fn apply_category_consolidation(
-        &self,
-        source: &str,
-        target: &str,
-        token: Option<&str>,
-    ) -> Result<finance_types::report::catalog::ConsolidationResult, String> {
-        self.write(|w, _| crate::writes::categories::apply_consolidation(w, source, target, token))
-    }
     pub fn commit_csv_import(
         &self,
         commit: finance_types::manage::CsvCommit,

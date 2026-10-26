@@ -63,20 +63,6 @@ pub fn money_dp(amount: Decimal, currency: &str, decimals: u32) -> String {
     }
 }
 
-pub fn money(amount: Decimal, currency: &str) -> String {
-    money_dp(amount, currency, 2)
-}
-
-/// Like [`money`] but always shows a sign (`+€5.00`).
-pub fn money_signed(amount: Decimal, currency: &str) -> String {
-    let text = money(amount, currency);
-    if amount.is_sign_positive() && !amount.is_zero() {
-        format!("+{text}")
-    } else {
-        text
-    }
-}
-
 fn parts(date: &str) -> Option<(&str, usize, &str)> {
     let year = date.get(..4)?;
     let month: usize = date.get(5..7)?.parse().ok()?;
@@ -89,14 +75,6 @@ pub fn date(date: &str) -> String {
     match parts(date) {
         Some((y, m, d)) => format!("{} {} {y}", d.trim_start_matches('0'), MONTHS[m - 1]),
         None => date.to_owned(),
-    }
-}
-
-/// `2026-10` → `Oct 2026`.
-pub fn month(month: &str) -> String {
-    match parts(month) {
-        Some((y, m, _)) => format!("{} {y}", MONTHS[m - 1]),
-        None => month.to_owned(),
     }
 }
 
@@ -147,17 +125,6 @@ pub fn month_end(month: &str) -> String {
         _ => 31,
     };
     format!("{month}-{days:02}")
-}
-
-/// Today as `YYYY-MM-DD` in local time.
-pub fn today() -> String {
-    let now = js_sys::Date::new_0();
-    format!(
-        "{:04}-{:02}-{:02}",
-        now.get_full_year(),
-        now.get_month() + 1,
-        now.get_date()
-    )
 }
 
 /// `2026-10-26T21:07:00+01:00` or `2026-10-26 21:07` → `26 Oct, 21:07`.
