@@ -71,6 +71,8 @@ pub struct Snapshot {
     pub daily_review_baseline: HashSet<String>,
     /// Last successful bank refresh, last attempt, and whether it failed.
     pub sync_health: (Option<Timestamp>, Option<Timestamp>, bool),
+    /// The latest non-superseded category proposal of each transaction.
+    pub category_proposals: Vec<finance_types::report::review::CategoryProposal>,
 }
 
 impl Snapshot {
@@ -88,11 +90,21 @@ impl Snapshot {
         let transactions = crate::transfers::resolve_own_transfers(transactions, &accounts);
         let details: HashMap<String, SavedDetails> = rows(
             conn,
-            "SELECT source_key, payload_json FROM transaction_details",
-            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+            "SELECT source_key, revision, payload_json FROM transaction_details",
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, u32>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            },
         )?
         .into_iter()
-        .map(|(k, v)| Ok((normalize_key(&k), parse::<SavedDetails>(&v)?)))
+        .map(|(k, revision, v)| {
+            // The payload holds only the values; the revision is its own column.
+            let values = parse(&v)?;
+            Ok((normalize_key(&k), SavedDetails { revision, values }))
+        })
         .collect::<Result<_>>()?;
         let raw_transactions = transactions.clone();
         let transactions = crate::personal::apply_personal_spending(transactions, &details);
@@ -206,6 +218,7 @@ impl Snapshot {
                     )
                 })
                 .unwrap_or((None, None, false)),
+            category_proposals: crate::review::latest_proposals(conn)?,
             settings,
             zone,
             accounts,
