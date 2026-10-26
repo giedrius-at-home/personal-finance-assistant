@@ -1,8 +1,0 @@
-blank_issues_enabled: false
-contact_links:
-  - name: Project roadmap
-    url: https://github.com/users/giedrius-at-home/projects/4
-    about: Review planned work, priorities, and current status before filing.
-  - name: Security reporting
-    url: https://github.com/giedrius-at-home/personal-finance-assistant/security/policy
-    about: Read the private-reporting and sensitive-data rules first.

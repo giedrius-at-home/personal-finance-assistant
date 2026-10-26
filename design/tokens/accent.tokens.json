@@ -1,0 +1,37 @@
+{
+  "accent": {
+    "$type": "color",
+    "finance": {
+      "light": {
+        "accent":        { "$value": "{primitive.blue.650}" },
+        "accent-strong": { "$value": "{primitive.blue.400}" },
+        "accent-soft":   { "$value": "{primitive.blue.100}" },
+        "fg-on-accent":  { "$value": "{primitive.neutral.900}" },
+        "ring":          { "$value": "{primitive.blue.650}" }
+      },
+      "dark": {
+        "accent":        { "$value": "{primitive.blue.300}" },
+        "accent-strong": { "$value": "{primitive.blue.300}" },
+        "accent-soft":   { "$value": "{primitive.blue.900}" },
+        "fg-on-accent":  { "$value": "{primitive.neutral.925}" },
+        "ring":          { "$value": "{primitive.blue.300}" }
+      }
+    },
+    "personal": {
+      "light": {
+        "accent":        { "$value": "{primitive.pink.700}" },
+        "accent-strong": { "$value": "{primitive.pink.500}" },
+        "accent-soft":   { "$value": "{primitive.pink.100}" },
+        "fg-on-accent":  { "$value": "{primitive.neutral.900}" },
+        "ring":          { "$value": "{primitive.pink.700}" }
+      },
+      "dark": {
+        "accent":        { "$value": "{primitive.pink.300}" },
+        "accent-strong": { "$value": "{primitive.pink.300}" },
+        "accent-soft":   { "$value": "{primitive.pink.900}" },
+        "fg-on-accent":  { "$value": "{primitive.neutral.925}" },
+        "ring":          { "$value": "{primitive.pink.300}" }
+      }
+    }
+  }
+}

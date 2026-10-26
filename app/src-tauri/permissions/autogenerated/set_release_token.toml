@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-release-token"
+description = "Enables the set_release_token command without any pre-configured scope."
+commands.allow = ["set_release_token"]
+
+[[permission]]
+identifier = "deny-set-release-token"
+description = "Denies the set_release_token command without any pre-configured scope."
+commands.deny = ["set_release_token"]

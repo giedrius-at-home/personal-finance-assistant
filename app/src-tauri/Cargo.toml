@@ -1,0 +1,32 @@
+[package]
+name = "finance-app"
+description = "Finance: the native macOS app (Tauri shell around the Leptos UI)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "finance"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2.7.4", features = [] }
+
+[dependencies]
+finance-storage.workspace = true
+finance-types.workspace = true
+serde.workspace = true
+tauri = { version = "2.12.5", features = ["macos-private-api"] }
+window-vibrancy = "0.8.1"
+finance-secrets.workspace = true
+serde_json.workspace = true
+jiff = "0.2.38"
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls"] }
+tauri-plugin-window-state = "2.5.0"
+tauri-plugin-updater = { version = "2.14.0", default-features = false, features = ["rustls-tls", "zip"] }
+tokio = { version = "1.54.1", features = ["time"] }
+
+[lints]
+workspace = true
