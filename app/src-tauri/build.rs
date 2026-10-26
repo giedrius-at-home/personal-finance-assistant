@@ -11,6 +11,8 @@ const COMMANDS: &[&str] = &[
     "install_update",
     "set_release_token",
     "forget_release_token",
+    "create_planned_payment",
+    "archive_planned_payment",
 ];
 
 fn main() {

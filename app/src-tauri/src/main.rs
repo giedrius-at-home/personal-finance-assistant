@@ -57,6 +57,26 @@ fn save_budget_plan(service: State<'_, Service>, plan: BudgetPlan) -> Result<Bud
 }
 
 #[tauri::command(async)]
+fn create_planned_payment(
+    service: State<'_, Service>,
+    request: finance_types::gateway::PlannedPaymentRequest,
+) -> Result<finance_types::gateway::PlannedPayment, String> {
+    traced(
+        "create_planned_payment",
+        service.create_planned_payment(&request),
+    )
+}
+
+/// Snake-case argument keys (`plan_id`), as the UI and devserver send them.
+#[tauri::command(async, rename_all = "snake_case")]
+fn archive_planned_payment(service: State<'_, Service>, plan_id: String) -> Result<(), String> {
+    traced(
+        "archive_planned_payment",
+        service.archive_planned_payment(&plan_id),
+    )
+}
+
+#[tauri::command(async)]
 fn status(service: State<'_, Service>) -> Result<DataStatus, String> {
     traced("status", service.status())
 }
@@ -144,6 +164,8 @@ fn main() {
             install_update,
             set_release_token,
             forget_release_token,
+            create_planned_payment,
+            archive_planned_payment,
         ])
         .setup(|app| {
             update::schedule(app.handle().clone());

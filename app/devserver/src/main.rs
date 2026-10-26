@@ -20,6 +20,16 @@ struct PlanArgs {
 }
 
 #[derive(Deserialize)]
+struct PlannedPaymentArgs {
+    request: finance_types::gateway::PlannedPaymentRequest,
+}
+
+#[derive(Deserialize)]
+struct ArchivePlanArgs {
+    plan_id: String,
+}
+
+#[derive(Deserialize)]
 struct SearchArgs {
     query: TransactionSearchQuery,
 }
@@ -124,6 +134,14 @@ fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
         "save_budget_plan" => {
             let a: PlanArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
             ok(service.save_budget_plan(a.plan))
+        }
+        "create_planned_payment" => {
+            let a: PlannedPaymentArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
+            ok(service.create_planned_payment(&a.request))
+        }
+        "archive_planned_payment" => {
+            let a: ArchivePlanArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
+            ok(service.archive_planned_payment(&a.plan_id))
         }
         "search_transactions" => {
             let a: SearchArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;

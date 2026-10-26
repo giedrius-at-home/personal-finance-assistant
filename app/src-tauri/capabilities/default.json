@@ -20,6 +20,8 @@
     "allow-install-update",
     "allow-set-release-token",
     "allow-forget-release-token",
+    "allow-create-planned-payment",
+    "allow-archive-planned-payment",
     "core:event:default"
   ]
 }

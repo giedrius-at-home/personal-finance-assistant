@@ -300,3 +300,28 @@ pub struct SavingsGoal {
     pub started_on: String,
     pub target_date: String,
 }
+
+/// A new one-off planned payment or expected income, as the site's
+/// `/api/finance/plans` "create" payload carried it (Python
+/// `/planned-payments/create`). `amount` stays text so its format can be
+/// checked exactly; empty optional strings count as absent.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlannedPaymentRequest {
+    pub name: String,
+    pub match_category: String,
+    #[serde(default)]
+    pub direction: Direction,
+    /// A positive decimal like `12.50`.
+    pub amount: String,
+    /// ISO currency code (`EUR`).
+    pub currency: String,
+    /// `YYYY-MM-DD`.
+    pub due_on: String,
+    pub account_id: String,
+    /// The purchase (`firefly:<id>`) this income reimburses.
+    #[serde(default)]
+    pub reimbursement_for: Option<String>,
+    /// Text the matching bank description must contain.
+    #[serde(default)]
+    pub match_description: Option<String>,
+}

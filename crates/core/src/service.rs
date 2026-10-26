@@ -167,6 +167,17 @@ impl Service {
         self.write(|w, snap| crate::writes::budget::save_budget_plan(w, snap, plan))
     }
 
+    pub fn create_planned_payment(
+        &self,
+        request: &finance_types::gateway::PlannedPaymentRequest,
+    ) -> Result<finance_types::gateway::PlannedPayment, String> {
+        self.write(|w, snap| crate::writes::plans::create_planned_payment(w, snap, request))
+    }
+
+    pub fn archive_planned_payment(&self, plan_id: &str) -> Result<(), String> {
+        self.write(|w, _| crate::writes::plans::archive_planned_payment(w, plan_id))
+    }
+
     pub fn status(&self) -> Result<DataStatus, String> {
         self.read(|store, _| Ok(store.status()?))
     }
