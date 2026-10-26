@@ -12,17 +12,7 @@ use crate::subscriptions::{BillWindow, budget_calendar_offset, subscription_repo
 use crate::{
     Ctx, Result, Snapshot, cash, catalog, forecast, groups, limits, plans, review, trends,
 };
-
-/// The transactions spending reports count: bulk settlements left out and
-/// reimbursed amounts netted against what they repay.
-pub fn spending_transactions(
-    ctx: &Ctx<'_>,
-    payments: &[finance_types::report::plans::PlannedPaymentView],
-) -> Vec<crate::model::Tx> {
-    let without = groups::without_settlements(&ctx.snap.transactions, &ctx.snap.details);
-    let netted = plans::net_spending_transactions(&without, payments);
-    crate::personal::apply_personal_spending(netted, &ctx.snap.details)
-}
+use crate::{allocation, budget};
 
 pub fn dashboard(store: &Store, snap: &Snapshot, now: &Zoned) -> Result<Dashboard> {
     let ctx = Ctx::new(snap, now);
@@ -45,7 +35,7 @@ pub fn dashboard(store: &Store, snap: &Snapshot, now: &Zoned) -> Result<Dashboar
         inputs.refreshed_at,
     );
     let payments = plans::planned_payment_views(&ctx);
-    let spending = spending_transactions(&ctx, &payments);
+    let spending = budget::spending_transactions(&ctx, &payments);
 
     let fixed_categories =
         groups::fixed_category_names(&snap.bills, &snap.group_mappings, &snap.subscription_rules);
@@ -80,6 +70,50 @@ pub fn dashboard(store: &Store, snap: &Snapshot, now: &Zoned) -> Result<Dashboar
         .and_then(|p| p.received_on.as_deref())
         .is_some_and(|received| received >= period_start.as_str());
 
+    let budgets = budget::monthly_budgets(
+        &ctx,
+        &spending,
+        &payments,
+        &current_subscriptions,
+        &next_subscriptions,
+    );
+    let spending_nudges = limits::spending_nudges(&snap.spending_limits, &time_trends);
+    let usage: Vec<allocation::GroupUsage> = spending_nudges
+        .iter()
+        .map(|n| allocation::GroupUsage {
+            currency: n.currency.clone(),
+            group: n.group.clone(),
+            spent: n.spent,
+            projected_month_end: n.projected_month_end,
+        })
+        .collect();
+    let goal_evaluations = if snap.settings.savings_goal_contributions_enabled {
+        weekly.goals.clone()
+    } else {
+        Vec::new()
+    };
+    let (savings_accounts, savings_goals) = allocation::savings_roles(&ctx);
+    let monthly_allocation = allocation::monthly_allocation(&allocation::AllocationInputs {
+        through_date: cash
+            .through_date
+            .parse()
+            .map_err(|_| crate::Error::Invalid("through date".into()))?,
+        accounts: &snap.accounts,
+        goals: &snap.goals,
+        goal_evaluations: &goal_evaluations,
+        payday_status: cash.payday_status.as_ref(),
+        current_subscriptions: &current_subscriptions,
+        next_subscriptions: &next_subscriptions,
+        planned_payments: &payments,
+        spending_limits: &snap.spending_limits,
+        spending_nudges: &usage,
+        budgets: Some(&budgets),
+        savings_account_ids: &savings_accounts,
+        current_month: Some(current_month),
+        savings_goal_ids: &savings_goals,
+        period_start: Some(ctx.resolver.period_start_date(current_month)),
+    });
+
     let daily_ids: HashSet<String> = snap
         .daily_review_entries
         .iter()
@@ -104,7 +138,9 @@ pub fn dashboard(store: &Store, snap: &Snapshot, now: &Zoned) -> Result<Dashboar
             &fixed_ids,
         ),
         spending_limits: snap.spending_limits.clone(),
-        spending_nudges: limits::spending_nudges(&snap.spending_limits, &time_trends),
+        spending_nudges,
+        monthly_budgets: budgets,
+        monthly_allocation: Some(monthly_allocation),
         spending_forecasts,
         time_trends,
         last_firefly_refresh: snap.sync_health.0.map(|t| t.to_string()),

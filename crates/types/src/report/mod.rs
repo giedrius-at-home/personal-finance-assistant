@@ -77,6 +77,8 @@ pub struct Dashboard {
     pub spending_limits: Vec<crate::gateway::SpendingLimit>,
     pub spending_nudges: Vec<trends::SpendingNudge>,
     pub spending_forecasts: Vec<trends::SpendingForecast>,
+    pub monthly_budgets: Vec<budget::MonthlyBudget>,
+    pub monthly_allocation: Option<allocation::MonthlyAllocation>,
 }
 
 /// The category review inbox (Transactions screen).
