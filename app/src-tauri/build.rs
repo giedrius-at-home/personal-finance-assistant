@@ -29,6 +29,13 @@ const COMMANDS: &[&str] = &[
     "save_pot",
     "save_account_role",
     "unclassified_accounts",
+    "manage_workspace",
+    "banks",
+    "preview_csv_import",
+    "commit_csv_import",
+    "preview_settings",
+    "apply_settings",
+    "rollback_settings",
 ];
 
 fn main() {

@@ -61,5 +61,7 @@ pub mod bills;
 pub mod budget;
 pub mod categories;
 pub mod closure;
+pub mod csv_import;
 pub mod groups;
 pub mod plans;
+pub mod settings;

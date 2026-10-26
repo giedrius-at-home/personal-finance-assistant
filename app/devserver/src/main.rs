@@ -225,8 +225,21 @@ fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
         "save_subscription_categories" => ok(service.save_subscription_categories(request(args)?)),
         "link_bill_payment" => ok(service.link_bill_payment(request(args)?)),
         "decline_bill_match" => ok(service.decline_bill_match(request(args)?)),
+        "manage_workspace" => ok(service.manage_workspace()),
+        "banks" => ok(service.banks()),
+        "preview_csv_import" => ok(service.preview_csv_import(arg(args, "upload")?)),
+        "commit_csv_import" => ok(service.commit_csv_import(arg(args, "commit")?)),
+        "preview_settings" => ok(service.preview_settings(arg(args, "form")?)),
+        "apply_settings" => ok(service.apply_settings(arg(args, "apply")?)),
+        "rollback_settings" => ok(service.rollback_settings(arg(args, "revision")?)),
         _ => Err(format!("unknown command {cmd}")),
     }
+}
+
+/// The command argument `name`, as Tauri would pass it.
+fn arg<T: serde::de::DeserializeOwned>(mut args: Value, name: &str) -> Result<T, String> {
+    serde_json::from_value(args.get_mut(name).map(Value::take).unwrap_or(Value::Null))
+        .map_err(|e| e.to_string())
 }
 
 fn mime(path: &str) -> &'static str {

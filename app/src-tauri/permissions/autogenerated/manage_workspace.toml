@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-manage-workspace"
+description = "Enables the manage_workspace command without any pre-configured scope."
+commands.allow = ["manage_workspace"]
+
+[[permission]]
+identifier = "deny-manage-workspace"
+description = "Denies the manage_workspace command without any pre-configured scope."
+commands.deny = ["manage_workspace"]

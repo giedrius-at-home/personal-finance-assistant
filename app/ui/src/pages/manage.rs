@@ -1,12 +1,18 @@
 //! The Manage section: banks, month closing, import, status and settings.
 
+mod banks;
+mod import;
+mod settings;
+mod status;
+mod ui;
+
 use leptos::prelude::*;
 
 use crate::ds::{Card, EmptyState};
 
 #[component]
 pub fn Banks() -> impl IntoView {
-    view! { <Card><EmptyState title="Banks" /></Card> }
+    banks::Banks()
 }
 
 #[component]
@@ -16,15 +22,15 @@ pub fn CloseMonth() -> impl IntoView {
 
 #[component]
 pub fn Import() -> impl IntoView {
-    view! { <Card><EmptyState title="Import" /></Card> }
+    import::Import()
 }
 
 #[component]
 pub fn Status() -> impl IntoView {
-    view! { <Card><EmptyState title="Status" /></Card> }
+    status::Status()
 }
 
 #[component]
 pub fn Settings() -> impl IntoView {
-    view! { <Card><EmptyState title="Settings" /></Card> }
+    settings::Settings()
 }

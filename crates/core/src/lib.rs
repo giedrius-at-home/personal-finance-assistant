@@ -15,6 +15,7 @@ pub mod goals;
 pub mod groups;
 pub mod limits;
 pub mod load;
+pub mod manage;
 pub mod model;
 pub mod outlook;
 pub mod period;
