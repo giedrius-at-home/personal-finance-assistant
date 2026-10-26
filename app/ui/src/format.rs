@@ -171,3 +171,27 @@ pub fn stamp(text: &str) -> String {
         None => day,
     }
 }
+
+/// `2026-10-01` → `Oct 26` (en-GB short month, two-digit year).
+pub fn month_short_year(date: &str) -> String {
+    match parts(date) {
+        Some((y, m, _)) => format!("{} {}", MONTHS[m - 1], &y[2..]),
+        None => date.to_owned(),
+    }
+}
+
+/// `2026-10-05` → `5 Oct` (en-GB day and short month).
+pub fn day_month(date: &str) -> String {
+    match parts(date) {
+        Some((_, m, d)) => format!("{} {}", d.trim_start_matches('0'), MONTHS[m - 1]),
+        None => date.to_owned(),
+    }
+}
+
+/// Days in the month of `YYYY-MM-…`.
+pub fn days_in_month(date: &str) -> u32 {
+    month_end(&date[..7.min(date.len())])
+        .get(8..10)
+        .and_then(|d| d.parse().ok())
+        .unwrap_or(30)
+}
