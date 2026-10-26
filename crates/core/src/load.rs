@@ -71,6 +71,8 @@ pub struct Snapshot {
     pub daily_review_baseline: HashSet<String>,
     /// Last successful bank refresh, last attempt, and whether it failed.
     pub sync_health: (Option<Timestamp>, Option<Timestamp>, bool),
+    /// When the ledger (accounts, transactions, bills) was last imported.
+    pub last_import: Option<Timestamp>,
 }
 
 impl Snapshot {
@@ -206,6 +208,15 @@ impl Snapshot {
                     )
                 })
                 .unwrap_or((None, None, false)),
+            last_import: conn
+                .query_row(
+                    "SELECT finished_at FROM import_runs ORDER BY id DESC LIMIT 1",
+                    [],
+                    |r| r.get::<_, String>(0),
+                )
+                .optional()?
+                .as_deref()
+                .and_then(parse_instant),
             settings,
             zone,
             accounts,
