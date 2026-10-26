@@ -203,7 +203,7 @@ pub fn CategoryTrends(
     #[prop(into)] through: String,
 ) -> impl IntoView {
     let mut sorted = trend.categories.clone();
-    sorted.sort_by(|a, b| b.total.cmp(&a.total));
+    sorted.sort_by_key(|row| std::cmp::Reverse(row.total));
     // Each category keeps its colour slot while selected, so toggling one never repaints the others.
     let slots = RwSignal::new(
         (0..COLORS.len())

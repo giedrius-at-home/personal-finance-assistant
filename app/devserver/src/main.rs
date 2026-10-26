@@ -125,6 +125,22 @@ fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
             let a: PlanArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
             ok(service.save_budget_plan(a.plan))
         }
+        "save_spending_group" => {
+            let a: GroupArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
+            ok(service.save_spending_group(&a.category, a.group.as_deref(), a.revision))
+        }
+        "create_spending_group" => {
+            let a: NewGroupArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
+            ok(service.create_spending_group(&a.group))
+        }
+        "preview_category_consolidation" => {
+            let a: ConsolidateArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
+            ok(service.preview_category_consolidation(&a.source, &a.target))
+        }
+        "apply_category_consolidation" => {
+            let a: ConsolidateArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
+            ok(service.apply_category_consolidation(&a.source, &a.target, a.token.as_deref()))
+        }
         "search_transactions" => {
             let a: SearchArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
             ok(service.search(&a.query))
@@ -168,4 +184,24 @@ fn respond(stream: &mut TcpStream, status: &str, kind: &str, body: &[u8]) -> Res
         body.len()
     )?;
     stream.write_all(body).context("write body")
+}
+
+#[derive(Deserialize)]
+struct GroupArgs {
+    category: String,
+    group: Option<String>,
+    revision: u32,
+}
+
+#[derive(Deserialize)]
+struct NewGroupArgs {
+    group: String,
+}
+
+#[derive(Deserialize)]
+struct ConsolidateArgs {
+    source: String,
+    target: String,
+    #[serde(default)]
+    token: Option<String>,
 }

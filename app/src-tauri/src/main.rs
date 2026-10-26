@@ -57,6 +57,52 @@ fn save_budget_plan(service: State<'_, Service>, plan: BudgetPlan) -> Result<Bud
 }
 
 #[tauri::command(async)]
+fn save_spending_group(
+    service: State<'_, Service>,
+    category: String,
+    group: Option<String>,
+    revision: u32,
+) -> Result<(), String> {
+    traced(
+        "save_spending_group",
+        service.save_spending_group(&category, group.as_deref(), revision),
+    )
+}
+
+#[tauri::command(async)]
+fn create_spending_group(service: State<'_, Service>, group: String) -> Result<String, String> {
+    traced(
+        "create_spending_group",
+        service.create_spending_group(&group),
+    )
+}
+
+#[tauri::command(async)]
+fn preview_category_consolidation(
+    service: State<'_, Service>,
+    source: String,
+    target: String,
+) -> Result<finance_types::report::catalog::ConsolidationPreview, String> {
+    traced(
+        "preview_category_consolidation",
+        service.preview_category_consolidation(&source, &target),
+    )
+}
+
+#[tauri::command(async)]
+fn apply_category_consolidation(
+    service: State<'_, Service>,
+    source: String,
+    target: String,
+    token: Option<String>,
+) -> Result<finance_types::report::catalog::ConsolidationResult, String> {
+    traced(
+        "apply_category_consolidation",
+        service.apply_category_consolidation(&source, &target, token.as_deref()),
+    )
+}
+
+#[tauri::command(async)]
 fn status(service: State<'_, Service>) -> Result<DataStatus, String> {
     traced("status", service.status())
 }
@@ -138,6 +184,10 @@ fn main() {
             search_transactions,
             refresh,
             save_budget_plan,
+            save_spending_group,
+            create_spending_group,
+            preview_category_consolidation,
+            apply_category_consolidation,
             status,
             update_status,
             check_for_updates,

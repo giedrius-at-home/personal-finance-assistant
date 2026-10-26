@@ -4,7 +4,6 @@
 use finance_types::report::Currency;
 use finance_types::report::trends::CurrencyTrends;
 use leptos::prelude::*;
-use rust_decimal::Decimal;
 
 use crate::ds::charts::ProgressBar;
 use crate::ds::{
@@ -44,7 +43,7 @@ pub fn PlanPatterns() -> impl IntoView {
                         on_change=Callback::new(move |v| variable.set(v))
                         disabled=Signal::derive(move || !has_variable)
                     />
-                    <label for="variable-patterns" class="cursor-pointer text-sm text-fg" on:click=move |_| variable.update(|v| *v = !*v)>
+                    <label for="variable-patterns" class="cursor-pointer text-sm text-fg">
                         "Variable patterns"
                     </label>
                 </div>
@@ -145,9 +144,7 @@ pub fn History() -> impl IntoView {
                                         <details class="group border-t border-line py-3.5">
                                             <summary class="flex cursor-pointer list-none items-center justify-between gap-3 text-sm [&::-webkit-details-marker]:hidden">
                                                 <span class="flex items-center gap-1.5">
-                                                    <span class="-rotate-90 text-fg-muted transition-transform group-open:rotate-0">
-                                                        <Lucide icon=Icon::ChevronDown size=14 />
-                                                    </span>
+                                                    <Lucide icon=Icon::ChevronDown size=14 class="-rotate-90 text-fg-muted transition-transform group-open:rotate-0" />
                                                     {group.group.unwrap_or_else(|| "Needs a group".into())}
                                                 </span>
                                                 <Money value=group.spending unit=unit.clone() neutral=true />

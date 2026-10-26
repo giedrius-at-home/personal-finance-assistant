@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-preview-category-consolidation"
+description = "Enables the preview_category_consolidation command without any pre-configured scope."
+commands.allow = ["preview_category_consolidation"]
+
+[[permission]]
+identifier = "deny-preview-category-consolidation"
+description = "Denies the preview_category_consolidation command without any pre-configured scope."
+commands.deny = ["preview_category_consolidation"]

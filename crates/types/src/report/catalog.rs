@@ -39,3 +39,25 @@ pub struct BulkPaymentSummary {
     pub component_count: u64,
     pub settlement_count: u64,
 }
+
+/// What a category consolidation would change (`/categories/consolidate/preview`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConsolidationPreview {
+    pub source: String,
+    pub target: String,
+    pub count: u64,
+    /// Fingerprint of the affected transactions; `apply` refuses a stale one.
+    pub token: String,
+}
+
+/// The outcome of applying a consolidation (`/categories/consolidate/apply`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConsolidationResult {
+    pub applied: u64,
+    pub total: u64,
+    pub complete: bool,
+    /// Balances and category lists already reflect the change.
+    pub refreshed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
