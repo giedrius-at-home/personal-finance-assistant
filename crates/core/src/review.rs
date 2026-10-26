@@ -379,7 +379,8 @@ pub fn search_transactions(
     ctx: &Ctx<'_>,
     query: &TransactionSearchQuery,
 ) -> Result<TransactionSearchResult> {
-    search(&ctx.snap.transactions, &ctx.snap.accounts, query)
+    // Python searched `list_transactions()`: bank categories, before shared-spending marks.
+    search(&ctx.snap.raw_transactions, &ctx.snap.accounts, query)
 }
 
 fn search(

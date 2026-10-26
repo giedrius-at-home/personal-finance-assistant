@@ -62,6 +62,10 @@ pub mod budget;
 pub mod categories;
 pub mod closure;
 pub mod csv_import;
+#[cfg(test)]
+mod fixture;
 pub mod groups;
 pub mod plans;
+pub mod review;
 pub mod settings;
+pub mod transactions;

@@ -201,6 +201,26 @@ fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
             ok(service.save_account_role(a.role))
         }
         "unclassified_accounts" => ok(service.unclassified_accounts()),
+        "personal_transactions" => {
+            ok(service.personal_transactions(&arg::<String>(args.clone(), "query")?))
+        }
+        "save_personal_choice" => ok(service.save_personal_choice(arg(args.clone(), "choice")?)),
+        "set_transaction_category" => {
+            ok(service.set_transaction_category(arg(args.clone(), "change")?))
+        }
+        "review_decisions" => ok(service.review_decisions(arg(args.clone(), "decisions")?)),
+        "review_batch" => ok(service.review_batch(arg(args.clone(), "items")?)),
+        "review_category_options" => {
+            ok(service.review_category_options(&arg::<String>(args.clone(), "proposal")?))
+        }
+        "save_review_details" => ok(service.save_review_details(arg(args.clone(), "details")?)),
+        "audit_daily_review" => {
+            ok(service.audit_daily_review(&arg::<String>(args.clone(), "transaction")?))
+        }
+        "preview_consolidation" => {
+            ok(service.preview_consolidation(&arg(args.clone(), "request")?))
+        }
+        "apply_consolidation" => ok(service.apply_consolidation(arg(args.clone(), "request")?)),
         // Updates only exist in the app; show a plausible state for layout checks.
         "update_status" => {
             let available = std::env::var("DEV_FAKE_UPDATE").ok().map(|version| {

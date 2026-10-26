@@ -36,6 +36,16 @@ const COMMANDS: &[&str] = &[
     "preview_settings",
     "apply_settings",
     "rollback_settings",
+    "personal_transactions",
+    "save_personal_choice",
+    "set_transaction_category",
+    "review_decisions",
+    "review_batch",
+    "review_category_options",
+    "save_review_details",
+    "audit_daily_review",
+    "preview_consolidation",
+    "apply_consolidation",
 ];
 
 fn main() {

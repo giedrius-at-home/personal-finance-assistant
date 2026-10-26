@@ -350,3 +350,179 @@ pub struct TransactionSearchResult {
     /// Accounts with transactions, for the account filter.
     pub accounts: Vec<SearchAccount>,
 }
+
+// ---------------------------------------------------------------------------
+// Transactions tab writes (Python `web.py` review and transaction routes).
+
+/// One payment in "Shared spending & money back" (`/transactions/personal`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PersonalTransaction {
+    /// The ledger id.
+    pub transaction_id: String,
+    pub description: String,
+    pub occurred_on: String,
+    /// Always positive.
+    pub amount: UnitMoney,
+    pub incoming: bool,
+    pub category: Option<String>,
+    /// "", "return", "payment" or "ignore".
+    pub role: String,
+    pub assigned_category: String,
+    pub revision: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PersonalTransactions {
+    /// Unreviewed first, newest first within each part; at most 100.
+    pub items: Vec<PersonalTransaction>,
+    pub total: usize,
+    /// The first day marks count from, `YYYY-MM-DD`.
+    pub since: String,
+}
+
+/// Save or clear the owner's shared-spending mark on one payment.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PersonalChoice {
+    pub transaction_id: String,
+    /// The `transaction_details` revision the owner saw.
+    pub revision: u32,
+    /// "return", "payment", "ignore" or "clear".
+    pub role: String,
+    pub category: String,
+    /// The bank amount the owner saw (positive).
+    pub expected_amount: String,
+    pub expected_currency: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PersonalSaved {
+    pub saved: bool,
+    pub revision: u32,
+}
+
+/// Set one transaction's category (`/transactions/category`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CategoryChange {
+    /// The ledger id or the canonical `firefly:<id>`.
+    pub transaction_id: String,
+    /// The category the owner saw; `None` when it was uncategorised.
+    pub expected_category: Option<String>,
+    pub category: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CategorySaved {
+    pub saved: bool,
+    pub category: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewAction {
+    Approve,
+    Correct,
+    Reject,
+    /// "No idea": set aside until another decision resumes it.
+    Defer,
+}
+
+/// One category decision on a pending proposal (a `/review/stream` item).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReviewDecision {
+    pub proposal_id: String,
+    pub decision: ReviewAction,
+    /// Required for approve and correct, absent otherwise.
+    #[serde(default)]
+    pub category: Option<String>,
+    pub expected_proposed_category: Option<String>,
+    pub expected_original_category: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DecisionStatus {
+    Saved,
+    /// The proposal or transaction changed; the decision was dropped.
+    Changed,
+    /// Not saved; the owner can try again.
+    Retry,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DecisionResult {
+    pub proposal_id: String,
+    pub status: DecisionStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DecisionsSaved {
+    pub saved: usize,
+    pub results: Vec<DecisionResult>,
+}
+
+/// One row of "Save all" in the current daily batch (`/review/batch`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BatchDecision {
+    pub proposal_id: String,
+    pub category: String,
+    pub expected_proposed_category: String,
+    pub expected_original_category: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BatchSaved {
+    pub saved: usize,
+}
+
+/// `/review/{id}/category-options`: the stored ranked choices among
+/// categories in use, and every category in use (most used first).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CategoryOptions {
+    pub options: Vec<CategoryAlternative>,
+    pub existing_categories: Vec<String>,
+}
+
+/// Save the owner's details & tags on a reviewed transaction.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DetailsSave {
+    pub proposal_id: String,
+    /// The revision the owner edited.
+    pub revision: u32,
+    pub values: crate::gateway::OwnerDetails,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Audited {
+    pub audited: bool,
+}
+
+/// Move every transaction of one category to another.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Consolidation {
+    pub source: String,
+    pub target: String,
+    /// From the preview; required to apply.
+    #[serde(default)]
+    pub token: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConsolidationPreview {
+    pub source: String,
+    pub target: String,
+    pub count: usize,
+    pub token: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConsolidationApplied {
+    pub applied: usize,
+    pub total: usize,
+    pub complete: bool,
+    pub refreshed: bool,
+    /// Why it stopped early.
+    #[serde(default)]
+    pub error: Option<String>,
+}
