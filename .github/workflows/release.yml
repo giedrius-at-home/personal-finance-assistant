@@ -32,7 +32,7 @@ jobs:
           test "v$version" = "$TAG" || { echo "tag $TAG does not match app version $version"; exit 1; }
 
       - name: Test
-        run: cargo test --locked -p finance-storage
+        run: cargo test --locked -p finance-storage -p finance-core
 
       - name: Build and sign
         working-directory: app/src-tauri

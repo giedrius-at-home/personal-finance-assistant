@@ -1,0 +1,62 @@
+/* Native glass. In the app window (html.glass) macOS Liquid Glass (or the
+   vibrancy fallback) sits behind a transparent web view, so the page and
+   cards become translucent layers over it. In a plain browser the opaque
+   site tokens stay. */
+@layer base {
+  html,
+  body {
+    height: 100%;
+  }
+  body {
+    margin: 0;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  input,
+  textarea,
+  [contenteditable],
+  .selectable {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
+  html.glass,
+  html.glass body {
+    background: transparent;
+  }
+  html.glass {
+    --glass-page: color-mix(in oklab, var(--ds-page) 58%, transparent);
+    --ds-card-strong: light-dark(oklch(1 0 0 / 0.66), oklch(0.2947 0.0072 118.26 / 0.6));
+    --ds-card: light-dark(oklch(0.985 0.0041 91.45 / 0.62), oklch(0.2743 0.0074 118.3 / 0.58));
+    --ds-card-muted: light-dark(oklch(0.9301 0.0081 98.88 / 0.58), oklch(0.3223 0.0088 116.08 / 0.55));
+    --ds-soft: light-dark(oklch(0.9455 0.0067 97.35 / 0.7), oklch(0.3223 0.0088 116.08 / 0.7));
+    --ds-border: light-dark(oklch(0.8997 0.0082 98.89 / 0.75), oklch(0.6 0.0086 116.02 / 0.28));
+    --ds-line: light-dark(oklch(0.8997 0.0082 98.89 / 0.75), oklch(0.6 0.0086 116.02 / 0.24));
+  }
+}
+
+@layer components {
+  /* The window: page tint plus the site's accent glow, over the native glass. */
+  .app-surface {
+    background-color: var(--glass-page, var(--ds-page));
+    background-image: radial-gradient(ellipse at 80% 0%, var(--ds-accent-soft), transparent 60%);
+    background-size: 100% 40rem;
+    background-repeat: no-repeat;
+  }
+  html.glass .glass-card {
+    backdrop-filter: blur(24px) saturate(1.4);
+    -webkit-backdrop-filter: blur(24px) saturate(1.4);
+    box-shadow:
+      inset 0 1px 0 0 light-dark(oklch(1 0 0 / 0.7), oklch(1 0 0 / 0.08)),
+      0 1px 2px 0 oklch(0.2 0 0 / 0.04);
+  }
+  html.glass .glass-bar {
+    backdrop-filter: blur(30px) saturate(1.6);
+    -webkit-backdrop-filter: blur(30px) saturate(1.6);
+  }
+  .drag-region {
+    -webkit-app-region: drag;
+  }
+}

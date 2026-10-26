@@ -6,3 +6,6 @@ dist = "dist"
 addresses = ["127.0.0.1"]
 port = 1420
 open = false
+
+[tools]
+tailwindcss = "4.3.3"

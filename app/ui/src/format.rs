@@ -159,3 +159,15 @@ pub fn today() -> String {
         now.get_date()
     )
 }
+
+/// `2026-10-26T21:07:00+01:00` or `2026-10-26 21:07` → `26 Oct, 21:07`.
+pub fn stamp(text: &str) -> String {
+    let day = match parts(text) {
+        Some((_, m, d)) => format!("{d} {}", MONTHS[m - 1]),
+        None => return text.to_owned(),
+    };
+    match text.get(11..16) {
+        Some(time) => format!("{day}, {time}"),
+        None => day,
+    }
+}

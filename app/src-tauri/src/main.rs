@@ -117,6 +117,36 @@ fn forget_release_token() -> Result<(), String> {
     finance_secrets::delete(Item::ReleaseToken).map_err(|e| e.to_string())
 }
 
+/// macOS 26 Liquid Glass behind the transparent web view; on older systems
+/// the translucent window-background material (the same look as Finder's
+/// sidebars). The UI tints it with the site's page colour.
+#[cfg(target_os = "macos")]
+fn apply_glass(window: &tauri::WebviewWindow) {
+    use window_vibrancy::{
+        LiquidGlassOptions, NSGlassEffectViewStyle, NSVisualEffectMaterial, NSVisualEffectState,
+        apply_liquid_glass, apply_vibrancy,
+    };
+    let glass = apply_liquid_glass(
+        window,
+        LiquidGlassOptions::new(NSGlassEffectViewStyle::Regular),
+    );
+    if std::env::var_os("FINANCE_TRACE").is_some() {
+        eprintln!(
+            "finance: liquid glass {}",
+            if glass.is_ok() { "on" } else { "unavailable" }
+        );
+    }
+    if glass.is_err() {
+        apply_vibrancy(
+            window,
+            NSVisualEffectMaterial::UnderWindowBackground,
+            Some(NSVisualEffectState::Active),
+            None,
+        )
+        .expect("vibrancy is supported on macOS");
+    }
+}
+
 fn main() {
     let path = finance_storage::default_db_path().expect("application data folder");
     tauri::Builder::default()
@@ -145,17 +175,7 @@ fn main() {
             update::schedule(app.handle().clone());
             #[cfg(target_os = "macos")]
             if let Some(window) = app.get_webview_window("main") {
-                use window_vibrancy::{
-                    NSVisualEffectMaterial, NSVisualEffectState, apply_vibrancy,
-                };
-                // Sidebar material is the system's translucent, wallpaper-tinted glass.
-                apply_vibrancy(
-                    &window,
-                    NSVisualEffectMaterial::Sidebar,
-                    Some(NSVisualEffectState::Active),
-                    None,
-                )
-                .expect("vibrancy is supported on macOS");
+                apply_glass(&window);
             }
             Ok(())
         })
