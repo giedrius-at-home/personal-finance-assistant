@@ -1,0 +1,6 @@
+/target
+/app/ui/dist
+.DS_Store
+*.sqlite3
+*.sqlite3-*
+/app/src-tauri/gen

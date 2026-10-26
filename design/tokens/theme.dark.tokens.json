@@ -1,0 +1,35 @@
+{
+  "theme": {
+    "dark": {
+      "$type": "color",
+      "page":           { "$value": "{primitive.neutral.925}" },
+      "card":           { "$value": "{primitive.neutral.850}" },
+      "card-strong":    { "$value": "{primitive.neutral.800}" },
+      "card-muted":     { "$value": "{primitive.neutral.750}" },
+      "contrast":       { "$value": "{primitive.neutral.75}" },
+      "fg":             { "$value": "{primitive.neutral.75}" },
+      "fg-muted":       { "$value": "{primitive.neutral.400}" },
+      "fg-on-contrast": { "$value": "{primitive.neutral.925}" },
+      "border":         { "$value": "{primitive.neutral.700}" },
+      "line":           { "$value": "{primitive.neutral.700}" },
+      "soft":           { "$value": "{primitive.neutral.750}" },
+      "positive":       { "$value": "{primitive.green.400}" },
+      "negative":       { "$value": "{primitive.coral.400}" },
+      "warning":        { "$value": "{primitive.amber.500}" },
+      "positive-fg":    { "$value": "{primitive.green.400}" },
+      "negative-fg":    { "$value": "{primitive.coral.400}" },
+      "warning-fg":     { "$value": "{primitive.amber.400}" },
+      "chart-1":        { "$value": { "colorSpace": "oklch", "components": [0.6661, 0.1242, 261.81] } },
+      "chart-2":        { "$value": { "colorSpace": "oklch", "components": [0.5596, 0.1251, 144.98] } },
+      "chart-3":        { "$value": { "colorSpace": "oklch", "components": [0.5998, 0.1257, 334.76] } },
+      "chart-4":        { "$value": { "colorSpace": "oklch", "components": [0.6656, 0.125, 42.44] } },
+      "chart-5":        { "$value": { "colorSpace": "oklch", "components": [0.6423, 0.1095, 195.55] } },
+      "chart-6":        { "$value": "{primitive.amber.500}" },
+      "chart-fixed":    { "$value": { "colorSpace": "oklch", "components": [0.64, 0.0155, 93.1] } },
+      "chart-free":     { "$value": { "colorSpace": "oklch", "components": [0.45, 0.0099, 114.51] } },
+      "chart-limit":    { "$value": { "colorSpace": "oklch", "components": [0.6197, 0.0197, 92.79] } },
+      "chart-grid":     { "$value": "{primitive.neutral.700}" },
+      "chart-axis":     { "$value": "{primitive.neutral.400}" }
+    }
+  }
+}
