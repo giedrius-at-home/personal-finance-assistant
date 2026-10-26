@@ -46,28 +46,68 @@ impl Series {
     }
 }
 
-/// A "nice" axis like Recharts' default: about five ticks on round steps.
+fn digit_count(value: f64) -> i32 {
+    if value == 0.0 {
+        1
+    } else {
+        value.abs().log10().floor() as i32 + 1
+    }
+}
+
+/// Recharts' `getAdaptiveStep`: the rough step rounded up to 0.05 (0.1 for
+/// one-digit steps) of its order of magnitude, plus a correction.
+fn adaptive_step(rough: f64, correction: u32) -> f64 {
+    if rough <= 0.0 {
+        return 0.0;
+    }
+    let digits = digit_count(rough);
+    let magnitude = 10f64.powi(digits);
+    let scale = if digits == 1 { 0.1 } else { 0.05 };
+    (((rough / magnitude) / scale - 1e-12).ceil() + f64::from(correction)) * scale * magnitude
+}
+
+/// Recharts' default value axis (`getNiceTickValues`, five ticks, domain
+/// `[0, auto]`), so axes read exactly as on the site.
 fn nice_axis(min: f64, max: f64) -> (f64, f64, Vec<f64>) {
+    const TICKS: i32 = 5;
     let (lo, hi) = (min.min(0.0), max.max(0.0));
     if hi - lo <= f64::EPSILON {
-        return (0.0, 1.0, vec![0.0, 0.25, 0.5, 0.75, 1.0]);
+        return (0.0, 4.0, vec![0.0, 1.0, 2.0, 3.0, 4.0]);
     }
-    let raw = (hi - lo) / 4.0;
-    let magnitude = 10f64.powf(raw.log10().floor());
-    let step = [1.0, 2.0, 2.5, 5.0, 10.0]
-        .iter()
-        .map(|m| m * magnitude)
-        .find(|s| *s >= raw)
-        .unwrap_or(10.0 * magnitude);
-    let start = (lo / step).floor() * step;
-    let end = (hi / step).ceil() * step;
-    let mut ticks = Vec::new();
-    let mut t = start;
-    while t <= end + step / 2.0 {
-        ticks.push(if t.abs() < step / 1e6 { 0.0 } else { t });
-        t += step;
+    let mut correction = 0;
+    loop {
+        let step = adaptive_step((hi - lo) / f64::from(TICKS - 1), correction);
+        let middle = if lo <= 0.0 && hi >= 0.0 {
+            0.0
+        } else {
+            let m = (lo + hi) / 2.0;
+            m - m % step
+        };
+        let mut below = ((middle - lo) / step - 1e-9).ceil() as i32;
+        let mut up = ((hi - middle) / step - 1e-9).ceil() as i32;
+        let count = below + up + 1;
+        if count > TICKS {
+            correction += 1;
+            continue;
+        }
+        if count < TICKS {
+            if hi > 0.0 {
+                up += TICKS - count;
+            } else {
+                below += TICKS - count;
+            }
+        }
+        let start = middle - f64::from(below) * step;
+        let end = middle + f64::from(up) * step;
+        let ticks: Vec<f64> = (0..TICKS)
+            .map(|i| {
+                let t = start + f64::from(i) * step;
+                // Trim float noise like 0.30000000000000004.
+                (t * 1e9).round() / 1e9
+            })
+            .collect();
+        return (start, end, ticks);
     }
-    (start, end, ticks)
 }
 
 fn pct(v: f64) -> String {
@@ -507,23 +547,24 @@ pub fn Donut(
         .max(f64::EPSILON);
     let hovered = RwSignal::new(None::<usize>);
     let (r_out, r_in) = (41.0, 29.0);
-    let mut angle = -90.0_f64;
+    // Recharts' Pie starts at 3 o'clock and runs counter-clockwise.
+    let mut angle = 0.0_f64;
     let gap = 1.0;
     let arcs = data
         .iter()
         .enumerate()
         .map(|(i, s)| {
             let sweep = s.value.max(0.0) / total * 360.0;
-            let (a0, a1) = (angle + gap / 2.0, angle + sweep - gap / 2.0);
-            angle += sweep;
+            let (a0, a1) = (angle - gap / 2.0, angle - sweep + gap / 2.0);
+            angle -= sweep;
             let pt = |r: f64, a: f64| {
                 let rad = a.to_radians();
                 (50.0 + r * rad.cos(), 50.0 + r * rad.sin())
             };
-            let large = if a1 - a0 > 180.0 { 1 } else { 0 };
+            let large = if a0 - a1 > 180.0 { 1 } else { 0 };
             let (o0, o1, i1, i0) = (pt(r_out, a0), pt(r_out, a1), pt(r_in, a1), pt(r_in, a0));
             let d = format!(
-                "M{:.3},{:.3} A{r_out},{r_out} 0 {large} 1 {:.3},{:.3} L{:.3},{:.3} A{r_in},{r_in} 0 {large} 0 {:.3},{:.3} Z",
+                "M{:.3},{:.3} A{r_out},{r_out} 0 {large} 0 {:.3},{:.3} L{:.3},{:.3} A{r_in},{r_in} 0 {large} 1 {:.3},{:.3} Z",
                 o0.0, o0.1, o1.0, o1.1, i1.0, i1.1, i0.0, i0.1
             );
             let color = s.color.clone();
@@ -717,4 +758,23 @@ pub fn ProgressBar(
 /// A shared, cheap-to-clone formatter.
 pub fn fmt(f: impl Fn(f64) -> String + Send + Sync + 'static) -> Fmt {
     Arc::new(f)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::nice_axis;
+
+    #[test]
+    fn ticks_follow_recharts() {
+        assert_eq!(
+            nice_axis(0.0, 2300.0).2,
+            vec![0.0, 600.0, 1200.0, 1800.0, 2400.0]
+        );
+        assert_eq!(
+            nice_axis(0.0, 236.96).2,
+            vec![0.0, 60.0, 120.0, 180.0, 240.0]
+        );
+        assert_eq!(nice_axis(0.0, 9.0).2, vec![0.0, 3.0, 6.0, 9.0, 12.0]);
+        assert_eq!(nice_axis(-10.0, 30.0).2, vec![-10.0, 0.0, 10.0, 20.0, 30.0]);
+    }
 }
