@@ -225,6 +225,9 @@ fn status(s: ProposalStatus) -> String {
     format!("{s:?}").to_lowercase()
 }
 
+/// The queue lives on the Transactions tab; this card only previews it.
+const SHOWN: usize = 8;
+
 #[component]
 fn CategoryReview(review: crate::api::Loaded<ReviewReport>) -> impl IntoView {
     let app = state();
@@ -252,6 +255,7 @@ fn CategoryReview(review: crate::api::Loaded<ReviewReport>) -> impl IntoView {
                     <div class="mt-3">
                         {items
                             .into_iter()
+                            .take(SHOWN)
                             .map(|item| {
                                 view! {
                                     <details class=cn(["group", super::ui::DETAILS])>
@@ -277,6 +281,14 @@ fn CategoryReview(review: crate::api::Loaded<ReviewReport>) -> impl IntoView {
                             })
                             .collect_view()}
                     </div>
+                    {(count > SHOWN)
+                        .then(|| {
+                            view! {
+                                <p class="border-t border-line pt-4 text-xs text-fg-muted">
+                                    {format!("Showing {SHOWN} of {count} proposals.")}
+                                </p>
+                            }
+                        })}
                 }
             }}
         </Card>

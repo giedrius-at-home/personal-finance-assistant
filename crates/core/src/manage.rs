@@ -110,6 +110,6 @@ pub fn banks(store: &Store) -> Result<BanksReport> {
         .collect();
     Ok(BanksReport {
         accounts,
-        last_import: import_run(conn, "")?,
+        last_import: import_run(conn, &format!("WHERE source != '{CSV_SOURCE}'"))?,
     })
 }

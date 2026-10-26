@@ -152,7 +152,7 @@ fn BankBox(
                         <strong class="block font-semibold">{a.account.name.clone()}</strong>
                         {(!a.active).then(|| view! { <small class="mt-1 block text-xs text-fg-muted">"Closed"</small> })}
                     </td>
-                    <td class=cn([TCELL, "text-fg-muted tabular-nums"])>
+                    <td class=cn([TCELL, "whitespace-nowrap text-fg-muted tabular-nums"])>
                         {a.account.iban_tail.map(|t| format!("•••• {t}")).unwrap_or_else(|| "—".into())}
                     </td>
                     <td class=cn([TCELL, "text-fg-muted tabular-nums"])>

@@ -182,6 +182,6 @@ pub struct BankAccount {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct BanksReport {
     pub accounts: Vec<BankAccount>,
-    /// The latest ledger change of any kind.
+    /// The latest whole-ledger import (not a CSV import).
     pub last_import: Option<ImportRun>,
 }
