@@ -12,7 +12,7 @@ use crate::subscriptions::{BillWindow, budget_calendar_offset, subscription_repo
 use crate::{
     Ctx, Result, Snapshot, cash, catalog, forecast, groups, limits, plans, review, trends,
 };
-use crate::{allocation, budget};
+use crate::{allocation, budget, daily, outlook};
 
 pub fn dashboard(store: &Store, snap: &Snapshot, now: &Zoned) -> Result<Dashboard> {
     let ctx = Ctx::new(snap, now);
@@ -114,6 +114,47 @@ pub fn dashboard(store: &Store, snap: &Snapshot, now: &Zoned) -> Result<Dashboar
         period_start: Some(ctx.resolver.period_start_date(current_month)),
     });
 
+    // Forecast horizons run from today, so they keep calendar months.
+    let future_subscriptions = (0..4)
+        .map(|offset| subscription_report(&ctx, BillWindow::CalendarMonth(offset)))
+        .collect::<Result<Vec<_>>>()?;
+    let budget_fixed_ids = groups::fixed_transaction_ids(&spending, &fixed_categories);
+    let savings_outlooks = outlook::savings_outlooks(&outlook::OutlookInputs {
+        transactions: &spending,
+        accounts: &snap.accounts,
+        plans: &snap.budget_plans,
+        mappings: &snap.group_mappings,
+        payments: &payments,
+        subscriptions: &future_subscriptions,
+        fixed_ids: &budget_fixed_ids,
+        payday_day: snap.settings.payday_day,
+        now: &ctx.now,
+        data_fresh: outlook::data_fresh(&snap.sync_health, &ctx.now),
+        current_month,
+        resolver: &ctx.resolver,
+    });
+    let mut currencies: Vec<finance_types::report::Currency> = snap
+        .accounts
+        .iter()
+        .map(|a| a.currency().clone())
+        .chain(spending.iter().map(|t| t.currency.clone()))
+        .collect();
+    currencies.sort_by(|a, b| a.code.cmp(&b.code));
+    currencies.dedup();
+    let forecast_plans = daily::forecast_plans(&snap.budget_plans, current_month, &currencies);
+    let daily_forecasts = daily::daily_spending_forecasts(&daily::DailyInputs {
+        transactions: &spending,
+        payments: &payments,
+        subscriptions: &future_subscriptions,
+        fixed_ids: &budget_fixed_ids,
+        now: &ctx.now,
+        current_month,
+        month_start: ctx.resolver.period_start_date(current_month),
+        budget_plans: &forecast_plans,
+        mappings: &snap.group_mappings,
+        excluded_categories: &snap.settings.forecast_excluded_categories,
+    });
+
     let daily_ids: HashSet<String> = snap
         .daily_review_entries
         .iter()
@@ -140,6 +181,8 @@ pub fn dashboard(store: &Store, snap: &Snapshot, now: &Zoned) -> Result<Dashboar
         spending_limits: snap.spending_limits.clone(),
         spending_nudges,
         monthly_budgets: budgets,
+        savings_outlooks,
+        daily_forecasts,
         monthly_allocation: Some(monthly_allocation),
         spending_forecasts,
         time_trends,

@@ -6,6 +6,7 @@ pub mod allocation;
 pub mod budget;
 pub mod cash;
 pub mod catalog;
+pub mod outlook;
 pub mod plans;
 pub mod reporting;
 pub mod review;
@@ -79,6 +80,8 @@ pub struct Dashboard {
     pub spending_forecasts: Vec<trends::SpendingForecast>,
     pub monthly_budgets: Vec<budget::MonthlyBudget>,
     pub monthly_allocation: Option<allocation::MonthlyAllocation>,
+    pub savings_outlooks: Vec<outlook::SavingsOutlook>,
+    pub daily_forecasts: Vec<outlook::DailySpendingForecast>,
 }
 
 /// The category review inbox (Transactions screen).

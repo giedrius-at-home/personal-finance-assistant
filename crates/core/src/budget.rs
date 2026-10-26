@@ -89,13 +89,13 @@ pub fn default_budget(month: Date, currency: &Currency) -> BudgetPlan {
 /// The plan group a purchase counts in: an explicit purchase overrides its
 /// category, which overrides a broad spending group.
 pub fn budget_owner<'p>(
-    plan: &'p BudgetPlan,
+    groups: &'p [BudgetGroup],
     category: Option<&str>,
     source_group: Option<&str>,
     transaction_id: Option<&str>,
 ) -> Option<&'p str> {
     let find = |pick: &dyn Fn(&BudgetGroup) -> bool| {
-        plan.groups.iter().find(|g| pick(g)).map(|g| g.id.as_str())
+        groups.iter().find(|g| pick(g)).map(|g| g.id.as_str())
     };
     transaction_id
         .and_then(|id| find(&|g| g.transaction_ids.iter().any(|t| t == id)))
@@ -204,7 +204,7 @@ pub fn monthly_budget(
                 .copied()
                 .unwrap_or(&t.transaction_id);
             budget_owner(
-                plan,
+                &plan.groups,
                 t.category.as_deref(),
                 source_group(t.category.as_deref()),
                 Some(id),
@@ -255,7 +255,12 @@ pub fn monthly_budget(
             continue;
         }
         let category = p.match_category.as_str();
-        match budget_owner(plan, Some(category), source_group(Some(category)), None) {
+        match budget_owner(
+            &plan.groups,
+            Some(category),
+            source_group(Some(category)),
+            None,
+        ) {
             Some(owner) => *pending.entry(owner).or_default() += p.amount.amount,
             None => extra_pending += p.amount.amount,
         }
@@ -749,7 +754,7 @@ mod tests {
             transaction_ids: vec!["t1".into()],
             ..extra_group("special", 10)
         });
-        let owner = |c, g, t| budget_owner(&plan, c, g, t);
+        let owner = |c, g, t| budget_owner(&plan.groups, c, g, t);
         assert_eq!(
             owner(Some("Lidl"), Some("Groceries"), Some("t1")),
             Some("special")
