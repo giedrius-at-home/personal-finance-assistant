@@ -90,6 +90,7 @@ impl Snapshot {
         let accounts = load_accounts(conn)?;
         let transactions = load_transactions(conn, &accounts, &zone)?;
         let transactions = crate::transfers::resolve_own_transfers(transactions, &accounts);
+        // The payload holds only the owner's values; the revision is a column.
         let details: HashMap<String, SavedDetails> = rows(
             conn,
             "SELECT source_key, revision, payload_json FROM transaction_details",
