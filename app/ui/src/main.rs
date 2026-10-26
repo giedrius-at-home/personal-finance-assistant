@@ -6,9 +6,11 @@ mod ds;
 mod format;
 mod pages;
 
+use finance_types::report::Dashboard;
 use leptos::ev;
 use leptos::prelude::*;
 
+use crate::api::{Loaded, NoArgs, load};
 use crate::ds::{
     Eyebrow, Heading, Icon, Lucide, SegmentedControl, Size, TABS_LIST, TABS_TRIGGER, Variant,
     button_class, cn,
@@ -104,6 +106,8 @@ pub struct AppState {
     pub updated: RwSignal<Option<String>>,
     pub refresh_failed: RwSignal<bool>,
     pub busy: RwSignal<bool>,
+    /// The dashboard report every screen reads; reloaded on `revision`.
+    pub report: Loaded<Dashboard>,
 }
 
 impl AppState {
@@ -121,9 +125,14 @@ impl AppState {
         self.tab.set(Tab::Manage);
     }
 
-    /// Ask every screen to reload.
+    /// Re-read the data from disk and reload every screen.
     pub fn refresh(&self) {
-        self.revision.update(|n| *n += 1);
+        let revision = self.revision;
+        self.busy.set(true);
+        leptos::task::spawn_local(async move {
+            let _ = api::invoke::<()>("refresh", &NoArgs {}).await;
+            revision.update(|n| *n += 1);
+        });
     }
 }
 
@@ -133,16 +142,33 @@ pub fn state() -> AppState {
 
 #[component]
 fn App() -> impl IntoView {
+    let revision = RwSignal::new(0_u32);
     let app = AppState {
         tab: RwSignal::new(Tab::Overview),
         spending: RwSignal::new(SpendingSection::PlanPatterns),
         manage: RwSignal::new(ManageSection::Banks),
-        revision: RwSignal::new(0),
+        revision,
         updated: RwSignal::new(None),
         refresh_failed: RwSignal::new(false),
         busy: RwSignal::new(false),
+        report: load("dashboard", move || {
+            revision.track();
+            NoArgs {}
+        }),
     };
     provide_context(app);
+    Effect::new(move |_| {
+        if let Some(result) = app.report.data.get() {
+            app.busy.set(app.report.loading.get());
+            match result {
+                Ok(report) => {
+                    app.updated.set(Some(report.generated_at.clone()));
+                    app.refresh_failed.set(false);
+                }
+                Err(_) => app.refresh_failed.set(true),
+            }
+        }
+    });
     if api::in_app() {
         if let Some(root) = document().document_element() {
             let _ = root.class_list().add_1("glass");

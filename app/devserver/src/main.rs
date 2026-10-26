@@ -5,23 +5,18 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use finance_storage::Store;
-use finance_types::TxQuery;
+use finance_core::service::Service;
+use finance_types::report::review::TransactionSearchQuery;
 use serde::Deserialize;
 use serde_json::Value;
 
 #[derive(Deserialize)]
-struct TxArgs {
-    query: TxQuery,
-}
-
-#[derive(Deserialize)]
-struct MonthArgs {
-    month: String,
+struct SearchArgs {
+    query: TransactionSearchQuery,
 }
 
 fn main() -> Result<()> {
@@ -31,9 +26,11 @@ fn main() -> Result<()> {
             .unwrap_or_else(|| "app/ui/dist".into()),
     );
     let port = std::env::args().nth(2).unwrap_or_else(|| "1430".into());
-    let store = Arc::new(Mutex::new(Store::open_read_only(
-        &finance_storage::default_db_path()?,
-    )?));
+    // DEV_DB points at a copy of the data, e.g. the parity golden.
+    let db = std::env::var_os("DEV_DB")
+        .map(PathBuf::from)
+        .unwrap_or(finance_storage::default_db_path()?);
+    let store = Arc::new(Service::new(db));
     let dist = Arc::new(dist);
     let listener = TcpListener::bind(format!("127.0.0.1:{port}"))?;
     eprintln!("finance-devserver on http://127.0.0.1:{port}");
@@ -51,7 +48,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn handle(stream: &mut TcpStream, store: &Mutex<Store>, dist: &Path) -> Result<()> {
+fn handle(stream: &mut TcpStream, store: &Service, dist: &Path) -> Result<()> {
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut request_line = String::new();
     reader.read_line(&mut request_line)?;
@@ -75,10 +72,7 @@ fn handle(stream: &mut TcpStream, store: &Mutex<Store>, dist: &Path) -> Result<(
         && let Some(cmd) = path.strip_prefix("/invoke/")
     {
         let args: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
-        let result = match store.lock() {
-            Ok(store) => run(&store, cmd, args),
-            Err(_) => Err("store-poisoned".to_owned()),
-        };
+        let result = run(store, cmd, args);
         return match result {
             Ok(v) => respond(
                 stream,
@@ -109,25 +103,22 @@ fn handle(stream: &mut TcpStream, store: &Mutex<Store>, dist: &Path) -> Result<(
     }
 }
 
-fn ok<T: serde::Serialize>(result: finance_storage::Result<T>) -> Result<Value, String> {
-    result
-        .map_err(|e| e.to_string())
-        .and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string()))
+fn ok<T: serde::Serialize>(result: Result<T, String>) -> Result<Value, String> {
+    result.and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string()))
 }
 
-fn run(store: &Store, cmd: &str, args: Value) -> Result<Value, String> {
+fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
     match cmd {
-        "overview" => ok(store.overview()),
-        "accounts" => ok(store.accounts()),
-        "facets" => ok(store.facets()),
-        "status" => ok(store.status()),
-        "transactions" => {
-            let a: TxArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
-            ok(store.transactions(&a.query))
+        "dashboard" => ok(service.dashboard()),
+        "review" => ok(service.review()),
+        "status" => ok(service.status()),
+        "refresh" => {
+            service.refresh();
+            Ok(Value::Null)
         }
-        "category_totals" => {
-            let a: MonthArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
-            ok(store.category_totals(&a.month))
+        "search_transactions" => {
+            let a: SearchArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
+            ok(service.search(&a.query))
         }
         // Updates only exist in the app; show a plausible state for layout checks.
         "update_status" => {

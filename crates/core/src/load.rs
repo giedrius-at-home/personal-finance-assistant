@@ -411,8 +411,17 @@ struct LedgerAccount {
     own: bool,
 }
 
+/// One own account's IBAN, with the memo patterns that name it.
+struct OwnIban {
+    account_id: String,
+    /// `IBAN: NL…` anywhere in a memo (the end is checked by hand).
+    labelled: Regex,
+    /// `(NL…)` in the bank's "Outgoing/Incoming transfer" format.
+    bank_format: Regex,
+}
+
 /// Own asset accounts by IBAN; an IBAN shared by several accounts is left out.
-fn own_iban_index(accounts: &[Account]) -> HashMap<String, String> {
+fn own_iban_index(accounts: &[Account]) -> HashMap<String, OwnIban> {
     let mut matches: HashMap<String, Vec<String>> = HashMap::new();
     for account in accounts {
         if let Some(iban) = account.iban.as_deref().and_then(compact_iban) {
@@ -425,7 +434,19 @@ fn own_iban_index(accounts: &[Account]) -> HashMap<String, String> {
     matches
         .into_iter()
         .filter(|(_, ids)| ids.len() == 1)
-        .map(|(iban, mut ids)| (iban, ids.remove(0)))
+        .filter_map(|(iban, mut ids)| {
+            let identifier = iban
+                .chars()
+                .map(|c| regex::escape(&c.to_string()))
+                .collect::<Vec<_>>()
+                .join(r"\s*");
+            let own = OwnIban {
+                account_id: ids.remove(0),
+                labelled: Regex::new(&format!(r"(?i)\bIBAN:\s*{identifier}")).ok()?,
+                bank_format: Regex::new(&format!(r"(?i)\(\s*{identifier}\s*\)")).ok()?,
+            };
+            Some((iban, own))
+        })
         .collect()
 }
 
@@ -435,7 +456,7 @@ fn owned_counterparty(
     counterparty_iban: Option<&str>,
     description: &str,
     primary: &str,
-    ibans: &HashMap<String, String>,
+    ibans: &HashMap<String, OwnIban>,
 ) -> Option<(String, &'static str)> {
     static TRANSFER_MEMO: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r"(?i)^(?:Outgoing|Incoming) transfer\b").expect("valid regex")
@@ -448,38 +469,28 @@ fn owned_counterparty(
             .collect();
         return ibans
             .get(&compact)
-            .filter(|other| other.as_str() != primary)
-            .map(|other| (other.clone(), "account_iban"));
+            .filter(|own| own.account_id != primary)
+            .map(|own| (own.account_id.clone(), "account_iban"));
     }
     let bank_format = TRANSFER_MEMO.is_match(description);
     let mut found: HashSet<&String> = HashSet::new();
-    for (iban, account_id) in ibans {
-        if account_id == primary {
+    for own in ibans.values() {
+        if own.account_id == primary {
             continue;
         }
-        let identifier = iban
-            .chars()
-            .map(|c| regex::escape(&c.to_string()))
-            .collect::<Vec<_>>()
-            .join(r"\s*");
-        let pattern = if bank_format {
-            format!(r"(?i)\(\s*{identifier}\s*\)")
+        let hit = if bank_format {
+            own.bank_format.is_match(description)
         } else {
-            format!(r"(?i)\bIBAN:\s*{identifier}")
-        };
-        let Ok(re) = Regex::new(&pattern) else {
-            continue;
-        };
-        // `(?![A-Z0-9])` after the IBAN, checked by hand.
-        let hit = re.find_iter(description).any(|m| {
-            bank_format
-                || !description[m.end()..]
+            // `(?![A-Z0-9])` after the IBAN, checked by hand.
+            own.labelled.find_iter(description).any(|m| {
+                !description[m.end()..]
                     .chars()
                     .next()
                     .is_some_and(|c| c.is_ascii_alphanumeric())
-        });
+            })
+        };
         if hit {
-            found.insert(account_id);
+            found.insert(&own.account_id);
         }
     }
     (found.len() == 1).then(|| {

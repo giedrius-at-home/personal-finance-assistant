@@ -1,10 +1,9 @@
 /// Commands the UI may call; each needs an `allow-*` entry in a capability.
 const COMMANDS: &[&str] = &[
-    "overview",
-    "accounts",
-    "facets",
-    "transactions",
-    "category_totals",
+    "dashboard",
+    "review",
+    "search_transactions",
+    "refresh",
     "status",
     "update_status",
     "check_for_updates",

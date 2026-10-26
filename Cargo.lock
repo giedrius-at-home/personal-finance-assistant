@@ -1231,6 +1231,7 @@ dependencies = [
 name = "finance-app"
 version = "0.1.0"
 dependencies = [
+ "finance-core",
  "finance-secrets",
  "finance-storage",
  "finance-types",
@@ -1267,6 +1268,7 @@ name = "finance-devserver"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "finance-core",
  "finance-storage",
  "finance-types",
  "serde",

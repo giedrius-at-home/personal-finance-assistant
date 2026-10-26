@@ -7,81 +7,52 @@
 
 mod update;
 
-use std::path::PathBuf;
-use std::sync::Mutex;
-
+use finance_core::service::Service;
 use finance_secrets::{Item, Secret};
-use finance_storage::Store;
-use finance_types::{
-    AccountSummary, CategoryTotal, DataStatus, Facets, Overview, TxPage, TxQuery, UpdateStatus,
-};
+use finance_types::report::review::{TransactionSearchQuery, TransactionSearchResult};
+use finance_types::report::{Dashboard, ReviewReport};
+use finance_types::{DataStatus, UpdateStatus};
 use tauri::{AppHandle, Manager, State};
 use update::Updates;
 
-/// The store is opened lazily so the app can start (and explain itself)
-/// before any data has been migrated.
-struct Db {
-    path: PathBuf,
-    store: Mutex<Option<Store>>,
-}
-
-/// Errors cross the boundary as short, data-free strings the UI can show.
-const NO_DATA: &str = "no-data";
-
-impl Db {
-    fn with<T>(&self, f: impl FnOnce(&Store) -> finance_storage::Result<T>) -> Result<T, String> {
-        let result = self.run(f);
-        // Diagnostics: command outcome only, never any data.
-        if std::env::var_os("FINANCE_TRACE").is_some() {
-            eprintln!(
-                "finance: command {}",
-                if result.is_ok() { "ok" } else { "failed" }
-            );
-        }
-        result
+/// Diagnostics: command outcome only, never any data.
+fn traced<T>(name: &str, result: Result<T, String>) -> Result<T, String> {
+    if std::env::var_os("FINANCE_TRACE").is_some() {
+        eprintln!(
+            "finance: {name} {}",
+            if result.is_ok() { "ok" } else { "failed" }
+        );
     }
-
-    fn run<T>(&self, f: impl FnOnce(&Store) -> finance_storage::Result<T>) -> Result<T, String> {
-        let mut guard = self.store.lock().map_err(|_| "store-poisoned".to_owned())?;
-        if guard.is_none() {
-            if !self.path.exists() {
-                return Err(NO_DATA.to_owned());
-            }
-            *guard = Some(Store::open_read_only(&self.path).map_err(|e| e.to_string())?);
-        }
-        let store = guard.as_ref().ok_or_else(|| NO_DATA.to_owned())?;
-        f(store).map_err(|e| e.to_string())
-    }
+    result
 }
 
 #[tauri::command(async)]
-fn overview(db: State<'_, Db>) -> Result<Overview, String> {
-    db.with(Store::overview)
+fn dashboard(service: State<'_, Service>) -> Result<Dashboard, String> {
+    traced("dashboard", service.dashboard())
 }
 
 #[tauri::command(async)]
-fn accounts(db: State<'_, Db>) -> Result<Vec<AccountSummary>, String> {
-    db.with(Store::accounts)
+fn review(service: State<'_, Service>) -> Result<ReviewReport, String> {
+    traced("review", service.review())
 }
 
 #[tauri::command(async)]
-fn facets(db: State<'_, Db>) -> Result<Facets, String> {
-    db.with(Store::facets)
+fn search_transactions(
+    service: State<'_, Service>,
+    query: TransactionSearchQuery,
+) -> Result<TransactionSearchResult, String> {
+    traced("search", service.search(&query))
+}
+
+/// Re-read the data from disk on the next request.
+#[tauri::command(async)]
+fn refresh(service: State<'_, Service>) {
+    service.refresh();
 }
 
 #[tauri::command(async)]
-fn transactions(db: State<'_, Db>, query: TxQuery) -> Result<TxPage, String> {
-    db.with(|s| s.transactions(&query))
-}
-
-#[tauri::command(async)]
-fn category_totals(db: State<'_, Db>, month: String) -> Result<Vec<CategoryTotal>, String> {
-    db.with(|s| s.category_totals(&month))
-}
-
-#[tauri::command(async)]
-fn status(db: State<'_, Db>) -> Result<DataStatus, String> {
-    db.with(Store::status)
+fn status(service: State<'_, Service>) -> Result<DataStatus, String> {
+    traced("status", service.status())
 }
 
 #[tauri::command]
@@ -153,17 +124,13 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         // Reopen with the size and position the owner left the window at.
         .plugin(tauri_plugin_window_state::Builder::new().build())
-        .manage(Db {
-            path,
-            store: Mutex::new(None),
-        })
+        .manage(Service::new(path))
         .manage(Updates::default())
         .invoke_handler(tauri::generate_handler![
-            overview,
-            accounts,
-            facets,
-            transactions,
-            category_totals,
+            dashboard,
+            review,
+            search_transactions,
+            refresh,
             status,
             update_status,
             check_for_updates,

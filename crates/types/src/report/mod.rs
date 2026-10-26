@@ -46,3 +46,36 @@ pub struct UnitMoney {
     pub amount: Decimal,
     pub currency: Currency,
 }
+
+/// Everything the Overview, Spending and Plan screens read, built in one go
+/// so every figure agrees (the Python `DashboardView`, without the review
+/// inbox, which is [`ReviewReport`]).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Dashboard {
+    /// The build moment, RFC 3339 with the owner's offset.
+    pub generated_at: String,
+    pub settings: crate::gateway::OwnerSettings,
+    pub weekly: reporting::WeeklyReport,
+    pub net_worth: reporting::NetWorthReport,
+    pub cash_overview: cash::CashOverview,
+    /// Last successful bank refresh (RFC 3339).
+    pub last_firefly_refresh: Option<String>,
+    pub firefly_refresh_failed: bool,
+    pub subscriptions: subscriptions::SubscriptionReport,
+    /// Next month's bills, once this month's salary arrived.
+    pub next_month_subscriptions: Option<subscriptions::SubscriptionReport>,
+    pub planned_payments: Vec<plans::PlannedPaymentView>,
+    pub monthly_spending: reporting::MonthlySpending,
+    pub category_catalog: catalog::CategoryCatalog,
+    pub taxonomy: Vec<reporting::TaxonomyRecommendation>,
+    pub bulk_payments: Vec<catalog::BulkPaymentSummary>,
+    pub historical_uncategorized_count: u64,
+    pub custom_spending_groups: Vec<String>,
+}
+
+/// The category review inbox (Transactions screen).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ReviewReport {
+    pub review_items: Vec<review::ReviewItem>,
+    pub daily_review: Option<review::DailyInbox>,
+}
