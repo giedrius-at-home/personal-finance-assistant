@@ -86,13 +86,28 @@ impl Snapshot {
         let accounts = load_accounts(conn)?;
         let transactions = load_transactions(conn, &accounts, &zone)?;
         let transactions = crate::transfers::resolve_own_transfers(transactions, &accounts);
+        // The payload holds only the owner's values; the revision is a column.
         let details: HashMap<String, SavedDetails> = rows(
             conn,
-            "SELECT source_key, payload_json FROM transaction_details",
-            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+            "SELECT source_key, revision, payload_json FROM transaction_details",
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, u32>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            },
         )?
         .into_iter()
-        .map(|(k, v)| Ok((normalize_key(&k), parse::<SavedDetails>(&v)?)))
+        .map(|(k, revision, v)| {
+            Ok((
+                normalize_key(&k),
+                SavedDetails {
+                    revision,
+                    values: parse(&v)?,
+                },
+            ))
+        })
         .collect::<Result<_>>()?;
         let raw_transactions = transactions.clone();
         let transactions = crate::personal::apply_personal_spending(transactions, &details);
