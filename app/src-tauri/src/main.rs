@@ -94,6 +94,55 @@ fn forget_release_token() -> Result<(), String> {
     finance_secrets::delete(Item::ReleaseToken).map_err(|e| e.to_string())
 }
 
+#[tauri::command(async)]
+fn manage_workspace(
+    service: State<'_, Service>,
+) -> Result<finance_types::manage::ManageWorkspace, String> {
+    traced("manage_workspace", service.manage_workspace())
+}
+
+#[tauri::command(async)]
+fn banks(service: State<'_, Service>) -> Result<finance_types::manage::BanksReport, String> {
+    traced("banks", service.banks())
+}
+
+#[tauri::command(async)]
+fn preview_csv_import(
+    service: State<'_, Service>,
+    upload: finance_types::manage::CsvUpload,
+) -> Result<finance_types::manage::CsvPreview, String> {
+    traced("preview_csv_import", service.preview_csv_import(upload))
+}
+
+#[tauri::command(async)]
+fn commit_csv_import(
+    service: State<'_, Service>,
+    commit: finance_types::manage::CsvCommit,
+) -> Result<finance_types::manage::CsvCommitResult, String> {
+    traced("commit_csv_import", service.commit_csv_import(commit))
+}
+
+#[tauri::command(async)]
+fn preview_settings(
+    service: State<'_, Service>,
+    form: finance_types::manage::SettingsForm,
+) -> Result<finance_types::manage::SettingsPreview, String> {
+    traced("preview_settings", service.preview_settings(form))
+}
+
+#[tauri::command(async)]
+fn apply_settings(
+    service: State<'_, Service>,
+    apply: finance_types::manage::SettingsApply,
+) -> Result<i64, String> {
+    traced("apply_settings", service.apply_settings(apply))
+}
+
+#[tauri::command(async)]
+fn rollback_settings(service: State<'_, Service>, revision: i64) -> Result<(), String> {
+    traced("rollback_settings", service.rollback_settings(revision))
+}
+
 /// macOS 26 Liquid Glass behind the transparent web view; on older systems
 /// the translucent window-background material (the same look as Finder's
 /// sidebars). The UI tints it with the site's page colour.
@@ -144,6 +193,13 @@ fn main() {
             install_update,
             set_release_token,
             forget_release_token,
+            manage_workspace,
+            banks,
+            preview_csv_import,
+            commit_csv_import,
+            preview_settings,
+            apply_settings,
+            rollback_settings,
         ])
         .setup(|app| {
             update::schedule(app.handle().clone());

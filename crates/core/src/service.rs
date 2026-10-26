@@ -170,4 +170,79 @@ impl Service {
     pub fn status(&self) -> Result<DataStatus, String> {
         self.read(|store, _| Ok(store.status()?))
     }
+
+    /// The Import, Status and Settings screens' data.
+    pub fn manage_workspace(&self) -> Result<finance_types::manage::ManageWorkspace, String> {
+        let last_write = last_write(&self.path);
+        self.read(|store, snap| crate::manage::workspace(store, snap, last_write))
+    }
+
+    pub fn banks(&self) -> Result<finance_types::manage::BanksReport, String> {
+        self.read(|store, _| crate::manage::banks(store))
+    }
+
+    pub fn preview_csv_import(
+        &self,
+        upload: finance_types::manage::CsvUpload,
+    ) -> Result<finance_types::manage::CsvPreview, String> {
+        self.read(|store, snap| {
+            let conn = store.connection();
+            let targets = crate::manage::import_targets(conn, snap)?;
+            crate::writes::csv_import::preview(
+                conn,
+                &targets,
+                &upload.content,
+                &upload.filename,
+                &upload.account_id,
+            )
+        })
+    }
+
+    pub fn commit_csv_import(
+        &self,
+        commit: finance_types::manage::CsvCommit,
+    ) -> Result<finance_types::manage::CsvCommitResult, String> {
+        self.write(|w, snap| {
+            let targets = crate::manage::import_targets(&w.tx, snap)?;
+            crate::writes::csv_import::commit(w, &targets, &commit)
+        })
+    }
+
+    pub fn preview_settings(
+        &self,
+        form: finance_types::manage::SettingsForm,
+    ) -> Result<finance_types::manage::SettingsPreview, String> {
+        self.read(|store, snap| {
+            crate::writes::settings::preview(
+                store.connection(),
+                &form,
+                &crate::manage::salary_accounts(snap),
+            )
+        })
+    }
+
+    pub fn apply_settings(
+        &self,
+        apply: finance_types::manage::SettingsApply,
+    ) -> Result<i64, String> {
+        self.write(|w, snap| {
+            crate::writes::settings::apply(w, &apply, &crate::manage::salary_accounts(snap))
+        })
+    }
+
+    pub fn rollback_settings(&self, revision: i64) -> Result<(), String> {
+        self.write(|w, _| crate::writes::settings::rollback(w, revision))
+    }
+}
+
+/// When the database (or its write-ahead log) last changed, RFC 3339 UTC.
+fn last_write(path: &std::path::Path) -> Option<String> {
+    let mut wal = path.as_os_str().to_owned();
+    wal.push("-wal");
+    [path.to_path_buf(), PathBuf::from(wal)]
+        .iter()
+        .filter_map(|p| std::fs::metadata(p).ok()?.modified().ok())
+        .max()
+        .and_then(|t| jiff::Timestamp::try_from(t).ok())
+        .map(|t| t.strftime("%Y-%m-%dT%H:%M:%SZ").to_string())
 }

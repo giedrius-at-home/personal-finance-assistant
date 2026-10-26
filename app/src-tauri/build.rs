@@ -11,6 +11,13 @@ const COMMANDS: &[&str] = &[
     "install_update",
     "set_release_token",
     "forget_release_token",
+    "manage_workspace",
+    "banks",
+    "preview_csv_import",
+    "commit_csv_import",
+    "preview_settings",
+    "apply_settings",
+    "rollback_settings",
 ];
 
 fn main() {

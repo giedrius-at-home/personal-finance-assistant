@@ -20,6 +20,13 @@
     "allow-install-update",
     "allow-set-release-token",
     "allow-forget-release-token",
+    "allow-manage-workspace",
+    "allow-banks",
+    "allow-preview-csv-import",
+    "allow-commit-csv-import",
+    "allow-preview-settings",
+    "allow-apply-settings",
+    "allow-rollback-settings",
     "core:event:default"
   ]
 }
