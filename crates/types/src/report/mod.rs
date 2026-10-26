@@ -6,6 +6,7 @@ pub mod allocation;
 pub mod budget;
 pub mod cash;
 pub mod catalog;
+pub mod outlook;
 pub mod plans;
 pub mod reporting;
 pub mod review;
