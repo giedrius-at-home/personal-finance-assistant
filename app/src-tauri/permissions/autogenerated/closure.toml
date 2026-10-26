@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-closure"
+description = "Enables the closure command without any pre-configured scope."
+commands.allow = ["closure"]
+
+[[permission]]
+identifier = "deny-closure"
+description = "Denies the closure command without any pre-configured scope."
+commands.deny = ["closure"]

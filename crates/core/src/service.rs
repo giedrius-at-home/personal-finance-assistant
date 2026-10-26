@@ -7,6 +7,9 @@ use std::sync::Mutex;
 
 use finance_storage::Store;
 use finance_types::DataStatus;
+use finance_types::report::closure::{
+    AccountRoleDraft, ClosureAction, ClosureView, PotDraft, PotView, PotsView, UnclassifiedAccounts,
+};
 use finance_types::report::review::{TransactionSearchQuery, TransactionSearchResult};
 use finance_types::report::{Dashboard, ReviewReport};
 use jiff::Zoned;
@@ -165,6 +168,52 @@ impl Service {
         plan: finance_types::gateway::BudgetPlan,
     ) -> Result<finance_types::gateway::BudgetPlan, String> {
         self.write(|w, snap| crate::writes::budget::save_budget_plan(w, snap, plan))
+    }
+
+    /// The closure screen of `month` (`YYYY-MM-01`).
+    pub fn closure(&self, month: &str) -> Result<ClosureView, String> {
+        self.read(|store, snap| {
+            crate::closure::closure_view(
+                store,
+                snap,
+                crate::closure::parse_month(month)?,
+                &Zoned::now(),
+            )
+        })
+    }
+
+    /// Run one closure step, then return the month's screen as it now stands.
+    /// A sync or finalize first re-reads the data in its own write (bank
+    /// refresh is a later phase), so late arrivals are flagged even when the
+    /// step itself is refused.
+    pub fn closure_action(&self, action: ClosureAction) -> Result<ClosureView, String> {
+        if matches!(
+            action,
+            ClosureAction::Sync { .. } | ClosureAction::Finalize { .. }
+        ) {
+            self.write(|w, snap| crate::writes::closure::prepare(w, snap, &action))?;
+        }
+        let month = self.write(|w, snap| crate::writes::closure::act(w, snap, action))?;
+        self.closure(&month.to_string())
+    }
+
+    /// Every pot (archived too) and the 50 newest pot entries.
+    pub fn pots(&self) -> Result<PotsView, String> {
+        self.read(|store, _| crate::closure::pots_view(store.connection()))
+    }
+
+    pub fn save_pot(&self, pot: PotDraft) -> Result<PotView, String> {
+        self.write(|w, snap| crate::writes::closure::save_pot(w, snap, pot))
+    }
+
+    /// Save an account's closure role; open transfers follow a new route.
+    pub fn save_account_role(&self, role: AccountRoleDraft) -> Result<(), String> {
+        self.write(|w, snap| crate::writes::closure::save_account_role(w, snap, role))
+    }
+
+    /// Accounts without a role, and outflows that look like savings transfers.
+    pub fn unclassified_accounts(&self) -> Result<UnclassifiedAccounts, String> {
+        self.read(|_, snap| Ok(crate::closure::unclassified_accounts(snap)))
     }
 
     pub fn status(&self) -> Result<DataStatus, String> {

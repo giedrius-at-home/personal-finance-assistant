@@ -20,6 +20,26 @@ struct PlanArgs {
 }
 
 #[derive(Deserialize)]
+struct MonthArgs {
+    month: String,
+}
+
+#[derive(Deserialize)]
+struct ClosureActionArgs {
+    action: finance_types::report::closure::ClosureAction,
+}
+
+#[derive(Deserialize)]
+struct PotArgs {
+    pot: finance_types::report::closure::PotDraft,
+}
+
+#[derive(Deserialize)]
+struct RoleArgs {
+    role: finance_types::report::closure::AccountRoleDraft,
+}
+
+#[derive(Deserialize)]
 struct SearchArgs {
     query: TransactionSearchQuery,
 }
@@ -129,6 +149,24 @@ fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
             let a: SearchArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
             ok(service.search(&a.query))
         }
+        "closure" => {
+            let a: MonthArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
+            ok(service.closure(&a.month))
+        }
+        "closure_action" => {
+            let a: ClosureActionArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
+            ok(service.closure_action(a.action))
+        }
+        "closure_pots" => ok(service.pots()),
+        "save_pot" => {
+            let a: PotArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
+            ok(service.save_pot(a.pot))
+        }
+        "save_account_role" => {
+            let a: RoleArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
+            ok(service.save_account_role(a.role))
+        }
+        "unclassified_accounts" => ok(service.unclassified_accounts()),
         // Updates only exist in the app; show a plausible state for layout checks.
         "update_status" => {
             let available = std::env::var("DEV_FAKE_UPDATE").ok().map(|version| {

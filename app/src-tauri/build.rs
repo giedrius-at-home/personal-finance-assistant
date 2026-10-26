@@ -11,6 +11,12 @@ const COMMANDS: &[&str] = &[
     "install_update",
     "set_release_token",
     "forget_release_token",
+    "closure",
+    "closure_action",
+    "closure_pots",
+    "save_pot",
+    "save_account_role",
+    "unclassified_accounts",
 ];
 
 fn main() {

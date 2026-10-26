@@ -20,6 +20,12 @@
     "allow-install-update",
     "allow-set-release-token",
     "allow-forget-release-token",
+    "allow-closure",
+    "allow-closure-action",
+    "allow-closure-pots",
+    "allow-save-pot",
+    "allow-save-account-role",
+    "allow-unclassified-accounts",
     "core:event:default"
   ]
 }

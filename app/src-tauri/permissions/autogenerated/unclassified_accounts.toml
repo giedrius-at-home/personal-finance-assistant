@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-unclassified-accounts"
+description = "Enables the unclassified_accounts command without any pre-configured scope."
+commands.allow = ["unclassified_accounts"]
+
+[[permission]]
+identifier = "deny-unclassified-accounts"
+description = "Denies the unclassified_accounts command without any pre-configured scope."
+commands.deny = ["unclassified_accounts"]

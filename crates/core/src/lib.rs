@@ -6,6 +6,7 @@ pub mod allocation;
 pub mod budget;
 pub mod cash;
 pub mod catalog;
+pub mod closure;
 pub mod context;
 pub mod daily;
 pub mod dashboard;
