@@ -23,6 +23,12 @@ const COMMANDS: &[&str] = &[
     "decline_bill_match",
     "create_planned_payment",
     "archive_planned_payment",
+    "closure",
+    "closure_action",
+    "closure_pots",
+    "save_pot",
+    "save_account_role",
+    "unclassified_accounts",
 ];
 
 fn main() {

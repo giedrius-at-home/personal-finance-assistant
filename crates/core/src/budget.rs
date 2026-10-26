@@ -703,10 +703,14 @@ mod tests {
 
     #[test]
     fn purchase_after_early_cutoff_lands_in_the_next_month() {
-        let periods = vec![serde_json::json!({
-            "month": "2026-09-01",
-            "cutoff_at": "2026-09-30T09:00:00Z",
-        })];
+        let periods: Vec<finance_types::report::closure::MonthPeriod> = vec![
+            serde_json::from_value(serde_json::json!({
+                "month": "2026-09-01",
+                "starts_at": "2026-09-01T00:00:00+00:00",
+                "cutoff_at": "2026-09-30T09:00:00Z",
+            }))
+            .unwrap(),
+        ];
         let bought: Zoned = "2026-09-30T11:00:00+00:00[UTC]".parse().unwrap();
         let now: Zoned = "2026-09-30T12:00:00+00:00[UTC]".parse().unwrap();
         let resolver = PeriodResolver::new(

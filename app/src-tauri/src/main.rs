@@ -10,6 +10,9 @@ mod update;
 use finance_core::service::Service;
 use finance_secrets::{Item, Secret};
 use finance_types::gateway::BudgetPlan;
+use finance_types::report::closure::{
+    AccountRoleDraft, ClosureAction, ClosureView, PotDraft, PotView, PotsView, UnclassifiedAccounts,
+};
 use finance_types::report::review::{TransactionSearchQuery, TransactionSearchResult};
 use finance_types::report::{Dashboard, ReviewReport};
 use finance_types::{DataStatus, UpdateStatus};
@@ -120,6 +123,39 @@ fn archive_planned_payment(service: State<'_, Service>, plan_id: String) -> Resu
         "archive_planned_payment",
         service.archive_planned_payment(&plan_id),
     )
+}
+
+#[tauri::command(async)]
+fn closure(service: State<'_, Service>, month: String) -> Result<ClosureView, String> {
+    traced("closure", service.closure(&month))
+}
+
+#[tauri::command(async)]
+fn closure_action(
+    service: State<'_, Service>,
+    action: ClosureAction,
+) -> Result<ClosureView, String> {
+    traced("closure_action", service.closure_action(action))
+}
+
+#[tauri::command(async)]
+fn closure_pots(service: State<'_, Service>) -> Result<PotsView, String> {
+    traced("closure_pots", service.pots())
+}
+
+#[tauri::command(async)]
+fn save_pot(service: State<'_, Service>, pot: PotDraft) -> Result<PotView, String> {
+    traced("save_pot", service.save_pot(pot))
+}
+
+#[tauri::command(async)]
+fn save_account_role(service: State<'_, Service>, role: AccountRoleDraft) -> Result<(), String> {
+    traced("save_account_role", service.save_account_role(role))
+}
+
+#[tauri::command(async)]
+fn unclassified_accounts(service: State<'_, Service>) -> Result<UnclassifiedAccounts, String> {
+    traced("unclassified_accounts", service.unclassified_accounts())
 }
 
 #[tauri::command(async)]
@@ -273,6 +309,12 @@ fn main() {
             decline_bill_match,
             create_planned_payment,
             archive_planned_payment,
+            closure,
+            closure_action,
+            closure_pots,
+            save_pot,
+            save_account_role,
+            unclassified_accounts,
         ])
         .setup(|app| {
             update::schedule(app.handle().clone());

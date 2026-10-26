@@ -60,5 +60,6 @@ pub fn invalid(message: impl Into<String>) -> Error {
 pub mod bills;
 pub mod budget;
 pub mod categories;
+pub mod closure;
 pub mod groups;
 pub mod plans;

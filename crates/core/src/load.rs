@@ -62,8 +62,8 @@ pub struct Snapshot {
     pub declined_bill_matches: HashSet<(String, String)>,
     pub deferred_sources: HashSet<String>,
     pub account_roles: BTreeMap<String, AccountRole>,
-    /// `month_periods` payloads, oldest month first.
-    pub month_periods: Vec<serde_json::Value>,
+    /// Month closures, oldest month first.
+    pub month_periods: Vec<finance_types::report::closure::MonthPeriod>,
     /// When each transaction was first seen (`firefly:<id>` → instant).
     pub first_observed: HashMap<String, Timestamp>,
     pub daily_review_policy: Option<DailyReviewPolicy>,
@@ -277,7 +277,7 @@ fn rows<T>(
     Ok(out)
 }
 
-fn payloads<T: DeserializeOwned>(conn: &Connection, sql: &str) -> Result<Vec<T>> {
+pub(crate) fn payloads<T: DeserializeOwned>(conn: &Connection, sql: &str) -> Result<Vec<T>> {
     rows(conn, sql, |r| r.get::<_, String>(0))?
         .iter()
         .map(|p| parse(p))

@@ -7,6 +7,8 @@ use jiff::civil::Date;
 use jiff::tz::TimeZone;
 use jiff::{Timestamp, Zoned};
 
+use finance_types::report::closure::MonthPeriod;
+
 use crate::load::parse_instant;
 use crate::model::Tx;
 
@@ -30,6 +32,8 @@ pub fn month_start(day: Date) -> Date {
 pub struct Cutoff {
     pub month: Date,
     pub cutoff_at: Option<Timestamp>,
+    /// `cutoff_at` as stored, so a derived period start keeps its spelling.
+    pub stored: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -40,21 +44,22 @@ pub struct PeriodResolver {
 }
 
 impl PeriodResolver {
-    /// `periods` are `month_periods` payloads.
+    /// `periods` are the stored month closures.
     pub fn new(
-        periods: &[serde_json::Value],
+        periods: &[MonthPeriod],
         observed: HashMap<String, Timestamp>,
         zone: TimeZone,
     ) -> Self {
         let cutoffs = periods
             .iter()
             .filter_map(|p| {
-                let month: Date = p.get("month")?.as_str()?.parse().ok()?;
-                let cutoff_at = p
-                    .get("cutoff_at")
-                    .and_then(|c| c.as_str())
-                    .and_then(parse_instant);
-                Some(Cutoff { month, cutoff_at })
+                let month: Date = p.month.parse().ok()?;
+                let cutoff_at = p.cutoff_at.as_deref().and_then(parse_instant);
+                Some(Cutoff {
+                    month,
+                    cutoff_at,
+                    stored: p.cutoff_at.clone().filter(|_| cutoff_at.is_some()),
+                })
             })
             .collect();
         Self {
@@ -68,11 +73,15 @@ impl PeriodResolver {
         &self.zone
     }
 
-    fn cutoff(&self, month: Date) -> Option<Timestamp> {
+    /// The first closure of `month` that has a cutoff.
+    fn closed(&self, month: Date) -> Option<&Cutoff> {
         self.cutoffs
             .iter()
-            .find(|c| c.month == month)
-            .and_then(|c| c.cutoff_at)
+            .find(|c| c.month == month && c.cutoff_at.is_some())
+    }
+
+    fn cutoff(&self, month: Date) -> Option<Timestamp> {
+        self.closed(month).and_then(|c| c.cutoff_at)
     }
 
     /// The booking date's calendar month, unless that month is closed and the
@@ -117,6 +126,18 @@ impl PeriodResolver {
         }
     }
 
+    /// [`PeriodResolver::period_start`] as the Python service serialized it:
+    /// the local midnight with its offset, or the stored early cutoff.
+    pub fn period_start_stamp(&self, month: Date) -> String {
+        let start = self.period_start(month);
+        match self.closed(shift_month(month, -1)) {
+            Some(c) if c.cutoff_at == Some(start.timestamp()) => {
+                c.stored.clone().unwrap_or_default()
+            }
+            _ => start.strftime("%Y-%m-%dT%H:%M:%S%:z").to_string(),
+        }
+    }
+
     /// `period_start` as a local date.
     pub fn period_start_date(&self, month: Date) -> Date {
         self.period_start(month).date()
@@ -129,10 +150,19 @@ mod tests {
     use jiff::civil::date;
 
     fn resolver() -> PeriodResolver {
-        let periods = vec![serde_json::json!({
-            "month": "2026-09-01",
-            "cutoff_at": "2026-09-28T10:00:00Z",
-        })];
+        let periods = vec![MonthPeriod {
+            month: "2026-09-01".into(),
+            starts_at: "2026-09-01T00:00:00+02:00".into(),
+            cutoff_at: Some("2026-09-28T10:00:00Z".into()),
+            status: Default::default(),
+            settled_at: None,
+            settled_snapshot: None,
+            missing_banks: Vec::new(),
+            allocations: Vec::new(),
+            revision: 0,
+            reviewed_through: None,
+            reopened_at: None,
+        }];
         PeriodResolver::new(
             &periods,
             HashMap::new(),
@@ -158,5 +188,13 @@ mod tests {
         );
         assert_eq!(r.period_for(date(2026, 9, 28), None), date(2026, 9, 1));
         assert_eq!(r.period_start_date(date(2026, 10, 1)), date(2026, 9, 28));
+        assert_eq!(
+            r.period_start_stamp(date(2026, 10, 1)),
+            "2026-09-28T10:00:00Z"
+        );
+        assert_eq!(
+            r.period_start_stamp(date(2026, 11, 1)),
+            "2026-11-01T00:00:00+01:00"
+        );
     }
 }
