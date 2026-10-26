@@ -16,9 +16,10 @@ use leptos::prelude::*;
 use crate::format;
 
 /// Where the site shows `MonthClosureBanner` (`month-closure.tsx`): the nudge
-/// to close last month, above the Overview. Month closing is ported
-/// separately; it plugs in here.
-fn month_closure_banner() -> impl IntoView {}
+/// to close last month, above the Overview.
+fn month_closure_banner() -> impl IntoView {
+    crate::pages::closure::MonthClosureBanner()
+}
 
 #[component]
 pub fn Overview() -> impl IntoView {

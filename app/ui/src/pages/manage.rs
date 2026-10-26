@@ -8,8 +8,6 @@ mod ui;
 
 use leptos::prelude::*;
 
-use crate::ds::{Card, EmptyState};
-
 #[component]
 pub fn Banks() -> impl IntoView {
     banks::Banks()
@@ -17,7 +15,7 @@ pub fn Banks() -> impl IntoView {
 
 #[component]
 pub fn CloseMonth() -> impl IntoView {
-    view! { <Card><EmptyState title="Close month" /></Card> }
+    crate::pages::closure::MonthClosure()
 }
 
 #[component]
