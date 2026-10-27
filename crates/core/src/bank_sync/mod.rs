@@ -183,9 +183,11 @@ pub fn preflight(
             continue;
         }
         let iban = details_iban(api, uid)?;
-        let bound = iban.is_empty()
-            && (connection.hash_bound(uid, target, &ledger.iban)
-                || connection.no_iban_bound(uid, target, &ledger.iban));
+        // A pocket the owner confirmed has no IBAN of its own in the ledger;
+        // some banks report the main account's IBAN for it, so the bank's
+        // answer does not matter there.
+        let bound = connection.no_iban_bound(uid, target, &ledger.iban)
+            || (iban.is_empty() && connection.hash_bound(uid, target, &ledger.iban));
         if !bound && (iban.is_empty() || iban != ledger.iban) {
             return Err(SyncStatus::MappingMismatch);
         }
@@ -903,6 +905,46 @@ mod tests {
             preflight(&mut limited, &connection(), &own(), None),
             Err(SyncStatus::RateLimited)
         );
+    }
+
+    #[test]
+    fn confirmed_pocket_passes_whatever_iban_the_bank_reports() {
+        let mut own = own();
+        own.insert(
+            9,
+            OwnAccount {
+                id: 9,
+                name: "Revolut Fun out".into(),
+                kind: "asset".into(),
+                active: true,
+                iban: String::new(),
+            },
+        );
+        let mut c = connection();
+        c.accounts.insert("pocket".into(), 9);
+        let session = json!({"status": "AUTHORIZED", "accounts": ["uid-1", "pocket"]});
+        let main = json!({"account_id": {"iban": "NL01BANK0000000001"}});
+        let script = || {
+            Script::new(vec![
+                ("sessions/s1", Ok(session.clone())),
+                ("accounts/uid-1/details", Ok(main.clone())),
+                ("accounts/pocket/details", Ok(main.clone())),
+            ])
+        };
+        assert_eq!(
+            preflight(&mut script(), &c, &own, None),
+            Err(SyncStatus::MappingMismatch)
+        );
+        c.verified_identity.insert(
+            "pocket".into(),
+            Identity {
+                target: 9,
+                sessions: vec!["s1".into()],
+                iban_sha256: None,
+                no_iban: true,
+            },
+        );
+        assert_eq!(preflight(&mut script(), &c, &own, None), Ok(None));
     }
 
     #[test]
