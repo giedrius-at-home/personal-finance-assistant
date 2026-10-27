@@ -17,12 +17,40 @@ export async function dev_invoke(cmd, args) {
   if (!r.ok) throw body;
   return body;
 }
+// Disclosures the owner opened stay open when a reload re-renders them. A
+// disclosure is known by its summary text and its position among those with
+// the same text.
+const openDetails = new Set();
+function detailsKey(el) {
+  const summary = el.querySelector(':scope > summary');
+  const text = summary ? summary.textContent.trim() : '';
+  const same = [...document.querySelectorAll('details')].filter((d) => {
+    const s = d.querySelector(':scope > summary');
+    return (s ? s.textContent.trim() : '') === text;
+  });
+  return text + '#' + same.indexOf(el);
+}
+export function keep_details_open() {
+  document.addEventListener('toggle', (e) => {
+    if (!(e.target instanceof HTMLDetailsElement)) return;
+    const key = detailsKey(e.target);
+    if (e.target.open) openDetails.add(key); else openDetails.delete(key);
+  }, true);
+  new MutationObserver(() => {
+    if (!openDetails.size) return;
+    for (const d of document.querySelectorAll('details:not([open])')) {
+      if (openDetails.has(detailsKey(d))) d.open = true;
+    }
+  }).observe(document.body, { childList: true, subtree: true });
+}
 export function listen(event, callback) {
   if (window.__TAURI__ && window.__TAURI__.event) window.__TAURI__.event.listen(event, () => callback());
 }
 ")]
 extern "C" {
     fn in_tauri() -> bool;
+    /// Keep open `<details>` open across re-renders (see the JS above).
+    pub fn keep_details_open();
     /// Run `callback` whenever the backend emits `event` (no-op in a browser).
     pub fn listen(event: &str, callback: &Closure<dyn FnMut()>);
     #[wasm_bindgen(catch)]

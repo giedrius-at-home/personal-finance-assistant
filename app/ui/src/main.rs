@@ -348,5 +348,6 @@ fn ManageTabs() -> impl IntoView {
 
 fn main() {
     console_error_panic_hook::set_once();
+    api::keep_details_open();
     leptos::mount::mount_to_body(App);
 }
