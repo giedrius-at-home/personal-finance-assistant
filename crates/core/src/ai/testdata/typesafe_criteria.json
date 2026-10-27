@@ -1,0 +1,19 @@
+{
+ "google play": "An explicit Google Play app-store merchant charge. Google Pay is a payment method and is not Google Play. A shop paid with Google Pay belongs to the shop's category.",
+ "google one": "An explicit Google One storage-service charge. Google Pay wallet payments and Google Play alone do not identify Google One.",
+ "transport": "Public transport, fares and returned transit-card balances, including OVpay and OV-chipkaart. Not internet bills or travel-retail shopping.",
+ "vue movie pass": "Explicit Vue moviepas/movie-pass recurring invoice. Not an ordinary Vue cinema merchant charge without pass evidence.",
+ "other internet bill": "Payment for internet access from a telecom provider. A URL, online purchase, app store or marketplace alone is not evidence.",
+ "internet": "An explicit internet-access bill or a shared internet-bill repayment.",
+ "other phone bill": "Mobile/telephone service from a provider such as Lebara or Pildyk. An incoming bank-card top-up or returned transit-card balance is not phone service.",
+ "revpoints": "Purchase of Revolut loyalty points, including RevPoints Spare Change. Not an internal transfer or a savings deposit.",
+ "revolut": "Revolut account funding or bank movement. Not RevPoints purchases; use a more specific purpose when stated.",
+ "money transfer": "Explicit account funding or money movement without an identified purchase purpose. Not ordinary retail spending or a named shared purchase.",
+ "account top-up": "Incoming funding of a bank/payment account by a payment card. Not a phone recharge, salary or a purchase.",
+ "cash": "Actual cash withdrawal or cash account movement. Not a fallback for a named shop purchase or a repayment.",
+ "credit card": "Payment or settlement of a credit-card account; not the purpose of the underlying purchases.",
+ "klarna": "Klarna payment with no more specific purchase purpose stated. If the memo names airline tickets, use Flights/Travel instead.",
+ "investments": "Investment purchases or movement into/out of an investment account. Not consumption spending or drinks.",
+ "subscriptions": "An explicitly recurring service. A merchant name alone does not establish recurrence; prefer a specific supported merchant/purpose.",
+ "income": "Income earned or received, excluding account funding, refunds, returned balances, reimbursements and savings movements."
+}

@@ -43,7 +43,10 @@ fn is_proposal_id(id: &str) -> bool {
 }
 
 /// A pending proposal and its stored payload.
-fn get_pending(w: &Writer<'_>, proposal_id: &str) -> Result<Option<(CategoryProposal, String)>> {
+pub(crate) fn get_pending(
+    w: &Writer<'_>,
+    proposal_id: &str,
+) -> Result<Option<(CategoryProposal, String)>> {
     let payload: Option<String> = w
         .tx
         .query_row(
@@ -69,7 +72,7 @@ fn ledger_id(source: &ProposalSource) -> Option<i64> {
 }
 
 /// `json.dumps(identity)`: the `review_deferrals` / `transaction_details` key.
-fn identity_key(source: &ProposalSource) -> String {
+pub(crate) fn identity_key(source: &ProposalSource) -> String {
     format!(
         "[\"{}\", \"{}\", \"{}\"]",
         source.system, source.entity, source.external_id
@@ -85,7 +88,7 @@ fn source_identity(source: &ProposalSource) -> String {
 }
 
 /// `_batch_token`: binds an approval to the exact proposals shown.
-fn batch_token(payloads: &[&str]) -> String {
+pub(crate) fn batch_token(payloads: &[&str]) -> String {
     let mut canonical: Vec<String> = payloads
         .iter()
         .map(|p| {
@@ -102,7 +105,7 @@ fn batch_token(payloads: &[&str]) -> String {
     sha256_hex(&canonical.join("\n"))
 }
 
-fn approve(w: &Writer<'_>, ids: &[&str], token: &str) -> Result<()> {
+pub(crate) fn approve(w: &Writer<'_>, ids: &[&str], token: &str) -> Result<()> {
     let now = iso_now(w);
     for id in ids {
         w.tx.execute(
@@ -476,7 +479,7 @@ pub(crate) fn save_entry(w: &Writer<'_>, entry: &DailyReviewEntry) -> Result<()>
 }
 
 /// `categorisation_runtime.has_merchant_description`.
-fn has_merchant_description(description: Option<&str>) -> bool {
+pub fn has_merchant_description(description: Option<&str>) -> bool {
     description.map(str::trim).is_some_and(|d| {
         !d.is_empty()
             && ![
@@ -718,7 +721,7 @@ pub fn reconcile_daily_review(
 mod tests;
 
 /// Idempotently store a proposal; only a superseded row is replaced.
-fn record_proposal(w: &Writer<'_>, proposal: &CategoryProposal) -> Result<()> {
+pub(crate) fn record_proposal(w: &Writer<'_>, proposal: &CategoryProposal) -> Result<()> {
     let created = iso_now(w);
     w.put_json(
         "INSERT OR IGNORE INTO category_proposals (proposal_id, source_system, source_entity, \

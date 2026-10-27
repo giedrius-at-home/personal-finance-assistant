@@ -1427,9 +1427,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "finance-ai"
+version = "0.1.0"
+dependencies = [
+ "finance-core",
+ "finance-secrets",
+ "finance-types",
+ "jiff",
+ "reqwest",
+ "serde_json",
+]
+
+[[package]]
 name = "finance-app"
 version = "0.1.0"
 dependencies = [
+ "finance-ai",
  "finance-bank",
  "finance-core",
  "finance-notify",
@@ -1475,12 +1488,14 @@ dependencies = [
  "finance-types",
  "jiff",
  "regex",
+ "roxmltree",
  "rusqlite",
  "rust_decimal",
  "serde",
  "serde_json",
  "sha2",
  "thiserror 2.0.21",
+ "url",
 ]
 
 [[package]]
@@ -1488,6 +1503,7 @@ name = "finance-devserver"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "finance-ai",
  "finance-core",
  "finance-storage",
  "finance-types",
@@ -4259,6 +4275,12 @@ dependencies = [
  "untrusted 0.9.0",
  "windows-sys 0.52.0",
 ]
+
+[[package]]
+name = "roxmltree"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
 
 [[package]]
 name = "rsqlite-vfs"

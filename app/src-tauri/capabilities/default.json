@@ -67,6 +67,13 @@
     "allow-set-smtp-password",
     "allow-forget-smtp-password",
     "allow-send-test-email",
+    "allow-ai-status",
+    "allow-save-ai-settings",
+    "allow-set-typesafe-key",
+    "allow-forget-typesafe-key",
+    "allow-suggest-categories",
+    "allow-suggest-spending-group",
+    "allow-research-merchant",
     "core:event:default"
   ]
 }

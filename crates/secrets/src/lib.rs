@@ -21,6 +21,8 @@ pub enum Item {
     BankConsent(Bank),
     /// The SMTP (app) password the daily spending email signs in with.
     SmtpPassword,
+    /// The TypeSafe API key for Jev category suggestions.
+    TypeSafeApiKey,
 }
 
 /// The banks with a stored consent.
@@ -54,6 +56,7 @@ impl Item {
             Self::BankConsent(Bank::Revolut) => "bank-consent-revolut",
             Self::BankConsent(Bank::Swedbank) => "bank-consent-swedbank",
             Self::SmtpPassword => "smtp-password",
+            Self::TypeSafeApiKey => "typesafe-api-key",
         }
     }
 }

@@ -14,6 +14,10 @@ use finance_types::report::review::TransactionSearchQuery;
 use serde::Deserialize;
 use serde_json::Value;
 
+/// One AI runner for the server's lifetime, without Keychain access.
+static ASSISTANT: std::sync::LazyLock<finance_ai::Assistant> =
+    std::sync::LazyLock::new(|| finance_ai::Assistant::new(false));
+
 #[derive(Deserialize)]
 struct PlanArgs {
     plan: finance_types::gateway::BudgetPlan,
@@ -259,6 +263,21 @@ fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
         | "bank_link_start"
         | "bank_link_finish"
         | "bank_link_confirm" => Err("Bank sync runs in the app only.".to_owned()),
+        // AI suggestions against the local Ollama; TypeSafe needs the
+        // Keychain, so its key cannot be set here.
+        "ai_status" => ok(ASSISTANT.status(service)),
+        "save_ai_settings" => ok(ASSISTANT.save_settings(service, arg(args, "settings")?)),
+        "set_typesafe_key" => ok(ASSISTANT.set_typesafe_key(&arg::<String>(args, "key")?)),
+        "forget_typesafe_key" => ok(ASSISTANT.forget_typesafe_key()),
+        "suggest_categories" => ok(ASSISTANT.suggest_now(service)),
+        "suggest_spending_group" => {
+            ok(ASSISTANT.suggest_group(service, &arg::<String>(args, "category")?))
+        }
+        "research_merchant" => ok(ASSISTANT.research_merchant(
+            service,
+            &arg::<String>(args.clone(), "proposal")?,
+            &arg::<String>(args, "public_name")?,
+        )),
         "preview_csv_import" => ok(service.preview_csv_import(arg(args, "upload")?)),
         "commit_csv_import" => ok(service.commit_csv_import(arg(args, "commit")?)),
         "preview_settings" => ok(service.preview_settings(arg(args, "form")?)),

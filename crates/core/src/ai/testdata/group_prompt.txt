@@ -1,0 +1,1 @@
+{"category": "Caf\u00e9 Noir", "reviewed_examples": [{"category": "Albert Heijn", "group": "Groceries"}], "allowed_groups": ["Subscriptions & recurring", "Groceries", "Eating out", "Home & household", "Housing & utilities", "Transport", "Travel", "Entertainment", "Shopping", "Health & personal care", "Education & work", "Fees & taxes", "Other"]}

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-suggest-spending-group"
+description = "Enables the suggest_spending_group command without any pre-configured scope."
+commands.allow = ["suggest_spending_group"]
+
+[[permission]]
+identifier = "deny-suggest-spending-group"
+description = "Denies the suggest_spending_group command without any pre-configured scope."
+commands.deny = ["suggest_spending_group"]

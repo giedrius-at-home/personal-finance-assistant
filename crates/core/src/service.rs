@@ -249,6 +249,53 @@ impl Service {
         &self,
         f: impl FnOnce(&Writer<'_>, &Snapshot) -> crate::Result<T>,
     ) -> Result<T, String> {
+        self.write_then(f, true)
+    }
+
+    /// [`Service::write`] for background work: the cached snapshot is
+    /// dropped only when the transaction changed rows.
+    pub(crate) fn write_if_changed<T>(
+        &self,
+        f: impl FnOnce(&Writer<'_>, &Snapshot) -> crate::Result<T>,
+    ) -> Result<T, String> {
+        self.write_then(f, false)
+    }
+
+    /// A write that needs no snapshot and leaves the cached one in place;
+    /// the caller refreshes when its work is done.
+    pub(crate) fn write_raw<T>(
+        &self,
+        f: impl FnOnce(&Writer<'_>) -> crate::Result<T>,
+    ) -> Result<T, String> {
+        let mut guard = self
+            .writer
+            .lock()
+            .map_err(|_| "store-poisoned".to_owned())?;
+        if guard.is_none() {
+            if !self.path.exists() {
+                return Err(NO_DATA.to_owned());
+            }
+            backup(&self.path).map_err(|e| format!("backup failed: {e}"))?;
+            *guard = Some(Store::open(&self.path).map_err(|e| e.to_string())?);
+        }
+        let store = guard.as_mut().ok_or_else(|| NO_DATA.to_owned())?;
+        (|| {
+            let writer = Writer {
+                tx: store.connection_mut().transaction()?,
+                now: Zoned::now(),
+            };
+            let value = f(&writer)?;
+            writer.tx.commit()?;
+            Ok::<T, crate::Error>(value)
+        })()
+        .map_err(|e| e.to_string())
+    }
+
+    fn write_then<T>(
+        &self,
+        f: impl FnOnce(&Writer<'_>, &Snapshot) -> crate::Result<T>,
+        always_refresh: bool,
+    ) -> Result<T, String> {
         let snapshot = {
             let mut snap = None;
             self.read(|_, s| {
@@ -266,6 +313,7 @@ impl Service {
             *guard = Some(Store::open(&self.path).map_err(|e| e.to_string())?);
         }
         let store = guard.as_mut().ok_or_else(|| NO_DATA.to_owned())?;
+        let before = store.connection().total_changes();
         let result = (|| {
             let writer = Writer {
                 tx: store.connection_mut().transaction()?,
@@ -276,8 +324,11 @@ impl Service {
             Ok::<T, crate::Error>(value)
         })()
         .map_err(|e| e.to_string());
+        let changed = store.connection().total_changes() != before;
         drop(guard);
-        self.refresh();
+        if always_refresh || changed {
+            self.refresh();
+        }
         result
     }
 

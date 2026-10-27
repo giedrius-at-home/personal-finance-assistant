@@ -5,6 +5,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod ai;
 mod bank;
 mod model;
 mod notify;
@@ -421,6 +422,7 @@ fn main() {
         .manage(Updates::default())
         .manage(finance_bank::Syncer::default())
         .manage(model::Model::default())
+        .manage(finance_ai::Assistant::default())
         .invoke_handler(tauri::generate_handler![
             dashboard,
             review,
@@ -482,6 +484,13 @@ fn main() {
             notify::send_test_email,
             model::forecast_model_status,
             model::download_forecast_model,
+            ai::ai_status,
+            ai::save_ai_settings,
+            ai::set_typesafe_key,
+            ai::forget_typesafe_key,
+            ai::suggest_categories,
+            ai::suggest_spending_group,
+            ai::research_merchant,
         ])
         .setup(|app| {
             update::schedule(app.handle().clone());
@@ -489,6 +498,7 @@ fn main() {
             notify::register(app.handle());
             notify::schedule(app.handle().clone());
             model::install(app.handle());
+            ai::schedule(app.handle().clone());
             #[cfg(target_os = "macos")]
             if let Some(window) = app.get_webview_window("main") {
                 apply_glass(&window);

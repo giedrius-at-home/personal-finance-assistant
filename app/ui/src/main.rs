@@ -183,6 +183,8 @@ fn App() -> impl IntoView {
         revision.try_update(|n| *n += 1);
     });
     api::listen("bank-sync", &on_sync);
+    // A suggestion pass stored proposals or saved categories.
+    api::listen("ai-suggestions", &on_sync);
     on_sync.forget();
     // The forecast model finished a background run: reload for its forecasts.
     let on_forecast = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {

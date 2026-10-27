@@ -58,6 +58,13 @@ const COMMANDS: &[&str] = &[
     "set_smtp_password",
     "forget_smtp_password",
     "send_test_email",
+    "ai_status",
+    "save_ai_settings",
+    "set_typesafe_key",
+    "forget_typesafe_key",
+    "suggest_categories",
+    "suggest_spending_group",
+    "research_merchant",
 ];
 
 fn main() {

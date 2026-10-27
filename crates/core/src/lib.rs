@@ -2,6 +2,7 @@
 //! and decisions every screen shows. A Rust port of the old Python service;
 //! each module names the Python module it replaces.
 
+pub mod ai;
 pub mod alerts;
 pub mod allocation;
 pub mod bank_sync;

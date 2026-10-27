@@ -35,6 +35,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("schema.sql"),
     include_str!("bank_sync.sql"),
     include_str!("notify.sql"),
+    include_str!("ai.sql"),
 ];
 
 /// `~/Library/Application Support/Finance`.

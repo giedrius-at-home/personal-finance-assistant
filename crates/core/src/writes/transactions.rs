@@ -40,7 +40,7 @@ fn chars(text: &str) -> usize {
     text.chars().count()
 }
 
-pub(crate) fn sha256_hex(text: &str) -> String {
+pub fn sha256_hex(text: &str) -> String {
     Sha256::digest(text.as_bytes())
         .iter()
         .map(|b| format!("{b:02x}"))

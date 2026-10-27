@@ -201,6 +201,7 @@ pub fn Settings() -> impl IntoView {
         })}
         <div class="mb-6 grid gap-4">
             <super::email::EmailCard />
+            <super::ai::AiSuggestions />
             {move || workspace.data.get().and_then(Result::ok).map(|ws| view! { <LocalData ws=ws /> })}
             <ForecastModel />
             <Updates />
