@@ -1,10 +1,10 @@
 //! Manage → Settings: owner preferences with preview, apply, history and
 //! rollback (personal-site `owner-operations.tsx`, "Settings"), plus the app
-//! update panel and the local data facts.
+//! update panel, the forecast model and the local data facts.
 
-use finance_types::UpdateStatus;
 use finance_types::gateway::OwnerSettings;
 use finance_types::manage::{ManageWorkspace, SettingsApply, SettingsForm, SettingsPreview};
+use finance_types::{ForecastModelStatus, UpdateStatus};
 use leptos::html::Input as InputElement;
 use leptos::prelude::*;
 use serde::Serialize;
@@ -202,6 +202,7 @@ pub fn Settings() -> impl IntoView {
         <div class="mb-6 grid gap-4">
             <super::email::EmailCard />
             {move || workspace.data.get().and_then(Result::ok).map(|ws| view! { <LocalData ws=ws /> })}
+            <ForecastModel />
             <Updates />
         </div>
     }
@@ -529,6 +530,111 @@ fn LocalData(ws: ManageWorkspace) -> impl IntoView {
 #[derive(Serialize)]
 struct TokenArgs {
     token: String,
+}
+
+/// Gigabytes with one decimal, for the model download.
+fn gigabytes(bytes: u64) -> String {
+    format!("{:.1} GB", bytes as f64 / 1e9)
+}
+
+/// The daily forecast's TimesFM model: whether it is on this Mac, and a
+/// download from Hugging Face on the owner's click.
+#[component]
+fn ForecastModel() -> impl IntoView {
+    let changed = RwSignal::new(0_u32);
+    let status = load::<ForecastModelStatus, _>("forecast_model_status", move || {
+        changed.track();
+        NoArgs {}
+    });
+    // The backend announces download progress and finished runs.
+    let on_change = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
+        changed.try_update(|n| *n += 1);
+    });
+    crate::api::listen("forecast-model", &on_change);
+    on_change.forget();
+
+    let ops = Ops::new();
+    let busy = ops.busy;
+    let download = move |_| {
+        ops.run("download_forecast_model", NoArgs {}, move |(): ()| {
+            changed.update(|n| *n += 1);
+        });
+    };
+    let body = move |s: ForecastModelStatus| {
+        let line = if let Some(received) = s.downloading {
+            let share = received.saturating_mul(100) / s.download_bytes.max(1);
+            format!(
+                "Downloading… {share}% ({} of {})",
+                gigabytes(received),
+                gigabytes(s.download_bytes)
+            )
+        } else if s.running {
+            "Computing forecasts in the background…".to_owned()
+        } else if s.available {
+            let place = match s.source.as_deref() {
+                Some("huggingface") => "Found in the Hugging Face cache",
+                _ => "Downloaded to this Mac",
+            };
+            match s.last_run_seconds {
+                Some(seconds) => format!("{place} · last run took {seconds:.1} s"),
+                None => place.to_owned(),
+            }
+        } else {
+            "Not on this Mac: daily forecasts use the same-weekday baseline.".to_owned()
+        };
+        let failed = s.error.is_some();
+        let offer = !s.available && s.downloading.is_none();
+        view! {
+            <dl class="mt-5 grid gap-4 sm:grid-cols-3">
+                <div>
+                    <dt class="text-xs text-fg-muted">"Model"</dt>
+                    <dd class="mt-1.5 text-sm">"TimesFM 3.0"</dd>
+                </div>
+                <div class="sm:col-span-2">
+                    <dt class="text-xs text-fg-muted">"Status"</dt>
+                    <dd class="mt-1.5 text-sm tabular-nums">{line}</dd>
+                </div>
+            </dl>
+            {s.error.map(|e| {
+                view! { <p class=cn(["mt-4 text-sm", if failed { "text-negative-fg" } else { "" }])>{format!("Last attempt failed: {e}")}</p> }
+            })}
+            {offer.then(|| {
+                view! {
+                    <div class="mt-5 grid gap-3">
+                        <p class="text-sm text-fg-muted">
+                            {format!(
+                                "Google's time-series model forecasts everyday spending and is kept when it beats the baseline on your own history. The download is {} from Hugging Face (google/timesfm-3.0-pytorch); it runs on this Mac only.",
+                                gigabytes(s.download_bytes),
+                            )}
+                        </p>
+                        <div>
+                            <Button disabled=Signal::derive(move || busy.get()) on_click=Callback::new(download)>
+                                "Download model"
+                            </Button>
+                        </div>
+                    </div>
+                }
+            })}
+        }
+    };
+    view! {
+        <Card>
+            <Eyebrow level=Heading::P>"FORECASTS"</Eyebrow>
+            <CardTitle level=Heading::H2 class="mt-1">"Forecast model"</CardTitle>
+            {move || match status.data.get() {
+                None => view! { <p class="mt-5 text-sm text-fg-muted">"Checking the model…"</p> }.into_any(),
+                Some(Err(e)) => {
+                    view! { <p class="mt-5 text-sm text-fg-muted">{format!("The model is not available here ({e}).")}</p> }
+                        .into_any()
+                }
+                Some(Ok(s)) => body(s).into_any(),
+            }}
+            {move || {
+                let e = ops.error.get();
+                (!e.is_empty()).then(|| view! { <p role="alert" class=cn([super::ui::ERROR, "mt-4"])>{e}</p> })
+            }}
+        </Card>
+    }
 }
 
 /// App updates from the GitHub releases (moved from the old Data screen).

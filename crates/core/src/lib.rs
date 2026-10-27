@@ -13,6 +13,7 @@ pub mod context;
 pub mod daily;
 pub mod dashboard;
 pub mod forecast;
+pub mod forecast_model;
 pub mod goals;
 pub mod groups;
 pub mod limits;

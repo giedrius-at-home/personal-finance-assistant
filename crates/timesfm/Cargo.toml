@@ -1,0 +1,28 @@
+[package]
+name = "finance-timesfm"
+description = "TimesFM 3.0 inference (Google's time-series foundation model) on the CPU, for the daily spending forecast."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+finance-core.workspace = true
+ndarray = { version = "0.17.2", features = ["matrixmultiply-threading"] }
+serde_json.workspace = true
+thiserror.workspace = true
+
+# On macOS, matrix products go to Accelerate's BLAS (Apple's matrix units).
+[target.'cfg(target_os = "macos")'.dependencies]
+blas-src = { version = "0.14.0", default-features = false, features = ["accelerate"] }
+ndarray = { version = "0.17.2", features = ["blas"] }
+
+[dev-dependencies]
+anyhow.workspace = true
+finance-storage.workspace = true
+jiff = "0.2.38"
+serde.workspace = true
+
+[lints]
+workspace = true

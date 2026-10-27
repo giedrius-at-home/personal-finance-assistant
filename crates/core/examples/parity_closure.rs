@@ -44,7 +44,7 @@ fn view(path: &std::path::Path, now: Option<&str>) -> anyhow::Result<()> {
     let snap = Snapshot::load(&store)?;
     let mut out = serde_json::Map::new();
     for month in ["2026-09-01", "2026-10-01"] {
-        let view = closure_view(&store, &snap, parse_month(month)?, &now)?;
+        let view = closure_view(&store, &snap, parse_month(month)?, &now, None)?;
         out.insert(format!("closure_{month}"), serde_json::to_value(view)?);
     }
     out.insert(

@@ -15,6 +15,8 @@ use finance_types::report::{Dashboard, ReviewReport};
 use jiff::Zoned;
 
 use crate::alerts::{Notification, Notifier, Outcome};
+use crate::daily::SeriesForecaster;
+use crate::forecast_model::{ForecastModel, ModelRunner, RunStatus};
 use crate::writes::Writer;
 use crate::{Ctx, Snapshot, dashboard, review};
 
@@ -92,6 +94,8 @@ pub struct Service {
     /// The read-write store, opened on the first write.
     writer: Mutex<Option<Store>>,
     alerts: AlertSink,
+    /// The daily forecast's model (TimesFM), when the app has one.
+    model: Mutex<Option<Arc<ModelRunner>>>,
 }
 
 impl Service {
@@ -101,6 +105,7 @@ impl Service {
             state: Mutex::new(None),
             writer: Mutex::new(None),
             alerts: AlertSink::default(),
+            model: Mutex::new(None),
         }
     }
 
@@ -121,6 +126,66 @@ impl Service {
             Some(n) => self.evaluate_alerts(jiff::Timestamp::now(), n.as_ref()),
             None => self.evaluate_alerts(jiff::Timestamp::now(), &Unavailable),
         }
+    }
+
+    /// Use `model` for daily forecasts from now on (`None`: the weekday
+    /// baseline only). Forecasts it computed before are dropped.
+    pub fn set_forecast_model(&self, model: Option<ForecastModel>) {
+        if let Ok(mut slot) = self.model.lock() {
+            *slot = model.map(|m| Arc::new(ModelRunner::new(m)));
+        }
+    }
+
+    /// The forecast model's background runs, when there is a model.
+    pub fn forecast_model_status(&self) -> Option<RunStatus> {
+        self.runner().map(|r| r.status())
+    }
+
+    fn runner(&self) -> Option<Arc<ModelRunner>> {
+        self.model.lock().ok().and_then(|m| m.clone())
+    }
+
+    /// Run `f` with the daily forecast's model answering from forecasts it
+    /// already computed; a miss starts computing them in the background
+    /// (the model's `on_done` says when they are ready).
+    fn read_forecast<T>(
+        &self,
+        f: impl FnOnce(&Store, &Snapshot, &Zoned, Option<&dyn SeriesForecaster>) -> crate::Result<T>,
+    ) -> Result<T, String> {
+        let runner = self.runner();
+        let now = Zoned::now();
+        self.read(|store, snap| {
+            let Some(runner) = &runner else {
+                return f(store, snap, &now, None);
+            };
+            let cached = runner.cached();
+            let value = f(store, snap, &now, Some(&cached))?;
+            if cached.missed() {
+                runner.start(&cached, self.path.clone(), snap.clone(), now.clone());
+            }
+            Ok(value)
+        })
+    }
+
+    /// [`Service::read_forecast`] as of `now`, in the data's time zone.
+    pub(crate) fn read_forecast_at<T>(
+        &self,
+        now: jiff::Timestamp,
+        f: impl FnOnce(&Store, &Snapshot, &Zoned, Option<&dyn SeriesForecaster>) -> crate::Result<T>,
+    ) -> Result<T, String> {
+        let runner = self.runner();
+        self.read(|store, snap| {
+            let zoned = now.to_zoned(snap.zone.clone());
+            let Some(runner) = &runner else {
+                return f(store, snap, &zoned, None);
+            };
+            let cached = runner.cached();
+            let value = f(store, snap, &zoned, Some(&cached))?;
+            if cached.missed() {
+                runner.start(&cached, self.path.clone(), snap.clone(), zoned.clone());
+            }
+            Ok(value)
+        })
     }
 
     /// Run `f` on the store and a current snapshot (loaded once, then reused
@@ -246,11 +311,13 @@ impl Service {
 
     /// The dashboard as of `now` (the spending email builds it for its slot).
     pub fn dashboard_at(&self, now: &Zoned) -> Result<Dashboard, String> {
-        self.read(|store, snap| dashboard::dashboard(store, snap, now))
+        self.read_forecast_at(now.timestamp(), |store, snap, now, model| {
+            dashboard::dashboard(store, snap, now, model)
+        })
     }
 
     pub fn dashboard(&self) -> Result<Dashboard, String> {
-        self.read(|store, snap| dashboard::dashboard(store, snap, &Zoned::now()))
+        self.read_forecast(|store, snap, now, model| dashboard::dashboard(store, snap, now, model))
     }
 
     pub fn review(&self) -> Result<ReviewReport, String> {
@@ -338,12 +405,13 @@ impl Service {
 
     /// The closure screen of `month` (`YYYY-MM-01`).
     pub fn closure(&self, month: &str) -> Result<ClosureView, String> {
-        self.read(|store, snap| {
+        self.read_forecast(|store, snap, now, model| {
             crate::closure::closure_view(
                 store,
                 snap,
                 crate::closure::parse_month(month)?,
-                &Zoned::now(),
+                now,
+                model,
             )
         })
     }

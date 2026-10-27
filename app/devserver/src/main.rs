@@ -234,6 +234,12 @@ fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
             })
             .map_err(|e| e.to_string())
         }
+        // The forecast model only exists in the app.
+        "forecast_model_status" => serde_json::to_value(finance_types::ForecastModelStatus {
+            download_bytes: 1_322_900_097,
+            ..Default::default()
+        })
+        .map_err(|e| e.to_string()),
         "create_bill" => ok(service.create_bill(request(args)?)),
         "edit_bill" => ok(service.edit_bill(request(args)?)),
         "archive_bill" => ok(service.archive_bill(request(args)?)),

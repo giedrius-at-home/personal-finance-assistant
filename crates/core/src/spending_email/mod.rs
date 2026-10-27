@@ -934,12 +934,12 @@ impl Service {
         writer: &dyn Writer,
         sender: &dyn Sender,
     ) -> std::result::Result<RunOutcome, String> {
-        let built = self.read(|store, snap| {
+        let built = self.read_forecast_at(now, |store, snap, zoned, model| {
             if !fresh(snap, now) {
                 return Ok(None);
             }
-            let zoned = now.to_zoned(snap.zone.clone());
-            let report = crate::dashboard::dashboard(store, snap, &zoned)?;
+            let zoned = zoned.clone();
+            let report = crate::dashboard::dashboard(store, snap, &zoned, model)?;
             let risk = spending_risk(&report, snap, &zoned);
             Ok(Some((report, risk, !snap.accounts.is_empty())))
         })?;
@@ -996,9 +996,9 @@ impl Service {
         settings: &EmailSettings,
         writer: &dyn Writer,
     ) -> std::result::Result<Message, String> {
-        let (report, risk) = self.read(|store, snap| {
-            let zoned = now.to_zoned(snap.zone.clone());
-            let report = crate::dashboard::dashboard(store, snap, &zoned)?;
+        let (report, risk) = self.read_forecast_at(now, |store, snap, zoned, model| {
+            let zoned = zoned.clone();
+            let report = crate::dashboard::dashboard(store, snap, &zoned, model)?;
             let risk = spending_risk(&report, snap, &zoned);
             Ok((report, risk))
         })?;

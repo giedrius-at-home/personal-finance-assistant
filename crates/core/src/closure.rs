@@ -840,8 +840,9 @@ fn suggestion(
     month: Date,
     now: &Zoned,
     entries: &[PotEntryRecord],
+    forecaster: Option<&dyn crate::daily::SeriesForecaster>,
 ) -> Result<Option<SavingsSuggestion>> {
-    let overview = dashboard::dashboard(store, snap, now)?;
+    let overview = dashboard::dashboard(store, snap, now, forecaster)?;
     let Some(allocation) = overview
         .monthly_allocation
         .as_ref()
@@ -870,6 +871,7 @@ pub fn closure_view(
     snap: &Snapshot,
     month: Date,
     now: &Zoned,
+    forecaster: Option<&dyn crate::daily::SeriesForecaster>,
 ) -> Result<ClosureView> {
     let conn = store.connection();
     let periods = &snap.month_periods;
@@ -892,7 +894,7 @@ pub fn closure_view(
             .iter()
             .map(|p| pot_view(p, &balances))
             .collect(),
-        suggestion: suggestion(store, snap, month, now, &entries)?,
+        suggestion: suggestion(store, snap, month, now, &entries, forecaster)?,
         accounts: account_role_views(&accounts_by_id(&snap.accounts), &roles),
         transfer_candidates: candidates(snap, &period),
         period,

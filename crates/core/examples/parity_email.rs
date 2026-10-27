@@ -73,7 +73,7 @@ fn main() -> anyhow::Result<()> {
     let store = Store::open_read_only(path.as_ref())?;
     let snap = Snapshot::load(&store)?;
     let zoned = now.to_zoned(snap.zone.clone());
-    let dash = finance_core::dashboard::dashboard(&store, &snap, &zoned)?;
+    let dash = finance_core::dashboard::dashboard(&store, &snap, &zoned, None)?;
     let risk = spending_email::spending_risk(&dash, &snap, &zoned);
     let risk_json = serde_json::to_value(&risk)?;
     if risk_json == golden["risk"] {
