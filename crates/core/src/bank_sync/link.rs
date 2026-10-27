@@ -343,6 +343,11 @@ pub fn confirm(
         accounts,
         verified_identity: verified,
         import_not_before: old.and_then(|o| o.import_not_before),
+        names: session
+            .accounts
+            .iter()
+            .map(|a| (a.uid.clone(), a.name.clone()))
+            .collect(),
     })
 }
 
@@ -452,6 +457,7 @@ mod tests {
             accounts: BTreeMap::from([("x".into(), 416)]),
             verified_identity: BTreeMap::new(),
             import_not_before: None,
+            names: BTreeMap::new(),
         };
         assert!(
             confirm(Some(&old), &session(), &choices, &own())

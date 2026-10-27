@@ -11,7 +11,7 @@ use jiff::civil::Date;
 use rusqlite::{Connection, OptionalExtension, params};
 use rust_decimal::Decimal;
 
-use super::{Entry, Window, normalize_iban};
+use super::{Connection as Consent, Entry, Window, normalize_iban};
 use crate::Result;
 use crate::writes::Writer;
 
@@ -60,6 +60,31 @@ fn account_currency(conn: &Connection, account: i64) -> Result<String> {
         )
         .optional()?
         .unwrap_or_else(|| "EUR".to_owned()))
+}
+
+/// Another account of the same consent this entry moves money to or from,
+/// by the bank's account name: banks without IBANs for their pockets
+/// describe those transfers as "To <pocket>" / "From <pocket>" or name the
+/// pocket as the counterparty.
+fn sibling(connection: &Consent, uid: &str, account: i64, entry: &Entry) -> Option<i64> {
+    let description = entry.description().to_lowercase();
+    let counterparty = entry.counterparty().to_lowercase();
+    let lead = if entry.amount.is_sign_negative() {
+        "to "
+    } else {
+        "from "
+    };
+    connection
+        .names
+        .iter()
+        .filter(|(other, name)| *other != uid && name.chars().count() >= 3)
+        .filter_map(|(other, name)| {
+            let target = *connection.accounts.get(other)?;
+            let name = name.to_lowercase();
+            (target != account && (description == format!("{lead}{name}") || counterparty == name))
+                .then_some(target)
+        })
+        .next()
 }
 
 /// What one sync wrote.
@@ -125,7 +150,7 @@ fn has_source_versions(conn: &Connection) -> Result<bool> {
 pub fn import(
     w: &Writer<'_>,
     bank: &str,
-    accounts: &std::collections::BTreeMap<String, i64>,
+    connection: &Consent,
     downloads: &[(String, Vec<Entry>)],
     window: Window,
     own: &HashMap<i64, OwnAccount>,
@@ -136,7 +161,7 @@ pub fn import(
     let run_tag = format!("Data Import on {} @ {}", today, w.now.strftime("%H:%M"));
     let mut imported = Imported::default();
     for (uid, entries) in downloads {
-        let Some(&account) = accounts.get(uid) else {
+        let Some(&account) = connection.accounts.get(uid) else {
             continue;
         };
         let currency = account_currency(conn, account)?;
@@ -155,12 +180,15 @@ pub fn import(
             }
             let amount = entry.amount.abs();
             let outgoing = entry.amount.is_sign_negative();
-            let other = entry.counterparty_iban().and_then(|iban| {
-                own.values()
-                    .filter(|a| a.kind == "asset" && a.id != account && a.iban == iban)
-                    .min_by_key(|a| (!a.active, a.id))
-                    .map(|a| a.id)
-            });
+            let other = entry
+                .counterparty_iban()
+                .and_then(|iban| {
+                    own.values()
+                        .filter(|a| a.kind == "asset" && a.id != account && a.iban == iban)
+                        .min_by_key(|a| (!a.active, a.id))
+                        .map(|a| a.id)
+                })
+                .or_else(|| sibling(connection, uid, account, entry));
             let (kind, source, destination) = match other {
                 Some(other) => {
                     let (s, d) = if outgoing {
@@ -254,6 +282,22 @@ mod tests {
         Entry::parse(&value, "booked")
     }
 
+    fn consent(accounts: &[(&str, i64)], names: &[(&str, &str)]) -> Consent {
+        Consent {
+            sessions: vec!["s".into()],
+            accounts: accounts
+                .iter()
+                .map(|(u, t)| ((*u).to_owned(), *t))
+                .collect(),
+            verified_identity: BTreeMap::new(),
+            import_not_before: None,
+            names: names
+                .iter()
+                .map(|(u, n)| ((*u).to_owned(), (*n).to_owned()))
+                .collect(),
+        }
+    }
+
     #[test]
     fn imports_new_entries_once() {
         let mut db = db();
@@ -268,7 +312,7 @@ mod tests {
             from: jiff::civil::date(2026, 10, 1),
             to: jiff::civil::date(2026, 10, 26),
         };
-        let accounts = BTreeMap::from([("uid-1".to_owned(), 1)]);
+        let accounts = consent(&[("uid-1", 1)], &[]);
         let downloads = vec![(
             "uid-1".to_owned(),
             vec![
@@ -337,7 +381,7 @@ mod tests {
         );
 
         // The savings bank reports the same transfer from its side.
-        let savings = BTreeMap::from([("uid-2".to_owned(), 50)]);
+        let savings = consent(&[("uid-2", 50)], &[]);
         let other_leg = vec![(
             "uid-2".to_owned(),
             vec![entry(
@@ -360,5 +404,63 @@ mod tests {
                 checked: 1
             }
         );
+    }
+
+    #[test]
+    fn pocket_transfers_match_by_account_name() {
+        let mut db = db();
+        db.store
+            .connection()
+            .execute_batch(
+                "INSERT INTO accounts (id, name, kind) VALUES (60, 'Revolut Savings', 'asset'),
+                 (61, 'Revolut Fun out', 'asset');",
+            )
+            .unwrap();
+        let window = Window {
+            from: jiff::civil::date(2026, 10, 1),
+            to: jiff::civil::date(2026, 10, 26),
+        };
+        let revolut = consent(
+            &[("savings", 60), ("fun", 61)],
+            &[("savings", "Instant Access Savings"), ("fun", "Fun out")],
+        );
+        let downloads = vec![
+            (
+                "fun".to_owned(),
+                vec![entry(
+                    json!({"entry_reference": "f1", "booking_date": "2026-10-16",
+                    "transaction_amount": {"amount": "300", "currency": "EUR"},
+                    "credit_debit_indicator": "CRDT",
+                    "remittance_information": ["From Instant Access Savings"]}),
+                )],
+            ),
+            (
+                "savings".to_owned(),
+                vec![entry(
+                    json!({"entry_reference": "s1", "booking_date": "2026-10-16",
+                    "transaction_amount": {"amount": "300", "currency": "EUR"},
+                    "credit_debit_indicator": "DBIT",
+                    "remittance_information": ["To Fun out"]}),
+                )],
+            ),
+        ];
+        let done = db
+            .write(|w, _| {
+                let own = own_accounts(&w.tx)?;
+                import(w, "revolut", &revolut, &downloads, window, &own)
+            })
+            .unwrap();
+        // One transfer: the second leg finds the first.
+        assert_eq!(
+            done,
+            Imported {
+                created: 1,
+                checked: 2
+            }
+        );
+        let kind: String = db.one(
+            "SELECT kind || ':' || source_account_id || '>' || destination_account_id FROM transactions WHERE external_id = 'f1'",
+        );
+        assert_eq!(kind, "transfer:60>61");
     }
 }

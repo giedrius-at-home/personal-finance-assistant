@@ -62,6 +62,7 @@
     "allow-bank-link-start",
     "allow-bank-link-finish",
     "allow-bank-link-confirm",
+    "allow-reconcile-bank-account",
     "allow-email-status",
     "allow-save-email-settings",
     "allow-set-smtp-password",

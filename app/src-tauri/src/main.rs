@@ -477,6 +477,7 @@ fn main() {
             bank::bank_link_start,
             bank::bank_link_finish,
             bank::bank_link_confirm,
+            bank::reconcile_bank_account,
             notify::email_status,
             notify::save_email_settings,
             notify::set_smtp_password,

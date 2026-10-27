@@ -11,11 +11,15 @@ pub mod link;
 
 use std::collections::{BTreeSet, HashMap};
 
-use finance_types::bank::{BANKS, BankRun, BankState, BankSyncReport, BankSyncResult, SyncStatus};
+use finance_storage::{NewTransaction, counterparty_account, insert_transaction};
+use finance_types::bank::{
+    AccountBalance, BANKS, BankRun, BankState, BankSyncReport, BankSyncResult, SyncStatus,
+};
 use jiff::civil::Date;
 use jiff::tz::TimeZone;
 use jiff::{SignedDuration, Timestamp, ToSpan};
 use rusqlite::{Connection as Sql, OptionalExtension};
+use rust_decimal::Decimal;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
@@ -54,6 +58,11 @@ pub trait Api {
     fn get(&mut self, path: &str) -> Result<Value, ApiError>;
     /// An authenticated `POST` of a JSON body.
     fn post(&mut self, path: &str, body: &Value) -> Result<Value, ApiError>;
+    /// What the bank answered to the last failed request, for the owner
+    /// (request kind, HTTP status, error code and message).
+    fn last_failure(&self) -> Option<String> {
+        None
+    }
 }
 
 pub(crate) fn sha256_hex(value: &str) -> String {
@@ -282,6 +291,8 @@ pub fn record(
         } else {
             previous.checked
         },
+        detail: None,
+        balances: previous.balances.clone(),
     }
 }
 
@@ -388,6 +399,8 @@ pub fn legacy_runs(raw: &str) -> HashMap<String, BankRun> {
                         .and_then(Value::as_u64)
                         .and_then(|n| u32::try_from(n).ok()),
                     consent_valid_until: None,
+                    detail: None,
+                    balances: Vec::new(),
                 },
             ))
         })
@@ -485,10 +498,21 @@ impl Service {
         now: Timestamp,
     ) -> Result<BankSyncResult, String> {
         let previous = self.bank_runs()?.remove(bank).unwrap_or_default();
-        let (status, imported, expires) = self.attempt(bank, connection, api, now);
+        let Attempt {
+            status,
+            imported,
+            expires,
+            balances,
+        } = self.attempt(bank, connection, api, now);
         let mut run = record(&previous, status, imported, now);
         if expires.is_some() {
             run.consent_valid_until = expires;
+        }
+        if !balances.is_empty() {
+            run.balances = balances;
+        }
+        if !status.is_ok() {
+            run.detail = api.last_failure();
         }
         self.save_bank_run(bank, &run)?;
         self.write(|w, _| save_health(w))?;
@@ -506,19 +530,23 @@ impl Service {
         connection: &Connection,
         api: &mut dyn Api,
         now: Timestamp,
-    ) -> (SyncStatus, Option<Imported>, Option<String>) {
+    ) -> Attempt {
+        let failed = |status| Attempt {
+            status,
+            ..Attempt::default()
+        };
         let today = now.to_zoned(TimeZone::UTC).date();
         let window = match window(today, connection.import_not_before) {
             Ok(Some(window)) => window,
-            Ok(None) => return (SyncStatus::WaitingForCompletedDay, None, None),
-            Err(status) => return (status, None, None),
+            Ok(None) => return failed(SyncStatus::WaitingForCompletedDay),
+            Err(status) => return failed(status),
         };
         let Ok(own) = self.read_store(own_accounts) else {
-            return (SyncStatus::Failed, None, None);
+            return failed(SyncStatus::Failed);
         };
         let expires = match preflight(api, connection, &own, None) {
             Ok(expires) => expires,
-            Err(status) => return (status, None, None),
+            Err(status) => return failed(status),
         };
         let mut downloads = Vec::new();
         let mut failure = None;
@@ -532,7 +560,7 @@ impl Service {
         }
         let written = self.write(|w, _| {
             let own = own_accounts(&w.tx)?;
-            let imported = import(w, bank, &connection.accounts, &downloads, window, &own)?;
+            let imported = import(w, bank, connection, &downloads, window, &own)?;
             w.record(
                 &format!("enable_banking:{bank}"),
                 &serde_json::json!({
@@ -544,7 +572,11 @@ impl Service {
             Ok(imported)
         });
         let Ok(imported) = written else {
-            return (SyncStatus::ImportFailed, None, expires);
+            return Attempt {
+                status: SyncStatus::ImportFailed,
+                expires,
+                ..Attempt::default()
+            };
         };
         // Late transactions may reopen closed months (Python ran this after
         // every bank sync); it needs a snapshot with the new rows.
@@ -553,20 +585,201 @@ impl Service {
                 .write(crate::writes::closure::refresh_after_sync)
                 .is_err()
         {
-            return (SyncStatus::ImportFailed, Some(imported), expires);
+            return Attempt {
+                status: SyncStatus::ImportFailed,
+                imported: Some(imported),
+                expires,
+                balances: Vec::new(),
+            };
         }
         // New transactions may change the alerts (Python evaluated them after
         // every sync). A failure here never fails the sync.
         if imported.created > 0 {
             let _ = self.evaluate_alerts_now();
         }
+        // The bank's own balances, to show where the ledger drifted. A
+        // failure here never fails the sync.
+        let balances = self
+            .read_store(|conn| Ok(balances(api, connection, conn)))
+            .unwrap_or_default();
         let status = match failure {
             None => SyncStatus::Success,
             Some(SyncStatus::RateLimited) => SyncStatus::RateLimited,
             Some(_) => SyncStatus::ImportFailed,
         };
-        (status, Some(imported), expires)
+        Attempt {
+            status,
+            imported: Some(imported),
+            expires,
+            balances,
+        }
     }
+
+    /// Bring `account_id`'s ledger balance to what `bank` last reported for
+    /// it, with a reconciliation entry (neither spending nor income), as the
+    /// owner's earlier manual reconciliations did.
+    pub fn reconcile_bank_account(&self, bank: &str, account_id: i64) -> Result<(), String> {
+        let mut run = self.bank_runs()?.remove(bank).unwrap_or_default();
+        let entry = run
+            .balances
+            .iter_mut()
+            .find(|b| b.account_id == account_id)
+            .ok_or("Sync the bank first: there is no bank balance for this account.")?;
+        let bank_amount: Decimal = entry.bank.parse().map_err(|_| "Invalid bank balance")?;
+        let reported = entry.reference_date.clone();
+        let currency = entry.currency.clone();
+        let account = entry.account.clone();
+        self.write(|w, _| {
+            let ledger = ledger_balance(&w.tx, account_id, &currency)?;
+            let difference = bank_amount - ledger;
+            if difference.is_zero() {
+                return Err(crate::writes::invalid("The ledger already matches the bank."));
+            }
+            let other = counterparty_account(
+                &w.tx,
+                &format!("{account} reconciliation ({currency})"),
+                "reconciliation",
+            )?;
+            let (source, destination) = if difference.is_sign_positive() {
+                (other, account_id)
+            } else {
+                (account_id, other)
+            };
+            let day = w.now.date().to_string();
+            let description = format!(
+                "Balance reconciliation — bank reported {bank_amount} {currency}{}",
+                reported.map(|d| format!(" on {d}")).unwrap_or_default()
+            );
+            insert_transaction(
+                &w.tx,
+                &NewTransaction {
+                    kind: "reconciliation",
+                    date: &day,
+                    description: &description,
+                    source_account_id: source,
+                    destination_account_id: destination,
+                    amount: difference.abs(),
+                    currency: &currency,
+                    external_id: None,
+                    internal_reference: None,
+                    notes: None,
+                    tags: &[],
+                },
+            )?;
+            w.record(
+                "reconciliation",
+                &serde_json::json!({"account_id": account_id, "difference": difference.to_string()}),
+            )?;
+            Ok(())
+        })?;
+        entry.ledger = entry.bank.clone();
+        self.save_bank_run(bank, &run)
+    }
+}
+
+/// What one sync attempt produced.
+#[derive(Debug)]
+struct Attempt {
+    status: SyncStatus,
+    imported: Option<Imported>,
+    expires: Option<String>,
+    balances: Vec<AccountBalance>,
+}
+
+impl Default for Attempt {
+    fn default() -> Self {
+        Self {
+            status: SyncStatus::Failed,
+            imported: None,
+            expires: None,
+            balances: Vec::new(),
+        }
+    }
+}
+
+/// The ledger balance of `account` in `currency` (sum of its postings).
+fn ledger_balance(conn: &Sql, account: i64, currency: &str) -> crate::Result<Decimal> {
+    let mut stmt =
+        conn.prepare_cached("SELECT amount FROM postings WHERE account_id = ?1 AND currency = ?2")?;
+    let rows = stmt.query_map(rusqlite::params![account, currency], |r| {
+        r.get::<_, String>(0)
+    })?;
+    let mut total = Decimal::ZERO;
+    for row in rows {
+        total += row?.parse::<Decimal>().unwrap_or_default();
+    }
+    Ok(total.normalize())
+}
+
+/// The balance type that best matches a ledger of booked transactions.
+const BALANCE_TYPES: [&str; 6] = ["CLBD", "ITBD", "XPCD", "OPBD", "ITAV", "CLAV"];
+
+/// Each synced account's bank balance next to its ledger balance
+/// (`GET /accounts/{uid}/balances`). Accounts the bank gives no balance for
+/// are left out.
+pub fn balances(api: &mut dyn Api, connection: &Connection, conn: &Sql) -> Vec<AccountBalance> {
+    let names: HashMap<i64, String> = own_accounts(conn)
+        .map(|own| own.into_iter().map(|(id, a)| (id, a.name)).collect())
+        .unwrap_or_default();
+    let mut out = Vec::new();
+    for (uid, &target) in &connection.accounts {
+        let Ok(answer) = api.get(&format!("accounts/{}/balances", encode(uid))) else {
+            continue;
+        };
+        let list = answer
+            .get("balances")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let rank = |b: &Value| {
+            let kind = b.get("balance_type").and_then(Value::as_str).unwrap_or("");
+            BALANCE_TYPES
+                .iter()
+                .position(|t| *t == kind)
+                .unwrap_or(BALANCE_TYPES.len())
+        };
+        let Some(best) = list.iter().min_by_key(|b| rank(b)) else {
+            continue;
+        };
+        let amount = best
+            .get("balance_amount")
+            .and_then(|a| a.get("amount"))
+            .and_then(|a| match a {
+                Value::String(s) => s.parse::<Decimal>().ok(),
+                Value::Number(n) => n.to_string().parse::<Decimal>().ok(),
+                _ => None,
+            });
+        let currency = best
+            .get("balance_amount")
+            .and_then(|a| a.get("currency"))
+            .and_then(Value::as_str);
+        let (Some(amount), Some(currency)) = (amount, currency) else {
+            continue;
+        };
+        let Ok(ledger) = ledger_balance(conn, target, currency) else {
+            continue;
+        };
+        out.push(AccountBalance {
+            account_id: target,
+            account: names
+                .get(&target)
+                .cloned()
+                .unwrap_or_else(|| format!("Account {target}")),
+            currency: currency.to_owned(),
+            bank: amount.normalize().to_string(),
+            ledger: ledger.to_string(),
+            balance_type: best
+                .get("balance_type")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_owned(),
+            reference_date: best
+                .get("reference_date")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+        });
+    }
+    out
 }
 
 #[cfg(test)]
@@ -629,6 +842,7 @@ mod tests {
             accounts: BTreeMap::from([("uid-1".into(), 5)]),
             verified_identity: BTreeMap::new(),
             import_not_before: None,
+            names: BTreeMap::new(),
         }
     }
 
@@ -837,6 +1051,57 @@ mod tests {
         let failed: String =
             db.one("SELECT last_success || '|' || failed FROM firefly_sync_health");
         assert_eq!(failed, "2026-10-26T20:00:00.000000Z|1");
+    }
+
+    #[test]
+    fn reconcile_books_the_difference_to_the_bank() {
+        let dir = std::env::temp_dir().join(format!("finance-reconcile-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("finance.sqlite3");
+        let _ = std::fs::remove_file(&path);
+        {
+            let store = finance_storage::Store::open(&path).unwrap();
+            store
+                .connection()
+                .execute_batch(include_str!("../writes/test_fixture.sql"))
+                .unwrap();
+        }
+        let service = Service::new(path.clone());
+        let ledger = |service: &Service| {
+            service
+                .read_store(|conn| ledger_balance(conn, 1, "EUR"))
+                .unwrap()
+        };
+        let before = ledger(&service);
+        let bank = before + Decimal::new(1250, 2);
+        let run = BankRun {
+            balances: vec![AccountBalance {
+                account_id: 1,
+                account: "Checking".into(),
+                currency: "EUR".into(),
+                bank: bank.to_string(),
+                ledger: before.to_string(),
+                balance_type: "CLBD".into(),
+                reference_date: Some("2026-10-27".into()),
+            }],
+            ..BankRun::default()
+        };
+        service.save_bank_run("abnamro", &run).unwrap();
+        service.reconcile_bank_account("abnamro", 1).unwrap();
+        assert_eq!(ledger(&service), bank);
+        // The entry is a reconciliation, not spending or income.
+        let kind: String = service
+            .read_store(|conn| {
+                Ok(conn.query_row(
+                    "SELECT kind FROM transactions ORDER BY id DESC LIMIT 1",
+                    [],
+                    |r| r.get(0),
+                )?)
+            })
+            .unwrap();
+        assert_eq!(kind, "reconciliation");
+        assert!(service.reconcile_bank_account("abnamro", 1).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

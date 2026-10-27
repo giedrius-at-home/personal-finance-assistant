@@ -117,6 +117,19 @@ pub async fn bank_link_confirm(
     )
 }
 
+/// Bring an account's ledger balance to the bank's last reported balance.
+#[tauri::command(async, rename_all = "snake_case")]
+pub fn reconcile_bank_account(
+    service: State<'_, Service>,
+    bank: String,
+    account_id: i64,
+) -> Result<(), String> {
+    crate::traced(
+        "reconcile_bank_account",
+        service.reconcile_bank_account(&bank, account_id),
+    )
+}
+
 /// Store the Enable Banking application id and key. They go straight to the
 /// Keychain and are never returned to the UI.
 #[tauri::command(async)]

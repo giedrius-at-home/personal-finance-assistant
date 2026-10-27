@@ -35,6 +35,10 @@ pub struct Connection {
     /// Never import before this day (the cut-over from an older import).
     #[serde(default)]
     pub import_not_before: Option<Date>,
+    /// The bank's name for each account the consent shares (uid → name),
+    /// to recognise transfers between accounts without IBANs (pockets).
+    #[serde(default)]
+    pub names: BTreeMap<String, String>,
 }
 
 impl fmt::Debug for Connection {
@@ -120,6 +124,7 @@ impl Connection {
             accounts,
             verified_identity,
             import_not_before,
+            names: BTreeMap::new(),
         })
     }
 
