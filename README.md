@@ -71,9 +71,12 @@ Firefly. Set up once in Manage → Banks:
 1. **Application key**: the Enable Banking application id and its `.pem`
    private key. Both go to the Keychain.
 2. **Consents**: "Use saved consents" takes over the consents the old
-   importer saved on this Mac, with their run history. A new consent
-   (an importer configuration file) goes through "Renew consent"; every
-   ledger account the old one filled must stay mapped.
+   importer saved on this Mac, with their run history. To connect a bank or
+   renew an expiring consent, use "Connect or renew": approve in the browser,
+   paste the address the bank returns to (registered redirect, default
+   `https://localhost:8444/eb-callback`; the page need not load), then map
+   each shared account onto a ledger account. Every ledger account the old
+   consent filled must stay mapped. Each bank shows when its consent ends.
 
 While the app is open it checks every 15 minutes and syncs each bank once a
 day (hourly retries after a failure, six hours after a rate limit). Each sync
