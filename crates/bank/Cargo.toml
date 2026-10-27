@@ -1,0 +1,22 @@
+[package]
+name = "finance-bank"
+description = "Enable Banking client: RS256 application tokens and authenticated GET requests."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+finance-core.workspace = true
+finance-secrets.workspace = true
+finance-types.workspace = true
+jiff = "0.2.38"
+aws-lc-rs = "1.18.2"
+base64 = "0.23.1"
+reqwest = { version = "0.13.5", default-features = false, features = ["blocking", "json", "rustls"] }
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

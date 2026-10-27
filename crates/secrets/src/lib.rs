@@ -13,6 +13,32 @@ const SERVICE: &str = "local.giedrius.finance";
 pub enum Item {
     /// Fine-grained, read-only GitHub token for downloading releases.
     ReleaseToken,
+    /// The Enable Banking application id.
+    EnableBankingAppId,
+    /// The Enable Banking application's PEM private key.
+    EnableBankingKey,
+    /// A bank's consent (sessions and account mapping), by bank id.
+    BankConsent(Bank),
+}
+
+/// The banks with a stored consent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Bank {
+    AbnAmro,
+    Revolut,
+    Swedbank,
+}
+
+impl Bank {
+    /// The bank with id `id` (`abnamro`, `revolut`, `swedbank`).
+    pub fn from_id(id: &str) -> Option<Self> {
+        match id {
+            "abnamro" => Some(Self::AbnAmro),
+            "revolut" => Some(Self::Revolut),
+            "swedbank" => Some(Self::Swedbank),
+            _ => None,
+        }
+    }
 }
 
 impl Item {
@@ -20,6 +46,11 @@ impl Item {
     fn account(self) -> &'static str {
         match self {
             Self::ReleaseToken => "github-release-token",
+            Self::EnableBankingAppId => "enable-banking-app-id",
+            Self::EnableBankingKey => "enable-banking-private-key",
+            Self::BankConsent(Bank::AbnAmro) => "bank-consent-abnamro",
+            Self::BankConsent(Bank::Revolut) => "bank-consent-revolut",
+            Self::BankConsent(Bank::Swedbank) => "bank-consent-swedbank",
         }
     }
 }

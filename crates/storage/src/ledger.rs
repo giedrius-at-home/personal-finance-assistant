@@ -273,6 +273,8 @@ pub struct NewTransaction<'a> {
     pub amount: Decimal,
     pub currency: &'a str,
     pub external_id: Option<&'a str>,
+    /// The bank's account id for synced rows (as the Firefly importer kept it).
+    pub internal_reference: Option<&'a str>,
     pub notes: Option<&'a str>,
     pub tags: &'a [String],
 }
@@ -287,8 +289,8 @@ pub fn insert_transaction(conn: &Connection, t: &NewTransaction<'_>) -> Result<i
     let tags = serde_json::to_string(t.tags).map_err(|e| Error::Corrupt(e.to_string()))?;
     conn.execute(
         "INSERT INTO transactions (kind, date, booked_at, description, source_account_id,
-            destination_account_id, external_id, notes, tags, reconciled)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 0)",
+            destination_account_id, external_id, internal_reference, notes, tags, reconciled)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 0)",
         params![
             t.kind,
             t.date,
@@ -297,6 +299,7 @@ pub fn insert_transaction(conn: &Connection, t: &NewTransaction<'_>) -> Result<i
             t.source_account_id,
             t.destination_account_id,
             t.external_id,
+            t.internal_reference,
             t.notes,
             tags,
         ],

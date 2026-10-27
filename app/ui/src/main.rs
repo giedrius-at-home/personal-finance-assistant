@@ -178,6 +178,13 @@ fn App() -> impl IntoView {
         let _ = root.class_list().add_1("glass");
     }
 
+    // A scheduled bank sync wrote new transactions: reload every screen.
+    let on_sync = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
+        revision.try_update(|n| *n += 1);
+    });
+    api::listen("bank-sync", &on_sync);
+    on_sync.forget();
+
     // ⌘1–5 switch sections, ⌘R refreshes.
     let handle = window_event_listener(ev::keydown, move |e| {
         if !e.meta_key() || e.shift_key() || e.alt_key() || e.ctrl_key() {

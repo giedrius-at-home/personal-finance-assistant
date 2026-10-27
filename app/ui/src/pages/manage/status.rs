@@ -168,7 +168,7 @@ fn Connections(ws: ManageWorkspace, ops: Ops) -> impl IntoView {
                 </Button>
             </CardHeader>
             <p class=cn([FEEDBACK, "mb-5"])>
-                "Bank connections arrive in a later phase. Until then, transactions come from bank CSV files you "
+                "Banks sync through Enable Banking once a day while Finance is open (see Banks). Statements can also come from bank CSV files you "
                 <button
                     type="button"
                     class="underline underline-offset-2 hover:no-underline"

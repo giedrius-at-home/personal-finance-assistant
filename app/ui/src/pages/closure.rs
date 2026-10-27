@@ -1,7 +1,7 @@
 //! Manage → Close month: the month-closure wizard and the Overview nudge
 //! (personal-site `components/month-closure.tsx`).
 
-mod bank_sync;
+pub mod bank_sync;
 mod panels;
 mod split;
 mod steps;

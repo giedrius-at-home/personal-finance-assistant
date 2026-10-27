@@ -3,8 +3,8 @@
 //! marking transfers by hand, pots and account roles.
 //!
 //! "Sync" re-reads the local data and runs the post-sync step (late
-//! arrivals flag closed months, late transfers are ticked off); pulling
-//! fresh bank data is a later phase.
+//! arrivals flag closed months, late transfers are ticked off); the screen
+//! pulls fresh bank data through `bank_sync` before it asks.
 
 use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasher, Hasher};
@@ -500,7 +500,7 @@ pub fn refresh_after_sync(w: &Writer<'_>, snap: &Snapshot) -> Result<()> {
 }
 
 /// Start settling (from the 25th). Run [`prepare`] first: it re-reads the
-/// data (bank refresh is a later phase).
+/// data the bank sync just wrote.
 pub fn sync(
     w: &Writer<'_>,
     snap: &Snapshot,

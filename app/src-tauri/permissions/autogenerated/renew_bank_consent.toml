@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-renew-bank-consent"
+description = "Enables the renew_bank_consent command without any pre-configured scope."
+commands.allow = ["renew_bank_consent"]
+
+[[permission]]
+identifier = "deny-renew-bank-consent"
+description = "Denies the renew_bank_consent command without any pre-configured scope."
+commands.deny = ["renew_bank_consent"]

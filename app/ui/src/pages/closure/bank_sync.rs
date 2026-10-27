@@ -1,29 +1,33 @@
-//! The sync step (personal-site `components/month-closure/bank-sync.tsx`).
-//! Bank connections arrive in a later phase: "sync" re-reads the local data
-//! (imports included) for every bank at once, then reports banks that could
-//! not be read as missing, except those the owner marks as covered by an
-//! imported statement CSV.
+//! The sync step (personal-site `components/month-closure/bank-sync.tsx`):
+//! syncs every bank one after another through Enable Banking, then reports
+//! banks that failed as missing, except those the owner marks as covered by
+//! an imported statement CSV.
 
+use finance_types::bank::BankSyncResult;
+pub use finance_types::bank::{BANKS, bank_name};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
+use serde::Serialize;
 
 use super::ui::{ACTIONS, LIST, SMALL, TextLink};
-use crate::api::{NoArgs, invoke};
+use crate::api::invoke;
 use crate::ds::charts::ProgressBar;
 use crate::ds::{Button, Size, Variant, cn};
 use crate::{ManageSection, state};
 
-pub const BANKS: [(&str, &str); 3] = [
-    ("abnamro", "ABN AMRO"),
-    ("revolut", "Revolut"),
-    ("swedbank", "Swedbank"),
-];
+#[derive(Serialize)]
+pub struct SyncArgs<'a> {
+    pub bank: &'a str,
+}
 
-pub fn bank_name(id: &str) -> &str {
-    BANKS
-        .iter()
-        .find(|(bank, _)| *bank == id)
-        .map_or(id, |(_, name)| name)
+/// Sync `bank`; `Err` carries the short reason the step shows.
+pub async fn sync_one(bank: &str) -> Result<BankSyncResult, String> {
+    let result = invoke::<BankSyncResult>("sync_bank", &SyncArgs { bank }).await?;
+    if result.status.is_ok() {
+        Ok(result)
+    } else {
+        Err(result.status.reason().to_owned())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -72,30 +76,32 @@ pub fn BankSyncPanel(
     let run = move |_| {
         running.set(true);
         csv_imported.set(Vec::new());
-        results.set(BANKS.iter().map(|(b, _)| (*b, Outcome::Syncing)).collect());
+        results.set(BANKS.iter().map(|(b, _)| (*b, Outcome::Waiting)).collect());
         spawn_local(async move {
-            // Every bank's data is local: one re-read covers them all.
-            let outcome = invoke::<()>("refresh", &NoArgs {}).await;
-            let failures = outcome.is_err();
-            let reason = outcome.err();
-            let set = results.try_set(
-                BANKS
-                    .iter()
-                    .map(|(b, _)| {
-                        (
-                            *b,
-                            Outcome::Finished {
-                                ok: reason.is_none(),
-                                reason: reason.clone(),
-                            },
-                        )
+            let mut failures = false;
+            for (bank, _) in BANKS {
+                let set = |outcome: Outcome| {
+                    results.try_update(|r| {
+                        if let Some(slot) = r.iter_mut().find(|(b, _)| *b == bank) {
+                            slot.1 = outcome;
+                        }
                     })
-                    .collect(),
-            );
-            if set.is_some() {
-                return; // unmounted meanwhile
+                };
+                if set(Outcome::Syncing).is_none() {
+                    return; // unmounted meanwhile
+                }
+                let outcome = sync_one(bank).await;
+                failures |= outcome.is_err();
+                let finished = Outcome::Finished {
+                    ok: outcome.is_ok(),
+                    reason: outcome.err(),
+                };
+                if set(finished).is_none() {
+                    return;
+                }
             }
             running.set(false);
+            app.revision.update(|n| *n += 1);
             if !failures {
                 on_continue.run(Vec::new());
             }
@@ -120,8 +126,8 @@ pub fn BankSyncPanel(
                     .unwrap_or(Outcome::Waiting);
                 let (label, tone) = match &outcome {
                     Outcome::Waiting => ("Waiting".to_owned(), "text-fg-muted"),
-                    Outcome::Syncing => ("Reading local data…".to_owned(), "text-fg-muted"),
-                    Outcome::Finished { ok: true, .. } => ("✓ Local data read".to_owned(), "text-positive-fg"),
+                    Outcome::Syncing => ("Syncing…".to_owned(), "text-fg-muted"),
+                    Outcome::Finished { ok: true, .. } => ("✓ Synced".to_owned(), "text-positive-fg"),
                     Outcome::Finished { reason, .. } => (
                         format!("✗ {}", reason.clone().unwrap_or_else(|| "Not synced".into())),
                         "text-negative-fg",
@@ -191,17 +197,12 @@ pub fn BankSyncPanel(
             <div>
                 <Button disabled=Signal::derive(move || disabled.get() || running.get()) on_click=Callback::new(run)>
                     {move || if running.get() {
-                        "Reading local data…".to_owned()
+                        "Syncing banks…".to_owned()
                     } else {
-                        format!("Re-read local data{}", if finished() { " again" } else { "" })
+                        format!("Sync all banks{}", if finished() { " again" } else { "" })
                     }}
                 </Button>
             </div>
-            <p class=SMALL>
-                "Bank refresh arrives in a later version. Import new statements in "
-                <TextLink on_click=Callback::new(move |_| app.go_manage(ManageSection::Import))>"Import"</TextLink>
-                " first; this re-reads the local data for every bank."
-            </p>
             {move || running.get().then(|| view! {
                 <ProgressBar
                     label=format!("{} of {} banks finished", done_count(), BANKS.len())

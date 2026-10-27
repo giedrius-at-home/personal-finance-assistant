@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-sync-bank"
+description = "Enables the sync_bank command without any pre-configured scope."
+commands.allow = ["sync_bank"]
+
+[[permission]]
+identifier = "deny-sync-bank"
+description = "Denies the sync_bank command without any pre-configured scope."
+commands.deny = ["sync_bank"]

@@ -10,7 +10,7 @@ publish.workspace = true
 [dependencies]
 finance-storage.workspace = true
 finance-types.workspace = true
-jiff = "0.2.38"
+jiff = { version = "0.2.38", features = ["serde"] }
 regex = "1.13.1"
 rusqlite.workspace = true
 rust_decimal.workspace = true

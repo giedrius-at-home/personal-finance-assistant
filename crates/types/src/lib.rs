@@ -4,6 +4,7 @@
 //! the UI and the backend can never disagree about a shape. Money is always an
 //! exact [`Decimal`] serialized as a string; dates are ISO `YYYY-MM-DD` strings.
 
+pub mod bank;
 pub mod gateway;
 pub mod manage;
 pub mod report;

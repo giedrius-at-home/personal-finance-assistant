@@ -5,6 +5,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod bank;
 mod update;
 
 use finance_core::service::Service;
@@ -19,9 +20,14 @@ use finance_types::{DataStatus, UpdateStatus};
 use tauri::{AppHandle, Manager, State};
 use update::Updates;
 
+/// `FINANCE_TRACE` is set: print outcomes (never data) to stderr.
+fn tracing() -> bool {
+    std::env::var_os("FINANCE_TRACE").is_some()
+}
+
 /// Diagnostics: command outcome only, never any data.
 fn traced<T>(name: &str, result: Result<T, String>) -> Result<T, String> {
-    if std::env::var_os("FINANCE_TRACE").is_some() {
+    if tracing() {
         eprintln!(
             "finance: {name} {}",
             if result.is_ok() { "ok" } else { "failed" }
@@ -408,6 +414,7 @@ fn main() {
         .plugin(tauri_plugin_window_state::Builder::new().build())
         .manage(Service::new(path))
         .manage(Updates::default())
+        .manage(finance_bank::Syncer::default())
         .invoke_handler(tauri::generate_handler![
             dashboard,
             review,
@@ -453,9 +460,16 @@ fn main() {
             audit_daily_review,
             preview_consolidation,
             apply_consolidation,
+            bank::bank_sync_status,
+            bank::sync_bank,
+            bank::renew_bank_consent,
+            bank::adopt_bank_consents,
+            bank::set_bank_credentials,
+            bank::forget_bank_credentials,
         ])
         .setup(|app| {
             update::schedule(app.handle().clone());
+            bank::schedule(app.handle().clone());
             #[cfg(target_os = "macos")]
             if let Some(window) = app.get_webview_window("main") {
                 apply_glass(&window);

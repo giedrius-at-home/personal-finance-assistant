@@ -239,6 +239,14 @@ fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
         "decline_bill_match" => ok(service.decline_bill_match(request(args)?)),
         "manage_workspace" => ok(service.manage_workspace()),
         "banks" => ok(service.banks()),
+        // The Keychain belongs to the app; here the Banks screen shows the
+        // stored runs only and syncs are refused.
+        "bank_sync_status" => ok(service.bank_sync_report(Default::default())),
+        "sync_bank"
+        | "renew_bank_consent"
+        | "adopt_bank_consents"
+        | "set_bank_credentials"
+        | "forget_bank_credentials" => Err("Bank sync runs in the app only.".to_owned()),
         "preview_csv_import" => ok(service.preview_csv_import(arg(args, "upload")?)),
         "commit_csv_import" => ok(service.commit_csv_import(arg(args, "commit")?)),
         "preview_settings" => ok(service.preview_settings(arg(args, "form")?)),

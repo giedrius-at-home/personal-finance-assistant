@@ -53,6 +53,12 @@
     "allow-audit-daily-review",
     "allow-preview-consolidation",
     "allow-apply-consolidation",
+    "allow-bank-sync-status",
+    "allow-sync-bank",
+    "allow-renew-bank-consent",
+    "allow-adopt-bank-consents",
+    "allow-set-bank-credentials",
+    "allow-forget-bank-credentials",
     "core:event:default"
   ]
 }

@@ -31,7 +31,7 @@ pub enum Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Ordered schema migrations; the index + 1 is the version.
-const MIGRATIONS: &[&str] = &[include_str!("schema.sql")];
+const MIGRATIONS: &[&str] = &[include_str!("schema.sql"), include_str!("bank_sync.sql")];
 
 /// `~/Library/Application Support/Finance`.
 pub fn data_dir() -> Result<PathBuf> {

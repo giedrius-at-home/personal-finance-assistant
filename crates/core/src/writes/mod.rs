@@ -62,7 +62,7 @@ pub mod budget;
 pub mod closure;
 pub mod csv_import;
 #[cfg(test)]
-mod fixture;
+pub(crate) mod fixture;
 pub mod groups;
 pub mod plans;
 pub mod review;
