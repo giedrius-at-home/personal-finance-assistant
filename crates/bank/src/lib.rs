@@ -151,6 +151,53 @@ pub struct Client {
     credentials: Credentials,
     http: reqwest::blocking::Client,
     token: Option<(String, i64)>,
+    /// What the bank answered to the last failed request.
+    failure: Option<String>,
+}
+
+/// The kind of request `path` is, for failure messages (never the ids).
+fn request_kind(path: &str) -> &'static str {
+    let path = path.split('?').next().unwrap_or("");
+    if path.starts_with("sessions/") {
+        "consent check"
+    } else if path == "sessions" {
+        "opening the session"
+    } else if path == "auth" {
+        "authorisation"
+    } else if path.starts_with("aspsps") {
+        "bank list"
+    } else if path.ends_with("/transactions") {
+        "transactions"
+    } else if path.ends_with("/balances") {
+        "balances"
+    } else if path.ends_with("/details") {
+        "account details"
+    } else {
+        "request"
+    }
+}
+
+/// A short, data-free description of an Enable Banking error answer: the
+/// HTTP status, the error code and the bank's message.
+fn describe_failure(kind: &str, status: u16, body: &str) -> String {
+    let parsed: Option<Value> = serde_json::from_str(body).ok();
+    let field = |key: &str| {
+        parsed
+            .as_ref()
+            .and_then(|v| v.get(key))
+            .and_then(Value::as_str)
+            .map(|s| s.chars().take(160).collect::<String>())
+    };
+    let mut text = format!("{kind}: HTTP {status}");
+    if let Some(code) = field("error") {
+        text.push(' ');
+        text.push_str(&code);
+    }
+    if let Some(message) = field("message") {
+        text.push_str(" — ");
+        text.push_str(&message);
+    }
+    text
 }
 
 impl Client {
@@ -165,6 +212,7 @@ impl Client {
             credentials,
             http,
             token: None,
+            failure: None,
         })
     }
 
@@ -185,34 +233,59 @@ impl Client {
 }
 
 impl Client {
-    fn send(&mut self, request: reqwest::blocking::RequestBuilder) -> Result<Value, ApiError> {
+    fn send(
+        &mut self,
+        path: &str,
+        request: reqwest::blocking::RequestBuilder,
+    ) -> Result<Value, ApiError> {
+        let kind = request_kind(path);
         let token = self.bearer()?;
-        let response = request
+        let response = match request
             .bearer_auth(token)
             .header("Accept", "application/json")
             .send()
-            .map_err(|_| ApiError::Unavailable)?;
+        {
+            Ok(response) => response,
+            Err(e) => {
+                let what = if e.is_timeout() {
+                    "timed out"
+                } else {
+                    "network error"
+                };
+                self.failure = Some(format!("{kind}: {what}"));
+                return Err(ApiError::Unavailable);
+            }
+        };
         let status = response.status();
         let body = response.text().map_err(|_| ApiError::Unavailable)?;
         if status.as_u16() == 429 || body.contains("ASPSP_RATE_LIMIT_EXCEEDED") {
+            self.failure = Some(describe_failure(kind, status.as_u16(), &body));
             return Err(ApiError::RateLimited);
         }
         if !status.is_success() {
+            self.failure = Some(describe_failure(kind, status.as_u16(), &body));
             return Err(ApiError::Unavailable);
         }
-        serde_json::from_str(&body).map_err(|_| ApiError::Unavailable)
+        serde_json::from_str(&body).map_err(|_| {
+            self.failure = Some(format!("{kind}: unreadable answer"));
+            ApiError::Unavailable
+        })
     }
 }
 
 impl Api for Client {
     fn get(&mut self, path: &str) -> Result<Value, ApiError> {
         let request = self.http.get(format!("{API}/{path}"));
-        self.send(request)
+        self.send(path, request)
     }
 
     fn post(&mut self, path: &str, body: &Value) -> Result<Value, ApiError> {
         let request = self.http.post(format!("{API}/{path}")).json(body);
-        self.send(request)
+        self.send(path, request)
+    }
+
+    fn last_failure(&self) -> Option<String> {
+        self.failure.clone()
     }
 }
 
@@ -611,5 +684,26 @@ mod tests {
         UnparsedPublicKey::new(&RSA_PKCS1_2048_8192_SHA256, generated.public_key().as_ref())
             .verify(format!("{}.{}", parts[0], parts[1]).as_bytes(), &signature)
             .unwrap();
+    }
+
+    #[test]
+    fn failures_name_the_request_and_the_bank_code() {
+        assert_eq!(
+            request_kind("accounts/abc/transactions?date_from=x"),
+            "transactions"
+        );
+        assert_eq!(request_kind("sessions/abc"), "consent check");
+        assert_eq!(
+            describe_failure(
+                "transactions",
+                422,
+                r#"{"code":422,"error":"WRONG_TRANSACTIONS_PERIOD","message":"Wrong transactions period requested"}"#
+            ),
+            "transactions: HTTP 422 WRONG_TRANSACTIONS_PERIOD — Wrong transactions period requested"
+        );
+        assert_eq!(
+            describe_failure("balances", 500, "<html>"),
+            "balances: HTTP 500"
+        );
     }
 }

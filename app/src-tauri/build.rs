@@ -53,6 +53,7 @@ const COMMANDS: &[&str] = &[
     "bank_link_start",
     "bank_link_finish",
     "bank_link_confirm",
+    "reconcile_bank_account",
     "email_status",
     "save_email_settings",
     "set_smtp_password",

@@ -255,6 +255,10 @@ fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
         // The Keychain belongs to the app; here the Banks screen shows the
         // stored runs only and syncs are refused.
         "bank_sync_status" => ok(service.bank_sync_report(Default::default())),
+        "reconcile_bank_account" => ok(service.reconcile_bank_account(
+            &arg::<String>(args.clone(), "bank")?,
+            arg::<i64>(args, "account_id")?,
+        )),
         "sync_bank"
         | "renew_bank_consent"
         | "adopt_bank_consents"

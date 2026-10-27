@@ -7,9 +7,9 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use finance_types::bank::{
-    BANKS, BankConsent, BankCredentials, BankLinkChoice, BankLinkConfirm, BankLinkProposal,
-    BankLinkStart, BankState, BankSyncReport, BankSyncResult, DEFAULT_REDIRECT, SyncStatus,
-    bank_name,
+    AccountBalance, BANKS, BankConsent, BankCredentials, BankLinkChoice, BankLinkConfirm,
+    BankLinkProposal, BankLinkStart, BankState, BankSyncReport, BankSyncResult, DEFAULT_REDIRECT,
+    SyncStatus, bank_name,
 };
 use finance_types::manage::{BankAccount, BanksReport};
 use finance_types::report::Currency;
@@ -114,6 +114,12 @@ fn status_label(status: SyncStatus) -> (&'static str, &'static str) {
 #[derive(Serialize)]
 struct ConsentArgs {
     consent: BankConsent,
+}
+
+#[derive(Serialize)]
+struct ReconcileArgs {
+    bank: String,
+    account_id: i64,
 }
 
 #[derive(Serialize)]
@@ -223,6 +229,19 @@ pub fn Banks() -> impl IntoView {
         });
     };
 
+    let reconcile = move |(bank, account_id): (String, i64)| {
+        ops.run(
+            "reconcile_bank_account",
+            ReconcileArgs { bank, account_id },
+            move |()| {
+                ops.notice.set(
+                    "Ledger balance set to the bank's balance with a reconciliation entry.".into(),
+                );
+                app.revision.update(|n| *n += 1);
+            },
+        );
+    };
+
     view! {
         <div class="mb-6 grid gap-4">
             <Messages ops=ops />
@@ -282,6 +301,7 @@ pub fn Banks() -> impl IntoView {
                                     accounts=own
                                     disabled=busy
                                     on_sync=Callback::new(sync)
+                                    on_reconcile=Callback::new(reconcile)
                                 />
                             }
                         })
@@ -309,8 +329,18 @@ fn BankBox(
     accounts: Vec<BankAccount>,
     disabled: Signal<bool>,
     on_sync: Callback<String>,
+    on_reconcile: Callback<(String, i64)>,
 ) -> impl IntoView {
     let status = bank.as_ref().and_then(|b| b.run.status);
+    let failure = bank
+        .as_ref()
+        .filter(|_| status.is_some_and(|s| !s.is_ok()))
+        .and_then(|b| b.run.detail.clone());
+    let compared = bank
+        .as_ref()
+        .map(|b| b.run.balances.clone())
+        .unwrap_or_default();
+    let reconcile_bank = id.clone();
     let cooling = bank.as_ref().is_some_and(|b| b.retry_after.is_some());
     let connected = bank.as_ref().is_some_and(|b| b.connected);
     let (label, detail) = match status {
@@ -405,6 +435,8 @@ fn BankBox(
             {consent.map(|(text, soon)| view! {
                 <p class=cn(["text-xs", if soon { "text-warning-fg" } else { "text-fg-muted" }])>{text}</p>
             })}
+            {failure.map(|f| view! { <p class="text-xs text-fg-muted">{format!("The bank answered: {f}")}</p> })}
+            <BalanceCheck balances=compared bank=reconcile_bank disabled=disabled on_reconcile=on_reconcile />
             <AccountTable name=name accounts=accounts />
             <div>
                 <Button
@@ -418,6 +450,70 @@ fn BankBox(
             </div>
         </div>
     }
+}
+
+/// Each synced account's balance at the bank next to the ledger's, with a
+/// way to book the difference as a reconciliation (not on the site).
+#[component]
+fn BalanceCheck(
+    balances: Vec<AccountBalance>,
+    bank: String,
+    disabled: Signal<bool>,
+    on_reconcile: Callback<(String, i64)>,
+) -> impl IntoView {
+    if balances.is_empty() {
+        return None;
+    }
+    let rows = balances
+        .into_iter()
+        .map(|b| {
+            let currency = Currency::new(&b.currency);
+            let at_bank: Decimal = b.bank.parse().unwrap_or_default();
+            let in_ledger: Decimal = b.ledger.parse().unwrap_or_default();
+            let difference = at_bank - in_ledger;
+            let off = !difference.is_zero();
+            let bank = bank.clone();
+            let account_id = b.account_id;
+            view! {
+                <tr class=TROW>
+                    <td class=TCELL>{b.account.clone()}</td>
+                    <td class=TCELL_NUM>{money(at_bank, &currency)}</td>
+                    <td class=TCELL_NUM>{money(in_ledger, &currency)}</td>
+                    <td class=cn([TCELL_NUM, if off { "text-warning-fg" } else { "text-fg-muted" }])>
+                        {if off { money(difference, &currency) } else { "Matches".to_owned() }}
+                    </td>
+                    <td class=TCELL>
+                        {off.then(|| view! {
+                            <Button
+                                variant=Variant::Secondary
+                                size=Size::Sm
+                                disabled=disabled
+                                on_click=Callback::new(move |_| on_reconcile.run((bank.clone(), account_id)))
+                            >
+                                "Reconcile to bank"
+                            </Button>
+                        })}
+                    </td>
+                </tr>
+            }
+        })
+        .collect_view();
+    Some(view! {
+        <div class=TABLE_CONTAINER tabindex="0" role="region" aria-label="Bank and ledger balances">
+            <table class=TABLE data-density="sm">
+                <thead class="text-left">
+                    <tr>
+                        <th class=TH>"Synced account"</th>
+                        <th class=TH_NUM>"Bank"</th>
+                        <th class=TH_NUM>"Ledger"</th>
+                        <th class=TH_NUM>"Difference"</th>
+                        <th class=TH></th>
+                    </tr>
+                </thead>
+                <tbody>{rows}</tbody>
+            </table>
+        </div>
+    })
 }
 
 /// The bank's ledger accounts with their balances (not on the site).

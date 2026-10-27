@@ -80,6 +80,28 @@ pub struct BankRun {
     /// When the bank consent ends (UTC), as the bank last reported it.
     #[serde(default)]
     pub consent_valid_until: Option<String>,
+    /// What the bank answered when the last attempt failed (request kind,
+    /// HTTP status, the bank's error code and message; never account data).
+    #[serde(default)]
+    pub detail: Option<String>,
+    /// Each synced account's balance at the bank next to the ledger's, as of
+    /// the last successful sync.
+    #[serde(default)]
+    pub balances: Vec<AccountBalance>,
+}
+
+/// One synced account's balance at the bank and in the ledger.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountBalance {
+    pub account_id: i64,
+    pub account: String,
+    pub currency: String,
+    /// Decimal strings.
+    pub bank: String,
+    pub ledger: String,
+    /// The bank's balance type (`CLBD` closing booked, `ITAV` available, ...).
+    pub balance_type: String,
+    pub reference_date: Option<String>,
 }
 
 /// One bank on the Banks screen.
