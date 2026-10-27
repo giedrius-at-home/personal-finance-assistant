@@ -354,8 +354,8 @@ fn forecast_row(
     } else {
         Decimal::ZERO
     };
-    let method = if forecast.method == ForecastMethod::CatboostQuantile {
-        "Forecast"
+    let method = if forecast.method == ForecastMethod::Timesfm {
+        "TimesFM"
     } else {
         "History + pace"
     };

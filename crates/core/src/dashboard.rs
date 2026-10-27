@@ -14,8 +14,8 @@ use crate::{
 };
 use crate::{allocation, budget, daily, outlook};
 
-/// `forecaster` is the model the daily forecast backtests against its
-/// weekday baseline (none: the baseline alone).
+/// `forecaster` (TimesFM) is the model the daily, group and outlook
+/// forecasts backtest against their fallbacks (none: the fallbacks alone).
 pub fn dashboard(
     store: &Store,
     snap: &Snapshot,
@@ -62,6 +62,7 @@ pub fn dashboard(
             current_month,
             period_start: ctx.resolver.period_start_date(current_month),
         },
+        forecaster,
     );
 
     let offset = budget_calendar_offset(&ctx);
@@ -139,6 +140,7 @@ pub fn dashboard(
         data_fresh: outlook::data_fresh(&snap.sync_health, &ctx.now),
         current_month,
         resolver: &ctx.resolver,
+        forecaster,
     });
     let mut currencies: Vec<finance_types::report::Currency> = snap
         .accounts

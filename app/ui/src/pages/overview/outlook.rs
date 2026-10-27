@@ -228,14 +228,14 @@ pub fn SavingsOutlookPanel(report: Dashboard, currency_code: String) -> impl Int
         })
         .collect_view();
     let method = match outlook.method.as_str() {
-        "catboost_quantile" => "CatBoost",
+        "timesfm" => "TimesFM",
         "insufficient_history" => "Insufficient history",
         _ => "Weighted weekday baseline",
     };
     let errors = outlook.baseline_error.map(|baseline| {
         view! {
             <p>{format!(
-                "Held-out 28-day error: baseline {}; CatBoost {}. {} three-month validation windows.",
+                "Held-out 28-day error: baseline {}; TimesFM {}. {} three-month validation windows.",
                 m(baseline),
                 outlook.model_error.map_or("unavailable".to_owned(), &m),
                 outlook.horizon_validation_windows,

@@ -2,10 +2,19 @@
 //! warnings (Python `savings_forecast.py` and `behavior_model.py`).
 //!
 //! The Python service tried a CatBoost weekly model and kept it only when it
-//! beat the weighted weekday baseline on held-out months. Rust has no model,
-//! so this port always runs the baseline path (`weighted_weekday_baseline`)
-//! and reports no model error. The simulation reproduces NumPy's float
-//! arithmetic and its seeded PCG64 draws, so the bands match Python's.
+//! beat the weighted weekday baseline on held-out months. This port tries
+//! TimesFM there instead (`timesfm`, through the app's [`SeriesForecaster`])
+//! with Python's selection unchanged: 28-day blocks held out from
+//! max(112, n − 84) days on, the model kept only when its total error is
+//! below 0.95 × the baseline's, the same 90-day coverage checks (a model
+//! candidate per check, chosen on the 28 days before it) and the same
+//! block-bootstrap scaling to the chosen point forecast. TimesFM forecasts
+//! the planned and unplanned daily series directly (daily means, never
+//! negative), where CatBoost predicted weekly totals spread over the
+//! baseline's weekday shape. Without a model (or when it fails) the
+//! baseline path runs exactly as before (`weighted_weekday_baseline`, no
+//! model error). The simulation reproduces NumPy's float arithmetic and its
+//! seeded PCG64 draws, so the bands match Python's.
 
 use std::collections::{HashMap, HashSet};
 
@@ -21,6 +30,7 @@ use jiff::{Timestamp, ToSpan, Zoned};
 use rust_decimal::Decimal;
 
 use crate::budget::{budget_owner, default_budget};
+use crate::daily::SeriesForecaster;
 use crate::groups::group_index;
 use crate::model::{Account, Kind, Tx};
 use crate::period::{PeriodResolver, shift_month};
@@ -48,6 +58,9 @@ pub struct OutlookInputs<'a> {
     pub current_month: Date,
     /// Decides which budget month a refund belongs to.
     pub resolver: &'a PeriodResolver,
+    /// The model tried against the weekday baseline (TimesFM); `None` keeps
+    /// the baseline.
+    pub forecaster: Option<&'a dyn SeriesForecaster>,
 }
 
 /// Whether the last bank refresh succeeded within 36 hours; stale data pauses
@@ -223,7 +236,7 @@ pub fn savings_outlooks(input: &OutlookInputs) -> Vec<SavingsOutlook> {
                 values[index][group] += np::to_f64(amount);
             }
         }
-        let model = fit_behavior(&values, start, horizon + 1);
+        let model = fit_behavior(&values, start, horizon + 1, input.forecaster);
         // Day zero of the simulation is today, which the balance already holds.
         let paths: Vec<&[[f64; 2]]> = model.paths.iter().map(|p| &p[1..]).collect();
         let balance: Decimal = input
@@ -593,7 +606,7 @@ pub fn savings_outlooks(input: &OutlookInputs) -> Vec<SavingsOutlook> {
             validation_windows: model.validation_windows,
             horizon_validation_windows: model.horizon_windows,
             baseline_error: model.baseline_error.map(money),
-            model_error: None,
+            model_error: model.model_error.map(money),
             interval_coverage: model.coverage.map(|c| np::round_decimal(c, 2)),
             assumptions,
             data_fresh: input.data_fresh,
@@ -620,6 +633,7 @@ struct Behavior {
     /// Simulation × future day × (planned, unplanned).
     paths: Vec<Vec<[f64; 2]>>,
     baseline_error: Option<f64>,
+    model_error: Option<f64>,
     validation_windows: usize,
     horizon_windows: usize,
     coverage: Option<f64>,
@@ -683,7 +697,43 @@ fn py_range(start: i64, stop: i64, step: usize) -> impl Iterator<Item = usize> {
         .map(|i| usize::try_from(i).unwrap_or(0))
 }
 
-fn fit_behavior(values: &[Day], start: Date, horizon: usize) -> Behavior {
+/// The model's daily forecasts (means, never negative) of both series,
+/// `horizon` days after each context `values[..end]`, in one call.
+fn model_forecasts(
+    model: &dyn SeriesForecaster,
+    values: &[Day],
+    requests: &[(usize, usize)],
+) -> Option<Vec<Vec<Day>>> {
+    let horizon = requests.iter().map(|r| r.1).max()?;
+    let contexts: Vec<Vec<f64>> = requests
+        .iter()
+        .flat_map(|&(end, _)| (0..2).map(move |g| values[..end].iter().map(|d| d[g]).collect()))
+        .collect();
+    let rows = model.quantiles(&contexts, horizon, None).ok()?;
+    if rows.len() != contexts.len() {
+        return None;
+    }
+    Some(
+        requests
+            .iter()
+            .enumerate()
+            .map(|(i, &(_, h))| {
+                (0..h)
+                    .map(|day| {
+                        [0, 1].map(|g| rows[2 * i + g].get(day).map_or(0.0, |r| r[1].max(0.0)))
+                    })
+                    .collect()
+            })
+            .collect(),
+    )
+}
+
+fn fit_behavior(
+    values: &[Day],
+    start: Date,
+    horizon: usize,
+    forecaster: Option<&dyn SeriesForecaster>,
+) -> Behavior {
     let began = std::time::Instant::now();
     let n = values.len();
     let signed = n as i64;
@@ -692,6 +742,7 @@ fn fit_behavior(values: &[Day], start: Date, horizon: usize) -> Behavior {
             method: "insufficient_history",
             paths: vec![vec![[0.0; 2]; horizon]; SIMULATIONS],
             baseline_error: None,
+            model_error: None,
             validation_windows: 0,
             horizon_windows: 0,
             coverage: None,
@@ -699,13 +750,87 @@ fn fit_behavior(values: &[Day], start: Date, horizon: usize) -> Behavior {
         };
     }
     // Entire validation blocks are held out; no shuffled day-level split.
-    let baseline_errors: Vec<f64> = py_range((signed - 84).max(112), signed - 27, 28)
-        .map(|origin| {
+    let origins: Vec<usize> = py_range((signed - 84).max(112), signed - 27, 28).collect();
+    let baseline_errors: Vec<f64> = origins
+        .iter()
+        .map(|&origin| {
             let actual = flat_sum(&values[origin..origin + 28]);
             (flat_sum(&predict(&values[..origin], start, 28)) - actual).abs()
         })
         .collect();
-    let point = predict(values, start, horizon);
+    let coverage_origins: Vec<usize> = py_range(112, signed - 89, 90).collect();
+    // Coverage checks choose their candidate on the 28 days before them.
+    let selections: Vec<usize> = coverage_origins
+        .iter()
+        .filter_map(|o| o.checked_sub(28).filter(|s| *s >= 112))
+        .collect();
+    // One call for every 28-day block the model is judged on.
+    let judged = forecaster.and_then(|m| {
+        let requests: Vec<(usize, usize)> = origins
+            .iter()
+            .chain(&selections)
+            .map(|&end| (end, 28))
+            .collect();
+        if requests.is_empty() {
+            return None;
+        }
+        model_forecasts(m, values, &requests)
+    });
+    let model_errors: Vec<f64> = judged.as_ref().map_or_else(Vec::new, |f| {
+        origins
+            .iter()
+            .zip(f)
+            .map(|(&origin, forecast)| {
+                (flat_sum(forecast) - flat_sum(&values[origin..origin + 28])).abs()
+            })
+            .collect()
+    });
+    let mut use_model = !model_errors.is_empty()
+        && np::py_sum(model_errors.iter().copied())
+            < np::py_sum(baseline_errors.iter().copied()) * 0.95;
+    // Which coverage checks would have picked the model.
+    let candidates: Vec<bool> = coverage_origins
+        .iter()
+        .map(|&origin| {
+            let Some(judged) = &judged else {
+                return false;
+            };
+            let Some(selection) = origin.checked_sub(28).filter(|s| *s >= 112) else {
+                return false;
+            };
+            let Some(index) = selections.iter().position(|s| *s == selection) else {
+                return false;
+            };
+            let training = &values[..origin];
+            let actual = flat_sum(&training[selection..]);
+            let simple = (flat_sum(&predict(&training[..selection], start, 28)) - actual).abs();
+            let candidate = (flat_sum(&judged[origins.len() + index]) - actual).abs();
+            candidate < simple * 0.95
+        })
+        .collect();
+    // One more call: the live forecast and the chosen 90-day candidates.
+    let mut later: Vec<(usize, usize)> = coverage_origins
+        .iter()
+        .zip(&candidates)
+        .filter(|(_, c)| **c)
+        .map(|(&origin, _)| (origin, 90))
+        .collect();
+    if use_model {
+        later.push((n, horizon));
+    }
+    let mut forecasts = match forecaster {
+        Some(m) if !later.is_empty() => model_forecasts(m, values, &later),
+        _ => None,
+    };
+    if forecasts.is_none() {
+        // The model failed: the baseline everywhere, as without one.
+        use_model = false;
+    }
+    let point = match forecasts.as_mut().filter(|_| use_model).and_then(Vec::pop) {
+        Some(forecast) => forecast,
+        None => predict(values, start, horizon),
+    };
+    let mut candidate_forecasts = forecasts.into_iter().flatten();
     // Joint moving blocks retain zero days, bursty purchases and group correlation.
     let blocks: Vec<&[Day]> = py_range((signed - 182).max(0), signed - 6, 7)
         .map(|i| &values[i..i + 7])
@@ -728,7 +853,7 @@ fn fit_behavior(values: &[Day], start: Date, horizon: usize) -> Behavior {
                 path
             })
             .collect();
-        // Align group expectations to the baseline, retaining joint variation.
+        // Align group expectations to the chosen point forecast, retaining joint variation.
         let count = (blocks.len() * 7) as f64;
         let point_count = point.len() as f64;
         for g in 0..2 {
@@ -744,10 +869,17 @@ fn fit_behavior(values: &[Day], start: Date, horizon: usize) -> Behavior {
         paths
     };
     // Separate 90-day validation; monthly accuracy is not a 3-month guarantee.
-    let coverage_checks: Vec<f64> = py_range(112, signed - 89, 90)
-        .map(|origin| {
+    let coverage_checks: Vec<f64> = coverage_origins
+        .iter()
+        .zip(&candidates)
+        .map(|(&origin, &candidate)| {
             let training = &values[..origin];
-            let predicted = flat_sum(&predict(training, start, 90));
+            let model_total = if candidate {
+                candidate_forecasts.next().map(|f| flat_sum(&f))
+            } else {
+                None
+            };
+            let predicted = model_total.unwrap_or_else(|| flat_sum(&predict(training, start, 90)));
             let weeks: Vec<f64> = py_range((origin as i64 - 182).max(0), origin as i64 - 6, 7)
                 .map(|i| flat_sum(&training[i..i + 7]))
                 .collect();
@@ -771,9 +903,14 @@ fn fit_behavior(values: &[Day], start: Date, horizon: usize) -> Behavior {
         })
         .collect();
     Behavior {
-        method: "weighted_weekday_baseline",
+        method: if use_model {
+            "timesfm"
+        } else {
+            "weighted_weekday_baseline"
+        },
         paths,
         baseline_error: (!baseline_errors.is_empty()).then(|| np::mean(&baseline_errors)),
+        model_error: (!model_errors.is_empty()).then(|| np::mean(&model_errors)),
         validation_windows: baseline_errors.len(),
         horizon_windows: coverage_checks.len(),
         coverage: (!coverage_checks.is_empty()).then(|| np::mean(&coverage_checks)),
@@ -1163,6 +1300,7 @@ mod tests {
             data_fresh: fresh,
             current_month: date(2026, 9, 1),
             resolver: &resolver,
+            forecaster: None,
         })
         .remove(0)
     }
@@ -1202,6 +1340,76 @@ mod tests {
         assert!(stale.behavior_score.is_none() && stale.deductions.is_empty());
     }
 
+    /// Continues each context's last daily step, or fails; counts calls.
+    #[derive(Debug)]
+    struct Trend {
+        fail: bool,
+        calls: std::cell::Cell<usize>,
+    }
+
+    impl SeriesForecaster for Trend {
+        fn name(&self) -> &str {
+            "trend"
+        }
+
+        fn supports_covariates(&self) -> bool {
+            false
+        }
+
+        fn quantiles(
+            &self,
+            contexts: &[Vec<f64>],
+            horizon: usize,
+            _: Option<&[Vec<f64>]>,
+        ) -> Result<Vec<Vec<[f64; 3]>>, String> {
+            self.calls.set(self.calls.get() + 1);
+            if self.fail {
+                return Err("no model".into());
+            }
+            Ok(contexts
+                .iter()
+                .map(|c| {
+                    let (last, step) = (c[c.len() - 1], c[c.len() - 1] - c[c.len() - 2]);
+                    (1..=horizon)
+                        .map(|k| {
+                            let v = last + step * k as f64;
+                            [v, v, v]
+                        })
+                        .collect()
+                })
+                .collect())
+        }
+    }
+
+    #[test]
+    fn a_model_that_beats_the_baseline_drives_the_outlook() {
+        // Unplanned spending grows steadily; the weekday baseline lags it.
+        let values: Vec<Day> = (0..300).map(|i| [1.0, 0.1 * f64::from(i)]).collect();
+        let start = date(2025, 1, 1);
+        let model = Trend {
+            fail: false,
+            calls: std::cell::Cell::new(0),
+        };
+        let result = fit_behavior(&values, start, 90, Some(&model));
+        assert_eq!(result.method, "timesfm");
+        assert!(result.model_error.unwrap() < 1e-6);
+        assert!(result.baseline_error.unwrap() > 100.0);
+        // Judged blocks in one call, the live forecast and candidates in another.
+        assert_eq!(model.calls.get(), 2);
+        assert_eq!(result.horizon_windows, 2);
+
+        let failing = Trend {
+            fail: true,
+            calls: std::cell::Cell::new(0),
+        };
+        let fallback = fit_behavior(&values, start, 90, Some(&failing));
+        let plain = fit_behavior(&values, start, 90, None);
+        assert_eq!(fallback.method, "weighted_weekday_baseline");
+        assert_eq!(fallback.model_error, None);
+        assert_eq!(fallback.paths, plain.paths);
+        assert_eq!(fallback.coverage, plain.coverage);
+    }
+
     #[test]
     fn transfers_never_create_spending() {
         let ordinary: Vec<Tx> = (1..35)
@@ -1229,7 +1437,7 @@ mod tests {
     #[test]
     fn constant_history_keeps_the_baseline_level() {
         let values = vec![[5.0, 5.0]; 280];
-        let result = fit_behavior(&values, date(2025, 12, 22), 90);
+        let result = fit_behavior(&values, date(2025, 12, 22), 90, None);
         assert_eq!(result.method, "weighted_weekday_baseline");
         assert_eq!(result.validation_windows, 3);
         assert_eq!(result.horizon_windows, 1);

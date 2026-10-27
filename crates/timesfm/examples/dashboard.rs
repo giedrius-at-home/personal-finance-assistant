@@ -1,5 +1,5 @@
 //! Development check: build the dashboard with TimesFM on a database copy,
-//! print its daily forecasts as JSON (for `cmp_report.py` against a golden
+//! print its daily, group and outlook forecasts as JSON (for `cmp_report.py` against a golden
 //! from `parity/dump.py`) and the timings to stderr.
 //!
 //! usage: dashboard DB CHECKPOINT [NOW, default 2026-10-26T21:00:00+01:00[Europe/Amsterdam]]
@@ -73,7 +73,11 @@ fn main() -> anyhow::Result<()> {
         started.elapsed().as_secs_f64()
     );
     if checkpoint == "-" {
-        let daily = serde_json::json!({ "daily_forecasts": baseline.daily_forecasts });
+        let daily = serde_json::json!({
+            "daily_forecasts": baseline.daily_forecasts,
+            "spending_forecasts": baseline.spending_forecasts,
+            "savings_outlooks": baseline.savings_outlooks,
+        });
         println!("{}", serde_json::to_string_pretty(&daily)?);
         return Ok(());
     }
@@ -92,12 +96,23 @@ fn main() -> anyhow::Result<()> {
         started.elapsed().as_secs_f64(),
         total.elapsed().as_secs_f64()
     );
+    // Again with the weights loaded and warm.
+    let warm = Instant::now();
+    dashboard::dashboard(&store, &snap, &now, Some(&model))?;
+    eprintln!(
+        "dashboard with model, again: {:.2}s",
+        warm.elapsed().as_secs_f64()
+    );
     for (contexts, horizon, covariates, seconds) in timed.calls.borrow().iter() {
         eprintln!(
             "  quantiles: {contexts} contexts, horizon {horizon}, covariates {covariates}: {seconds:.2}s"
         );
     }
-    let daily = serde_json::json!({ "daily_forecasts": report.daily_forecasts });
+    let daily = serde_json::json!({
+        "daily_forecasts": report.daily_forecasts,
+        "spending_forecasts": report.spending_forecasts,
+        "savings_outlooks": report.savings_outlooks,
+    });
     println!("{}", serde_json::to_string_pretty(&daily)?);
     Ok(())
 }

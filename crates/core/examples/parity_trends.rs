@@ -60,6 +60,7 @@ fn main() -> anyhow::Result<()> {
                 current_month,
                 period_start: ctx.resolver.period_start_date(current_month),
             },
+            None,
         ),
         "time_trends": full,
     });
