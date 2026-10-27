@@ -18,6 +18,7 @@ use serde::Serialize;
 
 use super::consolidation::CategoryConsolidation;
 use super::details::TransactionDetails;
+use super::research::{MerchantResearch, RequestSuggestions};
 use super::{Choice, clean_error, focus_id, options, region_name};
 use crate::api::{NoArgs, invoke, load};
 use crate::ds::{
@@ -1045,6 +1046,7 @@ pub fn OwnerReview() -> impl IntoView {
                 <p class="text-sm text-fg-muted">
                     {move || format!("{} pending Jev suggestions at 90%+ category probability.", view_model.with(|m| m.high_score))}
                 </p>
+                <RequestSuggestions />
                 {move || catalog.get().map(|c| view! { <CategoryConsolidation catalog=c /> })}
                 <Show
                     when=move || view_model.with(|m| m.daily)
@@ -1535,6 +1537,10 @@ fn ReviewRow(
             })}
             {hint.map(|h| view! { <p class="text-sm text-fg-muted">{h}</p> })}
             <TransactionDetails item=i.clone() on_editing=Callback::new(move |dirty| details_editing.set(dirty)) />
+            <details class="text-sm">
+                <summary class="cursor-pointer text-sm font-medium text-fg-muted">"Unfamiliar merchant?"</summary>
+                <div class="mt-3"><MerchantResearch id=i.proposal_id.clone() /></div>
+            </details>
             <Show when=move || details_editing.get()>
                 <p role="status" class="text-sm text-warning-fg">"Save or discard your detail edits before deciding on the category."</p>
             </Show>

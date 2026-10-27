@@ -50,6 +50,13 @@ const COMMANDS: &[&str] = &[
     "adopt_bank_consents",
     "set_bank_credentials",
     "forget_bank_credentials",
+    "ai_status",
+    "save_ai_settings",
+    "set_typesafe_key",
+    "forget_typesafe_key",
+    "suggest_categories",
+    "suggest_spending_group",
+    "research_merchant",
 ];
 
 fn main() {

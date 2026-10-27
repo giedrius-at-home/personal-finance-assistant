@@ -5,6 +5,7 @@
 mod consolidation;
 mod details;
 mod personal;
+mod research;
 mod review;
 mod search;
 

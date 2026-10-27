@@ -59,6 +59,13 @@
     "allow-adopt-bank-consents",
     "allow-set-bank-credentials",
     "allow-forget-bank-credentials",
+    "allow-ai-status",
+    "allow-save-ai-settings",
+    "allow-set-typesafe-key",
+    "allow-forget-typesafe-key",
+    "allow-suggest-categories",
+    "allow-suggest-spending-group",
+    "allow-research-merchant",
     "core:event:default"
   ]
 }

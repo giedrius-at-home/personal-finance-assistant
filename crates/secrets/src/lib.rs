@@ -19,6 +19,8 @@ pub enum Item {
     EnableBankingKey,
     /// A bank's consent (sessions and account mapping), by bank id.
     BankConsent(Bank),
+    /// The TypeSafe API key for Jev category suggestions.
+    TypeSafeApiKey,
 }
 
 /// The banks with a stored consent.
@@ -51,6 +53,7 @@ impl Item {
             Self::BankConsent(Bank::AbnAmro) => "bank-consent-abnamro",
             Self::BankConsent(Bank::Revolut) => "bank-consent-revolut",
             Self::BankConsent(Bank::Swedbank) => "bank-consent-swedbank",
+            Self::TypeSafeApiKey => "typesafe-api-key",
         }
     }
 }

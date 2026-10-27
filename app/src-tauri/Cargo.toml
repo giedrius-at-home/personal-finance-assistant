@@ -15,6 +15,7 @@ path = "src/main.rs"
 tauri-build = { version = "2.7.4", features = [] }
 
 [dependencies]
+finance-ai.workspace = true
 finance-bank.workspace = true
 finance-core.workspace = true
 finance-storage.workspace = true

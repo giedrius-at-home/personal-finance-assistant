@@ -38,10 +38,19 @@ pub fn bank_sync_status(
 
 #[tauri::command]
 pub async fn sync_bank(app: AppHandle, bank: String) -> Result<BankSyncResult, String> {
-    crate::traced(
-        "sync_bank",
-        off_runtime(app, move |service, syncer| syncer.sync(service, &bank)).await,
-    )
+    let handle = app.clone();
+    let result = off_runtime(app, move |service, syncer| syncer.sync(service, &bank)).await;
+    if let Ok(r) = &result {
+        wake_ai(&handle, std::slice::from_ref(r));
+    }
+    crate::traced("sync_bank", result)
+}
+
+/// New transactions get category suggestions right away.
+fn wake_ai(app: &AppHandle, results: &[BankSyncResult]) {
+    if results.iter().any(|r| r.created.is_some_and(|n| n > 0)) {
+        app.state::<finance_ai::Assistant>().wake();
+    }
 }
 
 #[tauri::command]
@@ -89,6 +98,7 @@ pub fn schedule(app: AppHandle) {
             if !results.is_empty() {
                 let _ = app.emit(SYNCED, ());
             }
+            wake_ai(&app, &results);
             std::thread::sleep(EVERY);
         }
     });

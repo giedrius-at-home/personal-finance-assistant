@@ -200,6 +200,7 @@ pub fn Settings() -> impl IntoView {
             view! { <SettingsCard ws=ws ops=ops draft=draft preview=preview rollback=rollback /> }.into_any()
         })}
         <div class="mb-6 grid gap-4">
+            <super::ai::AiSuggestions />
             {move || workspace.data.get().and_then(Result::ok).map(|ws| view! { <LocalData ws=ws /> })}
             <Updates />
         </div>

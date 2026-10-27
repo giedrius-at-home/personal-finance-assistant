@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-research-merchant"
+description = "Enables the research_merchant command without any pre-configured scope."
+commands.allow = ["research_merchant"]
+
+[[permission]]
+identifier = "deny-research-merchant"
+description = "Denies the research_merchant command without any pre-configured scope."
+commands.deny = ["research_merchant"]
