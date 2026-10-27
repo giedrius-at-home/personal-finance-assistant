@@ -77,6 +77,9 @@ pub struct BankRun {
     pub created: Option<u32>,
     /// Bank transactions the last successful sync looked at.
     pub checked: Option<u32>,
+    /// When the bank consent ends (UTC), as the bank last reported it.
+    #[serde(default)]
+    pub consent_valid_until: Option<String>,
 }
 
 /// One bank on the Banks screen.
@@ -146,4 +149,67 @@ pub struct BankSyncResult {
     pub status: SyncStatus,
     pub created: Option<u32>,
     pub checked: Option<u32>,
+}
+
+/// The Enable Banking ASPSP (bank name and country) behind bank `id`.
+pub fn aspsp(id: &str) -> Option<(&'static str, &'static str)> {
+    match id {
+        "abnamro" => Some(("ABN AMRO", "NL")),
+        "revolut" => Some(("Revolut", "NL")),
+        "swedbank" => Some(("Swedbank", "LT")),
+        _ => None,
+    }
+}
+
+/// The redirect the old importer registered with Enable Banking.
+pub const DEFAULT_REDIRECT: &str = "https://localhost:8444/eb-callback";
+
+/// Start connecting `bank`: the owner approves at `url` in the browser.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BankLinkStart {
+    pub bank: String,
+    pub redirect_url: String,
+}
+
+/// One bank account the approved session grants.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BankLinkAccount {
+    pub uid: String,
+    pub name: String,
+    pub iban_tail: Option<String>,
+    pub currency: Option<String>,
+    /// The ledger account it most likely fills.
+    pub suggested: Option<i64>,
+}
+
+/// A ledger account a bank account may fill.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LedgerTarget {
+    pub id: i64,
+    pub name: String,
+    pub iban_tail: Option<String>,
+}
+
+/// The approved session's accounts, for the owner to map.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BankLinkProposal {
+    pub bank: String,
+    pub accounts: Vec<BankLinkAccount>,
+    pub targets: Vec<LedgerTarget>,
+    /// Ledger accounts the previous consent filled; each must stay mapped.
+    pub required: Vec<i64>,
+    pub valid_until: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BankLinkChoice {
+    pub uid: String,
+    /// `None`: do not import this bank account.
+    pub target: Option<i64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BankLinkConfirm {
+    pub bank: String,
+    pub choices: Vec<BankLinkChoice>,
 }

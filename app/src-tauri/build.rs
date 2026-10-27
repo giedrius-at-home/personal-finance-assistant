@@ -50,6 +50,9 @@ const COMMANDS: &[&str] = &[
     "adopt_bank_consents",
     "set_bank_credentials",
     "forget_bank_credentials",
+    "bank_link_start",
+    "bank_link_finish",
+    "bank_link_confirm",
 ];
 
 fn main() {

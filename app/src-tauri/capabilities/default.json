@@ -59,6 +59,9 @@
     "allow-adopt-bank-consents",
     "allow-set-bank-credentials",
     "allow-forget-bank-credentials",
+    "allow-bank-link-start",
+    "allow-bank-link-finish",
+    "allow-bank-link-confirm",
     "core:event:default"
   ]
 }

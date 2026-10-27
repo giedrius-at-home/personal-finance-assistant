@@ -466,6 +466,9 @@ fn main() {
             bank::adopt_bank_consents,
             bank::set_bank_credentials,
             bank::forget_bank_credentials,
+            bank::bank_link_start,
+            bank::bank_link_finish,
+            bank::bank_link_confirm,
         ])
         .setup(|app| {
             update::schedule(app.handle().clone());

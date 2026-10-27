@@ -246,7 +246,10 @@ fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
         | "renew_bank_consent"
         | "adopt_bank_consents"
         | "set_bank_credentials"
-        | "forget_bank_credentials" => Err("Bank sync runs in the app only.".to_owned()),
+        | "forget_bank_credentials"
+        | "bank_link_start"
+        | "bank_link_finish"
+        | "bank_link_confirm" => Err("Bank sync runs in the app only.".to_owned()),
         "preview_csv_import" => ok(service.preview_csv_import(arg(args, "upload")?)),
         "commit_csv_import" => ok(service.commit_csv_import(arg(args, "commit")?)),
         "preview_settings" => ok(service.preview_settings(arg(args, "form")?)),

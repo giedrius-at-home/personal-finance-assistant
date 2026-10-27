@@ -5,7 +5,10 @@ use std::time::Duration;
 
 use finance_bank::{Credentials, Syncer};
 use finance_core::service::Service;
-use finance_types::bank::{BankConsent, BankCredentials, BankSyncReport, BankSyncResult};
+use finance_types::bank::{
+    BankConsent, BankCredentials, BankLinkConfirm, BankLinkProposal, BankLinkStart, BankSyncReport,
+    BankSyncResult,
+};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 /// Event the UI listens to so every screen reloads after a scheduled sync.
@@ -61,6 +64,48 @@ pub fn adopt_bank_consents(
     syncer: State<'_, Syncer>,
 ) -> Result<Vec<String>, String> {
     crate::traced("adopt_bank_consents", syncer.adopt_legacy(&service))
+}
+
+/// Ask Enable Banking for the approval page and open it in the browser.
+#[tauri::command]
+pub async fn bank_link_start(app: AppHandle, start: BankLinkStart) -> Result<String, String> {
+    let url = off_runtime(app, move |_, syncer| syncer.link_start(&start)).await;
+    let url = crate::traced("bank_link_start", url)?;
+    // `open` hands the https address to the default browser.
+    std::process::Command::new("/usr/bin/open")
+        .arg(&url)
+        .status()
+        .map_err(|_| "The browser could not be opened.".to_owned())?;
+    Ok(url)
+}
+
+#[tauri::command]
+pub async fn bank_link_finish(
+    app: AppHandle,
+    bank: String,
+    address: String,
+) -> Result<BankLinkProposal, String> {
+    crate::traced(
+        "bank_link_finish",
+        off_runtime(app, move |service, syncer| {
+            syncer.link_finish(service, &bank, &address)
+        })
+        .await,
+    )
+}
+
+#[tauri::command]
+pub async fn bank_link_confirm(
+    app: AppHandle,
+    confirm: BankLinkConfirm,
+) -> Result<BankSyncResult, String> {
+    crate::traced(
+        "bank_link_confirm",
+        off_runtime(app, move |service, syncer| {
+            syncer.link_confirm(service, &confirm)
+        })
+        .await,
+    )
 }
 
 /// Store the Enable Banking application id and key. They go straight to the
