@@ -1,5 +1,5 @@
 //! The app side of bank sync: the Enable Banking application credentials and
-//! each bank's consent in the Keychain, an authenticated HTTP client, and
+//! each bank's consent in the secret store, an authenticated HTTP client, and
 //! [`Syncer`], which runs one sync at a time for the commands and the daily
 //! scheduler. The sync itself is `finance_core::bank_sync`.
 
@@ -34,8 +34,8 @@ pub enum Error {
     Key,
     #[error("The application id is empty")]
     AppId,
-    #[error("Keychain: {0}")]
-    Keychain(#[from] finance_secrets::Error),
+    #[error("Secret store: {0}")]
+    Secrets(#[from] finance_secrets::Error),
 }
 
 /// The Enable Banking application: its id and private key.
@@ -87,7 +87,7 @@ impl Credentials {
         })
     }
 
-    /// The stored credentials, if both parts are in the Keychain.
+    /// The stored credentials, if both parts are stored.
     pub fn load() -> Result<Option<Self>, Error> {
         let (Some(app_id), Some(key)) = (
             finance_secrets::get(Item::EnableBankingAppId)?,

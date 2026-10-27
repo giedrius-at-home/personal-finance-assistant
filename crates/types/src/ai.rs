@@ -15,7 +15,7 @@ pub enum Classifier {
     Off,
     /// A local Ollama model (`api/generate`).
     Ollama,
-    /// TypeSafe System One ("Jev"); the API key lives in the Keychain.
+    /// TypeSafe System One ("Jev"); the API key lives in the secret store.
     #[serde(rename = "typesafe")]
     TypeSafe,
 }

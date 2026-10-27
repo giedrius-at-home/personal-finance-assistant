@@ -747,7 +747,7 @@ fn Updates() -> impl IntoView {
                         <p class="text-sm text-fg-muted">
                             "Updates come from this app's GitHub releases. Paste a fine-grained GitHub token with read-only "
                             <em>"Contents"</em>
-                            " access to the personal-finance-assistant repository. It is kept in your Keychain."
+                            " access to the personal-finance-assistant repository. It is kept privately on this Mac."
                         </p>
                         <form class="flex flex-col gap-3 sm:flex-row sm:items-end" on:submit=save_token>
                             <input

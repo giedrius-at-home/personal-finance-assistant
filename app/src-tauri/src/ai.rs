@@ -42,7 +42,7 @@ pub async fn save_ai_settings(app: AppHandle, settings: AiSettings) -> Result<Ai
     )
 }
 
-/// Store the TypeSafe API key. It goes straight to the Keychain and is
+/// Store the TypeSafe API key. It goes straight to the secret store and is
 /// never returned to the UI.
 #[tauri::command]
 pub async fn set_typesafe_key(app: AppHandle, key: String) -> Result<(), String> {

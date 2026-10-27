@@ -73,7 +73,7 @@ impl<T> Mailer<T> {
 
 impl Mailer<SmtpTransport> {
     /// The owner's SMTP server: TLS from the start (`ssl`, port 465) or
-    /// upgraded with STARTTLS, signing in with the Keychain password; 20
+    /// upgraded with STARTTLS, signing in with the secret store password; 20
     /// second timeout as in Python.
     pub fn smtp(smtp: Smtp, password: &Secret) -> Result<Self, String> {
         let builder = match smtp.security {

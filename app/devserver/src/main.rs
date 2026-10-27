@@ -14,7 +14,7 @@ use finance_types::report::review::TransactionSearchQuery;
 use serde::Deserialize;
 use serde_json::Value;
 
-/// One AI runner for the server's lifetime, without Keychain access.
+/// One AI runner for the server's lifetime, without secret store access.
 static ASSISTANT: std::sync::LazyLock<finance_ai::Assistant> =
     std::sync::LazyLock::new(|| finance_ai::Assistant::new(false));
 
@@ -252,7 +252,7 @@ fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
         "decline_bill_match" => ok(service.decline_bill_match(request(args)?)),
         "manage_workspace" => ok(service.manage_workspace()),
         "banks" => ok(service.banks()),
-        // The Keychain belongs to the app; here the Banks screen shows the
+        // The secret store belongs to the app; here the Banks screen shows the
         // stored runs only and syncs are refused.
         "bank_sync_status" => ok(service.bank_sync_report(Default::default())),
         "reconcile_bank_account" => ok(service.reconcile_bank_account(
@@ -268,7 +268,7 @@ fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
         | "bank_link_finish"
         | "bank_link_confirm" => Err("Bank sync runs in the app only.".to_owned()),
         // AI suggestions against the local Ollama; TypeSafe needs the
-        // Keychain, so its key cannot be set here.
+        // secret store, so its key cannot be set here.
         "ai_status" => ok(ASSISTANT.status(service)),
         "save_ai_settings" => ok(ASSISTANT.save_settings(service, arg(args, "settings")?)),
         "set_typesafe_key" => ok(ASSISTANT.set_typesafe_key(&arg::<String>(args, "key")?)),
@@ -287,7 +287,7 @@ fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
         "preview_settings" => ok(service.preview_settings(arg(args, "form")?)),
         "apply_settings" => ok(service.apply_settings(arg(args, "apply")?)),
         "rollback_settings" => ok(service.rollback_settings(arg(args, "revision")?)),
-        // The Keychain and the mail server belong to the app: settings can
+        // The secret store and the mail server belong to the app: settings can
         // be edited here, but no password is stored and nothing is sent.
         "email_status" => ok(service.email_status(false)),
         "save_email_settings" => {

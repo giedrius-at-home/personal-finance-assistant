@@ -26,7 +26,7 @@ pub struct Identity {
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Connection {
     /// Enable Banking session ids; with the application key they grant
-    /// read access, so they live in the Keychain only.
+    /// read access, so they live in the secret store only.
     pub sessions: Vec<String>,
     /// Enable Banking account uid → ledger account id.
     pub accounts: BTreeMap<String, i64>,

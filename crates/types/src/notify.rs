@@ -14,7 +14,7 @@ pub enum SmtpSecurity {
 }
 
 /// `email_settings.payload_json`. The SMTP password is not here: it lives in
-/// the Keychain and never reaches the UI.
+/// the secret store and never reaches the UI.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct EmailSettings {
@@ -59,7 +59,7 @@ impl Default for EmailSettings {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EmailStatus {
     pub settings: EmailSettings,
-    /// Whether a password is stored in the Keychain.
+    /// Whether a password is stored in the secret store.
     pub password_set: bool,
     /// When the last risk email and the last forecast digest went out (UTC).
     pub last_alert: Option<String>,
