@@ -50,6 +50,11 @@ const COMMANDS: &[&str] = &[
     "adopt_bank_consents",
     "set_bank_credentials",
     "forget_bank_credentials",
+    "email_status",
+    "save_email_settings",
+    "set_smtp_password",
+    "forget_smtp_password",
+    "send_test_email",
 ];
 
 fn main() {

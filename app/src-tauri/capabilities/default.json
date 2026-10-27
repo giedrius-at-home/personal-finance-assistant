@@ -59,6 +59,11 @@
     "allow-adopt-bank-consents",
     "allow-set-bank-credentials",
     "allow-forget-bank-credentials",
+    "allow-email-status",
+    "allow-save-email-settings",
+    "allow-set-smtp-password",
+    "allow-forget-smtp-password",
+    "allow-send-test-email",
     "core:event:default"
   ]
 }

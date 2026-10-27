@@ -6,6 +6,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod bank;
+mod notify;
 mod update;
 
 use finance_core::service::Service;
@@ -54,10 +55,12 @@ fn search_transactions(
     traced("search", service.search(&query))
 }
 
-/// Re-read the data from disk on the next request.
+/// Re-read the data from disk on the next request, then evaluate the
+/// alerts against it (in the background).
 #[tauri::command(async)]
-fn refresh(service: State<'_, Service>) {
-    service.refresh();
+fn refresh(app: AppHandle) {
+    app.state::<Service>().refresh();
+    notify::evaluate_alerts(app);
 }
 
 #[tauri::command(async)]
@@ -412,6 +415,7 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         // Reopen with the size and position the owner left the window at.
         .plugin(tauri_plugin_window_state::Builder::new().build())
+        .plugin(tauri_plugin_notification::init())
         .manage(Service::new(path))
         .manage(Updates::default())
         .manage(finance_bank::Syncer::default())
@@ -466,10 +470,17 @@ fn main() {
             bank::adopt_bank_consents,
             bank::set_bank_credentials,
             bank::forget_bank_credentials,
+            notify::email_status,
+            notify::save_email_settings,
+            notify::set_smtp_password,
+            notify::forget_smtp_password,
+            notify::send_test_email,
         ])
         .setup(|app| {
             update::schedule(app.handle().clone());
             bank::schedule(app.handle().clone());
+            notify::register(app.handle());
+            notify::schedule(app.handle().clone());
             #[cfg(target_os = "macos")]
             if let Some(window) = app.get_webview_window("main") {
                 apply_glass(&window);

@@ -19,9 +19,9 @@ use crate::{Error, Result};
 
 const ACTOR: &str = "local-owner";
 
-/// Notifications were delivered by the host the Python service ran on; the
-/// app has no delivery yet.
-pub const NOTIFICATIONS_AVAILABLE: bool = false;
+/// Alerts are delivered as macOS notifications by the app (the Python
+/// service never had a delivery channel enabled).
+pub const NOTIFICATIONS_AVAILABLE: bool = true;
 
 /// The stored settings, or the defaults when none were saved.
 pub fn current(conn: &Connection) -> Result<OwnerSettings> {

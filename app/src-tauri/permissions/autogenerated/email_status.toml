@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-email-status"
+description = "Enables the email_status command without any pre-configured scope."
+commands.allow = ["email_status"]
+
+[[permission]]
+identifier = "deny-email-status"
+description = "Denies the email_status command without any pre-configured scope."
+commands.deny = ["email_status"]

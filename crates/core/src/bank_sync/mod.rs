@@ -491,6 +491,11 @@ impl Service {
         {
             return (SyncStatus::ImportFailed, Some(imported));
         }
+        // New transactions may change the alerts (Python evaluated them after
+        // every sync). A failure here never fails the sync.
+        if imported.created > 0 {
+            let _ = self.evaluate_alerts_now();
+        }
         let status = match failure {
             None => SyncStatus::Success,
             Some(SyncStatus::RateLimited) => SyncStatus::RateLimited,

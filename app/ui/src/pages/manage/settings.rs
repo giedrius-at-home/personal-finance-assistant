@@ -200,6 +200,7 @@ pub fn Settings() -> impl IntoView {
             view! { <SettingsCard ws=ws ops=ops draft=draft preview=preview rollback=rollback /> }.into_any()
         })}
         <div class="mb-6 grid gap-4">
+            <super::email::EmailCard />
             {move || workspace.data.get().and_then(Result::ok).map(|ws| view! { <LocalData ws=ws /> })}
             <Updates />
         </div>
@@ -311,7 +312,11 @@ fn SettingsCard(
                         </span>
                         <span>
                             "Desktop notifications "
-                            {if notifications_available { "" } else { "— delivery is not installed" }}
+                            {if notifications_available {
+                                "— alerts about savings goals as macOS notifications"
+                            } else {
+                                "— delivery is not installed"
+                            }}
                         </span>
                     </label>
                     <details class=cn([DETAILS, "mb-5"])>
