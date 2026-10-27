@@ -53,6 +53,11 @@ const COMMANDS: &[&str] = &[
     "bank_link_start",
     "bank_link_finish",
     "bank_link_confirm",
+    "email_status",
+    "save_email_settings",
+    "set_smtp_password",
+    "forget_smtp_password",
+    "send_test_email",
 ];
 
 fn main() {

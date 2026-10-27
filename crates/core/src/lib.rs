@@ -2,6 +2,7 @@
 //! and decisions every screen shows. A Rust port of the old Python service;
 //! each module names the Python module it replaces.
 
+pub mod alerts;
 pub mod allocation;
 pub mod bank_sync;
 pub mod budget;
@@ -22,9 +23,11 @@ pub mod outlook;
 pub mod period;
 pub mod personal;
 pub mod plans;
+pub mod pyfmt;
 pub mod reporting;
 pub mod review;
 pub mod service;
+pub mod spending_email;
 pub mod subscriptions;
 pub mod text;
 pub mod transfers;

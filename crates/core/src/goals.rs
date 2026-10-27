@@ -29,7 +29,13 @@ pub fn evaluate_goal(goal: &SavingsGoal, as_of: Date) -> GoalEvaluation {
 
     let target = goal.target.amount;
     let current = goal.current.amount;
-    let remaining = (target - current).max(Decimal::ZERO);
+    // Python's `max(target - current, Decimal(0))` keeps the first of equals
+    // (`0.00`, not `0`).
+    let remaining = if target - current < Decimal::ZERO {
+        Decimal::ZERO
+    } else {
+        target - current
+    };
     let completed = remaining.is_zero();
     let overdue = as_of > target_date && !completed;
 
@@ -39,7 +45,7 @@ pub fn evaluate_goal(goal: &SavingsGoal, as_of: Date) -> GoalEvaluation {
     } else {
         py_div(Decimal::from(elapsed_days), Decimal::from(total_days))
     };
-    let expected_saved = crate::reporting::py_round(target * elapsed_ratio);
+    let expected_saved = crate::trends::py_mul(target, elapsed_ratio);
     let schedule_variance = current - expected_saved;
 
     let required_weekly = if completed {

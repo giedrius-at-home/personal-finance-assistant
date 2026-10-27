@@ -7,6 +7,7 @@
 pub mod bank;
 pub mod gateway;
 pub mod manage;
+pub mod notify;
 pub mod report;
 
 use rust_decimal::Decimal;

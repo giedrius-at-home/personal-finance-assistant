@@ -19,6 +19,8 @@ pub enum Item {
     EnableBankingKey,
     /// A bank's consent (sessions and account mapping), by bank id.
     BankConsent(Bank),
+    /// The SMTP (app) password the daily spending email signs in with.
+    SmtpPassword,
 }
 
 /// The banks with a stored consent.
@@ -51,6 +53,7 @@ impl Item {
             Self::BankConsent(Bank::AbnAmro) => "bank-consent-abnamro",
             Self::BankConsent(Bank::Revolut) => "bank-consent-revolut",
             Self::BankConsent(Bank::Swedbank) => "bank-consent-swedbank",
+            Self::SmtpPassword => "smtp-password",
         }
     }
 }

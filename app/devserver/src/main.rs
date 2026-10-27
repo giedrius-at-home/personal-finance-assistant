@@ -149,6 +149,9 @@ fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
         "status" => ok(service.status()),
         "refresh" => {
             service.refresh();
+            // No notifier here: due alerts are recorded as `unavailable`
+            // (or `disabled`), never shown.
+            let _ = service.evaluate_alerts_now();
             Ok(Value::Null)
         }
         "save_budget_plan" => {
@@ -255,6 +258,16 @@ fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
         "preview_settings" => ok(service.preview_settings(arg(args, "form")?)),
         "apply_settings" => ok(service.apply_settings(arg(args, "apply")?)),
         "rollback_settings" => ok(service.rollback_settings(arg(args, "revision")?)),
+        // The Keychain and the mail server belong to the app: settings can
+        // be edited here, but no password is stored and nothing is sent.
+        "email_status" => ok(service.email_status(false)),
+        "save_email_settings" => {
+            let saved = service.save_email_settings(arg(args, "settings")?);
+            ok(saved.and_then(|_| service.email_status(false)))
+        }
+        "set_smtp_password" | "forget_smtp_password" | "send_test_email" => {
+            Err("Email runs in the app only.".to_owned())
+        }
         _ => Err(format!("unknown command {cmd}")),
     }
 }

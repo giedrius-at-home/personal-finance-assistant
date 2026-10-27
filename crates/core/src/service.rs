@@ -3,7 +3,7 @@
 //! for. The Tauri commands and the development server are thin wrappers.
 
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use finance_storage::Store;
 use finance_types::DataStatus;
@@ -14,6 +14,7 @@ use finance_types::report::review::{self as rv, TransactionSearchQuery, Transact
 use finance_types::report::{Dashboard, ReviewReport};
 use jiff::Zoned;
 
+use crate::alerts::{Notification, Notifier, Outcome};
 use crate::writes::Writer;
 use crate::{Ctx, Snapshot, dashboard, review};
 
@@ -32,6 +33,10 @@ fn backup(path: &std::path::Path) -> Result<(), String> {
         jiff::Timestamp::now().strftime("%Y%m%dT%H%M%SZ")
     );
     let target = dir.join(name);
+    if target.exists() {
+        // Another store of this session backed up this same second.
+        return Ok(());
+    }
     let conn = rusqlite::Connection::open(path).map_err(|e| e.to_string())?;
     conn.execute("VACUUM INTO ?1", [target.to_string_lossy().as_ref()])
         .map_err(|e| e.to_string())?;
@@ -52,6 +57,15 @@ fn backup(path: &std::path::Path) -> Result<(), String> {
     Ok(())
 }
 
+/// No delivery channel is registered (development server, tests).
+struct Unavailable;
+
+impl Notifier for Unavailable {
+    fn send(&self, _: &Notification) -> Outcome {
+        Outcome::Unavailable
+    }
+}
+
 /// Errors cross to the UI as short, data-free strings.
 pub const NO_DATA: &str = "no-data";
 
@@ -61,12 +75,23 @@ struct Open {
     snapshot: Option<Snapshot>,
 }
 
+/// Where alerts go: the app's desktop notifications, once it registered them.
+#[derive(Default)]
+struct AlertSink(Mutex<Option<Arc<dyn Notifier + Send + Sync>>>);
+
+impl std::fmt::Debug for AlertSink {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("AlertSink")
+    }
+}
+
 #[derive(Debug)]
 pub struct Service {
     path: PathBuf,
     state: Mutex<Option<Open>>,
     /// The read-write store, opened on the first write.
     writer: Mutex<Option<Store>>,
+    alerts: AlertSink,
 }
 
 impl Service {
@@ -75,12 +100,35 @@ impl Service {
             path,
             state: Mutex::new(None),
             writer: Mutex::new(None),
+            alerts: AlertSink::default(),
+        }
+    }
+
+    /// Deliver alerts through `notifier` from now on (the app registers its
+    /// desktop notifications at start).
+    pub fn set_alert_notifier(&self, notifier: Arc<dyn Notifier + Send + Sync>) {
+        if let Ok(mut sink) = self.alerts.0.lock() {
+            *sink = Some(notifier);
+        }
+    }
+
+    /// Evaluate the alerts now through the registered notifier; without one,
+    /// a due alert is recorded as `unavailable` (or `disabled` when the owner
+    /// turned notifications off), as Python recorded it.
+    pub fn evaluate_alerts_now(&self) -> Result<Vec<crate::alerts::Decision>, String> {
+        let notifier = self.alerts.0.lock().ok().and_then(|s| s.clone());
+        match notifier {
+            Some(n) => self.evaluate_alerts(jiff::Timestamp::now(), n.as_ref()),
+            None => self.evaluate_alerts(jiff::Timestamp::now(), &Unavailable),
         }
     }
 
     /// Run `f` on the store and a current snapshot (loaded once, then reused
     /// until [`Service::refresh`]).
-    fn read<T>(&self, f: impl FnOnce(&Store, &Snapshot) -> crate::Result<T>) -> Result<T, String> {
+    pub(crate) fn read<T>(
+        &self,
+        f: impl FnOnce(&Store, &Snapshot) -> crate::Result<T>,
+    ) -> Result<T, String> {
         let mut guard = self.state.lock().map_err(|_| "store-poisoned".to_owned())?;
         if guard.is_none() {
             if !self.path.exists() {
@@ -166,6 +214,39 @@ impl Service {
         drop(guard);
         self.refresh();
         result
+    }
+
+    /// Run `f` on the cached snapshot.
+    pub(crate) fn read_snapshot<T>(&self, f: impl FnOnce(&Snapshot) -> T) -> Result<T, String> {
+        self.read(|_, snap| Ok(f(snap)))
+    }
+
+    /// Run `f` on the read-write connection, which manages its own
+    /// transactions (the alert lifecycle commits per candidate). Opens and
+    /// backs up like [`Service::write`]; the cached snapshot stays, as `f`
+    /// writes only tables the snapshot does not hold.
+    pub(crate) fn with_connection<T>(
+        &self,
+        f: impl FnOnce(&mut rusqlite::Connection) -> crate::Result<T>,
+    ) -> Result<T, String> {
+        if !self.path.exists() {
+            return Err(NO_DATA.to_owned());
+        }
+        let mut guard = self
+            .writer
+            .lock()
+            .map_err(|_| "store-poisoned".to_owned())?;
+        if guard.is_none() {
+            backup(&self.path).map_err(|e| format!("backup failed: {e}"))?;
+            *guard = Some(Store::open(&self.path).map_err(|e| e.to_string())?);
+        }
+        let store = guard.as_mut().ok_or_else(|| NO_DATA.to_owned())?;
+        f(store.connection_mut()).map_err(|e| e.to_string())
+    }
+
+    /// The dashboard as of `now` (the spending email builds it for its slot).
+    pub fn dashboard_at(&self, now: &Zoned) -> Result<Dashboard, String> {
+        self.read(|store, snap| dashboard::dashboard(store, snap, now))
     }
 
     pub fn dashboard(&self) -> Result<Dashboard, String> {

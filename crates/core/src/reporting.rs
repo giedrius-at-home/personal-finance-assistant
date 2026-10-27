@@ -50,8 +50,12 @@ pub fn py_round(d: Decimal) -> Decimal {
 /// half-even, and exact quotients reduced to the ideal exponent. Division by
 /// zero (an error in Python) gives zero.
 pub fn py_div(a: Decimal, b: Decimal) -> Decimal {
-    if b.is_zero() || a.is_zero() {
+    if b.is_zero() {
         return Decimal::ZERO;
+    }
+    if a.is_zero() {
+        // Python keeps the ideal exponent: `Decimal("0.00") / 7` is `0.00`.
+        return Decimal::new(0, a.scale().saturating_sub(b.scale()));
     }
     let negative = a.is_sign_negative() != b.is_sign_negative();
     let divisor = b.mantissa().unsigned_abs();
