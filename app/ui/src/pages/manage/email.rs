@@ -329,7 +329,7 @@ pub fn EmailCard() -> impl IntoView {
     };
     view! {
         <Card>
-            <Eyebrow level=Heading::P>"RAFAEL"</Eyebrow>
+            <Eyebrow level=Heading::P>"EMAIL"</Eyebrow>
             <CardTitle level=Heading::H2 class="mt-1">"Daily spending email"</CardTitle>
             <div class="mt-4 grid gap-3">
                 <Messages ops=ops />

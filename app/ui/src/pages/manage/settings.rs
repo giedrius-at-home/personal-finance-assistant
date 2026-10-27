@@ -581,7 +581,7 @@ fn ForecastModel() -> impl IntoView {
                 None => place.to_owned(),
             }
         } else {
-            "Not on this Mac: daily forecasts use the same-weekday baseline.".to_owned()
+            "Not on this Mac: forecasts use the simple baselines.".to_owned()
         };
         let failed = s.error.is_some();
         let offer = !s.available && s.downloading.is_none();
@@ -604,7 +604,7 @@ fn ForecastModel() -> impl IntoView {
                     <div class="mt-5 grid gap-3">
                         <p class="text-sm text-fg-muted">
                             {format!(
-                                "Google's time-series model forecasts everyday spending and is kept when it beats the baseline on your own history. The download is {} from Hugging Face (google/timesfm-3.0-pytorch); it runs on this Mac only.",
+                                "Google's time-series model forecasts daily spending, group month-end totals and the three-month outlook; each is kept only where it beats the simple baseline on your own history. The download is {} from Hugging Face (google/timesfm-3.0-pytorch); it runs on this Mac only.",
                                 gigabytes(s.download_bytes),
                             )}
                         </p>
