@@ -1,0 +1,622 @@
+{
+ "risk": {
+  "windows": [
+   {
+    "currency": {
+     "code": "EUR",
+     "minor_unit": 2
+    },
+    "signal": {
+     "start": "2026-10-09",
+     "end": "2026-10-11",
+     "previous_start": "2026-10-06",
+     "previous_end": "2026-10-08",
+     "spending": "274.99",
+     "previous_spending": "93.39",
+     "unplanned": "148.95",
+     "previous_unplanned": "69.92",
+     "allowance": "72.48",
+     "historical_upper": "299.17",
+     "excessive_speed": true,
+     "accelerating": true,
+     "unusual_unplanned": false,
+     "alert": true
+    },
+    "expected_savings": "-2385.51",
+    "planned_savings": "5211.27",
+    "expected_final": "-1520.004",
+    "planned_final": null
+   },
+   {
+    "currency": {
+     "code": "USD",
+     "minor_unit": 2
+    },
+    "signal": {
+     "start": "2026-10-09",
+     "end": "2026-10-11",
+     "previous_start": "2026-10-06",
+     "previous_end": "2026-10-08",
+     "spending": "-12.50",
+     "previous_spending": "93.39",
+     "unplanned": "148.95",
+     "previous_unplanned": "69.92",
+     "allowance": "72.48",
+     "historical_upper": "299.17",
+     "excessive_speed": true,
+     "accelerating": true,
+     "unusual_unplanned": false,
+     "alert": true
+    },
+    "expected_savings": "0.005",
+    "planned_savings": "1000000",
+    "expected_final": "-1520.004",
+    "planned_final": null
+   }
+  ],
+  "salary_at_risk": [
+   [
+    "EUR",
+    "1234.565"
+   ]
+  ],
+  "next_month_shortfall": [
+   [
+    "EUR",
+    "12.345"
+   ]
+  ],
+  "groups": [
+   {
+    "group": "Fun & <games>",
+    "currency": {
+     "code": "EUR",
+     "minor_unit": 2
+    },
+    "spent": "44.990000000000",
+    "expected": "59.51",
+    "upper": "132.13",
+    "limit": "45.00",
+    "daily_room": "0.000500000000"
+   },
+   {
+    "group": "Groceries",
+    "currency": {
+     "code": "EUR",
+     "minor_unit": 2
+    },
+    "spent": "147.920000000000",
+    "expected": "318.92",
+    "upper": "434.39",
+    "limit": "300",
+    "daily_room": "7.604000000000"
+   },
+   {
+    "group": "Travel",
+    "currency": {
+     "code": "EUR",
+     "minor_unit": 2
+    },
+    "spent": "1200.50",
+    "expected": "2345.678",
+    "upper": "3000",
+    "limit": "1999.995",
+    "daily_room": "40.1"
+   }
+  ],
+  "forecasts": [
+   {
+    "currency": {
+     "code": "EUR",
+     "minor_unit": 2
+    },
+    "as_of": "2026-10-12",
+    "method": "weekday_baseline",
+    "model": "weekday-baseline",
+    "habit_spent_this_month": "851.70",
+    "planned_paid_this_month": "2077.18",
+    "days": [
+     {
+      "day": "2026-10-12",
+      "habit_expected": "109.90",
+      "habit_lower": "52.85",
+      "habit_upper": "159.58",
+      "planned": "23.00",
+      "expected_income": "0.00"
+     },
+     {
+      "day": "2026-10-13",
+      "habit_expected": "33.51",
+      "habit_lower": "13.35",
+      "habit_upper": "48.40",
+      "planned": "0.00",
+      "expected_income": "0.00"
+     },
+     {
+      "day": "2026-10-14",
+      "habit_expected": "15.83",
+      "habit_lower": "7.20",
+      "habit_upper": "25.20",
+      "planned": "0.00",
+      "expected_income": "0.00"
+     },
+     {
+      "day": "2026-10-15",
+      "habit_expected": "36.80",
+      "habit_lower": "6.90",
+      "habit_upper": "63.85",
+      "planned": "0.00",
+      "expected_income": "0.00"
+     },
+     {
+      "day": "2026-10-16",
+      "habit_expected": "68.59",
+      "habit_lower": "36.66",
+      "habit_upper": "91.02",
+      "planned": "0.00",
+      "expected_income": "0.00"
+     },
+     {
+      "day": "2026-10-17",
+      "habit_expected": "72.64",
+      "habit_lower": "13.60",
+      "habit_upper": "119.56",
+      "planned": "0.00",
+      "expected_income": "0.00"
+     },
+     {
+      "day": "2026-10-18",
+      "habit_expected": "30.89",
+      "habit_lower": "0.00",
+      "habit_upper": "68.23",
+      "planned": "0.00",
+      "expected_income": "0.00"
+     },
+     {
+      "day": "2026-10-19",
+      "habit_expected": "109.90",
+      "habit_lower": "52.85",
+      "habit_upper": "159.58",
+      "planned": "0.00",
+      "expected_income": "0.00"
+     },
+     {
+      "day": "2026-10-20",
+      "habit_expected": "33.51",
+      "habit_lower": "13.35",
+      "habit_upper": "48.40",
+      "planned": "0.00",
+      "expected_income": "0.00"
+     },
+     {
+      "day": "2026-10-21",
+      "habit_expected": "15.83",
+      "habit_lower": "7.20",
+      "habit_upper": "25.20",
+      "planned": "149.90",
+      "expected_income": "0.00"
+     },
+     {
+      "day": "2026-10-22",
+      "habit_expected": "36.80",
+      "habit_lower": "6.90",
+      "habit_upper": "63.85",
+      "planned": "0.00",
+      "expected_income": "0.00"
+     },
+     {
+      "day": "2026-10-23",
+      "habit_expected": "68.59",
+      "habit_lower": "36.66",
+      "habit_upper": "91.02",
+      "planned": "0.00",
+      "expected_income": "0.00"
+     },
+     {
+      "day": "2026-10-24",
+      "habit_expected": "72.64",
+      "habit_lower": "13.60",
+      "habit_upper": "119.56",
+      "planned": "4.99",
+      "expected_income": "0.00"
+     },
+     {
+      "day": "2026-10-25",
+      "habit_expected": "30.89",
+      "habit_lower": "0.00",
+      "habit_upper": "68.23",
+      "planned": "0.00",
+      "expected_income": "0.00"
+     },
+     {
+      "day": "2026-10-26",
+      "habit_expected": "109.90",
+      "habit_lower": "52.85",
+      "habit_upper": "159.58",
+      "planned": "0.00",
+      "expected_income": "3042.27"
+     },
+     {
+      "day": "2026-10-27",
+      "habit_expected": "33.51",
+      "habit_lower": "13.35",
+      "habit_upper": "48.40",
+      "planned": "8.35",
+      "expected_income": "0.00"
+     },
+     {
+      "day": "2026-10-28",
+      "habit_expected": "15.83",
+      "habit_lower": "7.20",
+      "habit_upper": "25.20",
+      "planned": "0.00",
+      "expected_income": "0.00"
+     },
+     {
+      "day": "2026-10-29",
+      "habit_expected": "36.80",
+      "habit_lower": "6.90",
+      "habit_upper": "63.85",
+      "planned": "0.00",
+      "expected_income": "0.00"
+     },
+     {
+      "day": "2026-10-30",
+      "habit_expected": "68.59",
+      "habit_lower": "36.66",
+      "habit_upper": "91.02",
+      "planned": "0.00",
+      "expected_income": "0.00"
+     },
+     {
+      "day": "2026-10-31",
+      "habit_expected": "72.64",
+      "habit_lower": "13.60",
+      "habit_upper": "119.56",
+      "planned": "0.00",
+      "expected_income": "0.00"
+     }
+    ],
+    "next_week_habit": "368.17",
+    "next_week_lower": "108.76",
+    "next_week_upper": "642.41",
+    "next_week_planned": "23.00",
+    "month_end_habit": "1925.33",
+    "month_end_lower": "1486.83",
+    "month_end_upper": "2388.87",
+    "month_remaining_planned": "186.24",
+    "month_remaining_income": "3042.27",
+    "upcoming": [
+     {
+      "day": "2026-10-13",
+      "name": "Rent \"flat\" & co",
+      "amount": "1450.00",
+      "direction": "outflow",
+      "source": "planned_payment"
+     },
+     {
+      "day": "2026-10-15",
+      "name": "Refund from a friend who paid back the whole trip and then some more text to cut",
+      "amount": "80",
+      "direction": "inflow",
+      "source": "planned_payment"
+     },
+     {
+      "day": "2026-10-21",
+      "name": "Insurance",
+      "amount": "149.90",
+      "direction": "outflow",
+      "source": "bill"
+     },
+     {
+      "day": "2026-10-22",
+      "name": "Phone",
+      "amount": "15.00",
+      "direction": "outflow",
+      "source": "bill"
+     },
+     {
+      "day": "2026-10-23",
+      "name": "Gym",
+      "amount": "35.00",
+      "direction": "outflow",
+      "source": "bill"
+     },
+     {
+      "day": "2026-10-24",
+      "name": "Music",
+      "amount": "11.99",
+      "direction": "outflow",
+      "source": "bill"
+     },
+     {
+      "day": "2026-10-25",
+      "name": "Seventh",
+      "amount": "1.00",
+      "direction": "outflow",
+      "source": "bill"
+     }
+    ],
+    "habits": [
+     {
+      "weekday": "Monday",
+      "average": "250.10",
+      "spend_day_share": "1.00"
+     },
+     {
+      "weekday": "Tuesday",
+      "average": "37.87",
+      "spend_day_share": "1.00"
+     },
+     {
+      "weekday": "Wednesday",
+      "average": "106.27",
+      "spend_day_share": "1.00"
+     },
+     {
+      "weekday": "Thursday",
+      "average": "250.10",
+      "spend_day_share": "1.00"
+     },
+     {
+      "weekday": "Friday",
+      "average": "60.37",
+      "spend_day_share": "0.92"
+     },
+     {
+      "weekday": "Saturday",
+      "average": "80.69",
+      "spend_day_share": "0.92"
+     },
+     {
+      "weekday": "Sunday",
+      "average": "58.59",
+      "spend_day_share": "0.92"
+     }
+    ],
+    "training_days": 587,
+    "backtest_windows": 8,
+    "model_error": null,
+    "planned_model_error": null,
+    "baseline_error": "196.92",
+    "months": [
+     {
+      "month": "2026-10-01",
+      "habit": "1925.33",
+      "groups": [
+       {
+        "group_id": "groceries",
+        "expected": "403.56",
+        "remaining": "259.59"
+       },
+       {
+        "group_id": "food-out",
+        "expected": "362.06",
+        "remaining": "205.21"
+       },
+       {
+        "group_id": "3a0e43e7-1084-43cc-96af-6019329d07d4",
+        "expected": "230.91",
+        "remaining": "26.96"
+       },
+       {
+        "group_id": "a65f5366-77d4-4a1a-9e19-c9bab22a8400",
+        "expected": "143.45",
+        "remaining": "61.48"
+       },
+       {
+        "group_id": "a1c3d51e-3eaa-4822-b4cf-d8a3c1a5d8f1",
+        "expected": "97.48",
+        "remaining": "52.49"
+       }
+      ],
+      "remaining": "1073.63"
+     },
+     {
+      "month": "2026-11-01",
+      "habit": "1613.49",
+      "groups": [
+       {
+        "group_id": "groceries",
+        "expected": "387.23",
+        "remaining": "387.23"
+       },
+       {
+        "group_id": "food-out",
+        "expected": "302.09",
+        "remaining": "302.09"
+       }
+      ],
+      "remaining": "1613.49"
+     }
+    ],
+    "excluded": null
+   },
+   {
+    "currency": {
+     "code": "USD",
+     "minor_unit": 2
+    },
+    "as_of": "2026-10-12",
+    "method": "weekday_baseline",
+    "model": "weekday-baseline",
+    "habit_spent_this_month": "851.70",
+    "planned_paid_this_month": "2077.18",
+    "days": [
+     {
+      "day": "2026-10-12",
+      "habit_expected": "109.90",
+      "habit_lower": "52.85",
+      "habit_upper": "159.58",
+      "planned": "23.00",
+      "expected_income": "0.00"
+     }
+    ],
+    "next_week_habit": "368.17",
+    "next_week_lower": "108.76",
+    "next_week_upper": "642.41",
+    "next_week_planned": "23.00",
+    "month_end_habit": "1925.33",
+    "month_end_lower": "1486.83",
+    "month_end_upper": "2388.87",
+    "month_remaining_planned": "186.24",
+    "month_remaining_income": "3042.27",
+    "upcoming": [],
+    "habits": [],
+    "training_days": 587,
+    "backtest_windows": 0,
+    "model_error": null,
+    "planned_model_error": null,
+    "baseline_error": "196.92",
+    "months": [
+     {
+      "month": "2026-10-01",
+      "habit": "1925.33",
+      "groups": [
+       {
+        "group_id": "groceries",
+        "expected": "403.56",
+        "remaining": "259.59"
+       },
+       {
+        "group_id": "food-out",
+        "expected": "362.06",
+        "remaining": "205.21"
+       },
+       {
+        "group_id": "3a0e43e7-1084-43cc-96af-6019329d07d4",
+        "expected": "230.91",
+        "remaining": "26.96"
+       },
+       {
+        "group_id": "a65f5366-77d4-4a1a-9e19-c9bab22a8400",
+        "expected": "143.45",
+        "remaining": "61.48"
+       },
+       {
+        "group_id": "a1c3d51e-3eaa-4822-b4cf-d8a3c1a5d8f1",
+        "expected": "97.48",
+        "remaining": "52.49"
+       }
+      ],
+      "remaining": "1073.63"
+     },
+     {
+      "month": "2026-11-01",
+      "habit": "1613.49",
+      "groups": [
+       {
+        "group_id": "groceries",
+        "expected": "387.23",
+        "remaining": "387.23"
+       },
+       {
+        "group_id": "food-out",
+        "expected": "302.09",
+        "remaining": "302.09"
+       }
+      ],
+      "remaining": "1613.49"
+     }
+    ],
+    "excluded": null
+   }
+  ],
+  "recent_purchases": [
+   {
+    "date": "2026-10-11",
+    "merchant": "Shop 1",
+    "category": "Food",
+    "group": "Groceries",
+    "amount": "1.25",
+    "currency": {
+     "code": "EUR",
+     "minor_unit": 2
+    }
+   },
+   {
+    "date": "2026-10-11",
+    "merchant": "Shop 2",
+    "category": "Food",
+    "group": "Groceries",
+    "amount": "2.25",
+    "currency": {
+     "code": "EUR",
+     "minor_unit": 2
+    }
+   },
+   {
+    "date": "2026-10-11",
+    "merchant": "Shop 3",
+    "category": "Food",
+    "group": "Groceries",
+    "amount": "3.25",
+    "currency": {
+     "code": "EUR",
+     "minor_unit": 2
+    }
+   },
+   {
+    "date": "2026-10-11",
+    "merchant": "Shop 4",
+    "category": "Food",
+    "group": "Groceries",
+    "amount": "4.25",
+    "currency": {
+     "code": "EUR",
+     "minor_unit": 2
+    }
+   },
+   {
+    "date": "2026-10-11",
+    "merchant": "Shop 5",
+    "category": "Food",
+    "group": "Groceries",
+    "amount": "5.25",
+    "currency": {
+     "code": "EUR",
+     "minor_unit": 2
+    }
+   },
+   {
+    "date": "2026-10-11",
+    "merchant": "Shop 6",
+    "category": "Food",
+    "group": "Groceries",
+    "amount": "6.25",
+    "currency": {
+     "code": "EUR",
+     "minor_unit": 2
+    }
+   },
+   {
+    "date": "2026-10-11",
+    "merchant": "Shop 7",
+    "category": "Food",
+    "group": "Groceries",
+    "amount": "7.25",
+    "currency": {
+     "code": "EUR",
+     "minor_unit": 2
+    }
+   },
+   {
+    "date": "2026-10-11",
+    "merchant": "Shop 8",
+    "category": "Food",
+    "group": "Groceries",
+    "amount": "8.25",
+    "currency": {
+     "code": "EUR",
+     "minor_unit": 2
+    }
+   }
+  ]
+ },
+ "intro": "Hey <you> & 'friends', \"quick\" check.",
+ "alert_html": "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>The Rafael Report</title></head><body style=\"margin:0;background:#eeede8;color:#22221f;font-family:Arial,Helvetica,sans-serif\"><div style=\"display:none;max-height:0;overflow:hidden\">Your spending, your plan, and a quick move for future you.</div><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr><td align=\"center\" style=\"padding:24px 8px\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"max-width:640px;background:#fbfaf7;border:1px solid #dfded8;border-radius:16px;overflow:hidden\"><tr><td style=\"padding:20px 28px;border-bottom:1px solid #dfded8;color:#686760;font-size:11px;letter-spacing:2px\">GIEDRIUS / FINANCE <span style=\"float:right\">RAFAEL</span></td></tr><tr><td style=\"padding:32px 28px;background:#292a2d;color:#fbfaf7\"><div style=\"font-size:10px;letter-spacing:2px;color:#f4f3ef\">YOUR PERSONAL MONEY BRIEFING</div><h1 style=\"font-size:42px;line-height:1.05;letter-spacing:-1.5px;margin:16px 0\">The Rafael<br>Report.</h1><p style=\"font-size:18px;line-height:1.5;margin:0;color:#f4f3ef\">Your money. Front-page energy. 👀</p></td></tr><tr><td style=\"padding:24px 28px;font-size:16px;line-height:1.7\">Hey &lt;you&gt; &amp; &#x27;friends&#x27;, &quot;quick&quot; check.</td></tr><tr><td style=\"padding:25px 28px;border-bottom:1px solid #dfded8\"><div style=\"font-size:10px;letter-spacing:2px;color:#686760\">THE SPENDING SPEED CHECK</div><h2 style=\"font-size:23px;margin:9px 0\">The receipts are in. EUR</h2><p style=\"font-size:12px;color:#686760\">09 Oct–11 Oct 2026 · compared with 06 Oct–08 Oct</p><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr><td style=\"padding:10px 0 4px;font-size:13px\">Previous three days</td><td align=\"right\" style=\"font-size:14px;font-weight:bold\">EUR 93.39</td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"33%\" height=\"12\" style=\"background:#d9d7cf;border-radius:5px\"></td><td width=\"67%\" height=\"12\"></td></tr></table></td></tr><tr><td style=\"padding:10px 0 4px;font-size:13px\">Latest three complete days</td><td align=\"right\" style=\"font-size:14px;font-weight:bold\">EUR 274.99</td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"100%\" height=\"12\" style=\"background:#6288cf;border-radius:5px\"></td><td width=\"0%\" height=\"12\"></td></tr></table></td></tr></table><p style=\"font-size:13px;line-height:1.7;margin:18px 0 0\">Unplanned spending: <b>EUR 148.95</b><br>Planned allowance for the window: <b>EUR 72.48</b></p></td></tr><tr><td style=\"padding:25px 28px;border-bottom:1px solid #dfded8\"><div style=\"font-size:10px;letter-spacing:2px;color:#686760\">THE NEXT THREE MONTHS</div><h2 style=\"font-size:23px;margin:9px 0 18px\">Two possible plotlines.</h2><table role=\"presentation\" width=\"100%\" cellspacing=\"4\" cellpadding=\"0\"><tr><td width=\"50%\" valign=\"top\" style=\"padding:17px;border-top:3px solid #418345;background:#fbfaf7\"><div style=\"font-size:12px;color:#686760\">Following your plan</div><div style=\"font-size:25px;line-height:1.35;font-weight:bold;margin:8px 0\">EUR 5,211.27</div><div style=\"font-size:12px;color:#686760\">New savings over three months</div></td><td width=\"50%\" valign=\"top\" style=\"padding:17px;border-top:3px solid #c3704f;background:#fbfaf7\"><div style=\"font-size:12px;color:#686760\">Current habits</div><div style=\"font-size:25px;line-height:1.35;font-weight:bold;margin:8px 0\">−EUR 2,385.51</div><div style=\"font-size:12px;color:#686760\">Final balance −EUR 1,520.00</div></td></tr></table><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr><td style=\"padding:10px 0 4px;font-size:13px\">Following your plan</td><td align=\"right\" style=\"font-size:14px;font-weight:bold\">EUR 5,211.27</td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"100%\" height=\"12\" style=\"background:#418345;border-radius:5px\"></td><td width=\"0%\" height=\"12\"></td></tr></table></td></tr><tr><td style=\"padding:10px 0 4px;font-size:13px\">Continuing current habits</td><td align=\"right\" style=\"font-size:14px;font-weight:bold\">−EUR 2,385.51</td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"45%\" height=\"12\" style=\"background:#c3704f;border-radius:5px\"></td><td width=\"55%\" height=\"12\"></td></tr></table></td></tr></table><p style=\"font-size:11px;line-height:1.6;color:#686760;margin-top:14px\">Estimates, not promises. Negative savings mean drawing down your balance. Bars compare magnitudes; the amounts show the sign.</p></td></tr><tr><td style=\"padding:25px 28px;border-bottom:1px solid #dfded8\"><div style=\"font-size:10px;letter-spacing:2px;color:#686760\">THE SPENDING SPEED CHECK</div><h2 style=\"font-size:23px;margin:9px 0\">The receipts are in. USD</h2><p style=\"font-size:12px;color:#686760\">09 Oct–11 Oct 2026 · compared with 06 Oct–08 Oct</p><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr><td style=\"padding:10px 0 4px;font-size:13px\">Previous three days</td><td align=\"right\" style=\"font-size:14px;font-weight:bold\">USD 93.39</td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"100%\" height=\"12\" style=\"background:#d9d7cf;border-radius:5px\"></td><td width=\"0%\" height=\"12\"></td></tr></table></td></tr><tr><td style=\"padding:10px 0 4px;font-size:13px\">Latest three complete days</td><td align=\"right\" style=\"font-size:14px;font-weight:bold\">−USD 12.50</td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"13%\" height=\"12\" style=\"background:#6288cf;border-radius:5px\"></td><td width=\"87%\" height=\"12\"></td></tr></table></td></tr></table><p style=\"font-size:13px;line-height:1.7;margin:18px 0 0\">Unplanned spending: <b>USD 148.95</b><br>Planned allowance for the window: <b>USD 72.48</b></p></td></tr><tr><td style=\"padding:25px 28px;border-bottom:1px solid #dfded8\"><div style=\"font-size:10px;letter-spacing:2px;color:#686760\">THE NEXT THREE MONTHS</div><h2 style=\"font-size:23px;margin:9px 0 18px\">Two possible plotlines.</h2><table role=\"presentation\" width=\"100%\" cellspacing=\"4\" cellpadding=\"0\"><tr><td width=\"50%\" valign=\"top\" style=\"padding:17px;border-top:3px solid #418345;background:#fbfaf7\"><div style=\"font-size:12px;color:#686760\">Following your plan</div><div style=\"font-size:25px;line-height:1.35;font-weight:bold;margin:8px 0\">USD 1,000,000.00</div><div style=\"font-size:12px;color:#686760\">New savings over three months</div></td><td width=\"50%\" valign=\"top\" style=\"padding:17px;border-top:3px solid #c3704f;background:#fbfaf7\"><div style=\"font-size:12px;color:#686760\">Current habits</div><div style=\"font-size:25px;line-height:1.35;font-weight:bold;margin:8px 0\">USD 0.00</div><div style=\"font-size:12px;color:#686760\">Final balance −USD 1,520.00</div></td></tr></table><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr><td style=\"padding:10px 0 4px;font-size:13px\">Following your plan</td><td align=\"right\" style=\"font-size:14px;font-weight:bold\">USD 1,000,000.00</td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"100%\" height=\"12\" style=\"background:#418345;border-radius:5px\"></td><td width=\"0%\" height=\"12\"></td></tr></table></td></tr><tr><td style=\"padding:10px 0 4px;font-size:13px\">Continuing current habits</td><td align=\"right\" style=\"font-size:14px;font-weight:bold\">USD 0.00</td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"0%\" height=\"12\" style=\"background:#c3704f;border-radius:5px\"></td><td width=\"100%\" height=\"12\"></td></tr></table></td></tr></table><p style=\"font-size:11px;line-height:1.6;color:#686760;margin-top:14px\">Estimates, not promises. Negative savings mean drawing down your balance. Bars compare magnitudes; the amounts show the sign.</p></td></tr><tr><td style=\"padding:25px 28px;border-bottom:1px solid #dfded8\"><h2 style=\"font-size:22px;margin:0 0 10px\">Categories in the spotlight</h2><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" style=\"font-size:13px\"><tr><td style=\"padding:10px 0;border-bottom:1px solid #dfded8\">Fun &amp; &lt;games&gt;</td><td align=\"right\" style=\"padding:10px 0;border-bottom:1px solid #dfded8\"><b>EUR 59.51</b><br><span style=\"font-size:11px;color:#686760\">vs EUR 45.00 budget</span></td></tr><tr><td style=\"padding:10px 0;border-bottom:1px solid #dfded8\">Groceries</td><td align=\"right\" style=\"padding:10px 0;border-bottom:1px solid #dfded8\"><b>EUR 318.92</b><br><span style=\"font-size:11px;color:#686760\">vs EUR 300.00 budget</span></td></tr><tr><td style=\"padding:10px 0;border-bottom:1px solid #dfded8\">Travel</td><td align=\"right\" style=\"padding:10px 0;border-bottom:1px solid #dfded8\"><b>EUR 2,345.68</b><br><span style=\"font-size:11px;color:#686760\">vs EUR 2,000.00 budget</span></td></tr></table></td></tr><tr><td style=\"padding:20px 28px;font-size:13px;line-height:1.8\">Next month's reserved salary at risk: EUR 1,234.56.<br>Next month funding shortfall: EUR 12.34.</td></tr><tr><td style=\"padding:25px 28px;border-bottom:1px solid #dfded8\"><div style=\"font-size:10px;letter-spacing:2px;color:#686760\">THE FORECAST</div><h2 style=\"font-size:23px;margin:9px 0\">Your next seven days. EUR</h2><p style=\"font-size:12px;color:#686760\"><span style=\"color:#6288cf\">■</span> habits <span style=\"color:#c3704f\">■</span> planned payments and bills</p><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr><td style=\"padding:9px 0 4px;font-size:13px\">Mon 12 Oct</td><td align=\"right\" style=\"font-size:13px\"><b>EUR 132.90</b></td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"82%\" height=\"12\" style=\"background:#6288cf\"></td><td width=\"17%\" height=\"12\" style=\"background:#c3704f\"></td><td width=\"1%\" height=\"12\"></td></tr></table></td></tr><tr><td style=\"padding:9px 0 4px;font-size:13px\">Tue 13 Oct</td><td align=\"right\" style=\"font-size:13px\"><b>EUR 33.51</b></td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"25%\" height=\"12\" style=\"background:#6288cf\"></td><td width=\"75%\" height=\"12\"></td></tr></table></td></tr><tr><td style=\"padding:9px 0 4px;font-size:13px\">Wed 14 Oct</td><td align=\"right\" style=\"font-size:13px\"><b>EUR 15.83</b></td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"11%\" height=\"12\" style=\"background:#6288cf\"></td><td width=\"89%\" height=\"12\"></td></tr></table></td></tr><tr><td style=\"padding:9px 0 4px;font-size:13px\">Thu 15 Oct</td><td align=\"right\" style=\"font-size:13px\"><b>EUR 36.80</b></td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"27%\" height=\"12\" style=\"background:#6288cf\"></td><td width=\"73%\" height=\"12\"></td></tr></table></td></tr><tr><td style=\"padding:9px 0 4px;font-size:13px\">Fri 16 Oct</td><td align=\"right\" style=\"font-size:13px\"><b>EUR 68.59</b></td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"51%\" height=\"12\" style=\"background:#6288cf\"></td><td width=\"49%\" height=\"12\"></td></tr></table></td></tr><tr><td style=\"padding:9px 0 4px;font-size:13px\">Sat 17 Oct</td><td align=\"right\" style=\"font-size:13px\"><b>EUR 72.64</b></td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"54%\" height=\"12\" style=\"background:#6288cf\"></td><td width=\"46%\" height=\"12\"></td></tr></table></td></tr><tr><td style=\"padding:9px 0 4px;font-size:13px\">Sun 18 Oct</td><td align=\"right\" style=\"font-size:13px\"><b>EUR 30.89</b></td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"23%\" height=\"12\" style=\"background:#6288cf\"></td><td width=\"77%\" height=\"12\"></td></tr></table></td></tr></table><table role=\"presentation\" width=\"100%\" cellspacing=\"4\" cellpadding=\"0\" style=\"margin-top:18px\"><tr><td width=\"50%\" valign=\"top\" style=\"padding:17px;border-top:3px solid #6288cf;background:#fbfaf7\"><div style=\"font-size:12px;color:#686760\">Next 7 days: habits</div><div style=\"font-size:25px;line-height:1.35;font-weight:bold;margin:8px 0\">EUR 368.17</div><div style=\"font-size:12px;color:#686760\">Likely EUR 108.76–EUR 642.41 · plus EUR 23.00 planned</div></td><td width=\"50%\" valign=\"top\" style=\"padding:17px;border-top:3px solid #c3704f;background:#fbfaf7\"><div style=\"font-size:12px;color:#686760\">Month end: habits</div><div style=\"font-size:25px;line-height:1.35;font-weight:bold;margin:8px 0\">EUR 1,925.33</div><div style=\"font-size:12px;color:#686760\">Likely EUR 1,486.83–EUR 2,388.87 · EUR 186.24 still planned</div></td></tr></table><h3 style=\"font-size:15px;margin:20px 0 6px\">Coming up</h3><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" style=\"font-size:13px\"><tr><td style=\"padding:7px 0;border-bottom:1px solid #dfded8\">13 Oct · Rent &quot;flat&quot; &amp; co</td><td align=\"right\" style=\"padding:7px 0;border-bottom:1px solid #dfded8\">EUR 1,450.00</td></tr><tr><td style=\"padding:7px 0;border-bottom:1px solid #dfded8\">15 Oct · Refund from a friend who paid back the whole trip and then some more text to cut</td><td align=\"right\" style=\"padding:7px 0;border-bottom:1px solid #dfded8\">+EUR 80.00</td></tr><tr><td style=\"padding:7px 0;border-bottom:1px solid #dfded8\">21 Oct · Insurance</td><td align=\"right\" style=\"padding:7px 0;border-bottom:1px solid #dfded8\">EUR 149.90</td></tr><tr><td style=\"padding:7px 0;border-bottom:1px solid #dfded8\">22 Oct · Phone</td><td align=\"right\" style=\"padding:7px 0;border-bottom:1px solid #dfded8\">EUR 15.00</td></tr><tr><td style=\"padding:7px 0;border-bottom:1px solid #dfded8\">23 Oct · Gym</td><td align=\"right\" style=\"padding:7px 0;border-bottom:1px solid #dfded8\">EUR 35.00</td></tr><tr><td style=\"padding:7px 0;border-bottom:1px solid #dfded8\">24 Oct · Music</td><td align=\"right\" style=\"padding:7px 0;border-bottom:1px solid #dfded8\">EUR 11.99</td></tr></table><p style=\"font-size:13px;line-height:1.7;margin:16px 0 0\">Your heaviest habit day is <b>Monday</b> (about EUR 250.10). Income still expected this month: <b>EUR 3,042.27</b>.</p><p style=\"font-size:11px;line-height:1.6;color:#686760;margin-top:12px\">Forecast by weekday-baseline from 587 days of history, checked against 8 past weeks. Ranges are deliberately wide: they add up each day's likely range.</p></td></tr><tr><td style=\"padding:25px 28px;border-bottom:1px solid #dfded8\"><div style=\"font-size:10px;letter-spacing:2px;color:#686760\">THE FORECAST</div><h2 style=\"font-size:23px;margin:9px 0\">Your next seven days. USD</h2><p style=\"font-size:12px;color:#686760\"><span style=\"color:#6288cf\">■</span> habits <span style=\"color:#c3704f\">■</span> planned payments and bills</p><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr><td style=\"padding:9px 0 4px;font-size:13px\">Mon 12 Oct</td><td align=\"right\" style=\"font-size:13px\"><b>USD 132.90</b></td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"82%\" height=\"12\" style=\"background:#6288cf\"></td><td width=\"17%\" height=\"12\" style=\"background:#c3704f\"></td><td width=\"1%\" height=\"12\"></td></tr></table></td></tr></table><table role=\"presentation\" width=\"100%\" cellspacing=\"4\" cellpadding=\"0\" style=\"margin-top:18px\"><tr><td width=\"50%\" valign=\"top\" style=\"padding:17px;border-top:3px solid #6288cf;background:#fbfaf7\"><div style=\"font-size:12px;color:#686760\">Next 7 days: habits</div><div style=\"font-size:25px;line-height:1.35;font-weight:bold;margin:8px 0\">USD 368.17</div><div style=\"font-size:12px;color:#686760\">Likely USD 108.76–USD 642.41 · plus USD 23.00 planned</div></td><td width=\"50%\" valign=\"top\" style=\"padding:17px;border-top:3px solid #c3704f;background:#fbfaf7\"><div style=\"font-size:12px;color:#686760\">Month end: habits</div><div style=\"font-size:25px;line-height:1.35;font-weight:bold;margin:8px 0\">USD 1,925.33</div><div style=\"font-size:12px;color:#686760\">Likely USD 1,486.83–USD 2,388.87 · USD 186.24 still planned</div></td></tr></table><p style=\"font-size:13px;line-height:1.7;margin:16px 0 0\">Income still expected this month: <b>USD 3,042.27</b>.</p><p style=\"font-size:11px;line-height:1.6;color:#686760;margin-top:12px\">Forecast by weekday-baseline from 587 days of history. Ranges are deliberately wide: they add up each day's likely range.</p></td></tr><tr><td style=\"padding:28px\"><div style=\"font-size:10px;letter-spacing:2px;color:#686760\">YOUR NEXT MOVE</div><h2 style=\"font-size:23px;margin:10px 0\">Protect the future-you fund.</h2><p style=\"font-size:14px;line-height:1.7\">Check what is left in your plan before the next optional purchase. If a friend paid you back, assign it to the right category so the numbers tell the full story.</p><a href=\"https://finance.giedriusathome.com/finance?view=spending\" style=\"display:inline-block;padding:14px 22px;background:#292a2d;color:#f4f3ef;text-decoration:none;border-radius:8px;font-weight:bold;font-size:14px\">Open my dashboard ↗</a><p style=\"font-size:14px;margin-top:25px\">You have got this.<br><b>— Rafael</b></p></td></tr><tr><td style=\"padding:18px 28px;background:#f4f3ef;font-size:11px;color:#686760;line-height:1.6\">Built from your recorded spending and entered plans. Refunds reduce net spending; movements between your own accounts are excluded. Expected income is counted once. A small reset today can make room for what matters tomorrow.</td></tr></table></td></tr></table></body></html>",
+ "sample_html": "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>The Rafael Report</title></head><body style=\"margin:0;background:#eeede8;color:#22221f;font-family:Arial,Helvetica,sans-serif\"><div style=\"display:none;max-height:0;overflow:hidden\">Your spending, your plan, and a quick move for future you.</div><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr><td align=\"center\" style=\"padding:24px 8px\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"max-width:640px;background:#fbfaf7;border:1px solid #dfded8;border-radius:16px;overflow:hidden\"><tr><td style=\"padding:20px 28px;border-bottom:1px solid #dfded8;color:#686760;font-size:11px;letter-spacing:2px\">GIEDRIUS / FINANCE <span style=\"float:right\">RAFAEL</span></td></tr><tr><td style=\"padding:32px 28px;background:#292a2d;color:#fbfaf7\"><div style=\"font-size:10px;letter-spacing:2px;color:#f4f3ef\">PREVIEW EDITION · THIS IS A TEST</div><h1 style=\"font-size:42px;line-height:1.05;letter-spacing:-1.5px;margin:16px 0\">The Rafael<br>Report.</h1><p style=\"font-size:18px;line-height:1.5;margin:0;color:#f4f3ef\">Your money. Front-page energy. 👀</p></td></tr><tr><td style=\"padding:24px 28px;font-size:16px;line-height:1.7\">Hey &lt;you&gt; &amp; &#x27;friends&#x27;, &quot;quick&quot; check.</td></tr><tr><td style=\"padding:25px 28px;border-bottom:1px solid #dfded8\"><div style=\"font-size:10px;letter-spacing:2px;color:#686760\">THE SPENDING SPEED CHECK</div><h2 style=\"font-size:23px;margin:9px 0\">The receipts are in. EUR</h2><p style=\"font-size:12px;color:#686760\">09 Oct–11 Oct 2026 · compared with 06 Oct–08 Oct</p><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr><td style=\"padding:10px 0 4px;font-size:13px\">Previous three days</td><td align=\"right\" style=\"font-size:14px;font-weight:bold\">EUR 93.39</td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"33%\" height=\"12\" style=\"background:#d9d7cf;border-radius:5px\"></td><td width=\"67%\" height=\"12\"></td></tr></table></td></tr><tr><td style=\"padding:10px 0 4px;font-size:13px\">Latest three complete days</td><td align=\"right\" style=\"font-size:14px;font-weight:bold\">EUR 274.99</td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"100%\" height=\"12\" style=\"background:#6288cf;border-radius:5px\"></td><td width=\"0%\" height=\"12\"></td></tr></table></td></tr></table><p style=\"font-size:13px;line-height:1.7;margin:18px 0 0\">Unplanned spending: <b>EUR 148.95</b><br>Planned allowance for the window: <b>EUR 72.48</b></p></td></tr><tr><td style=\"padding:25px 28px;border-bottom:1px solid #dfded8\"><div style=\"font-size:10px;letter-spacing:2px;color:#686760\">THE NEXT THREE MONTHS</div><h2 style=\"font-size:23px;margin:9px 0 18px\">Two possible plotlines.</h2><table role=\"presentation\" width=\"100%\" cellspacing=\"4\" cellpadding=\"0\"><tr><td width=\"50%\" valign=\"top\" style=\"padding:17px;border-top:3px solid #418345;background:#fbfaf7\"><div style=\"font-size:12px;color:#686760\">Following your plan</div><div style=\"font-size:25px;line-height:1.35;font-weight:bold;margin:8px 0\">EUR 5,211.27</div><div style=\"font-size:12px;color:#686760\">New savings over three months</div></td><td width=\"50%\" valign=\"top\" style=\"padding:17px;border-top:3px solid #c3704f;background:#fbfaf7\"><div style=\"font-size:12px;color:#686760\">Current habits</div><div style=\"font-size:25px;line-height:1.35;font-weight:bold;margin:8px 0\">−EUR 2,385.51</div><div style=\"font-size:12px;color:#686760\">Final balance −EUR 1,520.00</div></td></tr></table><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr><td style=\"padding:10px 0 4px;font-size:13px\">Following your plan</td><td align=\"right\" style=\"font-size:14px;font-weight:bold\">EUR 5,211.27</td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"100%\" height=\"12\" style=\"background:#418345;border-radius:5px\"></td><td width=\"0%\" height=\"12\"></td></tr></table></td></tr><tr><td style=\"padding:10px 0 4px;font-size:13px\">Continuing current habits</td><td align=\"right\" style=\"font-size:14px;font-weight:bold\">−EUR 2,385.51</td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"45%\" height=\"12\" style=\"background:#c3704f;border-radius:5px\"></td><td width=\"55%\" height=\"12\"></td></tr></table></td></tr></table><p style=\"font-size:11px;line-height:1.6;color:#686760;margin-top:14px\">Estimates, not promises. Negative savings mean drawing down your balance. Bars compare magnitudes; the amounts show the sign.</p></td></tr><tr><td style=\"padding:25px 28px;border-bottom:1px solid #dfded8\"><div style=\"font-size:10px;letter-spacing:2px;color:#686760\">THE SPENDING SPEED CHECK</div><h2 style=\"font-size:23px;margin:9px 0\">The receipts are in. USD</h2><p style=\"font-size:12px;color:#686760\">09 Oct–11 Oct 2026 · compared with 06 Oct–08 Oct</p><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr><td style=\"padding:10px 0 4px;font-size:13px\">Previous three days</td><td align=\"right\" style=\"font-size:14px;font-weight:bold\">USD 93.39</td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"100%\" height=\"12\" style=\"background:#d9d7cf;border-radius:5px\"></td><td width=\"0%\" height=\"12\"></td></tr></table></td></tr><tr><td style=\"padding:10px 0 4px;font-size:13px\">Latest three complete days</td><td align=\"right\" style=\"font-size:14px;font-weight:bold\">−USD 12.50</td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"13%\" height=\"12\" style=\"background:#6288cf;border-radius:5px\"></td><td width=\"87%\" height=\"12\"></td></tr></table></td></tr></table><p style=\"font-size:13px;line-height:1.7;margin:18px 0 0\">Unplanned spending: <b>USD 148.95</b><br>Planned allowance for the window: <b>USD 72.48</b></p></td></tr><tr><td style=\"padding:25px 28px;border-bottom:1px solid #dfded8\"><div style=\"font-size:10px;letter-spacing:2px;color:#686760\">THE NEXT THREE MONTHS</div><h2 style=\"font-size:23px;margin:9px 0 18px\">Two possible plotlines.</h2><table role=\"presentation\" width=\"100%\" cellspacing=\"4\" cellpadding=\"0\"><tr><td width=\"50%\" valign=\"top\" style=\"padding:17px;border-top:3px solid #418345;background:#fbfaf7\"><div style=\"font-size:12px;color:#686760\">Following your plan</div><div style=\"font-size:25px;line-height:1.35;font-weight:bold;margin:8px 0\">USD 1,000,000.00</div><div style=\"font-size:12px;color:#686760\">New savings over three months</div></td><td width=\"50%\" valign=\"top\" style=\"padding:17px;border-top:3px solid #c3704f;background:#fbfaf7\"><div style=\"font-size:12px;color:#686760\">Current habits</div><div style=\"font-size:25px;line-height:1.35;font-weight:bold;margin:8px 0\">USD 0.00</div><div style=\"font-size:12px;color:#686760\">Final balance −USD 1,520.00</div></td></tr></table><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr><td style=\"padding:10px 0 4px;font-size:13px\">Following your plan</td><td align=\"right\" style=\"font-size:14px;font-weight:bold\">USD 1,000,000.00</td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"100%\" height=\"12\" style=\"background:#418345;border-radius:5px\"></td><td width=\"0%\" height=\"12\"></td></tr></table></td></tr><tr><td style=\"padding:10px 0 4px;font-size:13px\">Continuing current habits</td><td align=\"right\" style=\"font-size:14px;font-weight:bold\">USD 0.00</td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"0%\" height=\"12\" style=\"background:#c3704f;border-radius:5px\"></td><td width=\"100%\" height=\"12\"></td></tr></table></td></tr></table><p style=\"font-size:11px;line-height:1.6;color:#686760;margin-top:14px\">Estimates, not promises. Negative savings mean drawing down your balance. Bars compare magnitudes; the amounts show the sign.</p></td></tr><tr><td style=\"padding:25px 28px;border-bottom:1px solid #dfded8\"><h2 style=\"font-size:22px;margin:0 0 10px\">Categories in the spotlight</h2><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" style=\"font-size:13px\"><tr><td style=\"padding:10px 0;border-bottom:1px solid #dfded8\">Fun &amp; &lt;games&gt;</td><td align=\"right\" style=\"padding:10px 0;border-bottom:1px solid #dfded8\"><b>EUR 59.51</b><br><span style=\"font-size:11px;color:#686760\">vs EUR 45.00 budget</span></td></tr><tr><td style=\"padding:10px 0;border-bottom:1px solid #dfded8\">Groceries</td><td align=\"right\" style=\"padding:10px 0;border-bottom:1px solid #dfded8\"><b>EUR 318.92</b><br><span style=\"font-size:11px;color:#686760\">vs EUR 300.00 budget</span></td></tr><tr><td style=\"padding:10px 0;border-bottom:1px solid #dfded8\">Travel</td><td align=\"right\" style=\"padding:10px 0;border-bottom:1px solid #dfded8\"><b>EUR 2,345.68</b><br><span style=\"font-size:11px;color:#686760\">vs EUR 2,000.00 budget</span></td></tr></table></td></tr><tr><td style=\"padding:20px 28px;font-size:13px;line-height:1.8\">Next month's reserved salary at risk: EUR 1,234.56.<br>Next month funding shortfall: EUR 12.34.</td></tr><tr><td style=\"padding:25px 28px;border-bottom:1px solid #dfded8\"><div style=\"font-size:10px;letter-spacing:2px;color:#686760\">THE FORECAST</div><h2 style=\"font-size:23px;margin:9px 0\">Your next seven days. EUR</h2><p style=\"font-size:12px;color:#686760\"><span style=\"color:#6288cf\">■</span> habits <span style=\"color:#c3704f\">■</span> planned payments and bills</p><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr><td style=\"padding:9px 0 4px;font-size:13px\">Mon 12 Oct</td><td align=\"right\" style=\"font-size:13px\"><b>EUR 132.90</b></td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"82%\" height=\"12\" style=\"background:#6288cf\"></td><td width=\"17%\" height=\"12\" style=\"background:#c3704f\"></td><td width=\"1%\" height=\"12\"></td></tr></table></td></tr><tr><td style=\"padding:9px 0 4px;font-size:13px\">Tue 13 Oct</td><td align=\"right\" style=\"font-size:13px\"><b>EUR 33.51</b></td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"25%\" height=\"12\" style=\"background:#6288cf\"></td><td width=\"75%\" height=\"12\"></td></tr></table></td></tr><tr><td style=\"padding:9px 0 4px;font-size:13px\">Wed 14 Oct</td><td align=\"right\" style=\"font-size:13px\"><b>EUR 15.83</b></td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"11%\" height=\"12\" style=\"background:#6288cf\"></td><td width=\"89%\" height=\"12\"></td></tr></table></td></tr><tr><td style=\"padding:9px 0 4px;font-size:13px\">Thu 15 Oct</td><td align=\"right\" style=\"font-size:13px\"><b>EUR 36.80</b></td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"27%\" height=\"12\" style=\"background:#6288cf\"></td><td width=\"73%\" height=\"12\"></td></tr></table></td></tr><tr><td style=\"padding:9px 0 4px;font-size:13px\">Fri 16 Oct</td><td align=\"right\" style=\"font-size:13px\"><b>EUR 68.59</b></td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"51%\" height=\"12\" style=\"background:#6288cf\"></td><td width=\"49%\" height=\"12\"></td></tr></table></td></tr><tr><td style=\"padding:9px 0 4px;font-size:13px\">Sat 17 Oct</td><td align=\"right\" style=\"font-size:13px\"><b>EUR 72.64</b></td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"54%\" height=\"12\" style=\"background:#6288cf\"></td><td width=\"46%\" height=\"12\"></td></tr></table></td></tr><tr><td style=\"padding:9px 0 4px;font-size:13px\">Sun 18 Oct</td><td align=\"right\" style=\"font-size:13px\"><b>EUR 30.89</b></td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"23%\" height=\"12\" style=\"background:#6288cf\"></td><td width=\"77%\" height=\"12\"></td></tr></table></td></tr></table><table role=\"presentation\" width=\"100%\" cellspacing=\"4\" cellpadding=\"0\" style=\"margin-top:18px\"><tr><td width=\"50%\" valign=\"top\" style=\"padding:17px;border-top:3px solid #6288cf;background:#fbfaf7\"><div style=\"font-size:12px;color:#686760\">Next 7 days: habits</div><div style=\"font-size:25px;line-height:1.35;font-weight:bold;margin:8px 0\">EUR 368.17</div><div style=\"font-size:12px;color:#686760\">Likely EUR 108.76–EUR 642.41 · plus EUR 23.00 planned</div></td><td width=\"50%\" valign=\"top\" style=\"padding:17px;border-top:3px solid #c3704f;background:#fbfaf7\"><div style=\"font-size:12px;color:#686760\">Month end: habits</div><div style=\"font-size:25px;line-height:1.35;font-weight:bold;margin:8px 0\">EUR 1,925.33</div><div style=\"font-size:12px;color:#686760\">Likely EUR 1,486.83–EUR 2,388.87 · EUR 186.24 still planned</div></td></tr></table><h3 style=\"font-size:15px;margin:20px 0 6px\">Coming up</h3><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" style=\"font-size:13px\"><tr><td style=\"padding:7px 0;border-bottom:1px solid #dfded8\">13 Oct · Rent &quot;flat&quot; &amp; co</td><td align=\"right\" style=\"padding:7px 0;border-bottom:1px solid #dfded8\">EUR 1,450.00</td></tr><tr><td style=\"padding:7px 0;border-bottom:1px solid #dfded8\">15 Oct · Refund from a friend who paid back the whole trip and then some more text to cut</td><td align=\"right\" style=\"padding:7px 0;border-bottom:1px solid #dfded8\">+EUR 80.00</td></tr><tr><td style=\"padding:7px 0;border-bottom:1px solid #dfded8\">21 Oct · Insurance</td><td align=\"right\" style=\"padding:7px 0;border-bottom:1px solid #dfded8\">EUR 149.90</td></tr><tr><td style=\"padding:7px 0;border-bottom:1px solid #dfded8\">22 Oct · Phone</td><td align=\"right\" style=\"padding:7px 0;border-bottom:1px solid #dfded8\">EUR 15.00</td></tr><tr><td style=\"padding:7px 0;border-bottom:1px solid #dfded8\">23 Oct · Gym</td><td align=\"right\" style=\"padding:7px 0;border-bottom:1px solid #dfded8\">EUR 35.00</td></tr><tr><td style=\"padding:7px 0;border-bottom:1px solid #dfded8\">24 Oct · Music</td><td align=\"right\" style=\"padding:7px 0;border-bottom:1px solid #dfded8\">EUR 11.99</td></tr></table><p style=\"font-size:13px;line-height:1.7;margin:16px 0 0\">Your heaviest habit day is <b>Monday</b> (about EUR 250.10). Income still expected this month: <b>EUR 3,042.27</b>.</p><p style=\"font-size:11px;line-height:1.6;color:#686760;margin-top:12px\">Forecast by weekday-baseline from 587 days of history, checked against 8 past weeks. Ranges are deliberately wide: they add up each day's likely range.</p></td></tr><tr><td style=\"padding:25px 28px;border-bottom:1px solid #dfded8\"><div style=\"font-size:10px;letter-spacing:2px;color:#686760\">THE FORECAST</div><h2 style=\"font-size:23px;margin:9px 0\">Your next seven days. USD</h2><p style=\"font-size:12px;color:#686760\"><span style=\"color:#6288cf\">■</span> habits <span style=\"color:#c3704f\">■</span> planned payments and bills</p><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr><td style=\"padding:9px 0 4px;font-size:13px\">Mon 12 Oct</td><td align=\"right\" style=\"font-size:13px\"><b>USD 132.90</b></td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"82%\" height=\"12\" style=\"background:#6288cf\"></td><td width=\"17%\" height=\"12\" style=\"background:#c3704f\"></td><td width=\"1%\" height=\"12\"></td></tr></table></td></tr></table><table role=\"presentation\" width=\"100%\" cellspacing=\"4\" cellpadding=\"0\" style=\"margin-top:18px\"><tr><td width=\"50%\" valign=\"top\" style=\"padding:17px;border-top:3px solid #6288cf;background:#fbfaf7\"><div style=\"font-size:12px;color:#686760\">Next 7 days: habits</div><div style=\"font-size:25px;line-height:1.35;font-weight:bold;margin:8px 0\">USD 368.17</div><div style=\"font-size:12px;color:#686760\">Likely USD 108.76–USD 642.41 · plus USD 23.00 planned</div></td><td width=\"50%\" valign=\"top\" style=\"padding:17px;border-top:3px solid #c3704f;background:#fbfaf7\"><div style=\"font-size:12px;color:#686760\">Month end: habits</div><div style=\"font-size:25px;line-height:1.35;font-weight:bold;margin:8px 0\">USD 1,925.33</div><div style=\"font-size:12px;color:#686760\">Likely USD 1,486.83–USD 2,388.87 · USD 186.24 still planned</div></td></tr></table><p style=\"font-size:13px;line-height:1.7;margin:16px 0 0\">Income still expected this month: <b>USD 3,042.27</b>.</p><p style=\"font-size:11px;line-height:1.6;color:#686760;margin-top:12px\">Forecast by weekday-baseline from 587 days of history. Ranges are deliberately wide: they add up each day's likely range.</p></td></tr><tr><td style=\"padding:28px\"><div style=\"font-size:10px;letter-spacing:2px;color:#686760\">YOUR NEXT MOVE</div><h2 style=\"font-size:23px;margin:10px 0\">Protect the future-you fund.</h2><p style=\"font-size:14px;line-height:1.7\">Check what is left in your plan before the next optional purchase. If a friend paid you back, assign it to the right category so the numbers tell the full story.</p><a href=\"https://finance.giedriusathome.com/finance?view=spending\" style=\"display:inline-block;padding:14px 22px;background:#292a2d;color:#f4f3ef;text-decoration:none;border-radius:8px;font-weight:bold;font-size:14px\">Open my dashboard ↗</a><p style=\"font-size:14px;margin-top:25px\">You have got this.<br><b>— Rafael</b></p></td></tr><tr><td style=\"padding:18px 28px;background:#f4f3ef;font-size:11px;color:#686760;line-height:1.6\">Built from your recorded spending and entered plans. Refunds reduce net spending; movements between your own accounts are excluded. Expected income is counted once. A small reset today can make room for what matters tomorrow.</td></tr></table></td></tr></table></body></html>",
+ "digest_html": "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>The Rafael Report</title></head><body style=\"margin:0;background:#eeede8;color:#22221f;font-family:Arial,Helvetica,sans-serif\"><div style=\"display:none;max-height:0;overflow:hidden\">Your spending, your plan, and a quick move for future you.</div><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr><td align=\"center\" style=\"padding:24px 8px\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"max-width:640px;background:#fbfaf7;border:1px solid #dfded8;border-radius:16px;overflow:hidden\"><tr><td style=\"padding:20px 28px;border-bottom:1px solid #dfded8;color:#686760;font-size:11px;letter-spacing:2px\">GIEDRIUS / FINANCE <span style=\"float:right\">RAFAEL</span></td></tr><tr><td style=\"padding:32px 28px;background:#292a2d;color:#fbfaf7\"><div style=\"font-size:10px;letter-spacing:2px;color:#f4f3ef\">YOUR DAILY FORECAST</div><h1 style=\"font-size:42px;line-height:1.05;letter-spacing:-1.5px;margin:16px 0\">The Rafael<br>Report.</h1><p style=\"font-size:18px;line-height:1.5;margin:0;color:#f4f3ef\">Your money. Front-page energy. 👀</p></td></tr><tr><td style=\"padding:24px 28px;font-size:16px;line-height:1.7\">Here is how the next days look if your usual habits continue.</td></tr><tr><td style=\"padding:25px 28px;border-bottom:1px solid #dfded8\"><div style=\"font-size:10px;letter-spacing:2px;color:#686760\">THE FORECAST</div><h2 style=\"font-size:23px;margin:9px 0\">Your next seven days. EUR</h2><p style=\"font-size:12px;color:#686760\"><span style=\"color:#6288cf\">■</span> habits <span style=\"color:#c3704f\">■</span> planned payments and bills</p><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr><td style=\"padding:9px 0 4px;font-size:13px\">Mon 12 Oct</td><td align=\"right\" style=\"font-size:13px\"><b>EUR 132.90</b></td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"82%\" height=\"12\" style=\"background:#6288cf\"></td><td width=\"17%\" height=\"12\" style=\"background:#c3704f\"></td><td width=\"1%\" height=\"12\"></td></tr></table></td></tr><tr><td style=\"padding:9px 0 4px;font-size:13px\">Tue 13 Oct</td><td align=\"right\" style=\"font-size:13px\"><b>EUR 33.51</b></td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"25%\" height=\"12\" style=\"background:#6288cf\"></td><td width=\"75%\" height=\"12\"></td></tr></table></td></tr><tr><td style=\"padding:9px 0 4px;font-size:13px\">Wed 14 Oct</td><td align=\"right\" style=\"font-size:13px\"><b>EUR 15.83</b></td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"11%\" height=\"12\" style=\"background:#6288cf\"></td><td width=\"89%\" height=\"12\"></td></tr></table></td></tr><tr><td style=\"padding:9px 0 4px;font-size:13px\">Thu 15 Oct</td><td align=\"right\" style=\"font-size:13px\"><b>EUR 36.80</b></td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"27%\" height=\"12\" style=\"background:#6288cf\"></td><td width=\"73%\" height=\"12\"></td></tr></table></td></tr><tr><td style=\"padding:9px 0 4px;font-size:13px\">Fri 16 Oct</td><td align=\"right\" style=\"font-size:13px\"><b>EUR 68.59</b></td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"51%\" height=\"12\" style=\"background:#6288cf\"></td><td width=\"49%\" height=\"12\"></td></tr></table></td></tr><tr><td style=\"padding:9px 0 4px;font-size:13px\">Sat 17 Oct</td><td align=\"right\" style=\"font-size:13px\"><b>EUR 72.64</b></td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"54%\" height=\"12\" style=\"background:#6288cf\"></td><td width=\"46%\" height=\"12\"></td></tr></table></td></tr><tr><td style=\"padding:9px 0 4px;font-size:13px\">Sun 18 Oct</td><td align=\"right\" style=\"font-size:13px\"><b>EUR 30.89</b></td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"23%\" height=\"12\" style=\"background:#6288cf\"></td><td width=\"77%\" height=\"12\"></td></tr></table></td></tr></table><table role=\"presentation\" width=\"100%\" cellspacing=\"4\" cellpadding=\"0\" style=\"margin-top:18px\"><tr><td width=\"50%\" valign=\"top\" style=\"padding:17px;border-top:3px solid #6288cf;background:#fbfaf7\"><div style=\"font-size:12px;color:#686760\">Next 7 days: habits</div><div style=\"font-size:25px;line-height:1.35;font-weight:bold;margin:8px 0\">EUR 368.17</div><div style=\"font-size:12px;color:#686760\">Likely EUR 108.76–EUR 642.41 · plus EUR 23.00 planned</div></td><td width=\"50%\" valign=\"top\" style=\"padding:17px;border-top:3px solid #c3704f;background:#fbfaf7\"><div style=\"font-size:12px;color:#686760\">Month end: habits</div><div style=\"font-size:25px;line-height:1.35;font-weight:bold;margin:8px 0\">EUR 1,925.33</div><div style=\"font-size:12px;color:#686760\">Likely EUR 1,486.83–EUR 2,388.87 · EUR 186.24 still planned</div></td></tr></table><h3 style=\"font-size:15px;margin:20px 0 6px\">Coming up</h3><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" style=\"font-size:13px\"><tr><td style=\"padding:7px 0;border-bottom:1px solid #dfded8\">13 Oct · Rent &quot;flat&quot; &amp; co</td><td align=\"right\" style=\"padding:7px 0;border-bottom:1px solid #dfded8\">EUR 1,450.00</td></tr><tr><td style=\"padding:7px 0;border-bottom:1px solid #dfded8\">15 Oct · Refund from a friend who paid back the whole trip and then some more text to cut</td><td align=\"right\" style=\"padding:7px 0;border-bottom:1px solid #dfded8\">+EUR 80.00</td></tr><tr><td style=\"padding:7px 0;border-bottom:1px solid #dfded8\">21 Oct · Insurance</td><td align=\"right\" style=\"padding:7px 0;border-bottom:1px solid #dfded8\">EUR 149.90</td></tr><tr><td style=\"padding:7px 0;border-bottom:1px solid #dfded8\">22 Oct · Phone</td><td align=\"right\" style=\"padding:7px 0;border-bottom:1px solid #dfded8\">EUR 15.00</td></tr><tr><td style=\"padding:7px 0;border-bottom:1px solid #dfded8\">23 Oct · Gym</td><td align=\"right\" style=\"padding:7px 0;border-bottom:1px solid #dfded8\">EUR 35.00</td></tr><tr><td style=\"padding:7px 0;border-bottom:1px solid #dfded8\">24 Oct · Music</td><td align=\"right\" style=\"padding:7px 0;border-bottom:1px solid #dfded8\">EUR 11.99</td></tr></table><p style=\"font-size:13px;line-height:1.7;margin:16px 0 0\">Your heaviest habit day is <b>Monday</b> (about EUR 250.10). Income still expected this month: <b>EUR 3,042.27</b>.</p><p style=\"font-size:11px;line-height:1.6;color:#686760;margin-top:12px\">Forecast by weekday-baseline from 587 days of history, checked against 8 past weeks. Ranges are deliberately wide: they add up each day's likely range.</p></td></tr><tr><td style=\"padding:25px 28px;border-bottom:1px solid #dfded8\"><div style=\"font-size:10px;letter-spacing:2px;color:#686760\">THE FORECAST</div><h2 style=\"font-size:23px;margin:9px 0\">Your next seven days. USD</h2><p style=\"font-size:12px;color:#686760\"><span style=\"color:#6288cf\">■</span> habits <span style=\"color:#c3704f\">■</span> planned payments and bills</p><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr><td style=\"padding:9px 0 4px;font-size:13px\">Mon 12 Oct</td><td align=\"right\" style=\"font-size:13px\"><b>USD 132.90</b></td></tr><tr><td colspan=\"2\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#eeede8;border-radius:5px\"><tr><td width=\"82%\" height=\"12\" style=\"background:#6288cf\"></td><td width=\"17%\" height=\"12\" style=\"background:#c3704f\"></td><td width=\"1%\" height=\"12\"></td></tr></table></td></tr></table><table role=\"presentation\" width=\"100%\" cellspacing=\"4\" cellpadding=\"0\" style=\"margin-top:18px\"><tr><td width=\"50%\" valign=\"top\" style=\"padding:17px;border-top:3px solid #6288cf;background:#fbfaf7\"><div style=\"font-size:12px;color:#686760\">Next 7 days: habits</div><div style=\"font-size:25px;line-height:1.35;font-weight:bold;margin:8px 0\">USD 368.17</div><div style=\"font-size:12px;color:#686760\">Likely USD 108.76–USD 642.41 · plus USD 23.00 planned</div></td><td width=\"50%\" valign=\"top\" style=\"padding:17px;border-top:3px solid #c3704f;background:#fbfaf7\"><div style=\"font-size:12px;color:#686760\">Month end: habits</div><div style=\"font-size:25px;line-height:1.35;font-weight:bold;margin:8px 0\">USD 1,925.33</div><div style=\"font-size:12px;color:#686760\">Likely USD 1,486.83–USD 2,388.87 · USD 186.24 still planned</div></td></tr></table><p style=\"font-size:13px;line-height:1.7;margin:16px 0 0\">Income still expected this month: <b>USD 3,042.27</b>.</p><p style=\"font-size:11px;line-height:1.6;color:#686760;margin-top:12px\">Forecast by weekday-baseline from 587 days of history. Ranges are deliberately wide: they add up each day's likely range.</p></td></tr><tr><td style=\"padding:28px\"><div style=\"font-size:10px;letter-spacing:2px;color:#686760\">YOUR NEXT MOVE</div><h2 style=\"font-size:23px;margin:10px 0\">Protect the future-you fund.</h2><p style=\"font-size:14px;line-height:1.7\">Check what is left in your plan before the next optional purchase. If a friend paid you back, assign it to the right category so the numbers tell the full story.</p><a href=\"https://finance.giedriusathome.com/finance?view=spending\" style=\"display:inline-block;padding:14px 22px;background:#292a2d;color:#f4f3ef;text-decoration:none;border-radius:8px;font-weight:bold;font-size:14px\">Open my dashboard ↗</a><p style=\"font-size:14px;margin-top:25px\">You have got this.<br><b>— Rafael</b></p></td></tr><tr><td style=\"padding:18px 28px;background:#f4f3ef;font-size:11px;color:#686760;line-height:1.6\">Built from your recorded spending and entered plans. Refunds reduce net spending; movements between your own accounts are excluded. Expected income is counted once. A small reset today can make room for what matters tomorrow.</td></tr></table></td></tr></table></body></html>",
+ "factual_summary": "2026-10-09–2026-10-11: EUR 274.99; previous three days: EUR 93.39.\nUnplanned: EUR 148.95. Three-day planned allowance: EUR 72.48.\nThree-month savings: expected EUR -2385.51; following plan EUR 5211.27.\n2026-10-09–2026-10-11: USD -12.50; previous three days: USD 93.39.\nUnplanned: USD 148.95. Three-day planned allowance: USD 72.48.\nThree-month savings: expected USD 0.005; following plan USD 1000000.\nFun & <games>: forecast EUR 59.51; limit 45.00.\nGroceries: forecast EUR 318.92; limit 300.\nTravel: forecast EUR 2345.678; limit 1999.995.\nNext month's reserved salary at risk: EUR 1234.565.\nNext month funding shortfall: EUR 12.345.\nNext 7 days (EUR): habits EUR 368.17 (likely 108.76–642.41) plus planned EUR 23.00.\nTomorrow (Tue): habits EUR 33.51, planned EUR 0.00.\nMonth end: habit spending EUR 1925.33 (likely 1486.83–2388.87); still planned EUR 186.24; expected income EUR 3042.27.\nHeaviest habit day: Monday, about EUR 250.10.\nPlanned 13 Oct: Rent \"flat\" & co EUR 1450.00.\nPlanned 15 Oct: Refund from a friend who paid back the whole trip and then s +EUR 80.\nPlanned 21 Oct: Insurance EUR 149.90.\nPlanned 22 Oct: Phone EUR 15.00.\nPlanned 23 Oct: Gym EUR 35.00.\nModel: weekday-baseline.\nNext 7 days (USD): habits USD 368.17 (likely 108.76–642.41) plus planned USD 23.00.\nTomorrow (Mon): habits USD 109.90, planned USD 23.00.\nMonth end: habit spending USD 1925.33 (likely 1486.83–2388.87); still planned USD 186.24; expected income USD 3042.27.\nModel: weekday-baseline.\n— Rafael\nOpen your plan: https://finance.giedriusathome.com/finance?view=spending",
+ "forecast_summary": "Next 7 days (EUR): habits EUR 368.17 (likely 108.76–642.41) plus planned EUR 23.00.\nTomorrow (Tue): habits EUR 33.51, planned EUR 0.00.\nMonth end: habit spending EUR 1925.33 (likely 1486.83–2388.87); still planned EUR 186.24; expected income EUR 3042.27.\nHeaviest habit day: Monday, about EUR 250.10.\nPlanned 13 Oct: Rent \"flat\" & co EUR 1450.00.\nPlanned 15 Oct: Refund from a friend who paid back the whole trip and then s +EUR 80.\nPlanned 21 Oct: Insurance EUR 149.90.\nPlanned 22 Oct: Phone EUR 15.00.\nPlanned 23 Oct: Gym EUR 35.00.\nModel: weekday-baseline.\nNext 7 days (USD): habits USD 368.17 (likely 108.76–642.41) plus planned USD 23.00.\nTomorrow (Mon): habits USD 109.90, planned USD 23.00.\nMonth end: habit spending USD 1925.33 (likely 1486.83–2388.87); still planned USD 186.24; expected income USD 3042.27.\nModel: weekday-baseline.\n— Rafael\nOpen your plan: https://finance.giedriusathome.com/finance?view=spending"
+}

@@ -5,7 +5,10 @@ use std::time::Duration;
 
 use finance_bank::{Credentials, Syncer};
 use finance_core::service::Service;
-use finance_types::bank::{BankConsent, BankCredentials, BankSyncReport, BankSyncResult};
+use finance_types::bank::{
+    BankConsent, BankCredentials, BankLinkConfirm, BankLinkProposal, BankLinkStart, BankSyncReport,
+    BankSyncResult,
+};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 /// Event the UI listens to so every screen reloads after a scheduled sync.
@@ -38,10 +41,19 @@ pub fn bank_sync_status(
 
 #[tauri::command]
 pub async fn sync_bank(app: AppHandle, bank: String) -> Result<BankSyncResult, String> {
-    crate::traced(
-        "sync_bank",
-        off_runtime(app, move |service, syncer| syncer.sync(service, &bank)).await,
-    )
+    let handle = app.clone();
+    let result = off_runtime(app, move |service, syncer| syncer.sync(service, &bank)).await;
+    if let Ok(r) = &result {
+        wake_ai(&handle, std::slice::from_ref(r));
+    }
+    crate::traced("sync_bank", result)
+}
+
+/// New transactions get category suggestions right away.
+fn wake_ai(app: &AppHandle, results: &[BankSyncResult]) {
+    if results.iter().any(|r| r.created.is_some_and(|n| n > 0)) {
+        app.state::<finance_ai::Assistant>().wake();
+    }
 }
 
 #[tauri::command]
@@ -61,6 +73,48 @@ pub fn adopt_bank_consents(
     syncer: State<'_, Syncer>,
 ) -> Result<Vec<String>, String> {
     crate::traced("adopt_bank_consents", syncer.adopt_legacy(&service))
+}
+
+/// Ask Enable Banking for the approval page and open it in the browser.
+#[tauri::command]
+pub async fn bank_link_start(app: AppHandle, start: BankLinkStart) -> Result<String, String> {
+    let url = off_runtime(app, move |_, syncer| syncer.link_start(&start)).await;
+    let url = crate::traced("bank_link_start", url)?;
+    // `open` hands the https address to the default browser.
+    std::process::Command::new("/usr/bin/open")
+        .arg(&url)
+        .status()
+        .map_err(|_| "The browser could not be opened.".to_owned())?;
+    Ok(url)
+}
+
+#[tauri::command]
+pub async fn bank_link_finish(
+    app: AppHandle,
+    bank: String,
+    address: String,
+) -> Result<BankLinkProposal, String> {
+    crate::traced(
+        "bank_link_finish",
+        off_runtime(app, move |service, syncer| {
+            syncer.link_finish(service, &bank, &address)
+        })
+        .await,
+    )
+}
+
+#[tauri::command]
+pub async fn bank_link_confirm(
+    app: AppHandle,
+    confirm: BankLinkConfirm,
+) -> Result<BankSyncResult, String> {
+    crate::traced(
+        "bank_link_confirm",
+        off_runtime(app, move |service, syncer| {
+            syncer.link_confirm(service, &confirm)
+        })
+        .await,
+    )
 }
 
 /// Store the Enable Banking application id and key. They go straight to the
@@ -89,6 +143,7 @@ pub fn schedule(app: AppHandle) {
             if !results.is_empty() {
                 let _ = app.emit(SYNCED, ());
             }
+            wake_ai(&app, &results);
             std::thread::sleep(EVERY);
         }
     });

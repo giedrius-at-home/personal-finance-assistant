@@ -1,0 +1,19 @@
+[package]
+name = "finance-ai"
+description = "AI suggestion clients: local Ollama (generate, embed), TypeSafe System One and restricted public research over blocking HTTP, plus the runner the app schedules."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+finance-core.workspace = true
+finance-secrets.workspace = true
+finance-types.workspace = true
+jiff = "0.2.38"
+reqwest = { version = "0.13.5", default-features = false, features = ["blocking", "json", "rustls"] }
+serde_json.workspace = true
+
+[lints]
+workspace = true

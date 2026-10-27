@@ -183,7 +183,15 @@ fn App() -> impl IntoView {
         revision.try_update(|n| *n += 1);
     });
     api::listen("bank-sync", &on_sync);
+    // A suggestion pass stored proposals or saved categories.
+    api::listen("ai-suggestions", &on_sync);
     on_sync.forget();
+    // The forecast model finished a background run: reload for its forecasts.
+    let on_forecast = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
+        revision.try_update(|n| *n += 1);
+    });
+    api::listen("daily-forecast", &on_forecast);
+    on_forecast.forget();
 
     // ⌘1–5 switch sections, ⌘R refreshes.
     let handle = window_event_listener(ev::keydown, move |e| {
@@ -348,5 +356,6 @@ fn ManageTabs() -> impl IntoView {
 
 fn main() {
     console_error_panic_hook::set_once();
+    api::keep_details_open();
     leptos::mount::mount_to_body(App);
 }

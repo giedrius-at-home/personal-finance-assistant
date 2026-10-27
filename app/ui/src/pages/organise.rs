@@ -358,6 +358,11 @@ fn OwnerCategoryGroups() -> impl IntoView {
     }
 }
 
+#[derive(Serialize)]
+struct SuggestArgs {
+    category: String,
+}
+
 /// One category and its group (`GroupRow`).
 #[component]
 fn GroupRow(mapping: GroupMapping, options: Memo<Vec<String>>) -> impl IntoView {
@@ -395,9 +400,44 @@ fn GroupRow(mapping: GroupMapping, options: Memo<Vec<String>>) -> impl IntoView 
             }
         });
     };
-    // Group suggestions came from a language model on the server; the app
-    // has none, so this shows the site's unavailable state.
-    let suggest = move |_| suggestion_note.set("Suggestions are unavailable.".into());
+    // `/api/finance/group-suggest`: ranked options from the configured model.
+    let suggesting = RwSignal::new(false);
+    let suggestions = RwSignal::new(Vec::<String>::new());
+    let category_for_suggest = StoredValue::new(category.clone());
+    let suggest = move |_| {
+        suggesting.set(true);
+        suggestion_note.set(String::new());
+        let args = SuggestArgs {
+            category: category_for_suggest.get_value(),
+        };
+        spawn_local(async move {
+            match invoke::<finance_types::ai::GroupSuggestion>("suggest_spending_group", &args)
+                .await
+            {
+                Ok(body) => {
+                    let mut groups: Vec<String> =
+                        body.options.into_iter().map(|o| o.group).collect();
+                    // A local model answers with one group and no ranking.
+                    if groups.is_empty()
+                        && let Some(group) = body.group
+                    {
+                        groups.push(group);
+                    }
+                    suggestion_note.set(
+                        if groups.is_empty() {
+                            "No suggestion found."
+                        } else {
+                            "Choose a group."
+                        }
+                        .into(),
+                    );
+                    suggestions.set(groups);
+                }
+                Err(e) => suggestion_note.set(e),
+            }
+            suggesting.set(false);
+        });
+    };
     let label = format!("Spending group for {category}");
     view! {
         <div class="grid items-center gap-x-3 gap-y-2 border-t border-line py-3 [grid-template-columns:1fr_1fr] sm:[grid-template-columns:minmax(150px,1fr)_minmax(160px,1fr)_auto_auto]">
@@ -427,8 +467,8 @@ fn GroupRow(mapping: GroupMapping, options: Memo<Vec<String>>) -> impl IntoView 
                     <Lucide icon=Icon::ChevronDown size=16 />
                 </span>
             </div>
-            <Button size=Size::Sm variant=Variant::Secondary disabled=Signal::derive(move || busy.get()) on_click=Callback::new(suggest)>
-                "Suggest"
+            <Button size=Size::Sm variant=Variant::Secondary disabled=Signal::derive(move || busy.get() || suggesting.get()) on_click=Callback::new(suggest)>
+                {move || if suggesting.get() { "Finding…" } else { "Suggest" }}
             </Button>
             {move || {
                 let m = message.get();
@@ -436,10 +476,29 @@ fn GroupRow(mapping: GroupMapping, options: Memo<Vec<String>>) -> impl IntoView 
             }}
             {move || {
                 let note = suggestion_note.get();
-                (!note.is_empty()).then(|| view! {
+                (!note.is_empty() || !suggestions.with(Vec::is_empty)).then(|| view! {
                     <div class="col-span-full grid gap-2">
                         <p role="status" class="text-sm text-fg-muted">{note}</p>
-                        <div class="flex flex-wrap items-center gap-2"></div>
+                        <div class="flex flex-wrap items-center gap-2">
+                            {suggestions
+                                .get()
+                                .into_iter()
+                                .map(|option| {
+                                    let known = options.with(|o| o.contains(&option));
+                                    let pick = option.clone();
+                                    view! {
+                                        <Button
+                                            size=Size::Sm
+                                            variant=Variant::Secondary
+                                            disabled=Signal::derive(move || busy.get() || !known)
+                                            on_click=Callback::new(move |_| save(pick.clone()))
+                                        >
+                                            {option}
+                                        </Button>
+                                    }
+                                })
+                                .collect_view()}
+                        </div>
                     </div>
                 })
             }}

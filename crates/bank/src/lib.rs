@@ -13,6 +13,7 @@ use aws_lc_rs::rand::SystemRandom;
 use aws_lc_rs::signature::{RSA_PKCS1_SHA256, RsaKeyPair};
 use base64::Engine;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
+use finance_core::bank_sync::link::{self, Session};
 use finance_core::bank_sync::{self, Api, ApiError, Connection, Context};
 use finance_core::service::Service;
 use finance_secrets::{Bank, Item, Secret};
@@ -183,12 +184,10 @@ impl Client {
     }
 }
 
-impl Api for Client {
-    fn get(&mut self, path: &str) -> Result<Value, ApiError> {
+impl Client {
+    fn send(&mut self, request: reqwest::blocking::RequestBuilder) -> Result<Value, ApiError> {
         let token = self.bearer()?;
-        let response = self
-            .http
-            .get(format!("{API}/{path}"))
+        let response = request
             .bearer_auth(token)
             .header("Accept", "application/json")
             .send()
@@ -202,6 +201,18 @@ impl Api for Client {
             return Err(ApiError::Unavailable);
         }
         serde_json::from_str(&body).map_err(|_| ApiError::Unavailable)
+    }
+}
+
+impl Api for Client {
+    fn get(&mut self, path: &str) -> Result<Value, ApiError> {
+        let request = self.http.get(format!("{API}/{path}"));
+        self.send(request)
+    }
+
+    fn post(&mut self, path: &str, body: &Value) -> Result<Value, ApiError> {
+        let request = self.http.post(format!("{API}/{path}")).json(body);
+        self.send(request)
     }
 }
 
@@ -241,11 +252,37 @@ fn legacy_file(bank: &str) -> Option<PathBuf> {
         .filter(|p| p.is_file())
 }
 
+/// A connection the owner started and has not finished.
+#[derive(Debug)]
+struct Link {
+    bank: String,
+    state: String,
+    session: Option<Session>,
+}
+
 /// One sync at a time, for the commands and the scheduler.
 #[derive(Debug, Default)]
 pub struct Syncer {
     running: Mutex<Option<String>>,
     last_check: Mutex<Option<Timestamp>>,
+    link: Mutex<Option<Link>>,
+}
+
+fn random_state() -> Result<String, String> {
+    let mut bytes = [0_u8; 16];
+    aws_lc_rs::rand::fill(&mut bytes).map_err(|_| "No randomness available".to_owned())?;
+    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
+}
+
+fn refused(e: ApiError) -> String {
+    match e {
+        ApiError::RateLimited => {
+            "Enable Banking is rate limiting requests. Try again later.".into()
+        }
+        ApiError::Unavailable => {
+            "Enable Banking refused the request or could not be reached.".into()
+        }
+    }
 }
 
 /// Clears the running bank when a sync ends, however it ends.
@@ -406,6 +443,94 @@ impl Syncer {
             .map_err(|status| format!("Consent not renewed: {}.", status.reason()))?;
         store_consent(bank, &candidate)?;
         service.sync_bank(bank, &candidate, &mut client, now)
+    }
+
+    /// Start connecting `start.bank`: returns the Enable Banking address
+    /// where the owner approves access at the bank.
+    pub fn link_start(&self, start: &finance_types::bank::BankLinkStart) -> Result<String, String> {
+        let (_, country) = finance_types::bank::aspsp(&start.bank).ok_or("Unknown bank")?;
+        let mut client = Self::client().map_err(|s| s.reason().to_owned())?;
+        let aspsps = client.get(&format!("aspsps?country={country}")).ok();
+        let state = random_state()?;
+        let body = link::auth_body(
+            &start.bank,
+            start.redirect_url.trim(),
+            &state,
+            Timestamp::now(),
+            aspsps.as_ref(),
+        )?;
+        let answer = client.post("auth", &body).map_err(refused)?;
+        let url = answer
+            .get("url")
+            .and_then(Value::as_str)
+            .filter(|u| u.starts_with("https://"))
+            .ok_or("Enable Banking returned no approval address.")?
+            .to_owned();
+        *self.link.lock().map_err(|_| "link-poisoned".to_owned())? = Some(Link {
+            bank: start.bank.clone(),
+            state,
+            session: None,
+        });
+        Ok(url)
+    }
+
+    /// Finish the approval: `address` is the page the bank redirected to.
+    /// Opens the session and proposes how its accounts map.
+    pub fn link_finish(
+        &self,
+        service: &Service,
+        bank: &str,
+        address: &str,
+    ) -> Result<finance_types::bank::BankLinkProposal, String> {
+        let mut guard = self.link.lock().map_err(|_| "link-poisoned".to_owned())?;
+        let pending = guard
+            .as_mut()
+            .filter(|l| l.bank == bank)
+            .ok_or("Start the connection first.")?;
+        let code = link::callback_code(address.trim(), &pending.state)?;
+        let mut client = Self::client().map_err(|s| s.reason().to_owned())?;
+        let answer = client
+            .post("sessions", &serde_json::json!({"code": code}))
+            .map_err(refused)?;
+        let session = Session::parse(&answer)?;
+        let own = service.bank_own_accounts()?;
+        let old = consent(bank)?;
+        let proposal = link::proposal(bank, old.as_ref(), &session, &own);
+        pending.session = Some(session);
+        Ok(proposal)
+    }
+
+    /// Store the owner's mapping as `bank`'s consent once the bank accepts
+    /// it, then sync.
+    pub fn link_confirm(
+        &self,
+        service: &Service,
+        request: &finance_types::bank::BankLinkConfirm,
+    ) -> Result<BankSyncResult, String> {
+        let bank = request.bank.as_str();
+        keychain_bank(bank)?;
+        let session = self
+            .link
+            .lock()
+            .map_err(|_| "link-poisoned".to_owned())?
+            .as_ref()
+            .filter(|l| l.bank == bank)
+            .and_then(|l| l.session.clone())
+            .ok_or("Approve access at the bank first.")?;
+        let _running = self.begin(bank)?;
+        let now = Timestamp::now();
+        let own = service.bank_own_accounts()?;
+        let old = consent(bank)?;
+        let connection = link::confirm(old.as_ref(), &session, &request.choices, &own)?;
+        let mut client = Self::client().map_err(|s| s.reason().to_owned())?;
+        service
+            .verify_bank(&connection, &mut client, now)
+            .map_err(|status| format!("Not connected: {}.", status.reason()))?;
+        store_consent(bank, &connection)?;
+        if let Ok(mut link) = self.link.lock() {
+            *link = None;
+        }
+        service.sync_bank(bank, &connection, &mut client, now)
     }
 
     /// Take over the consents the old importer saved on this Mac, with its

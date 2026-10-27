@@ -3,7 +3,7 @@
 //! for. The Tauri commands and the development server are thin wrappers.
 
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use finance_storage::Store;
 use finance_types::DataStatus;
@@ -14,6 +14,9 @@ use finance_types::report::review::{self as rv, TransactionSearchQuery, Transact
 use finance_types::report::{Dashboard, ReviewReport};
 use jiff::Zoned;
 
+use crate::alerts::{Notification, Notifier, Outcome};
+use crate::daily::SeriesForecaster;
+use crate::forecast_model::{ForecastModel, ModelRunner, RunStatus};
 use crate::writes::Writer;
 use crate::{Ctx, Snapshot, dashboard, review};
 
@@ -32,6 +35,10 @@ fn backup(path: &std::path::Path) -> Result<(), String> {
         jiff::Timestamp::now().strftime("%Y%m%dT%H%M%SZ")
     );
     let target = dir.join(name);
+    if target.exists() {
+        // Another store of this session backed up this same second.
+        return Ok(());
+    }
     let conn = rusqlite::Connection::open(path).map_err(|e| e.to_string())?;
     conn.execute("VACUUM INTO ?1", [target.to_string_lossy().as_ref()])
         .map_err(|e| e.to_string())?;
@@ -52,6 +59,15 @@ fn backup(path: &std::path::Path) -> Result<(), String> {
     Ok(())
 }
 
+/// No delivery channel is registered (development server, tests).
+struct Unavailable;
+
+impl Notifier for Unavailable {
+    fn send(&self, _: &Notification) -> Outcome {
+        Outcome::Unavailable
+    }
+}
+
 /// Errors cross to the UI as short, data-free strings.
 pub const NO_DATA: &str = "no-data";
 
@@ -61,12 +77,25 @@ struct Open {
     snapshot: Option<Snapshot>,
 }
 
+/// Where alerts go: the app's desktop notifications, once it registered them.
+#[derive(Default)]
+struct AlertSink(Mutex<Option<Arc<dyn Notifier + Send + Sync>>>);
+
+impl std::fmt::Debug for AlertSink {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("AlertSink")
+    }
+}
+
 #[derive(Debug)]
 pub struct Service {
     path: PathBuf,
     state: Mutex<Option<Open>>,
     /// The read-write store, opened on the first write.
     writer: Mutex<Option<Store>>,
+    alerts: AlertSink,
+    /// The daily forecast's model (TimesFM), when the app has one.
+    model: Mutex<Option<Arc<ModelRunner>>>,
 }
 
 impl Service {
@@ -75,12 +104,96 @@ impl Service {
             path,
             state: Mutex::new(None),
             writer: Mutex::new(None),
+            alerts: AlertSink::default(),
+            model: Mutex::new(None),
         }
+    }
+
+    /// Deliver alerts through `notifier` from now on (the app registers its
+    /// desktop notifications at start).
+    pub fn set_alert_notifier(&self, notifier: Arc<dyn Notifier + Send + Sync>) {
+        if let Ok(mut sink) = self.alerts.0.lock() {
+            *sink = Some(notifier);
+        }
+    }
+
+    /// Evaluate the alerts now through the registered notifier; without one,
+    /// a due alert is recorded as `unavailable` (or `disabled` when the owner
+    /// turned notifications off), as Python recorded it.
+    pub fn evaluate_alerts_now(&self) -> Result<Vec<crate::alerts::Decision>, String> {
+        let notifier = self.alerts.0.lock().ok().and_then(|s| s.clone());
+        match notifier {
+            Some(n) => self.evaluate_alerts(jiff::Timestamp::now(), n.as_ref()),
+            None => self.evaluate_alerts(jiff::Timestamp::now(), &Unavailable),
+        }
+    }
+
+    /// Use `model` for daily forecasts from now on (`None`: the weekday
+    /// baseline only). Forecasts it computed before are dropped.
+    pub fn set_forecast_model(&self, model: Option<ForecastModel>) {
+        if let Ok(mut slot) = self.model.lock() {
+            *slot = model.map(|m| Arc::new(ModelRunner::new(m)));
+        }
+    }
+
+    /// The forecast model's background runs, when there is a model.
+    pub fn forecast_model_status(&self) -> Option<RunStatus> {
+        self.runner().map(|r| r.status())
+    }
+
+    fn runner(&self) -> Option<Arc<ModelRunner>> {
+        self.model.lock().ok().and_then(|m| m.clone())
+    }
+
+    /// Run `f` with the daily forecast's model answering from forecasts it
+    /// already computed; a miss starts computing them in the background
+    /// (the model's `on_done` says when they are ready).
+    fn read_forecast<T>(
+        &self,
+        f: impl FnOnce(&Store, &Snapshot, &Zoned, Option<&dyn SeriesForecaster>) -> crate::Result<T>,
+    ) -> Result<T, String> {
+        let runner = self.runner();
+        let now = Zoned::now();
+        self.read(|store, snap| {
+            let Some(runner) = &runner else {
+                return f(store, snap, &now, None);
+            };
+            let cached = runner.cached();
+            let value = f(store, snap, &now, Some(&cached))?;
+            if cached.missed() {
+                runner.start(&cached, self.path.clone(), snap.clone(), now.clone());
+            }
+            Ok(value)
+        })
+    }
+
+    /// [`Service::read_forecast`] as of `now`, in the data's time zone.
+    pub(crate) fn read_forecast_at<T>(
+        &self,
+        now: jiff::Timestamp,
+        f: impl FnOnce(&Store, &Snapshot, &Zoned, Option<&dyn SeriesForecaster>) -> crate::Result<T>,
+    ) -> Result<T, String> {
+        let runner = self.runner();
+        self.read(|store, snap| {
+            let zoned = now.to_zoned(snap.zone.clone());
+            let Some(runner) = &runner else {
+                return f(store, snap, &zoned, None);
+            };
+            let cached = runner.cached();
+            let value = f(store, snap, &zoned, Some(&cached))?;
+            if cached.missed() {
+                runner.start(&cached, self.path.clone(), snap.clone(), zoned.clone());
+            }
+            Ok(value)
+        })
     }
 
     /// Run `f` on the store and a current snapshot (loaded once, then reused
     /// until [`Service::refresh`]).
-    fn read<T>(&self, f: impl FnOnce(&Store, &Snapshot) -> crate::Result<T>) -> Result<T, String> {
+    pub(crate) fn read<T>(
+        &self,
+        f: impl FnOnce(&Store, &Snapshot) -> crate::Result<T>,
+    ) -> Result<T, String> {
         let mut guard = self.state.lock().map_err(|_| "store-poisoned".to_owned())?;
         if guard.is_none() {
             if !self.path.exists() {
@@ -136,6 +249,53 @@ impl Service {
         &self,
         f: impl FnOnce(&Writer<'_>, &Snapshot) -> crate::Result<T>,
     ) -> Result<T, String> {
+        self.write_then(f, true)
+    }
+
+    /// [`Service::write`] for background work: the cached snapshot is
+    /// dropped only when the transaction changed rows.
+    pub(crate) fn write_if_changed<T>(
+        &self,
+        f: impl FnOnce(&Writer<'_>, &Snapshot) -> crate::Result<T>,
+    ) -> Result<T, String> {
+        self.write_then(f, false)
+    }
+
+    /// A write that needs no snapshot and leaves the cached one in place;
+    /// the caller refreshes when its work is done.
+    pub(crate) fn write_raw<T>(
+        &self,
+        f: impl FnOnce(&Writer<'_>) -> crate::Result<T>,
+    ) -> Result<T, String> {
+        let mut guard = self
+            .writer
+            .lock()
+            .map_err(|_| "store-poisoned".to_owned())?;
+        if guard.is_none() {
+            if !self.path.exists() {
+                return Err(NO_DATA.to_owned());
+            }
+            backup(&self.path).map_err(|e| format!("backup failed: {e}"))?;
+            *guard = Some(Store::open(&self.path).map_err(|e| e.to_string())?);
+        }
+        let store = guard.as_mut().ok_or_else(|| NO_DATA.to_owned())?;
+        (|| {
+            let writer = Writer {
+                tx: store.connection_mut().transaction()?,
+                now: Zoned::now(),
+            };
+            let value = f(&writer)?;
+            writer.tx.commit()?;
+            Ok::<T, crate::Error>(value)
+        })()
+        .map_err(|e| e.to_string())
+    }
+
+    fn write_then<T>(
+        &self,
+        f: impl FnOnce(&Writer<'_>, &Snapshot) -> crate::Result<T>,
+        always_refresh: bool,
+    ) -> Result<T, String> {
         let snapshot = {
             let mut snap = None;
             self.read(|_, s| {
@@ -153,6 +313,7 @@ impl Service {
             *guard = Some(Store::open(&self.path).map_err(|e| e.to_string())?);
         }
         let store = guard.as_mut().ok_or_else(|| NO_DATA.to_owned())?;
+        let before = store.connection().total_changes();
         let result = (|| {
             let writer = Writer {
                 tx: store.connection_mut().transaction()?,
@@ -163,13 +324,51 @@ impl Service {
             Ok::<T, crate::Error>(value)
         })()
         .map_err(|e| e.to_string());
+        let changed = store.connection().total_changes() != before;
         drop(guard);
-        self.refresh();
+        if always_refresh || changed {
+            self.refresh();
+        }
         result
     }
 
+    /// Run `f` on the cached snapshot.
+    pub(crate) fn read_snapshot<T>(&self, f: impl FnOnce(&Snapshot) -> T) -> Result<T, String> {
+        self.read(|_, snap| Ok(f(snap)))
+    }
+
+    /// Run `f` on the read-write connection, which manages its own
+    /// transactions (the alert lifecycle commits per candidate). Opens and
+    /// backs up like [`Service::write`]; the cached snapshot stays, as `f`
+    /// writes only tables the snapshot does not hold.
+    pub(crate) fn with_connection<T>(
+        &self,
+        f: impl FnOnce(&mut rusqlite::Connection) -> crate::Result<T>,
+    ) -> Result<T, String> {
+        if !self.path.exists() {
+            return Err(NO_DATA.to_owned());
+        }
+        let mut guard = self
+            .writer
+            .lock()
+            .map_err(|_| "store-poisoned".to_owned())?;
+        if guard.is_none() {
+            backup(&self.path).map_err(|e| format!("backup failed: {e}"))?;
+            *guard = Some(Store::open(&self.path).map_err(|e| e.to_string())?);
+        }
+        let store = guard.as_mut().ok_or_else(|| NO_DATA.to_owned())?;
+        f(store.connection_mut()).map_err(|e| e.to_string())
+    }
+
+    /// The dashboard as of `now` (the spending email builds it for its slot).
+    pub fn dashboard_at(&self, now: &Zoned) -> Result<Dashboard, String> {
+        self.read_forecast_at(now.timestamp(), |store, snap, now, model| {
+            dashboard::dashboard(store, snap, now, model)
+        })
+    }
+
     pub fn dashboard(&self) -> Result<Dashboard, String> {
-        self.read(|store, snap| dashboard::dashboard(store, snap, &Zoned::now()))
+        self.read_forecast(|store, snap, now, model| dashboard::dashboard(store, snap, now, model))
     }
 
     pub fn review(&self) -> Result<ReviewReport, String> {
@@ -257,12 +456,13 @@ impl Service {
 
     /// The closure screen of `month` (`YYYY-MM-01`).
     pub fn closure(&self, month: &str) -> Result<ClosureView, String> {
-        self.read(|store, snap| {
+        self.read_forecast(|store, snap, now, model| {
             crate::closure::closure_view(
                 store,
                 snap,
                 crate::closure::parse_month(month)?,
-                &Zoned::now(),
+                now,
+                model,
             )
         })
     }

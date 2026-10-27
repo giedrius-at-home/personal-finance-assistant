@@ -59,6 +59,21 @@
     "allow-adopt-bank-consents",
     "allow-set-bank-credentials",
     "allow-forget-bank-credentials",
+    "allow-bank-link-start",
+    "allow-bank-link-finish",
+    "allow-bank-link-confirm",
+    "allow-email-status",
+    "allow-save-email-settings",
+    "allow-set-smtp-password",
+    "allow-forget-smtp-password",
+    "allow-send-test-email",
+    "allow-ai-status",
+    "allow-save-ai-settings",
+    "allow-set-typesafe-key",
+    "allow-forget-typesafe-key",
+    "allow-suggest-categories",
+    "allow-suggest-spending-group",
+    "allow-research-merchant",
     "core:event:default"
   ]
 }

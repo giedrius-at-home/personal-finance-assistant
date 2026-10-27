@@ -1,0 +1,1 @@
+{"transaction_description": "bea, betaalpas caf\u00e9 noir number ,pas123", "direction": "outflow", "suggested_category": "Dining", "suggestion_reason": ["coffee shop"], "same_merchant_categories_in_history": ["Dining"], "bank_from_country": "NL", "bank_to_country": null}

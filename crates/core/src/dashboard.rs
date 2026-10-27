@@ -14,7 +14,14 @@ use crate::{
 };
 use crate::{allocation, budget, daily, outlook};
 
-pub fn dashboard(store: &Store, snap: &Snapshot, now: &Zoned) -> Result<Dashboard> {
+/// `forecaster` (TimesFM) is the model the daily, group and outlook
+/// forecasts backtest against their fallbacks (none: the fallbacks alone).
+pub fn dashboard(
+    store: &Store,
+    snap: &Snapshot,
+    now: &Zoned,
+    forecaster: Option<&dyn daily::SeriesForecaster>,
+) -> Result<Dashboard> {
     let ctx = Ctx::new(snap, now);
     let inputs = ReportInputs::load(store.connection(), snap.sync_health.0)?;
     let txs = &snap.transactions;
@@ -55,6 +62,7 @@ pub fn dashboard(store: &Store, snap: &Snapshot, now: &Zoned) -> Result<Dashboar
             current_month,
             period_start: ctx.resolver.period_start_date(current_month),
         },
+        forecaster,
     );
 
     let offset = budget_calendar_offset(&ctx);
@@ -132,6 +140,7 @@ pub fn dashboard(store: &Store, snap: &Snapshot, now: &Zoned) -> Result<Dashboar
         data_fresh: outlook::data_fresh(&snap.sync_health, &ctx.now),
         current_month,
         resolver: &ctx.resolver,
+        forecaster,
     });
     let mut currencies: Vec<finance_types::report::Currency> = snap
         .accounts
@@ -153,6 +162,7 @@ pub fn dashboard(store: &Store, snap: &Snapshot, now: &Zoned) -> Result<Dashboar
         budget_plans: &forecast_plans,
         mappings: &snap.group_mappings,
         excluded_categories: &snap.settings.forecast_excluded_categories,
+        forecaster,
     });
 
     let daily_ids: HashSet<String> = snap

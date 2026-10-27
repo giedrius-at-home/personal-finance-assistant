@@ -18,6 +18,9 @@ Design: [docs/specs/2026-10-26-finance-assistant-rust-design.md](docs/specs/2026
 | `crates/core` | Finance logic: the canonical model, every report and every write (the Python service's port) |
 | `crates/secrets` | Keychain access, zeroizing secret values |
 | `crates/bank` | Enable Banking client (RS256 application token), consents in the Keychain, one sync at a time |
+| `crates/timesfm` | TimesFM 3.0 inference (ndarray; Accelerate on macOS) for the forecasts |
+| `crates/ai` | Jev (TypeSafe) and Ollama clients for category suggestions, plus merchant research |
+| `crates/notify` | Daily spending email (SMTP) and its Ollama copy writer |
 | `crates/migrate` | One-off copy of the data from `laptopthree` |
 | `app/src-tauri` | The macOS app: window, glass, commands, updater |
 | `app/ui` | Leptos screens (compiled to WASM by Trunk; Tailwind 4 through Trunk) |
@@ -68,14 +71,39 @@ Firefly. Set up once in Manage → Banks:
 1. **Application key**: the Enable Banking application id and its `.pem`
    private key. Both go to the Keychain.
 2. **Consents**: "Use saved consents" takes over the consents the old
-   importer saved on this Mac, with their run history. A new consent
-   (an importer configuration file) goes through "Renew consent"; every
-   ledger account the old one filled must stay mapped.
+   importer saved on this Mac, with their run history. To connect a bank or
+   renew an expiring consent, use "Connect or renew": approve in the browser,
+   paste the address the bank returns to (registered redirect, default
+   `https://localhost:8444/eb-callback`; the page need not load), then map
+   each shared account onto a ledger account. Every ledger account the old
+   consent filled must stay mapped. Each bank shows when its consent ends.
 
 While the app is open it checks every 15 minutes and syncs each bank once a
 day (hourly retries after a failure, six hours after a rate limit). Each sync
 downloads the last 30 days, writes booked transactions it has not seen (by the
 bank's entry reference) and flags closed months that received late ones.
+
+## Forecasts
+
+Daily spending, group month-end totals and the three-month outlook use
+TimesFM 3.0 when its weights are on this Mac (Hugging Face cache, or
+Settings → Forecast model downloads them to
+`~/Library/Application Support/Finance/models/timesfm-3.0/`). Each method is
+backtested against the old service's simple forecast on recent history and
+kept only where it wins. Screens never wait: they show the simple forecast
+until a background run (a few seconds, ~1.4 GB while it runs) has cached
+TimesFM's answers for the current data.
+
+## Suggestions, alerts and email
+
+All off until switched on in Manage → Settings:
+
+- **AI suggestions**: Jev (TypeSafe, key in the Keychain) proposes categories
+  for new transactions after each sync; proposals at 0.90 or more are applied
+  automatically when that is on. Ollama is supported as an alternative.
+- **Notifications**: goal alerts as macOS notifications.
+- **Daily spending email** at 20:00 over SMTP (password in the Keychain),
+  with a "Send test" button.
 
 ## Checks
 

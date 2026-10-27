@@ -1,0 +1,1351 @@
+{
+ "source": "Python AlertEvaluationService on a copy of the gateway database",
+ "goals": [
+  {
+   "current": {
+    "amount": "0.00",
+    "currency": {
+     "code": "EUR",
+     "minor_unit": 2
+    }
+   },
+   "goal_id": "firefly-piggy-bank:1",
+   "name": "Goal 1",
+   "started_on": "2026-09-06",
+   "target": {
+    "amount": "1600.00",
+    "currency": {
+     "code": "EUR",
+     "minor_unit": 2
+    }
+   },
+   "target_date": "2026-12-02"
+  },
+  {
+   "current": {
+    "amount": "0.00",
+    "currency": {
+     "code": "EUR",
+     "minor_unit": 2
+    }
+   },
+   "goal_id": "firefly-piggy-bank:3",
+   "name": "Goal 3",
+   "started_on": "2026-09-06",
+   "target": {
+    "amount": "340.00",
+    "currency": {
+     "code": "EUR",
+     "minor_unit": 2
+    }
+   },
+   "target_date": "2026-10-01"
+  }
+ ],
+ "lifecycle": [
+  [
+   "goal",
+   "firefly-piggy-bank:1",
+   1,
+   "warning",
+   "",
+   "2026-10-26T20:18:59.822202+00:00",
+   "2026-10-26T19:35:56.924480+00:00"
+  ],
+  [
+   "goal",
+   "firefly-piggy-bank:3",
+   1,
+   "critical",
+   "",
+   "2026-10-26T20:04:09.777448+00:00",
+   "2026-10-26T19:35:56.924480+00:00"
+  ]
+ ],
+ "runs": [
+  {
+   "mode": "disabled",
+   "moments": [
+    "2026-10-27T10:00:00.123456+00:00",
+    "2026-10-27T10:30:00.5+00:00",
+    "2026-10-27T12:00:00.123456+00:00",
+    "2026-11-05T09:00:00+00:00",
+    "2026-12-03T08:00:00+00:00",
+    "2026-12-03T08:00:00+00:00",
+    "2026-12-05T08:00:00.000001+00:00"
+   ],
+   "expected": {
+    "decisions": [
+     [
+      "firefly-piggy-bank:1",
+      "dispatch",
+      true
+     ],
+     [
+      "firefly-piggy-bank:3",
+      "dispatch",
+      true
+     ],
+     [
+      "firefly-piggy-bank:1",
+      "suppressed",
+      false
+     ],
+     [
+      "firefly-piggy-bank:3",
+      "suppressed",
+      false
+     ],
+     [
+      "firefly-piggy-bank:1",
+      "dispatch",
+      true
+     ],
+     [
+      "firefly-piggy-bank:3",
+      "dispatch",
+      true
+     ],
+     [
+      "firefly-piggy-bank:1",
+      "dispatch",
+      true
+     ],
+     [
+      "firefly-piggy-bank:3",
+      "dispatch",
+      true
+     ],
+     [
+      "firefly-piggy-bank:1",
+      "escalated",
+      true
+     ],
+     [
+      "firefly-piggy-bank:3",
+      "dispatch",
+      true
+     ],
+     [
+      "firefly-piggy-bank:1",
+      "suppressed",
+      false
+     ],
+     [
+      "firefly-piggy-bank:3",
+      "suppressed",
+      false
+     ],
+     [
+      "firefly-piggy-bank:1",
+      "dispatch",
+      true
+     ],
+     [
+      "firefly-piggy-bank:3",
+      "dispatch",
+      true
+     ]
+    ],
+    "sent": [],
+    "lifecycle": [
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      1,
+      "critical",
+      "",
+      "2026-12-05T09:00:00.000001+00:00",
+      "2026-12-05T08:00:00.000001+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      1,
+      "critical",
+      "",
+      "2026-12-05T09:00:00.000001+00:00",
+      "2026-12-05T08:00:00.000001+00:00"
+     ]
+    ],
+    "events": [
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "warning",
+      "9c29e7c930b5f4d954994ef3cd4a5faebc5ca59d61596666604ddd9798f70de1",
+      "b5cc38537a1c4b3f0f25f4da650afea4e9fe5a22286ff7c042d6e0baa9394dde",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":36,\"expected_saved\":\"937.9310344827586206896551725\",\"goal_id\":\"firefly-piggy-bank:1\",\"on_track\":false,\"overdue\":false,\"projected_completion_date\":null,\"remaining\":\"1600.00\",\"required_weekly_contribution\":\"311.1111111111111111111111111\",\"schedule_variance\":\"-937.9310344827586206896551725\"}",
+      "[\"goal is behind by at least one required weekly contribution\"]",
+      "dispatch",
+      "2026-10-27T10:00:00.123456+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "critical",
+      "4fe38d575c4642651c2abbee94afa5b99b78b907e246ff70ee7170d837deb0d6",
+      "422241e4c6c8cd63fbd1e50022153b10bd05dec60672b6b8778c45b82fd43a1c",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":0,\"expected_saved\":\"340.00\",\"goal_id\":\"firefly-piggy-bank:3\",\"on_track\":false,\"overdue\":true,\"projected_completion_date\":null,\"remaining\":\"340.00\",\"required_weekly_contribution\":\"340.00\",\"schedule_variance\":\"-340.00\"}",
+      "[\"incomplete goal is past its target date\"]",
+      "dispatch",
+      "2026-10-27T10:00:00.123456+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "warning",
+      "9c29e7c930b5f4d954994ef3cd4a5faebc5ca59d61596666604ddd9798f70de1",
+      "b5cc38537a1c4b3f0f25f4da650afea4e9fe5a22286ff7c042d6e0baa9394dde",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":36,\"expected_saved\":\"937.9310344827586206896551725\",\"goal_id\":\"firefly-piggy-bank:1\",\"on_track\":false,\"overdue\":false,\"projected_completion_date\":null,\"remaining\":\"1600.00\",\"required_weekly_contribution\":\"311.1111111111111111111111111\",\"schedule_variance\":\"-937.9310344827586206896551725\"}",
+      "[\"goal is behind by at least one required weekly contribution\"]",
+      "suppressed",
+      "2026-10-27T10:30:00.500000+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "critical",
+      "4fe38d575c4642651c2abbee94afa5b99b78b907e246ff70ee7170d837deb0d6",
+      "422241e4c6c8cd63fbd1e50022153b10bd05dec60672b6b8778c45b82fd43a1c",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":0,\"expected_saved\":\"340.00\",\"goal_id\":\"firefly-piggy-bank:3\",\"on_track\":false,\"overdue\":true,\"projected_completion_date\":null,\"remaining\":\"340.00\",\"required_weekly_contribution\":\"340.00\",\"schedule_variance\":\"-340.00\"}",
+      "[\"incomplete goal is past its target date\"]",
+      "suppressed",
+      "2026-10-27T10:30:00.500000+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "warning",
+      "9c29e7c930b5f4d954994ef3cd4a5faebc5ca59d61596666604ddd9798f70de1",
+      "b5cc38537a1c4b3f0f25f4da650afea4e9fe5a22286ff7c042d6e0baa9394dde",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":36,\"expected_saved\":\"937.9310344827586206896551725\",\"goal_id\":\"firefly-piggy-bank:1\",\"on_track\":false,\"overdue\":false,\"projected_completion_date\":null,\"remaining\":\"1600.00\",\"required_weekly_contribution\":\"311.1111111111111111111111111\",\"schedule_variance\":\"-937.9310344827586206896551725\"}",
+      "[\"goal is behind by at least one required weekly contribution\"]",
+      "dispatch",
+      "2026-10-27T12:00:00.123456+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "critical",
+      "4fe38d575c4642651c2abbee94afa5b99b78b907e246ff70ee7170d837deb0d6",
+      "422241e4c6c8cd63fbd1e50022153b10bd05dec60672b6b8778c45b82fd43a1c",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":0,\"expected_saved\":\"340.00\",\"goal_id\":\"firefly-piggy-bank:3\",\"on_track\":false,\"overdue\":true,\"projected_completion_date\":null,\"remaining\":\"340.00\",\"required_weekly_contribution\":\"340.00\",\"schedule_variance\":\"-340.00\"}",
+      "[\"incomplete goal is past its target date\"]",
+      "dispatch",
+      "2026-10-27T12:00:00.123456+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "warning",
+      "2c22a8924179806a7c577465671e4dd0bb97ad998c98c99cf7cb0488fc75e392",
+      "065d2c32dcf5b99e64c1ce56bbba28064926e33641e99a5466ad25f8616a896a",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":27,\"expected_saved\":\"1103.448275862068965517241379\",\"goal_id\":\"firefly-piggy-bank:1\",\"on_track\":false,\"overdue\":false,\"projected_completion_date\":null,\"remaining\":\"1600.00\",\"required_weekly_contribution\":\"414.8148148148148148148148148\",\"schedule_variance\":\"-1103.448275862068965517241379\"}",
+      "[\"goal is behind by at least one required weekly contribution\"]",
+      "dispatch",
+      "2026-11-05T09:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "critical",
+      "4fe38d575c4642651c2abbee94afa5b99b78b907e246ff70ee7170d837deb0d6",
+      "422241e4c6c8cd63fbd1e50022153b10bd05dec60672b6b8778c45b82fd43a1c",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":0,\"expected_saved\":\"340.00\",\"goal_id\":\"firefly-piggy-bank:3\",\"on_track\":false,\"overdue\":true,\"projected_completion_date\":null,\"remaining\":\"340.00\",\"required_weekly_contribution\":\"340.00\",\"schedule_variance\":\"-340.00\"}",
+      "[\"incomplete goal is past its target date\"]",
+      "dispatch",
+      "2026-11-05T09:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "critical",
+      "55e5c05a902196fb8acbdc4ff7fd30ce9f52201d7ff2ed7bd0b16141c28517d8",
+      "2efe45123054ba1bb00a679af5e79448c571ed8e7c8ab6b763a1a0581c4019be",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":0,\"expected_saved\":\"1600.00\",\"goal_id\":\"firefly-piggy-bank:1\",\"on_track\":false,\"overdue\":true,\"projected_completion_date\":null,\"remaining\":\"1600.00\",\"required_weekly_contribution\":\"1600.00\",\"schedule_variance\":\"-1600.00\"}",
+      "[\"incomplete goal is past its target date\"]",
+      "escalated",
+      "2026-12-03T08:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "critical",
+      "4fe38d575c4642651c2abbee94afa5b99b78b907e246ff70ee7170d837deb0d6",
+      "422241e4c6c8cd63fbd1e50022153b10bd05dec60672b6b8778c45b82fd43a1c",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":0,\"expected_saved\":\"340.00\",\"goal_id\":\"firefly-piggy-bank:3\",\"on_track\":false,\"overdue\":true,\"projected_completion_date\":null,\"remaining\":\"340.00\",\"required_weekly_contribution\":\"340.00\",\"schedule_variance\":\"-340.00\"}",
+      "[\"incomplete goal is past its target date\"]",
+      "dispatch",
+      "2026-12-03T08:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "critical",
+      "55e5c05a902196fb8acbdc4ff7fd30ce9f52201d7ff2ed7bd0b16141c28517d8",
+      "2efe45123054ba1bb00a679af5e79448c571ed8e7c8ab6b763a1a0581c4019be",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":0,\"expected_saved\":\"1600.00\",\"goal_id\":\"firefly-piggy-bank:1\",\"on_track\":false,\"overdue\":true,\"projected_completion_date\":null,\"remaining\":\"1600.00\",\"required_weekly_contribution\":\"1600.00\",\"schedule_variance\":\"-1600.00\"}",
+      "[\"incomplete goal is past its target date\"]",
+      "suppressed",
+      "2026-12-03T08:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "critical",
+      "4fe38d575c4642651c2abbee94afa5b99b78b907e246ff70ee7170d837deb0d6",
+      "422241e4c6c8cd63fbd1e50022153b10bd05dec60672b6b8778c45b82fd43a1c",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":0,\"expected_saved\":\"340.00\",\"goal_id\":\"firefly-piggy-bank:3\",\"on_track\":false,\"overdue\":true,\"projected_completion_date\":null,\"remaining\":\"340.00\",\"required_weekly_contribution\":\"340.00\",\"schedule_variance\":\"-340.00\"}",
+      "[\"incomplete goal is past its target date\"]",
+      "suppressed",
+      "2026-12-03T08:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "critical",
+      "55e5c05a902196fb8acbdc4ff7fd30ce9f52201d7ff2ed7bd0b16141c28517d8",
+      "2efe45123054ba1bb00a679af5e79448c571ed8e7c8ab6b763a1a0581c4019be",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":0,\"expected_saved\":\"1600.00\",\"goal_id\":\"firefly-piggy-bank:1\",\"on_track\":false,\"overdue\":true,\"projected_completion_date\":null,\"remaining\":\"1600.00\",\"required_weekly_contribution\":\"1600.00\",\"schedule_variance\":\"-1600.00\"}",
+      "[\"incomplete goal is past its target date\"]",
+      "dispatch",
+      "2026-12-05T08:00:00.000001+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "critical",
+      "4fe38d575c4642651c2abbee94afa5b99b78b907e246ff70ee7170d837deb0d6",
+      "422241e4c6c8cd63fbd1e50022153b10bd05dec60672b6b8778c45b82fd43a1c",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":0,\"expected_saved\":\"340.00\",\"goal_id\":\"firefly-piggy-bank:3\",\"on_track\":false,\"overdue\":true,\"projected_completion_date\":null,\"remaining\":\"340.00\",\"required_weekly_contribution\":\"340.00\",\"schedule_variance\":\"-340.00\"}",
+      "[\"incomplete goal is past its target date\"]",
+      "dispatch",
+      "2026-12-05T08:00:00.000001+00:00"
+     ]
+    ],
+    "attempts": [
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "b5cc38537a1c4b3f0f25f4da650afea4e9fe5a22286ff7c042d6e0baa9394dde",
+      "disabled",
+      "2026-10-27T10:00:00.123456+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "422241e4c6c8cd63fbd1e50022153b10bd05dec60672b6b8778c45b82fd43a1c",
+      "disabled",
+      "2026-10-27T10:00:00.123456+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "b5cc38537a1c4b3f0f25f4da650afea4e9fe5a22286ff7c042d6e0baa9394dde",
+      "disabled",
+      "2026-10-27T12:00:00.123456+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "422241e4c6c8cd63fbd1e50022153b10bd05dec60672b6b8778c45b82fd43a1c",
+      "disabled",
+      "2026-10-27T12:00:00.123456+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "065d2c32dcf5b99e64c1ce56bbba28064926e33641e99a5466ad25f8616a896a",
+      "disabled",
+      "2026-11-05T09:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "422241e4c6c8cd63fbd1e50022153b10bd05dec60672b6b8778c45b82fd43a1c",
+      "disabled",
+      "2026-11-05T09:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "2efe45123054ba1bb00a679af5e79448c571ed8e7c8ab6b763a1a0581c4019be",
+      "disabled",
+      "2026-12-03T08:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "422241e4c6c8cd63fbd1e50022153b10bd05dec60672b6b8778c45b82fd43a1c",
+      "disabled",
+      "2026-12-03T08:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "2efe45123054ba1bb00a679af5e79448c571ed8e7c8ab6b763a1a0581c4019be",
+      "disabled",
+      "2026-12-05T08:00:00.000001+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "422241e4c6c8cd63fbd1e50022153b10bd05dec60672b6b8778c45b82fd43a1c",
+      "disabled",
+      "2026-12-05T08:00:00.000001+00:00"
+     ]
+    ]
+   }
+  },
+  {
+   "mode": "delivered",
+   "moments": [
+    "2026-10-27T10:00:00.123456+00:00",
+    "2026-10-27T10:30:00.5+00:00",
+    "2026-10-27T12:00:00.123456+00:00",
+    "2026-11-05T09:00:00+00:00",
+    "2026-12-03T08:00:00+00:00",
+    "2026-12-03T08:00:00+00:00",
+    "2026-12-05T08:00:00.000001+00:00"
+   ],
+   "expected": {
+    "decisions": [
+     [
+      "firefly-piggy-bank:1",
+      "dispatch",
+      true
+     ],
+     [
+      "firefly-piggy-bank:3",
+      "dispatch",
+      true
+     ],
+     [
+      "firefly-piggy-bank:1",
+      "duplicate",
+      false
+     ],
+     [
+      "firefly-piggy-bank:3",
+      "duplicate",
+      false
+     ],
+     [
+      "firefly-piggy-bank:1",
+      "duplicate",
+      false
+     ],
+     [
+      "firefly-piggy-bank:3",
+      "duplicate",
+      false
+     ],
+     [
+      "firefly-piggy-bank:1",
+      "dispatch",
+      true
+     ],
+     [
+      "firefly-piggy-bank:3",
+      "duplicate",
+      false
+     ],
+     [
+      "firefly-piggy-bank:1",
+      "escalated",
+      true
+     ],
+     [
+      "firefly-piggy-bank:3",
+      "duplicate",
+      false
+     ],
+     [
+      "firefly-piggy-bank:1",
+      "duplicate",
+      false
+     ],
+     [
+      "firefly-piggy-bank:3",
+      "duplicate",
+      false
+     ],
+     [
+      "firefly-piggy-bank:1",
+      "duplicate",
+      false
+     ],
+     [
+      "firefly-piggy-bank:3",
+      "duplicate",
+      false
+     ]
+    ],
+    "sent": [
+     [
+      "Personal finance: warning",
+      "firefly-piggy-bank:1: goal is behind by at least one required weekly contribution"
+     ],
+     [
+      "Personal finance: critical",
+      "firefly-piggy-bank:3: incomplete goal is past its target date"
+     ],
+     [
+      "Personal finance: warning",
+      "firefly-piggy-bank:1: goal is behind by at least one required weekly contribution"
+     ],
+     [
+      "Personal finance: critical",
+      "firefly-piggy-bank:1: incomplete goal is past its target date"
+     ]
+    ],
+    "lifecycle": [
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      1,
+      "critical",
+      "2efe45123054ba1bb00a679af5e79448c571ed8e7c8ab6b763a1a0581c4019be",
+      "2026-12-04T08:00:00+00:00",
+      "2026-12-05T08:00:00.000001+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      1,
+      "critical",
+      "422241e4c6c8cd63fbd1e50022153b10bd05dec60672b6b8778c45b82fd43a1c",
+      "2026-10-28T10:00:00.123456+00:00",
+      "2026-12-05T08:00:00.000001+00:00"
+     ]
+    ],
+    "events": [
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "warning",
+      "9c29e7c930b5f4d954994ef3cd4a5faebc5ca59d61596666604ddd9798f70de1",
+      "b5cc38537a1c4b3f0f25f4da650afea4e9fe5a22286ff7c042d6e0baa9394dde",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":36,\"expected_saved\":\"937.9310344827586206896551725\",\"goal_id\":\"firefly-piggy-bank:1\",\"on_track\":false,\"overdue\":false,\"projected_completion_date\":null,\"remaining\":\"1600.00\",\"required_weekly_contribution\":\"311.1111111111111111111111111\",\"schedule_variance\":\"-937.9310344827586206896551725\"}",
+      "[\"goal is behind by at least one required weekly contribution\"]",
+      "dispatch",
+      "2026-10-27T10:00:00.123456+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "critical",
+      "4fe38d575c4642651c2abbee94afa5b99b78b907e246ff70ee7170d837deb0d6",
+      "422241e4c6c8cd63fbd1e50022153b10bd05dec60672b6b8778c45b82fd43a1c",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":0,\"expected_saved\":\"340.00\",\"goal_id\":\"firefly-piggy-bank:3\",\"on_track\":false,\"overdue\":true,\"projected_completion_date\":null,\"remaining\":\"340.00\",\"required_weekly_contribution\":\"340.00\",\"schedule_variance\":\"-340.00\"}",
+      "[\"incomplete goal is past its target date\"]",
+      "dispatch",
+      "2026-10-27T10:00:00.123456+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "warning",
+      "9c29e7c930b5f4d954994ef3cd4a5faebc5ca59d61596666604ddd9798f70de1",
+      "b5cc38537a1c4b3f0f25f4da650afea4e9fe5a22286ff7c042d6e0baa9394dde",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":36,\"expected_saved\":\"937.9310344827586206896551725\",\"goal_id\":\"firefly-piggy-bank:1\",\"on_track\":false,\"overdue\":false,\"projected_completion_date\":null,\"remaining\":\"1600.00\",\"required_weekly_contribution\":\"311.1111111111111111111111111\",\"schedule_variance\":\"-937.9310344827586206896551725\"}",
+      "[\"goal is behind by at least one required weekly contribution\"]",
+      "duplicate",
+      "2026-10-27T10:30:00.500000+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "critical",
+      "4fe38d575c4642651c2abbee94afa5b99b78b907e246ff70ee7170d837deb0d6",
+      "422241e4c6c8cd63fbd1e50022153b10bd05dec60672b6b8778c45b82fd43a1c",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":0,\"expected_saved\":\"340.00\",\"goal_id\":\"firefly-piggy-bank:3\",\"on_track\":false,\"overdue\":true,\"projected_completion_date\":null,\"remaining\":\"340.00\",\"required_weekly_contribution\":\"340.00\",\"schedule_variance\":\"-340.00\"}",
+      "[\"incomplete goal is past its target date\"]",
+      "duplicate",
+      "2026-10-27T10:30:00.500000+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "warning",
+      "9c29e7c930b5f4d954994ef3cd4a5faebc5ca59d61596666604ddd9798f70de1",
+      "b5cc38537a1c4b3f0f25f4da650afea4e9fe5a22286ff7c042d6e0baa9394dde",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":36,\"expected_saved\":\"937.9310344827586206896551725\",\"goal_id\":\"firefly-piggy-bank:1\",\"on_track\":false,\"overdue\":false,\"projected_completion_date\":null,\"remaining\":\"1600.00\",\"required_weekly_contribution\":\"311.1111111111111111111111111\",\"schedule_variance\":\"-937.9310344827586206896551725\"}",
+      "[\"goal is behind by at least one required weekly contribution\"]",
+      "duplicate",
+      "2026-10-27T12:00:00.123456+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "critical",
+      "4fe38d575c4642651c2abbee94afa5b99b78b907e246ff70ee7170d837deb0d6",
+      "422241e4c6c8cd63fbd1e50022153b10bd05dec60672b6b8778c45b82fd43a1c",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":0,\"expected_saved\":\"340.00\",\"goal_id\":\"firefly-piggy-bank:3\",\"on_track\":false,\"overdue\":true,\"projected_completion_date\":null,\"remaining\":\"340.00\",\"required_weekly_contribution\":\"340.00\",\"schedule_variance\":\"-340.00\"}",
+      "[\"incomplete goal is past its target date\"]",
+      "duplicate",
+      "2026-10-27T12:00:00.123456+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "warning",
+      "2c22a8924179806a7c577465671e4dd0bb97ad998c98c99cf7cb0488fc75e392",
+      "065d2c32dcf5b99e64c1ce56bbba28064926e33641e99a5466ad25f8616a896a",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":27,\"expected_saved\":\"1103.448275862068965517241379\",\"goal_id\":\"firefly-piggy-bank:1\",\"on_track\":false,\"overdue\":false,\"projected_completion_date\":null,\"remaining\":\"1600.00\",\"required_weekly_contribution\":\"414.8148148148148148148148148\",\"schedule_variance\":\"-1103.448275862068965517241379\"}",
+      "[\"goal is behind by at least one required weekly contribution\"]",
+      "dispatch",
+      "2026-11-05T09:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "critical",
+      "4fe38d575c4642651c2abbee94afa5b99b78b907e246ff70ee7170d837deb0d6",
+      "422241e4c6c8cd63fbd1e50022153b10bd05dec60672b6b8778c45b82fd43a1c",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":0,\"expected_saved\":\"340.00\",\"goal_id\":\"firefly-piggy-bank:3\",\"on_track\":false,\"overdue\":true,\"projected_completion_date\":null,\"remaining\":\"340.00\",\"required_weekly_contribution\":\"340.00\",\"schedule_variance\":\"-340.00\"}",
+      "[\"incomplete goal is past its target date\"]",
+      "duplicate",
+      "2026-11-05T09:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "critical",
+      "55e5c05a902196fb8acbdc4ff7fd30ce9f52201d7ff2ed7bd0b16141c28517d8",
+      "2efe45123054ba1bb00a679af5e79448c571ed8e7c8ab6b763a1a0581c4019be",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":0,\"expected_saved\":\"1600.00\",\"goal_id\":\"firefly-piggy-bank:1\",\"on_track\":false,\"overdue\":true,\"projected_completion_date\":null,\"remaining\":\"1600.00\",\"required_weekly_contribution\":\"1600.00\",\"schedule_variance\":\"-1600.00\"}",
+      "[\"incomplete goal is past its target date\"]",
+      "escalated",
+      "2026-12-03T08:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "critical",
+      "4fe38d575c4642651c2abbee94afa5b99b78b907e246ff70ee7170d837deb0d6",
+      "422241e4c6c8cd63fbd1e50022153b10bd05dec60672b6b8778c45b82fd43a1c",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":0,\"expected_saved\":\"340.00\",\"goal_id\":\"firefly-piggy-bank:3\",\"on_track\":false,\"overdue\":true,\"projected_completion_date\":null,\"remaining\":\"340.00\",\"required_weekly_contribution\":\"340.00\",\"schedule_variance\":\"-340.00\"}",
+      "[\"incomplete goal is past its target date\"]",
+      "duplicate",
+      "2026-12-03T08:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "critical",
+      "55e5c05a902196fb8acbdc4ff7fd30ce9f52201d7ff2ed7bd0b16141c28517d8",
+      "2efe45123054ba1bb00a679af5e79448c571ed8e7c8ab6b763a1a0581c4019be",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":0,\"expected_saved\":\"1600.00\",\"goal_id\":\"firefly-piggy-bank:1\",\"on_track\":false,\"overdue\":true,\"projected_completion_date\":null,\"remaining\":\"1600.00\",\"required_weekly_contribution\":\"1600.00\",\"schedule_variance\":\"-1600.00\"}",
+      "[\"incomplete goal is past its target date\"]",
+      "duplicate",
+      "2026-12-03T08:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "critical",
+      "4fe38d575c4642651c2abbee94afa5b99b78b907e246ff70ee7170d837deb0d6",
+      "422241e4c6c8cd63fbd1e50022153b10bd05dec60672b6b8778c45b82fd43a1c",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":0,\"expected_saved\":\"340.00\",\"goal_id\":\"firefly-piggy-bank:3\",\"on_track\":false,\"overdue\":true,\"projected_completion_date\":null,\"remaining\":\"340.00\",\"required_weekly_contribution\":\"340.00\",\"schedule_variance\":\"-340.00\"}",
+      "[\"incomplete goal is past its target date\"]",
+      "duplicate",
+      "2026-12-03T08:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "critical",
+      "55e5c05a902196fb8acbdc4ff7fd30ce9f52201d7ff2ed7bd0b16141c28517d8",
+      "2efe45123054ba1bb00a679af5e79448c571ed8e7c8ab6b763a1a0581c4019be",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":0,\"expected_saved\":\"1600.00\",\"goal_id\":\"firefly-piggy-bank:1\",\"on_track\":false,\"overdue\":true,\"projected_completion_date\":null,\"remaining\":\"1600.00\",\"required_weekly_contribution\":\"1600.00\",\"schedule_variance\":\"-1600.00\"}",
+      "[\"incomplete goal is past its target date\"]",
+      "duplicate",
+      "2026-12-05T08:00:00.000001+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "critical",
+      "4fe38d575c4642651c2abbee94afa5b99b78b907e246ff70ee7170d837deb0d6",
+      "422241e4c6c8cd63fbd1e50022153b10bd05dec60672b6b8778c45b82fd43a1c",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":0,\"expected_saved\":\"340.00\",\"goal_id\":\"firefly-piggy-bank:3\",\"on_track\":false,\"overdue\":true,\"projected_completion_date\":null,\"remaining\":\"340.00\",\"required_weekly_contribution\":\"340.00\",\"schedule_variance\":\"-340.00\"}",
+      "[\"incomplete goal is past its target date\"]",
+      "duplicate",
+      "2026-12-05T08:00:00.000001+00:00"
+     ]
+    ],
+    "attempts": [
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "b5cc38537a1c4b3f0f25f4da650afea4e9fe5a22286ff7c042d6e0baa9394dde",
+      "delivered",
+      "2026-10-27T10:00:00.123456+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "422241e4c6c8cd63fbd1e50022153b10bd05dec60672b6b8778c45b82fd43a1c",
+      "delivered",
+      "2026-10-27T10:00:00.123456+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "065d2c32dcf5b99e64c1ce56bbba28064926e33641e99a5466ad25f8616a896a",
+      "delivered",
+      "2026-11-05T09:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "2efe45123054ba1bb00a679af5e79448c571ed8e7c8ab6b763a1a0581c4019be",
+      "delivered",
+      "2026-12-03T08:00:00+00:00"
+     ]
+    ]
+   }
+  },
+  {
+   "mode": "disabled",
+   "moments": [
+    "2026-09-06T12:00:00+00:00",
+    "2026-09-08T12:00:00.25+00:00",
+    "2026-09-08T13:00:00+00:00",
+    "2026-09-30T12:00:00+00:00",
+    "2026-10-02T12:00:00+00:00",
+    "2026-12-24T23:30:00+00:00"
+   ],
+   "expected": {
+    "decisions": [
+     [
+      "firefly-piggy-bank:1",
+      "resolved",
+      false
+     ],
+     [
+      "firefly-piggy-bank:3",
+      "resolved",
+      false
+     ],
+     [
+      "firefly-piggy-bank:1",
+      "dispatch",
+      true
+     ],
+     [
+      "firefly-piggy-bank:3",
+      "dispatch",
+      true
+     ],
+     [
+      "firefly-piggy-bank:1",
+      "suppressed",
+      false
+     ],
+     [
+      "firefly-piggy-bank:3",
+      "suppressed",
+      false
+     ],
+     [
+      "firefly-piggy-bank:1",
+      "escalated",
+      true
+     ],
+     [
+      "firefly-piggy-bank:3",
+      "dispatch",
+      true
+     ],
+     [
+      "firefly-piggy-bank:1",
+      "dispatch",
+      true
+     ],
+     [
+      "firefly-piggy-bank:3",
+      "escalated",
+      true
+     ],
+     [
+      "firefly-piggy-bank:1",
+      "escalated",
+      true
+     ],
+     [
+      "firefly-piggy-bank:3",
+      "dispatch",
+      true
+     ]
+    ],
+    "sent": [],
+    "lifecycle": [
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      1,
+      "critical",
+      "",
+      "2026-12-25T00:30:00+00:00",
+      "2026-12-24T23:30:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      1,
+      "critical",
+      "",
+      "2026-12-25T00:30:00+00:00",
+      "2026-12-24T23:30:00+00:00"
+     ]
+    ],
+    "events": [
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "none",
+      "e00be49dbe1ea1182999ab2eca4ddcd0bf368bbf67fd163a3a56a2d119bd8811",
+      "81c464c280a54964a92379ffb54e056fc2a57556ef8c607839a52a60c8fbc21e",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":87,\"expected_saved\":\"0.00\",\"goal_id\":\"firefly-piggy-bank:1\",\"on_track\":true,\"overdue\":false,\"projected_completion_date\":null,\"remaining\":\"1600.00\",\"required_weekly_contribution\":\"128.7356321839080459770114943\",\"schedule_variance\":\"0.00\"}",
+      "[\"goal is on track\"]",
+      "resolved",
+      "2026-09-06T12:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "none",
+      "e368ced4c3d0838ab1c2cdadc486bc3620f7c74711a45c1499f2f74b9d9c73ac",
+      "2aa56196f69955e21e5a1a00fbdea35daa471130c77676818dd96510715c3796",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":25,\"expected_saved\":\"0.00\",\"goal_id\":\"firefly-piggy-bank:3\",\"on_track\":true,\"overdue\":false,\"projected_completion_date\":null,\"remaining\":\"340.00\",\"required_weekly_contribution\":\"95.20\",\"schedule_variance\":\"0.00\"}",
+      "[\"goal is on track\"]",
+      "resolved",
+      "2026-09-06T12:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "heads_up",
+      "c83d775b4f9bf16568eb39bad08257d76a6feb1c5930a031bc31096d682c7d83",
+      "82a26abcfe69097cc5b6cf11671c6cb55041d97bd60d9d3c6be2a2fbe93c4d01",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":85,\"expected_saved\":\"36.78160919540229885057471264\",\"goal_id\":\"firefly-piggy-bank:1\",\"on_track\":false,\"overdue\":false,\"projected_completion_date\":null,\"remaining\":\"1600.00\",\"required_weekly_contribution\":\"131.7647058823529411764705882\",\"schedule_variance\":\"-36.78160919540229885057471264\"}",
+      "[\"goal is behind its contribution schedule\"]",
+      "dispatch",
+      "2026-09-08T12:00:00.250000+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "heads_up",
+      "2c3801117bfa61b93fd9e78bdbce7329451bab037f950113569a5e83d2405668",
+      "98cc19bef440e01e741d0c511d195d1072ab9d3ab8a4ae37181177db48b12d87",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":23,\"expected_saved\":\"27.2000\",\"goal_id\":\"firefly-piggy-bank:3\",\"on_track\":false,\"overdue\":false,\"projected_completion_date\":null,\"remaining\":\"340.00\",\"required_weekly_contribution\":\"103.4782608695652173913043478\",\"schedule_variance\":\"-27.2000\"}",
+      "[\"goal is behind its contribution schedule\"]",
+      "dispatch",
+      "2026-09-08T12:00:00.250000+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "heads_up",
+      "c83d775b4f9bf16568eb39bad08257d76a6feb1c5930a031bc31096d682c7d83",
+      "82a26abcfe69097cc5b6cf11671c6cb55041d97bd60d9d3c6be2a2fbe93c4d01",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":85,\"expected_saved\":\"36.78160919540229885057471264\",\"goal_id\":\"firefly-piggy-bank:1\",\"on_track\":false,\"overdue\":false,\"projected_completion_date\":null,\"remaining\":\"1600.00\",\"required_weekly_contribution\":\"131.7647058823529411764705882\",\"schedule_variance\":\"-36.78160919540229885057471264\"}",
+      "[\"goal is behind its contribution schedule\"]",
+      "suppressed",
+      "2026-09-08T13:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "heads_up",
+      "2c3801117bfa61b93fd9e78bdbce7329451bab037f950113569a5e83d2405668",
+      "98cc19bef440e01e741d0c511d195d1072ab9d3ab8a4ae37181177db48b12d87",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":23,\"expected_saved\":\"27.2000\",\"goal_id\":\"firefly-piggy-bank:3\",\"on_track\":false,\"overdue\":false,\"projected_completion_date\":null,\"remaining\":\"340.00\",\"required_weekly_contribution\":\"103.4782608695652173913043478\",\"schedule_variance\":\"-27.2000\"}",
+      "[\"goal is behind its contribution schedule\"]",
+      "suppressed",
+      "2026-09-08T13:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "warning",
+      "a43787510a53f5997434f3e0fad42d80e17b4e0897883991fb9f36a32837ba8a",
+      "2cb6f89b3fb299aec525309dc2da3e3645d85f530ca1cb304b1a4f44d4b220cb",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":63,\"expected_saved\":\"441.3793103448275862068965517\",\"goal_id\":\"firefly-piggy-bank:1\",\"on_track\":false,\"overdue\":false,\"projected_completion_date\":null,\"remaining\":\"1600.00\",\"required_weekly_contribution\":\"177.7777777777777777777777778\",\"schedule_variance\":\"-441.3793103448275862068965517\"}",
+      "[\"goal is behind by at least one required weekly contribution\"]",
+      "escalated",
+      "2026-09-30T12:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "heads_up",
+      "2ed45bd73aa04a0ef27bdf450c04deb2b922e83257247ebc5b8a3c016dbf5314",
+      "1724507faa321356125669a90ca8be5ed6c35063b96c5017e6c344c35a426e46",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":1,\"expected_saved\":\"326.4000\",\"goal_id\":\"firefly-piggy-bank:3\",\"on_track\":false,\"overdue\":false,\"projected_completion_date\":null,\"remaining\":\"340.00\",\"required_weekly_contribution\":\"2380.00\",\"schedule_variance\":\"-326.4000\"}",
+      "[\"goal is behind its contribution schedule\"]",
+      "dispatch",
+      "2026-09-30T12:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "warning",
+      "d9cdbb31d893774bbe199c3f56377505f2cb3c50d8cb4444e57e7b6fd00d6f8c",
+      "a7a7a89ca732fbbb4668b636c70f3941366ab2de2cb26f2ce72b077deefa90b0",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":61,\"expected_saved\":\"478.1609195402298850574712643\",\"goal_id\":\"firefly-piggy-bank:1\",\"on_track\":false,\"overdue\":false,\"projected_completion_date\":null,\"remaining\":\"1600.00\",\"required_weekly_contribution\":\"183.6065573770491803278688525\",\"schedule_variance\":\"-478.1609195402298850574712643\"}",
+      "[\"goal is behind by at least one required weekly contribution\"]",
+      "dispatch",
+      "2026-10-02T12:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "critical",
+      "4fe38d575c4642651c2abbee94afa5b99b78b907e246ff70ee7170d837deb0d6",
+      "422241e4c6c8cd63fbd1e50022153b10bd05dec60672b6b8778c45b82fd43a1c",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":0,\"expected_saved\":\"340.00\",\"goal_id\":\"firefly-piggy-bank:3\",\"on_track\":false,\"overdue\":true,\"projected_completion_date\":null,\"remaining\":\"340.00\",\"required_weekly_contribution\":\"340.00\",\"schedule_variance\":\"-340.00\"}",
+      "[\"incomplete goal is past its target date\"]",
+      "escalated",
+      "2026-10-02T12:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "critical",
+      "55e5c05a902196fb8acbdc4ff7fd30ce9f52201d7ff2ed7bd0b16141c28517d8",
+      "2efe45123054ba1bb00a679af5e79448c571ed8e7c8ab6b763a1a0581c4019be",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":0,\"expected_saved\":\"1600.00\",\"goal_id\":\"firefly-piggy-bank:1\",\"on_track\":false,\"overdue\":true,\"projected_completion_date\":null,\"remaining\":\"1600.00\",\"required_weekly_contribution\":\"1600.00\",\"schedule_variance\":\"-1600.00\"}",
+      "[\"incomplete goal is past its target date\"]",
+      "escalated",
+      "2026-12-24T23:30:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "critical",
+      "4fe38d575c4642651c2abbee94afa5b99b78b907e246ff70ee7170d837deb0d6",
+      "422241e4c6c8cd63fbd1e50022153b10bd05dec60672b6b8778c45b82fd43a1c",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":0,\"expected_saved\":\"340.00\",\"goal_id\":\"firefly-piggy-bank:3\",\"on_track\":false,\"overdue\":true,\"projected_completion_date\":null,\"remaining\":\"340.00\",\"required_weekly_contribution\":\"340.00\",\"schedule_variance\":\"-340.00\"}",
+      "[\"incomplete goal is past its target date\"]",
+      "dispatch",
+      "2026-12-24T23:30:00+00:00"
+     ]
+    ],
+    "attempts": [
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "82a26abcfe69097cc5b6cf11671c6cb55041d97bd60d9d3c6be2a2fbe93c4d01",
+      "disabled",
+      "2026-09-08T12:00:00.250000+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "98cc19bef440e01e741d0c511d195d1072ab9d3ab8a4ae37181177db48b12d87",
+      "disabled",
+      "2026-09-08T12:00:00.250000+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "2cb6f89b3fb299aec525309dc2da3e3645d85f530ca1cb304b1a4f44d4b220cb",
+      "disabled",
+      "2026-09-30T12:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "1724507faa321356125669a90ca8be5ed6c35063b96c5017e6c344c35a426e46",
+      "disabled",
+      "2026-09-30T12:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "a7a7a89ca732fbbb4668b636c70f3941366ab2de2cb26f2ce72b077deefa90b0",
+      "disabled",
+      "2026-10-02T12:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "422241e4c6c8cd63fbd1e50022153b10bd05dec60672b6b8778c45b82fd43a1c",
+      "disabled",
+      "2026-10-02T12:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "2efe45123054ba1bb00a679af5e79448c571ed8e7c8ab6b763a1a0581c4019be",
+      "disabled",
+      "2026-12-24T23:30:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "422241e4c6c8cd63fbd1e50022153b10bd05dec60672b6b8778c45b82fd43a1c",
+      "disabled",
+      "2026-12-24T23:30:00+00:00"
+     ]
+    ]
+   }
+  },
+  {
+   "mode": "delivered",
+   "moments": [
+    "2026-09-06T12:00:00+00:00",
+    "2026-09-08T12:00:00.25+00:00",
+    "2026-09-08T13:00:00+00:00",
+    "2026-09-30T12:00:00+00:00",
+    "2026-10-02T12:00:00+00:00",
+    "2026-12-24T23:30:00+00:00"
+   ],
+   "expected": {
+    "decisions": [
+     [
+      "firefly-piggy-bank:1",
+      "resolved",
+      false
+     ],
+     [
+      "firefly-piggy-bank:3",
+      "resolved",
+      false
+     ],
+     [
+      "firefly-piggy-bank:1",
+      "dispatch",
+      true
+     ],
+     [
+      "firefly-piggy-bank:3",
+      "dispatch",
+      true
+     ],
+     [
+      "firefly-piggy-bank:1",
+      "duplicate",
+      false
+     ],
+     [
+      "firefly-piggy-bank:3",
+      "duplicate",
+      false
+     ],
+     [
+      "firefly-piggy-bank:1",
+      "escalated",
+      true
+     ],
+     [
+      "firefly-piggy-bank:3",
+      "dispatch",
+      true
+     ],
+     [
+      "firefly-piggy-bank:1",
+      "suppressed",
+      false
+     ],
+     [
+      "firefly-piggy-bank:3",
+      "escalated",
+      true
+     ],
+     [
+      "firefly-piggy-bank:1",
+      "escalated",
+      true
+     ],
+     [
+      "firefly-piggy-bank:3",
+      "duplicate",
+      false
+     ]
+    ],
+    "sent": [
+     [
+      "Personal finance: heads up",
+      "firefly-piggy-bank:1: goal is behind its contribution schedule"
+     ],
+     [
+      "Personal finance: heads up",
+      "firefly-piggy-bank:3: goal is behind its contribution schedule"
+     ],
+     [
+      "Personal finance: warning",
+      "firefly-piggy-bank:1: goal is behind by at least one required weekly contribution"
+     ],
+     [
+      "Personal finance: heads up",
+      "firefly-piggy-bank:3: goal is behind its contribution schedule"
+     ],
+     [
+      "Personal finance: critical",
+      "firefly-piggy-bank:3: incomplete goal is past its target date"
+     ],
+     [
+      "Personal finance: critical",
+      "firefly-piggy-bank:1: incomplete goal is past its target date"
+     ]
+    ],
+    "lifecycle": [
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      1,
+      "critical",
+      "2efe45123054ba1bb00a679af5e79448c571ed8e7c8ab6b763a1a0581c4019be",
+      "2026-12-25T23:30:00+00:00",
+      "2026-12-24T23:30:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      1,
+      "critical",
+      "422241e4c6c8cd63fbd1e50022153b10bd05dec60672b6b8778c45b82fd43a1c",
+      "2026-10-03T12:00:00+00:00",
+      "2026-12-24T23:30:00+00:00"
+     ]
+    ],
+    "events": [
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "none",
+      "e00be49dbe1ea1182999ab2eca4ddcd0bf368bbf67fd163a3a56a2d119bd8811",
+      "81c464c280a54964a92379ffb54e056fc2a57556ef8c607839a52a60c8fbc21e",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":87,\"expected_saved\":\"0.00\",\"goal_id\":\"firefly-piggy-bank:1\",\"on_track\":true,\"overdue\":false,\"projected_completion_date\":null,\"remaining\":\"1600.00\",\"required_weekly_contribution\":\"128.7356321839080459770114943\",\"schedule_variance\":\"0.00\"}",
+      "[\"goal is on track\"]",
+      "resolved",
+      "2026-09-06T12:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "none",
+      "e368ced4c3d0838ab1c2cdadc486bc3620f7c74711a45c1499f2f74b9d9c73ac",
+      "2aa56196f69955e21e5a1a00fbdea35daa471130c77676818dd96510715c3796",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":25,\"expected_saved\":\"0.00\",\"goal_id\":\"firefly-piggy-bank:3\",\"on_track\":true,\"overdue\":false,\"projected_completion_date\":null,\"remaining\":\"340.00\",\"required_weekly_contribution\":\"95.20\",\"schedule_variance\":\"0.00\"}",
+      "[\"goal is on track\"]",
+      "resolved",
+      "2026-09-06T12:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "heads_up",
+      "c83d775b4f9bf16568eb39bad08257d76a6feb1c5930a031bc31096d682c7d83",
+      "82a26abcfe69097cc5b6cf11671c6cb55041d97bd60d9d3c6be2a2fbe93c4d01",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":85,\"expected_saved\":\"36.78160919540229885057471264\",\"goal_id\":\"firefly-piggy-bank:1\",\"on_track\":false,\"overdue\":false,\"projected_completion_date\":null,\"remaining\":\"1600.00\",\"required_weekly_contribution\":\"131.7647058823529411764705882\",\"schedule_variance\":\"-36.78160919540229885057471264\"}",
+      "[\"goal is behind its contribution schedule\"]",
+      "dispatch",
+      "2026-09-08T12:00:00.250000+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "heads_up",
+      "2c3801117bfa61b93fd9e78bdbce7329451bab037f950113569a5e83d2405668",
+      "98cc19bef440e01e741d0c511d195d1072ab9d3ab8a4ae37181177db48b12d87",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":23,\"expected_saved\":\"27.2000\",\"goal_id\":\"firefly-piggy-bank:3\",\"on_track\":false,\"overdue\":false,\"projected_completion_date\":null,\"remaining\":\"340.00\",\"required_weekly_contribution\":\"103.4782608695652173913043478\",\"schedule_variance\":\"-27.2000\"}",
+      "[\"goal is behind its contribution schedule\"]",
+      "dispatch",
+      "2026-09-08T12:00:00.250000+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "heads_up",
+      "c83d775b4f9bf16568eb39bad08257d76a6feb1c5930a031bc31096d682c7d83",
+      "82a26abcfe69097cc5b6cf11671c6cb55041d97bd60d9d3c6be2a2fbe93c4d01",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":85,\"expected_saved\":\"36.78160919540229885057471264\",\"goal_id\":\"firefly-piggy-bank:1\",\"on_track\":false,\"overdue\":false,\"projected_completion_date\":null,\"remaining\":\"1600.00\",\"required_weekly_contribution\":\"131.7647058823529411764705882\",\"schedule_variance\":\"-36.78160919540229885057471264\"}",
+      "[\"goal is behind its contribution schedule\"]",
+      "duplicate",
+      "2026-09-08T13:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "heads_up",
+      "2c3801117bfa61b93fd9e78bdbce7329451bab037f950113569a5e83d2405668",
+      "98cc19bef440e01e741d0c511d195d1072ab9d3ab8a4ae37181177db48b12d87",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":23,\"expected_saved\":\"27.2000\",\"goal_id\":\"firefly-piggy-bank:3\",\"on_track\":false,\"overdue\":false,\"projected_completion_date\":null,\"remaining\":\"340.00\",\"required_weekly_contribution\":\"103.4782608695652173913043478\",\"schedule_variance\":\"-27.2000\"}",
+      "[\"goal is behind its contribution schedule\"]",
+      "duplicate",
+      "2026-09-08T13:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "warning",
+      "a43787510a53f5997434f3e0fad42d80e17b4e0897883991fb9f36a32837ba8a",
+      "2cb6f89b3fb299aec525309dc2da3e3645d85f530ca1cb304b1a4f44d4b220cb",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":63,\"expected_saved\":\"441.3793103448275862068965517\",\"goal_id\":\"firefly-piggy-bank:1\",\"on_track\":false,\"overdue\":false,\"projected_completion_date\":null,\"remaining\":\"1600.00\",\"required_weekly_contribution\":\"177.7777777777777777777777778\",\"schedule_variance\":\"-441.3793103448275862068965517\"}",
+      "[\"goal is behind by at least one required weekly contribution\"]",
+      "escalated",
+      "2026-09-30T12:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "heads_up",
+      "2ed45bd73aa04a0ef27bdf450c04deb2b922e83257247ebc5b8a3c016dbf5314",
+      "1724507faa321356125669a90ca8be5ed6c35063b96c5017e6c344c35a426e46",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":1,\"expected_saved\":\"326.4000\",\"goal_id\":\"firefly-piggy-bank:3\",\"on_track\":false,\"overdue\":false,\"projected_completion_date\":null,\"remaining\":\"340.00\",\"required_weekly_contribution\":\"2380.00\",\"schedule_variance\":\"-326.4000\"}",
+      "[\"goal is behind its contribution schedule\"]",
+      "dispatch",
+      "2026-09-30T12:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "warning",
+      "d9cdbb31d893774bbe199c3f56377505f2cb3c50d8cb4444e57e7b6fd00d6f8c",
+      "a7a7a89ca732fbbb4668b636c70f3941366ab2de2cb26f2ce72b077deefa90b0",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":61,\"expected_saved\":\"478.1609195402298850574712643\",\"goal_id\":\"firefly-piggy-bank:1\",\"on_track\":false,\"overdue\":false,\"projected_completion_date\":null,\"remaining\":\"1600.00\",\"required_weekly_contribution\":\"183.6065573770491803278688525\",\"schedule_variance\":\"-478.1609195402298850574712643\"}",
+      "[\"goal is behind by at least one required weekly contribution\"]",
+      "suppressed",
+      "2026-10-02T12:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "critical",
+      "4fe38d575c4642651c2abbee94afa5b99b78b907e246ff70ee7170d837deb0d6",
+      "422241e4c6c8cd63fbd1e50022153b10bd05dec60672b6b8778c45b82fd43a1c",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":0,\"expected_saved\":\"340.00\",\"goal_id\":\"firefly-piggy-bank:3\",\"on_track\":false,\"overdue\":true,\"projected_completion_date\":null,\"remaining\":\"340.00\",\"required_weekly_contribution\":\"340.00\",\"schedule_variance\":\"-340.00\"}",
+      "[\"incomplete goal is past its target date\"]",
+      "escalated",
+      "2026-10-02T12:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "critical",
+      "55e5c05a902196fb8acbdc4ff7fd30ce9f52201d7ff2ed7bd0b16141c28517d8",
+      "2efe45123054ba1bb00a679af5e79448c571ed8e7c8ab6b763a1a0581c4019be",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":0,\"expected_saved\":\"1600.00\",\"goal_id\":\"firefly-piggy-bank:1\",\"on_track\":false,\"overdue\":true,\"projected_completion_date\":null,\"remaining\":\"1600.00\",\"required_weekly_contribution\":\"1600.00\",\"schedule_variance\":\"-1600.00\"}",
+      "[\"incomplete goal is past its target date\"]",
+      "escalated",
+      "2026-12-24T23:30:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "critical",
+      "4fe38d575c4642651c2abbee94afa5b99b78b907e246ff70ee7170d837deb0d6",
+      "422241e4c6c8cd63fbd1e50022153b10bd05dec60672b6b8778c45b82fd43a1c",
+      "2026-09-v1",
+      "{\"completed\":false,\"currency\":{\"code\":\"EUR\",\"minor_unit\":2},\"days_remaining\":0,\"expected_saved\":\"340.00\",\"goal_id\":\"firefly-piggy-bank:3\",\"on_track\":false,\"overdue\":true,\"projected_completion_date\":null,\"remaining\":\"340.00\",\"required_weekly_contribution\":\"340.00\",\"schedule_variance\":\"-340.00\"}",
+      "[\"incomplete goal is past its target date\"]",
+      "duplicate",
+      "2026-12-24T23:30:00+00:00"
+     ]
+    ],
+    "attempts": [
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "82a26abcfe69097cc5b6cf11671c6cb55041d97bd60d9d3c6be2a2fbe93c4d01",
+      "delivered",
+      "2026-09-08T12:00:00.250000+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "98cc19bef440e01e741d0c511d195d1072ab9d3ab8a4ae37181177db48b12d87",
+      "delivered",
+      "2026-09-08T12:00:00.250000+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "2cb6f89b3fb299aec525309dc2da3e3645d85f530ca1cb304b1a4f44d4b220cb",
+      "delivered",
+      "2026-09-30T12:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "1724507faa321356125669a90ca8be5ed6c35063b96c5017e6c344c35a426e46",
+      "delivered",
+      "2026-09-30T12:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:3",
+      "422241e4c6c8cd63fbd1e50022153b10bd05dec60672b6b8778c45b82fd43a1c",
+      "delivered",
+      "2026-10-02T12:00:00+00:00"
+     ],
+     [
+      "goal",
+      "firefly-piggy-bank:1",
+      "2efe45123054ba1bb00a679af5e79448c571ed8e7c8ab6b763a1a0581c4019be",
+      "delivered",
+      "2026-12-24T23:30:00+00:00"
+     ]
+    ]
+   }
+  }
+ ]
+}

@@ -66,6 +66,7 @@ fn main() -> anyhow::Result<()> {
         data_fresh: data_fresh(&snap.sync_health, &ctx.now),
         current_month,
         resolver: &ctx.resolver,
+        forecaster: None,
     });
     let plans = forecast_plans(&snap.budget_plans, current_month, &currencies);
     let daily = daily_spending_forecasts(&DailyInputs {
@@ -79,6 +80,7 @@ fn main() -> anyhow::Result<()> {
         budget_plans: &plans,
         mappings: &snap.group_mappings,
         excluded_categories: &snap.settings.forecast_excluded_categories,
+        forecaster: None,
     });
     let report = serde_json::json!({
         "savings_outlooks": outlooks,

@@ -1,0 +1,209 @@
+//! Delivery for the daily spending email: the SMTP sender (Python
+//! `SmtpSpendingEmailSender`) and the local Qwen writer (Python
+//! `QwenSpendingMessageWriter` over `OllamaClient`). The content and every
+//! decision come from `finance_core::spending_email`; this crate only talks
+//! to the mail server and to Ollama. Both block, so callers run them on
+//! their own thread, never on the async runtime.
+
+use std::io::Read;
+use std::time::Duration;
+
+use finance_core::spending_email::{
+    Copy, Message, Risk, Sender, Smtp, WRITER_SYSTEM, Writer, parse_writer_reply, writer_prompt,
+};
+use finance_secrets::Secret;
+use finance_types::notify::SmtpSecurity;
+use lettre::message::{Mailbox, MultiPart, SinglePart, header::ContentType};
+use lettre::transport::smtp::authentication::Credentials;
+use lettre::{SmtpTransport, Transport};
+use serde_json::{Value, json};
+
+/// The Ollama the Python service used, on this Mac.
+pub const OLLAMA_URL: &str = "http://127.0.0.1:11434";
+pub const OLLAMA_MODEL: &str = "qwen3:8b";
+/// Python `MAX_OLLAMA_RESPONSE_BYTES`.
+const MAX_RESPONSE_BYTES: u64 = 64 * 1024;
+/// Python's status codes worth one more try.
+const RETRYABLE: [u16; 4] = [429, 502, 503, 504];
+
+/// The email as the mail server receives it: from "Rafael", plain text with
+/// an HTML alternative when there is one.
+pub fn email(message: &Message, smtp: &Smtp) -> Result<lettre::Message, String> {
+    let from: Mailbox = format!("Rafael <{}>", smtp.from)
+        .parse()
+        .map_err(|_| "The sender is not an email address.".to_owned())?;
+    let to: Mailbox = smtp
+        .to
+        .parse()
+        .map_err(|_| "The recipient is not an email address.".to_owned())?;
+    let builder = lettre::Message::builder()
+        .from(from)
+        .to(to)
+        .subject(message.subject.clone());
+    match &message.html_body {
+        Some(html) => builder.multipart(MultiPart::alternative_plain_html(
+            message.body.clone(),
+            html.clone(),
+        )),
+        None => builder.singlepart(
+            SinglePart::builder()
+                .header(ContentType::TEXT_PLAIN)
+                .body(message.body.clone()),
+        ),
+    }
+    .map_err(|e| format!("The email could not be built: {e}"))
+}
+
+/// Sends through any lettre transport: SMTP in the app, a stub in tests.
+#[derive(Debug)]
+pub struct Mailer<T> {
+    smtp: Smtp,
+    transport: T,
+}
+
+impl<T> Mailer<T> {
+    pub fn new(smtp: Smtp, transport: T) -> Self {
+        Self { smtp, transport }
+    }
+
+    pub fn transport(&self) -> &T {
+        &self.transport
+    }
+}
+
+impl Mailer<SmtpTransport> {
+    /// The owner's SMTP server: TLS from the start (`ssl`, port 465) or
+    /// upgraded with STARTTLS, signing in with the Keychain password; 20
+    /// second timeout as in Python.
+    pub fn smtp(smtp: Smtp, password: &Secret) -> Result<Self, String> {
+        let builder = match smtp.security {
+            SmtpSecurity::Ssl => SmtpTransport::relay(&smtp.host),
+            SmtpSecurity::Starttls => SmtpTransport::starttls_relay(&smtp.host),
+        }
+        .map_err(|_| "The SMTP host is not valid.".to_owned())?;
+        let transport = builder
+            .port(smtp.port)
+            .credentials(Credentials::new(
+                smtp.username.clone(),
+                password.expose().to_owned(),
+            ))
+            .timeout(Some(Duration::from_secs(20)))
+            .build();
+        Ok(Self::new(smtp, transport))
+    }
+}
+
+impl<T> Sender for Mailer<T>
+where
+    T: Transport,
+    T::Error: std::fmt::Display,
+{
+    fn send(&self, message: &Message) -> Result<(), String> {
+        let email = email(message, &self.smtp)?;
+        self.transport
+            .send(&email)
+            .map(|_| ())
+            .map_err(|e| format!("Sending failed: {e}"))
+    }
+}
+
+/// Python `QwenSpendingMessageWriter`: the persona prompt, qualitative
+/// signals only, JSON out, temperature 0, two attempts, 90 second read.
+#[derive(Debug)]
+pub struct Ollama {
+    base_url: String,
+    model: String,
+    client: reqwest::blocking::Client,
+}
+
+impl Ollama {
+    pub fn local() -> Result<Self, String> {
+        Self::new(OLLAMA_URL, OLLAMA_MODEL)
+    }
+
+    /// Only a loopback address, as Python's `normalize_ollama_base_url`
+    /// allowed.
+    pub fn new(base_url: &str, model: &str) -> Result<Self, String> {
+        let url = reqwest::Url::parse(base_url).map_err(|_| "Invalid Ollama URL.".to_owned())?;
+        let local = matches!(
+            url.host_str(),
+            Some("127.0.0.1" | "localhost" | "[::1]" | "::1")
+        );
+        if !local || !url.username().is_empty() || url.password().is_some() {
+            return Err("Ollama must run on this Mac.".into());
+        }
+        let client = reqwest::blocking::Client::builder()
+            .connect_timeout(Duration::from_secs(2))
+            .timeout(Duration::from_secs(90))
+            .redirect(reqwest::redirect::Policy::none())
+            .no_proxy()
+            .build()
+            .map_err(|e| e.to_string())?;
+        Ok(Self {
+            base_url: base_url.trim_end_matches('/').to_owned(),
+            model: model.trim().to_owned(),
+            client,
+        })
+    }
+
+    /// The request body Python's `OllamaClient.generate` posted.
+    pub fn payload(&self, prompt: &str) -> Value {
+        json!({
+            "model": self.model,
+            "prompt": prompt,
+            "stream": false,
+            "format": "json",
+            "options": {"temperature": 0},
+            "think": false,
+            "system": WRITER_SYSTEM,
+        })
+    }
+
+    fn generate(&self, prompt: &str) -> Result<String, String> {
+        let unavailable = || "The local model is not available.".to_owned();
+        let url = format!("{}/api/generate", self.base_url);
+        let mut last = unavailable();
+        for _ in 0..2 {
+            let response = match self.client.post(&url).json(&self.payload(prompt)).send() {
+                Ok(r) => r,
+                Err(_) => {
+                    last = unavailable();
+                    continue;
+                }
+            };
+            let status = response.status().as_u16();
+            if RETRYABLE.contains(&status) {
+                last = unavailable();
+                continue;
+            }
+            if status != 200 {
+                return Err("The local model refused the request.".into());
+            }
+            let mut body = Vec::new();
+            response
+                .take(MAX_RESPONSE_BYTES + 1)
+                .read_to_end(&mut body)
+                .map_err(|_| unavailable())?;
+            if body.len() as u64 > MAX_RESPONSE_BYTES {
+                return Err("The local model answered too much.".into());
+            }
+            let document: Value =
+                serde_json::from_slice(&body).map_err(|_| "Unreadable model answer.".to_owned())?;
+            return document
+                .get("response")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .ok_or_else(|| "Unreadable model answer.".to_owned());
+        }
+        Err(last)
+    }
+}
+
+impl Writer for Ollama {
+    fn write(&self, risk: &Risk) -> Result<Copy, String> {
+        parse_writer_reply(&self.generate(&writer_prompt(risk))?)
+    }
+}
+
+#[cfg(test)]
+mod tests;

@@ -7,6 +7,7 @@
 mod connection;
 mod entry;
 mod import;
+pub mod link;
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -51,6 +52,8 @@ impl From<ApiError> for SyncStatus {
 /// An authenticated `GET` against `https://api.enablebanking.com/<path>`.
 pub trait Api {
     fn get(&mut self, path: &str) -> Result<Value, ApiError>;
+    /// An authenticated `POST` of a JSON body.
+    fn post(&mut self, path: &str, body: &Value) -> Result<Value, ApiError>;
 }
 
 pub(crate) fn sha256_hex(value: &str) -> String {
@@ -100,13 +103,26 @@ pub fn window(today: Date, not_before: Option<Date>) -> Result<Option<Window>, S
     Ok((from != today).then_some(Window { from, to: today }))
 }
 
-/// The bank account uids the consent's sessions grant.
-fn granted(api: &mut dyn Api, connection: &Connection) -> Result<BTreeSet<String>, SyncStatus> {
+/// The bank account uids the consent's sessions grant, and when the
+/// earliest of them expires.
+fn granted(
+    api: &mut dyn Api,
+    connection: &Connection,
+) -> Result<(BTreeSet<String>, Option<String>), SyncStatus> {
     let mut sources = BTreeSet::new();
+    let mut expires: Option<Timestamp> = None;
     for session in &connection.sessions {
         let data = api.get(&format!("sessions/{}", encode(session)))?;
         if data.get("status").and_then(Value::as_str) != Some("AUTHORIZED") {
             return Err(SyncStatus::ReauthorizationRequired);
+        }
+        if let Some(until) = data
+            .get("access")
+            .and_then(|a| a.get("valid_until"))
+            .and_then(Value::as_str)
+            .and_then(|s| s.parse::<Timestamp>().ok())
+        {
+            expires = Some(expires.map_or(until, |e| e.min(until)));
         }
         for account in data
             .get("accounts")
@@ -121,7 +137,7 @@ fn granted(api: &mut dyn Api, connection: &Connection) -> Result<BTreeSet<String
             sources.insert(uid.to_owned());
         }
     }
-    Ok(sources)
+    Ok((sources, expires.map(utc_stamp)))
 }
 
 fn details_iban(api: &mut dyn Api, uid: &str) -> Result<String, SyncStatus> {
@@ -144,8 +160,8 @@ pub fn preflight(
     connection: &Connection,
     own: &HashMap<i64, OwnAccount>,
     full: Option<Window>,
-) -> Result<(), SyncStatus> {
-    let sources = granted(api, connection)?;
+) -> Result<Option<String>, SyncStatus> {
+    let (sources, expires) = granted(api, connection)?;
     for (uid, &target) in &connection.accounts {
         if !sources.contains(uid) {
             return Err(SyncStatus::MappingMismatch);
@@ -168,7 +184,7 @@ pub fn preflight(
             download(api, uid, window)?;
         }
     }
-    Ok(())
+    Ok(expires)
 }
 
 /// Every entry of `uid` in `window`, page by page.
@@ -260,6 +276,7 @@ pub fn record(
         } else {
             previous.created
         },
+        consent_valid_until: previous.consent_valid_until.clone(),
         checked: if success {
             imported.map(|i| i.checked)
         } else {
@@ -304,6 +321,42 @@ pub fn save_run(w: &Writer<'_>, bank: &str, run: &BankRun) -> crate::Result<()> 
     )
 }
 
+/// Update the data-refresh health the dashboard reads (Python's
+/// `firefly_sync_health`, written by its sync loop): every bank sync is an
+/// attempt; the data is fresh only while no connected bank's last sync
+/// failed. Banks without consent or key do not count.
+pub fn save_health(w: &Writer<'_>) -> crate::Result<()> {
+    let exists =
+        w.tx.query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'firefly_sync_health'",
+            [],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+    if !exists {
+        return Ok(());
+    }
+    let failed = runs(&w.tx)?.values().any(|r| {
+        r.status.is_some_and(|s| {
+            !s.is_ok()
+                && !matches!(
+                    s,
+                    SyncStatus::MissingConfig | SyncStatus::MissingCredentials
+                )
+        })
+    });
+    let stamp = w.stamp();
+    w.tx.execute(
+        "INSERT INTO firefly_sync_health (singleton, last_success, last_attempt, failed) \
+         VALUES (1, CASE WHEN ?2 THEN NULL ELSE ?1 END, ?1, ?2) \
+         ON CONFLICT(singleton) DO UPDATE SET last_attempt = ?1, failed = ?2, \
+         last_success = CASE WHEN ?2 THEN last_success ELSE ?1 END",
+        rusqlite::params![stamp, failed],
+    )?;
+    Ok(())
+}
+
 /// The old importer's `status.json`, as runs. Statuses this app does not
 /// know (Firefly-only ones) read as a failed attempt.
 pub fn legacy_runs(raw: &str) -> HashMap<String, BankRun> {
@@ -334,6 +387,7 @@ pub fn legacy_runs(raw: &str) -> HashMap<String, BankRun> {
                         .get("converted")
                         .and_then(Value::as_u64)
                         .and_then(|n| u32::try_from(n).ok()),
+                    consent_valid_until: None,
                 },
             ))
         })
@@ -388,6 +442,11 @@ impl Service {
         })
     }
 
+    /// The ledger's own accounts, for mapping bank accounts onto them.
+    pub fn bank_own_accounts(&self) -> Result<HashMap<i64, OwnAccount>, String> {
+        self.read_store(own_accounts)
+    }
+
     /// The stored run of every bank.
     pub fn bank_runs(&self) -> Result<HashMap<String, BankRun>, String> {
         self.read_store(runs)
@@ -413,7 +472,7 @@ impl Service {
         let own = self
             .read_store(own_accounts)
             .map_err(|_| SyncStatus::Failed)?;
-        preflight(api, connection, &own, Some(window))
+        preflight(api, connection, &own, Some(window)).map(|_| ())
     }
 
     /// Sync one bank: check the consent, download every account's window,
@@ -426,9 +485,13 @@ impl Service {
         now: Timestamp,
     ) -> Result<BankSyncResult, String> {
         let previous = self.bank_runs()?.remove(bank).unwrap_or_default();
-        let (status, imported) = self.attempt(bank, connection, api, now);
-        let run = record(&previous, status, imported, now);
+        let (status, imported, expires) = self.attempt(bank, connection, api, now);
+        let mut run = record(&previous, status, imported, now);
+        if expires.is_some() {
+            run.consent_valid_until = expires;
+        }
         self.save_bank_run(bank, &run)?;
+        self.write(|w, _| save_health(w))?;
         Ok(BankSyncResult {
             bank: bank.to_owned(),
             status,
@@ -443,19 +506,20 @@ impl Service {
         connection: &Connection,
         api: &mut dyn Api,
         now: Timestamp,
-    ) -> (SyncStatus, Option<Imported>) {
+    ) -> (SyncStatus, Option<Imported>, Option<String>) {
         let today = now.to_zoned(TimeZone::UTC).date();
         let window = match window(today, connection.import_not_before) {
             Ok(Some(window)) => window,
-            Ok(None) => return (SyncStatus::WaitingForCompletedDay, None),
-            Err(status) => return (status, None),
+            Ok(None) => return (SyncStatus::WaitingForCompletedDay, None, None),
+            Err(status) => return (status, None, None),
         };
         let Ok(own) = self.read_store(own_accounts) else {
-            return (SyncStatus::Failed, None);
+            return (SyncStatus::Failed, None, None);
         };
-        if let Err(status) = preflight(api, connection, &own, None) {
-            return (status, None);
-        }
+        let expires = match preflight(api, connection, &own, None) {
+            Ok(expires) => expires,
+            Err(status) => return (status, None, None),
+        };
         let mut downloads = Vec::new();
         let mut failure = None;
         for uid in connection.accounts.keys() {
@@ -480,7 +544,7 @@ impl Service {
             Ok(imported)
         });
         let Ok(imported) = written else {
-            return (SyncStatus::ImportFailed, None);
+            return (SyncStatus::ImportFailed, None, expires);
         };
         // Late transactions may reopen closed months (Python ran this after
         // every bank sync); it needs a snapshot with the new rows.
@@ -489,14 +553,19 @@ impl Service {
                 .write(crate::writes::closure::refresh_after_sync)
                 .is_err()
         {
-            return (SyncStatus::ImportFailed, Some(imported));
+            return (SyncStatus::ImportFailed, Some(imported), expires);
+        }
+        // New transactions may change the alerts (Python evaluated them after
+        // every sync). A failure here never fails the sync.
+        if imported.created > 0 {
+            let _ = self.evaluate_alerts_now();
         }
         let status = match failure {
             None => SyncStatus::Success,
             Some(SyncStatus::RateLimited) => SyncStatus::RateLimited,
             Some(_) => SyncStatus::ImportFailed,
         };
-        (status, Some(imported))
+        (status, Some(imported), expires)
     }
 }
 
@@ -534,6 +603,10 @@ mod tests {
                 .get_mut(path)
                 .and_then(VecDeque::pop_front)
                 .unwrap_or(Err(ApiError::Unavailable))
+        }
+
+        fn post(&mut self, path: &str, _body: &Value) -> Result<Value, ApiError> {
+            self.get(&format!("POST {path}"))
         }
     }
 
@@ -591,7 +664,7 @@ mod tests {
             ("sessions/s1", Ok(session.clone())),
             ("accounts/uid-1/details", Ok(details)),
         ]);
-        assert_eq!(preflight(&mut ok, &connection(), &own(), None), Ok(()));
+        assert_eq!(preflight(&mut ok, &connection(), &own(), None), Ok(None));
 
         let mut expired = Script::new(vec![("sessions/s1", Ok(json!({"status": "EXPIRED"})))]);
         assert_eq!(
@@ -634,7 +707,7 @@ mod tests {
             "sessions/s1",
             Ok(json!({"status": "AUTHORIZED", "accounts": ["uid-1"]})),
         )]);
-        assert_eq!(preflight(&mut api, &c, &own(), None), Ok(()));
+        assert_eq!(preflight(&mut api, &c, &own(), None), Ok(None));
         assert_eq!(api.asked, ["sessions/s1"]);
     }
 
@@ -730,6 +803,40 @@ mod tests {
         assert_eq!(failed.last_success, ok.last_success);
         assert_eq!(failed.created, Some(3));
         assert_eq!(failed.status, Some(SyncStatus::RateLimited));
+    }
+
+    #[test]
+    fn health_follows_the_connected_banks() {
+        let mut db = crate::writes::fixture::db();
+        db.store
+            .connection()
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS firefly_sync_health (singleton INTEGER PRIMARY KEY,
+                 last_success TEXT, last_attempt TEXT NOT NULL, failed INTEGER NOT NULL,
+                 last_full_success TEXT);
+                 INSERT OR REPLACE INTO firefly_sync_health VALUES (1, 'old', 'old', 0, 'full');",
+            )
+            .unwrap();
+        let run = |status| BankRun {
+            status: Some(status),
+            ..BankRun::default()
+        };
+        db.write(|w, _| {
+            save_run(w, "abnamro", &run(SyncStatus::Success))?;
+            save_run(w, "swedbank", &run(SyncStatus::MissingConfig))?;
+            save_health(w)
+        })
+        .unwrap();
+        let fresh: String = db.one("SELECT last_success || '|' || failed || '|' || last_full_success FROM firefly_sync_health");
+        assert_eq!(fresh, "2026-10-26T20:00:00.000000Z|0|full");
+        db.write(|w, _| {
+            save_run(w, "revolut", &run(SyncStatus::ReauthorizationRequired))?;
+            save_health(w)
+        })
+        .unwrap();
+        let failed: String =
+            db.one("SELECT last_success || '|' || failed FROM firefly_sync_health");
+        assert_eq!(failed, "2026-10-26T20:00:00.000000Z|1");
     }
 
     #[test]

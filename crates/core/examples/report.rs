@@ -19,7 +19,7 @@ fn main() -> anyhow::Result<()> {
     let started = Instant::now();
     let snap = Snapshot::load(&store)?;
     let loaded = started.elapsed();
-    let report = dashboard::dashboard(&store, &snap, &now)?;
+    let report = dashboard::dashboard(&store, &snap, &now, None)?;
     let built = started.elapsed();
     let review = dashboard::review_report(&snap, &now);
     let reviewed = started.elapsed();

@@ -14,6 +14,10 @@ use finance_types::report::review::TransactionSearchQuery;
 use serde::Deserialize;
 use serde_json::Value;
 
+/// One AI runner for the server's lifetime, without Keychain access.
+static ASSISTANT: std::sync::LazyLock<finance_ai::Assistant> =
+    std::sync::LazyLock::new(|| finance_ai::Assistant::new(false));
+
 #[derive(Deserialize)]
 struct PlanArgs {
     plan: finance_types::gateway::BudgetPlan,
@@ -149,6 +153,9 @@ fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
         "status" => ok(service.status()),
         "refresh" => {
             service.refresh();
+            // No notifier here: due alerts are recorded as `unavailable`
+            // (or `disabled`), never shown.
+            let _ = service.evaluate_alerts_now();
             Ok(Value::Null)
         }
         "save_budget_plan" => {
@@ -231,6 +238,12 @@ fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
             })
             .map_err(|e| e.to_string())
         }
+        // The forecast model only exists in the app.
+        "forecast_model_status" => serde_json::to_value(finance_types::ForecastModelStatus {
+            download_bytes: 1_322_900_097,
+            ..Default::default()
+        })
+        .map_err(|e| e.to_string()),
         "create_bill" => ok(service.create_bill(request(args)?)),
         "edit_bill" => ok(service.edit_bill(request(args)?)),
         "archive_bill" => ok(service.archive_bill(request(args)?)),
@@ -246,12 +259,40 @@ fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
         | "renew_bank_consent"
         | "adopt_bank_consents"
         | "set_bank_credentials"
-        | "forget_bank_credentials" => Err("Bank sync runs in the app only.".to_owned()),
+        | "forget_bank_credentials"
+        | "bank_link_start"
+        | "bank_link_finish"
+        | "bank_link_confirm" => Err("Bank sync runs in the app only.".to_owned()),
+        // AI suggestions against the local Ollama; TypeSafe needs the
+        // Keychain, so its key cannot be set here.
+        "ai_status" => ok(ASSISTANT.status(service)),
+        "save_ai_settings" => ok(ASSISTANT.save_settings(service, arg(args, "settings")?)),
+        "set_typesafe_key" => ok(ASSISTANT.set_typesafe_key(&arg::<String>(args, "key")?)),
+        "forget_typesafe_key" => ok(ASSISTANT.forget_typesafe_key()),
+        "suggest_categories" => ok(ASSISTANT.suggest_now(service)),
+        "suggest_spending_group" => {
+            ok(ASSISTANT.suggest_group(service, &arg::<String>(args, "category")?))
+        }
+        "research_merchant" => ok(ASSISTANT.research_merchant(
+            service,
+            &arg::<String>(args.clone(), "proposal")?,
+            &arg::<String>(args, "public_name")?,
+        )),
         "preview_csv_import" => ok(service.preview_csv_import(arg(args, "upload")?)),
         "commit_csv_import" => ok(service.commit_csv_import(arg(args, "commit")?)),
         "preview_settings" => ok(service.preview_settings(arg(args, "form")?)),
         "apply_settings" => ok(service.apply_settings(arg(args, "apply")?)),
         "rollback_settings" => ok(service.rollback_settings(arg(args, "revision")?)),
+        // The Keychain and the mail server belong to the app: settings can
+        // be edited here, but no password is stored and nothing is sent.
+        "email_status" => ok(service.email_status(false)),
+        "save_email_settings" => {
+            let saved = service.save_email_settings(arg(args, "settings")?);
+            ok(saved.and_then(|_| service.email_status(false)))
+        }
+        "set_smtp_password" | "forget_smtp_password" | "send_test_email" => {
+            Err("Email runs in the app only.".to_owned())
+        }
         _ => Err(format!("unknown command {cmd}")),
     }
 }

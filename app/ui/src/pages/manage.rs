@@ -1,6 +1,8 @@
 //! The Manage section: banks, month closing, import, status and settings.
 
+mod ai;
 mod banks;
+mod email;
 mod import;
 mod settings;
 mod status;

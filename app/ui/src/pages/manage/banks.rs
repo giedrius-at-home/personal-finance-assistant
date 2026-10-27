@@ -7,7 +7,8 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use finance_types::bank::{
-    BANKS, BankConsent, BankCredentials, BankState, BankSyncReport, BankSyncResult, SyncStatus,
+    BANKS, BankConsent, BankCredentials, BankLinkChoice, BankLinkConfirm, BankLinkProposal,
+    BankLinkStart, BankState, BankSyncReport, BankSyncResult, DEFAULT_REDIRECT, SyncStatus,
     bank_name,
 };
 use finance_types::manage::{BankAccount, BanksReport};
@@ -365,6 +366,19 @@ fn BankBox(
         .as_ref()
         .map(|b| b.accounts.join(", "))
         .filter(|l| !l.is_empty());
+    let consent = bank
+        .as_ref()
+        .and_then(|b| b.run.consent_valid_until.clone())
+        .map(|until| {
+            let ends = js_sys::Date::new(&JsValue::from_str(&until)).get_time();
+            let soon = ends - js_sys::Date::now() < 14.0 * 86_400_000.0;
+            let text = if soon {
+                format!("Consent ends {}. Renew it below.", local_date(Some(&until)))
+            } else {
+                format!("Consent valid until {}.", local_date(Some(&until)))
+            };
+            (text, soon)
+        });
     let sync_label = format!("Sync {name}");
     view! {
         <div class="mt-4 grid gap-3 rounded-lg border border-border p-4 sm:p-5">
@@ -388,6 +402,9 @@ fn BankBox(
             </dl>
             {result.filter(|r| !r.is_empty()).map(|r| view! { <p class="text-sm text-fg-muted">{r}</p> })}
             {linked.map(|l| view! { <p class="text-xs text-fg-muted">{format!("Fills {l}")}</p> })}
+            {consent.map(|(text, soon)| view! {
+                <p class=cn(["text-xs", if soon { "text-warning-fg" } else { "text-fg-muted" }])>{text}</p>
+            })}
             <AccountTable name=name accounts=accounts />
             <div>
                 <Button
@@ -468,6 +485,35 @@ fn AccountTable(name: String, accounts: Vec<BankAccount>) -> impl IntoView {
     })
 }
 
+#[wasm_bindgen(inline_js = "
+export function redirect_get() { try { return window.localStorage.getItem('finance.eb-redirect'); } catch { return null; } }
+export function redirect_set(v) { try { window.localStorage.setItem('finance.eb-redirect', v); } catch { } }
+")]
+extern "C" {
+    fn redirect_get() -> Option<String>;
+    fn redirect_set(value: &str);
+}
+
+#[derive(Serialize)]
+struct StartArgs {
+    start: BankLinkStart,
+}
+
+#[derive(Serialize)]
+struct FinishArgs {
+    bank: String,
+    address: String,
+}
+
+#[derive(Serialize)]
+struct ConfirmArgs {
+    confirm: BankLinkConfirm,
+}
+
+/// Connect a bank or renew its consent from the app (the importer's
+/// Enable Banking link flow): approve in the browser, paste the address the
+/// bank returns to, map the shared accounts. The site's file-based renewal
+/// stays available below it.
 #[component]
 fn ConsentCard(
     ops: Ops,
@@ -476,8 +522,20 @@ fn ConsentCard(
 ) -> impl IntoView {
     let app = state();
     let bank = RwSignal::new(BANKS[0].0.to_owned());
+    let redirect = RwSignal::new(redirect_get().unwrap_or_else(|| DEFAULT_REDIRECT.to_owned()));
+    let started = RwSignal::new(false);
+    let address = RwSignal::new(String::new());
+    let proposal = RwSignal::new(None::<BankLinkProposal>);
+    let choices = RwSignal::new(Vec::<(String, RwSignal<String>)>::new());
     let has_file = RwSignal::new(false);
     let file = NodeRef::<InputElement>::new();
+    let credentials = move || {
+        report.with(|r| {
+            r.as_ref()
+                .and_then(|r| r.as_ref().ok())
+                .is_some_and(|r| r.credentials)
+        })
+    };
     let cooling = move || {
         report.with(|r| {
             r.as_ref().and_then(|r| r.as_ref().ok()).is_some_and(|r| {
@@ -487,7 +545,71 @@ fn ConsentCard(
             })
         })
     };
-    let submit = move |e: leptos::ev::SubmitEvent| {
+    let reset = move || {
+        started.set(false);
+        address.set(String::new());
+        proposal.set(None);
+        choices.set(Vec::new());
+    };
+    let open = move |_| {
+        let start = BankLinkStart {
+            bank: bank.get_untracked(),
+            redirect_url: redirect.get_untracked().trim().to_owned(),
+        };
+        redirect_set(&start.redirect_url);
+        reset();
+        ops.run("bank_link_start", StartArgs { start }, move |_: String| {
+            started.set(true);
+            ops.notice.set(
+                "Approve access in your browser. Then copy the address of the page the bank returns you to and paste it below.".into(),
+            );
+        });
+    };
+    let finish = move |e: leptos::ev::SubmitEvent| {
+        e.prevent_default();
+        let args = FinishArgs {
+            bank: bank.get_untracked(),
+            address: address.get_untracked(),
+        };
+        ops.run("bank_link_finish", args, move |p: BankLinkProposal| {
+            choices.set(
+                p.accounts
+                    .iter()
+                    .map(|a| {
+                        let target = a.suggested.map(|t| t.to_string()).unwrap_or_default();
+                        (a.uid.clone(), RwSignal::new(target))
+                    })
+                    .collect(),
+            );
+            proposal.set(Some(p));
+        });
+    };
+    let save = move |_| {
+        let confirm = BankLinkConfirm {
+            bank: bank.get_untracked(),
+            choices: choices
+                .get_untracked()
+                .into_iter()
+                .map(|(uid, target)| BankLinkChoice {
+                    uid,
+                    target: target.get_untracked().parse().ok(),
+                })
+                .collect(),
+        };
+        ops.run(
+            "bank_link_confirm",
+            ConfirmArgs { confirm },
+            move |result: BankSyncResult| {
+                match outcome(&result) {
+                    Ok(notice) => ops.notice.set(format!("Connected. {notice}")),
+                    Err(error) => ops.error.set(format!("Connected. {error}")),
+                }
+                reset();
+                app.revision.update(|n| *n += 1);
+            },
+        );
+    };
+    let submit_file = move |e: leptos::ev::SubmitEvent| {
         e.prevent_default();
         if !ops.begin() {
             return;
@@ -517,11 +639,87 @@ fn ConsentCard(
             app.revision.update(|n| *n += 1);
         });
     };
+    let mapping = move || {
+        proposal.get().map(|p| {
+            let targets = p.targets.clone();
+            let options: Vec<(String, String)> = std::iter::once((String::new(), "Don't import".to_owned()))
+                .chain(targets.iter().map(|t| {
+                    let label = match &t.iban_tail {
+                        Some(tail) => format!("{} · •••• {tail}", t.name),
+                        None => t.name.clone(),
+                    };
+                    (t.id.to_string(), label)
+                }))
+                .collect();
+            let required: Vec<String> = p
+                .required
+                .iter()
+                .filter_map(|id| targets.iter().find(|t| t.id == *id).map(|t| t.name.clone()))
+                .collect();
+            let rows = p
+                .accounts
+                .iter()
+                .map(|a| {
+                    let target = choices
+                        .get_untracked()
+                        .into_iter()
+                        .find(|(uid, _)| *uid == a.uid)
+                        .map(|(_, t)| t)
+                        .unwrap_or_else(|| RwSignal::new(String::new()));
+                    let id = format!("map-{}", a.uid);
+                    let detail = [a.iban_tail.as_ref().map(|t| format!("•••• {t}")), a.currency.clone()]
+                        .into_iter()
+                        .flatten()
+                        .collect::<Vec<_>>()
+                        .join(" · ");
+                    let options = options.clone();
+                    view! {
+                        <tr class=TROW>
+                            <td class=TCELL>
+                                <strong class="block font-semibold">{a.name.clone()}</strong>
+                                <small class="mt-1 block text-xs text-fg-muted">{detail}</small>
+                            </td>
+                            <td class=TCELL>
+                                <Select id=id value=target options=Signal::derive(move || options.clone()) label="Ledger account" />
+                            </td>
+                        </tr>
+                    }
+                })
+                .collect_view();
+            view! {
+                <div class="mt-4 grid gap-3">
+                    <div class=TABLE_CONTAINER tabindex="0" role="region" aria-label="Shared bank accounts">
+                        <table class=TABLE data-density="sm">
+                            <thead class="text-left">
+                                <tr>
+                                    <th class=TH>"Bank account"</th>
+                                    <th class=TH>"Fills ledger account"</th>
+                                </tr>
+                            </thead>
+                            <tbody>{rows}</tbody>
+                        </table>
+                    </div>
+                    {(!required.is_empty()).then(|| view! {
+                        <p class="text-xs text-fg-muted">{format!("Keep {} mapped: the previous connection filled them.", required.join(", "))}</p>
+                    })}
+                    {p.valid_until.as_deref().map(|u| view! {
+                        <p class="text-xs text-fg-muted">{format!("Access lasts until {}.", local_date(Some(u)))}</p>
+                    })}
+                    <div>
+                        <Button disabled=busy on_click=Callback::new(save)>"Save connection"</Button>
+                    </div>
+                </div>
+            }
+        })
+    };
     view! {
         <Card>
             <Eyebrow level=Heading::P>"BANK CONSENT"</Eyebrow>
-            <CardTitle level=Heading::H2 class="mb-4 mt-1">"Renew consent"</CardTitle>
-            <form class="grid items-end gap-4 sm:grid-cols-[minmax(0,12rem)_minmax(0,1fr)_auto]" on:submit=submit>
+            <CardTitle level=Heading::H2 class="mt-1">"Connect or renew"</CardTitle>
+            <CardDescription class="mb-4">
+                "Approve access at the bank in your browser. The bank then opens the redirect address registered with Enable Banking; that page may not load, its address is all the app needs."
+            </CardDescription>
+            <div class="grid items-end gap-4 sm:grid-cols-[minmax(0,12rem)_minmax(0,1fr)_auto]">
                 <Field label="Bank" id="consent-bank">
                     <Select
                         id="consent-bank"
@@ -529,26 +727,51 @@ fn ConsentCard(
                         options=Signal::derive(|| BANKS.iter().map(|(id, name)| ((*id).to_owned(), (*name).to_owned())).collect())
                     />
                 </Field>
-                <Field label="Configuration" id="consent-file">
-                    <input
-                        id="consent-file"
-                        node_ref=file
-                        type="file"
-                        accept=".json,application/json"
-                        class=cn([CONTROL, FILE_INPUT])
-                        on:change=move |e| {
-                            let input: web_sys::HtmlInputElement = event_target(&e);
-                            has_file.set(input.files().is_some_and(|f| f.length() > 0));
-                        }
-                    />
+                <Field label="Redirect URL" id="consent-redirect">
+                    <Input id="consent-redirect" value=redirect />
                 </Field>
-                <Button submit=true disabled=Signal::derive(move || busy.get() || !has_file.get() || cooling())>
-                    "Renew consent"
+                <Button
+                    disabled=Signal::derive(move || busy.get() || cooling() || !credentials())
+                    on_click=Callback::new(open)
+                >
+                    "Open bank approval"
                 </Button>
-            </form>
+            </div>
+            {move || started.get().then(|| view! {
+                <form class="mt-4 grid items-end gap-4 sm:grid-cols-[minmax(0,1fr)_auto]" on:submit=finish>
+                    <Field label="Address after approval" id="consent-address">
+                        <Input id="consent-address" value=address placeholder="https://localhost:8444/eb-callback?state=…&code=…" />
+                    </Field>
+                    <Button submit=true disabled=Signal::derive(move || busy.get() || address.get().trim().is_empty())>
+                        "Continue"
+                    </Button>
+                </form>
+            })}
+            {mapping}
             <p class="mt-3 text-xs text-fg-muted">
                 "Existing accounts must stay mapped to the same ledger accounts; new accounts may be added."
             </p>
+            <details class=cn([super::ui::DETAILS, "mt-4 pb-0"])>
+                <summary class=super::ui::SUMMARY>"Renew from an importer configuration file"</summary>
+                <form class="mt-4 grid items-end gap-4 sm:grid-cols-[minmax(0,1fr)_auto]" on:submit=submit_file>
+                    <Field label="Configuration" id="consent-file">
+                        <input
+                            id="consent-file"
+                            node_ref=file
+                            type="file"
+                            accept=".json,application/json"
+                            class=cn([CONTROL, FILE_INPUT])
+                            on:change=move |e| {
+                                let input: web_sys::HtmlInputElement = event_target(&e);
+                                has_file.set(input.files().is_some_and(|f| f.length() > 0));
+                            }
+                        />
+                    </Field>
+                    <Button submit=true disabled=Signal::derive(move || busy.get() || !has_file.get() || cooling())>
+                        "Renew consent"
+                    </Button>
+                </form>
+            </details>
         </Card>
     }
 }

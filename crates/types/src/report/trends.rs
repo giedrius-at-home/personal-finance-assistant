@@ -119,8 +119,8 @@ pub struct SpendingNudge {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ForecastMethod {
-    /// The Python service's CatBoost quantile model (not ported).
-    CatboostQuantile,
+    /// TimesFM's daily forecast of the rest of the period.
+    Timesfm,
     /// This month's pace averaged with the group's historical median.
     HistoricalFallback,
 }
