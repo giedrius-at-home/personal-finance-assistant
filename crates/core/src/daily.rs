@@ -2,11 +2,17 @@
 //! (Python `daily_forecast.py`).
 //!
 //! Habit spending is every outflow net of refunds that is not a bill,
-//! recurring direct debit, fixed category or planned payment. The Python
-//! service could forecast it with TimesFM; this port always uses the
-//! same-weekday baseline (Python's default when TimesFM is off), calibrated by
-//! its own rolling weekly backtest. The model learns from everyday spending
-//! only (see [`everyday_inputs`]); spent-so-far totals keep every habit outflow.
+//! recurring direct debit, fixed category or planned payment. A
+//! [`SeriesForecaster`] (TimesFM, when the app has its weights) forecasts that
+//! series day by day; planned payments and unpaid bills are known amounts,
+//! added on top and offered to the model as a past-and-future covariate. A
+//! rolling weekly backtest keeps whichever of TimesFM (`timesfm`), TimesFM with
+//! planned-payment covariates (`timesfm_planned`) or a same-weekday baseline
+//! (`weekday_baseline`) has been most accurate on this owner's own history,
+//! and calibrates it by its average miss. Without a forecaster (or when it
+//! fails) the baseline is the only candidate. The model learns from everyday
+//! spending only (see [`everyday_inputs`]); spent-so-far totals keep every
+//! habit outflow.
 
 use std::collections::{HashMap, HashSet};
 
@@ -45,7 +51,32 @@ const MAX_CONTEXT_DAYS: i64 = 730;
 /// Everyday forecast inputs: larger single outflows are one-offs, not habits.
 pub const EVERYDAY_SINGLE_PURCHASE_LIMIT: i64 = 150;
 const EXCLUSION_SUMMARY_DAYS: i64 = 183;
-const METHOD: &str = "weekday_baseline";
+const BASELINE: &str = "weekday_baseline";
+const TIMESFM: &str = "timesfm";
+const TIMESFM_PLANNED: &str = "timesfm_planned";
+/// Backtest windows need this much history before their origin.
+const MIN_BACKTEST_CONTEXT: usize = 56;
+
+/// A model that forecasts daily series (Python `SeriesForecaster`): one
+/// `(q10, mean, q90)` row per future day for each context. The mean, not the
+/// median, is the daily estimate: most days have no habit spending, so daily
+/// medians are zero and would understate every total.
+pub trait SeriesForecaster: std::fmt::Debug {
+    /// The name daily forecasts report as their model.
+    fn name(&self) -> &str;
+
+    /// Whether `quantiles` accepts past-and-future covariates.
+    fn supports_covariates(&self) -> bool;
+
+    /// Forecast `horizon` days after each context. A covariate, when given,
+    /// covers its context and the horizon.
+    fn quantiles(
+        &self,
+        contexts: &[Vec<f64>],
+        horizon: usize,
+        covariates: Option<&[Vec<f64>]>,
+    ) -> Result<Vec<Vec<[f64; 3]>>, String>;
+}
 
 /// Everything the forecast reads. `now` is in the owner's time zone.
 #[derive(Clone, Copy, Debug)]
@@ -64,6 +95,8 @@ pub struct DailyInputs<'a> {
     pub budget_plans: &'a [BudgetPlan],
     pub mappings: &'a [GroupMapping],
     pub excluded_categories: &'a [String],
+    /// The model to backtest against the baseline; `None` keeps the baseline.
+    pub forecaster: Option<&'a dyn SeriesForecaster>,
 }
 
 /// One habit transaction: a positive outflow or a negative refund.
@@ -363,6 +396,8 @@ struct Prepared {
     currency: Currency,
     first: Date,
     series: Vec<f64>,
+    /// Planned payments and bills paid on each context day.
+    past_planned: Vec<f64>,
     future_planned: Vec<f64>,
     future_income: Vec<f64>,
     upcoming: Vec<(Date, PlannedFlow)>,
@@ -507,6 +542,8 @@ pub fn daily_spending_forecasts(input: &DailyInputs) -> Vec<DailySpendingForecas
         let series: Vec<f64> = (0..length)
             .map(|i| py_max(0.0, daily_model.get(add_days(first, i))))
             .collect();
+        let paid = planned.get(&currency).unwrap_or(&empty);
+        let past_planned: Vec<f64> = (0..length).map(|i| paid.get(add_days(first, i))).collect();
         let mut future_planned = vec![0.0; horizon];
         let mut future_income = vec![0.0; horizon];
         for (day, flow) in &flows {
@@ -522,6 +559,7 @@ pub fn daily_spending_forecasts(input: &DailyInputs) -> Vec<DailySpendingForecas
             currency,
             first,
             series,
+            past_planned,
             future_planned,
             future_income,
             upcoming: flows,
@@ -529,27 +567,96 @@ pub fn daily_spending_forecasts(input: &DailyInputs) -> Vec<DailySpendingForecas
         });
     }
 
-    let mut results = Vec::new();
-    for p in prepared {
-        // Signed weekly misses (actual minus expected) of the baseline.
-        let mut misses = Vec::new();
-        for week in 1..=BACKTEST_WEEKS {
-            let Some(origin) = p.series.len().checked_sub(7 * week).filter(|o| *o >= 56) else {
-                break;
-            };
-            let prediction = weekday_baseline(&p.series[..origin], 7, 4);
-            let actual = np::sum(&p.series[origin..origin + 7]);
-            misses.push(actual - np::sum_iter(prediction.iter().map(|r| r[1])));
+    // One batched call per candidate covers every backtest window of every currency.
+    let windows = backtest_windows(&prepared);
+    let contexts: Vec<Vec<f64>> = windows
+        .iter()
+        .map(|w| prepared[w.index].series[..w.origin].to_vec())
+        .collect();
+    let mut forecaster = input.forecaster;
+    let mut residuals = Residuals::default();
+    if !windows.is_empty() {
+        let baseline: Vec<_> = contexts.iter().map(|c| weekday_baseline(c, 7, 4)).collect();
+        residuals.score(BASELINE, &windows, &prepared, &baseline);
+        if let Some(model) = forecaster {
+            let scored = model.quantiles(&contexts, 7, None).and_then(|rows| {
+                residuals.score(TIMESFM, &windows, &prepared, &rows);
+                if model.supports_covariates() {
+                    let covariates: Vec<Vec<f64>> = windows
+                        .iter()
+                        .map(|w| prepared[w.index].past_planned[..w.origin + 7].to_vec())
+                        .collect();
+                    let rows = model.quantiles(&contexts, 7, Some(&covariates))?;
+                    residuals.score(TIMESFM_PLANNED, &windows, &prepared, &rows);
+                }
+                Ok(())
+            });
+            // The baseline keeps forecasts alive when the model fails.
+            if scored.is_err() {
+                forecaster = None;
+            }
         }
-        let error = (!misses.is_empty()).then(|| {
-            let center = np::mean(&misses);
-            let spread: Vec<f64> = misses.iter().map(|m| (m - center).abs()).collect();
-            np::mean(&spread)
-        });
-        let live = weekday_baseline(&p.series, horizon, 4);
-        let (rows, bias) = calibrated(&live, &misses);
+    }
+
+    let live_contexts: Vec<Vec<f64>> = prepared.iter().map(|p| p.series.clone()).collect();
+    let mut live: Vec<(&str, Vec<Vec<[f64; 3]>>)> = vec![(
+        BASELINE,
+        live_contexts
+            .iter()
+            .map(|c| weekday_baseline(c, horizon, 4))
+            .collect(),
+    )];
+    if let Some(model) = forecaster {
+        let forecasts = model
+            .quantiles(&live_contexts, horizon, None)
+            .and_then(|plain| {
+                let mut out = vec![(TIMESFM, plain)];
+                if model.supports_covariates() {
+                    let covariates: Vec<Vec<f64>> = prepared
+                        .iter()
+                        .map(|p| [&p.past_planned[..], &p.future_planned[..]].concat())
+                        .collect();
+                    out.push((
+                        TIMESFM_PLANNED,
+                        model.quantiles(&live_contexts, horizon, Some(&covariates))?,
+                    ));
+                }
+                Ok(out)
+            });
+        if let Ok(forecasts) = forecasts {
+            live.extend(forecasts);
+        }
+    }
+    let available: Vec<&str> = live.iter().map(|(name, _)| *name).collect();
+
+    let mut results = Vec::new();
+    for (index, p) in prepared.iter().enumerate() {
+        // Rank methods after removing each one's own average miss.
+        let errors: Vec<(&str, f64)> = residuals
+            .methods
+            .iter()
+            .filter_map(|(name, by_series)| {
+                let misses = by_series.get(&index).filter(|m| !m.is_empty())?;
+                let center = np::mean(misses);
+                let spread: Vec<f64> = misses.iter().map(|m| (m - center).abs()).collect();
+                Some((*name, np::mean(&spread)))
+            })
+            .collect();
+        let error_of = |name: &str| errors.iter().find(|(n, _)| *n == name).map(|e| e.1);
+        let scored: Vec<(&str, f64)> = errors
+            .iter()
+            .copied()
+            .filter(|(name, _)| available.contains(name))
+            .collect();
+        let method = choose(&scored, &available);
+        let misses = residuals.misses(method, index);
+        let daily = &live
+            .iter()
+            .find(|(name, _)| *name == method)
+            .map_or(&[][..], |(_, rows)| &rows[..])[index];
+        let (rows, bias) = calibrated(daily, misses);
         let next_week = np::sum_iter(rows.iter().take(7).map(|r| r[1]));
-        let (week_low, week_high) = band(next_week, &rows, &misses, bias, 7);
+        let (week_low, week_high) = band(next_week, &rows, misses, bias, 7);
         let habit_days = habit.get(&p.currency).unwrap_or(&empty);
         let months = month_forecasts(&MonthInputs {
             currency: &p.currency,
@@ -563,6 +670,7 @@ pub fn daily_spending_forecasts(input: &DailyInputs) -> Vec<DailySpendingForecas
             grouped: &grouped,
             model_grouped: &model_grouped,
             rows: &rows,
+            forecaster: forecaster.filter(|_| method != BASELINE),
         });
         let days = (0..shown)
             .map(|step| DailyPoint {
@@ -602,13 +710,16 @@ pub fn daily_spending_forecasts(input: &DailyInputs) -> Vec<DailySpendingForecas
             usize::try_from(first_weekday).unwrap_or(0),
         );
         let rest = np::sum_iter(rows.iter().take(in_month).map(|r| r[1]));
-        let (rest_low, rest_high) = band(rest, &rows, &misses, bias, in_month);
+        let (rest_low, rest_high) = band(rest, &rows, misses, bias, in_month);
         let sum_head = |values: &[f64], n: usize| np::sum(&values[..n.min(values.len())]);
         results.push(DailySpendingForecast {
             currency: p.currency.clone(),
             as_of: today.to_string(),
-            method: METHOD.into(),
-            model: "weekday-baseline".into(),
+            method: method.into(),
+            model: match forecaster {
+                Some(model) if method != BASELINE => model.name().into(),
+                _ => "weekday-baseline".into(),
+            },
             habit_spent_this_month: money(spent),
             planned_paid_this_month: money(planned_paid),
             days,
@@ -623,21 +734,111 @@ pub fn daily_spending_forecasts(input: &DailyInputs) -> Vec<DailySpendingForecas
             month_remaining_income: money(sum_head(&p.future_income, in_month)),
             upcoming: p
                 .upcoming
-                .into_iter()
+                .iter()
                 .filter(|(day, _)| *day <= shown_end)
-                .map(|(_, flow)| flow)
+                .map(|(_, flow)| flow.clone())
                 .collect(),
             habits,
             training_days: training,
-            backtest_windows: misses.len(),
-            model_error: None,
-            planned_model_error: None,
-            baseline_error: error.map(money),
+            backtest_windows: windows.iter().filter(|w| w.index == index).count(),
+            model_error: error_of(TIMESFM).map(money),
+            planned_model_error: error_of(TIMESFM_PLANNED).map(money),
+            baseline_error: error_of(BASELINE).map(money),
             months,
-            excluded: Some(p.exclusions),
+            excluded: Some(p.exclusions.clone()),
         });
     }
     results
+}
+
+/// One weekly backtest window: forecast the 7 days from `origin` on.
+struct Window {
+    index: usize,
+    origin: usize,
+}
+
+/// Up to [`BACKTEST_WEEKS`] weekly windows per series, newest first, each
+/// with at least [`MIN_BACKTEST_CONTEXT`] days of history.
+fn backtest_windows(prepared: &[Prepared]) -> Vec<Window> {
+    let mut windows = Vec::new();
+    for (index, p) in prepared.iter().enumerate() {
+        for week in 1..=BACKTEST_WEEKS {
+            let Some(origin) = p.series.len().checked_sub(7 * week) else {
+                break;
+            };
+            if origin < MIN_BACKTEST_CONTEXT {
+                break;
+            }
+            windows.push(Window { index, origin });
+        }
+    }
+    windows
+}
+
+/// Signed weekly misses (actual minus expected) per method and series, in
+/// the order the methods were scored.
+#[derive(Default)]
+struct Residuals {
+    methods: Vec<(&'static str, HashMap<usize, Vec<f64>>)>,
+}
+
+impl Residuals {
+    fn score(
+        &mut self,
+        method: &'static str,
+        windows: &[Window],
+        prepared: &[Prepared],
+        predictions: &[Vec<[f64; 3]>],
+    ) {
+        let mut by_series: HashMap<usize, Vec<f64>> = HashMap::new();
+        for (window, prediction) in windows.iter().zip(predictions) {
+            let series = &prepared[window.index].series;
+            let actual = np::sum(&series[window.origin..window.origin + 7]);
+            let expected = np::sum_iter(prediction.iter().map(|r| r[1]));
+            by_series
+                .entry(window.index)
+                .or_default()
+                .push(actual - expected);
+        }
+        self.methods.push((method, by_series));
+    }
+
+    fn misses(&self, method: &str, index: usize) -> &[f64] {
+        self.methods
+            .iter()
+            .find(|(name, _)| *name == method)
+            .and_then(|(_, by_series)| by_series.get(&index))
+            .map_or(&[], Vec::as_slice)
+    }
+}
+
+/// Lowest backtest error wins; ties favour using the planned payments. With
+/// too little history to backtest, TimesFM is preferred over the baseline.
+fn choose(scored: &[(&'static str, f64)], available: &[&'static str]) -> &'static str {
+    let mut best: Option<(&'static str, f64)> = None;
+    for &(name, error) in scored {
+        let key = (error, name != TIMESFM_PLANNED);
+        let better = best.is_none_or(|(best_name, best_error)| {
+            key.0
+                .total_cmp(&best_error)
+                .then(key.1.cmp(&(best_name != TIMESFM_PLANNED)))
+                .is_lt()
+        });
+        if better {
+            best = Some((name, error));
+        }
+    }
+    match best {
+        Some((name, _)) => name,
+        None if available.len() > 1 => {
+            if available.contains(&TIMESFM_PLANNED) {
+                TIMESFM_PLANNED
+            } else {
+                TIMESFM
+            }
+        }
+        None => BASELINE,
+    }
 }
 
 struct MonthInputs<'a> {
@@ -652,10 +853,13 @@ struct MonthInputs<'a> {
     grouped: &'a HashMap<GroupKey, DayTotals>,
     model_grouped: &'a HashMap<GroupKey, DayTotals>,
     rows: &'a [[f64; 3]],
+    /// The model for group series: only when the backtest chose a model.
+    forecaster: Option<&'a dyn SeriesForecaster>,
 }
 
 /// Spent so far plus the forecast rest of each budget month and group. Each
-/// group's own everyday history is forecast with the same baseline.
+/// group's own everyday history is forecast with the method the backtest
+/// chose for all habit spending (without planned-payment covariates).
 fn month_forecasts(m: &MonthInputs) -> Vec<MonthHabitForecast> {
     let today = m.today;
     let rest = |start: Date, stop: Date, daily: &[[f64; 3]]| -> f64 {
@@ -669,38 +873,57 @@ fn month_forecasts(m: &MonthInputs) -> Vec<MonthHabitForecast> {
         money(spent + rest(start, stop, daily))
     };
     let empty = DayTotals::default();
+    let mut keys: Vec<(Date, &str, &DayTotals)> = Vec::new();
+    let mut contexts: Vec<Vec<f64>> = Vec::new();
+    for &(target, _, _) in m.spans {
+        let groups = m
+            .plans
+            .get(&(target, m.currency.clone()))
+            .map_or(&[][..], |p| &p.groups[..]);
+        for group in groups {
+            let key = (m.currency.clone(), target, group.id.clone());
+            let learned = m.model_grouped.get(&key).unwrap_or(&empty);
+            keys.push((target, &group.id, m.grouped.get(&key).unwrap_or(&empty)));
+            contexts.push(
+                (0..m.length)
+                    .map(|i| py_max(0.0, learned.get(add_days(m.first, i as i64))))
+                    .collect(),
+            );
+        }
+    }
+    let modelled = match m.forecaster {
+        Some(model) if !contexts.is_empty() => model
+            .quantiles(&contexts, m.horizon, None)
+            .ok()
+            .filter(|rows| !rows.is_empty()),
+        _ => None,
+    };
+    let group_rows: Vec<Vec<[f64; 3]>> = modelled
+        .unwrap_or_else(|| {
+            contexts
+                .iter()
+                .map(|c| weekday_baseline(c, m.horizon, 4))
+                .collect()
+        })
+        .into_iter()
+        .map(|rows| rows.into_iter().map(|r| r.map(|v| v.max(0.0))).collect())
+        .collect();
     m.spans
         .iter()
-        .map(|&(target, start, stop)| {
-            let groups = m
-                .plans
-                .get(&(target, m.currency.clone()))
-                .map_or(&[][..], |p| &p.groups[..]);
-            MonthHabitForecast {
-                month: target.to_string(),
-                habit: total(start, stop, m.habit, m.rows),
-                remaining: money(rest(start, stop, m.rows)),
-                groups: groups
-                    .iter()
-                    .map(|group| {
-                        let key = (m.currency.clone(), target, group.id.clone());
-                        let actual = m.grouped.get(&key).unwrap_or(&empty);
-                        let learned = m.model_grouped.get(&key).unwrap_or(&empty);
-                        let context: Vec<f64> = (0..m.length)
-                            .map(|i| py_max(0.0, learned.get(add_days(m.first, i as i64))))
-                            .collect();
-                        let daily: Vec<[f64; 3]> = weekday_baseline(&context, m.horizon, 4)
-                            .into_iter()
-                            .map(|r| r.map(|v| v.max(0.0)))
-                            .collect();
-                        GroupMonthForecast {
-                            group_id: group.id.clone(),
-                            expected: total(start, stop, actual, &daily),
-                            remaining: money(rest(start, stop, &daily)),
-                        }
-                    })
-                    .collect(),
-            }
+        .map(|&(target, start, stop)| MonthHabitForecast {
+            month: target.to_string(),
+            habit: total(start, stop, m.habit, m.rows),
+            remaining: money(rest(start, stop, m.rows)),
+            groups: keys
+                .iter()
+                .zip(&group_rows)
+                .filter(|((month, _, _), _)| *month == target)
+                .map(|((_, group_id, actual), daily)| GroupMonthForecast {
+                    group_id: (*group_id).to_owned(),
+                    expected: total(start, stop, actual, daily),
+                    remaining: money(rest(start, stop, daily)),
+                })
+                .collect(),
         })
         .collect()
 }
@@ -846,6 +1069,7 @@ mod tests {
             budget_plans: &[],
             mappings: &[],
             excluded_categories: excluded,
+            forecaster: None,
         })
     }
 
@@ -1023,6 +1247,166 @@ mod tests {
         assert_eq!(excluded.categories.len(), 1);
         assert_eq!(excluded.categories[0].category, "Flights");
         assert_eq!(excluded.categories[0].count, 17);
+    }
+
+    /// Seasonal-naive model with a two-week period; records its calls.
+    #[derive(Debug)]
+    struct Fortnightly {
+        covariates: bool,
+        fail: bool,
+        calls: std::cell::RefCell<Vec<(usize, usize, bool)>>,
+    }
+
+    impl Fortnightly {
+        fn new(covariates: bool, fail: bool) -> Self {
+            Self {
+                covariates,
+                fail,
+                calls: std::cell::RefCell::new(Vec::new()),
+            }
+        }
+    }
+
+    impl SeriesForecaster for Fortnightly {
+        fn name(&self) -> &str {
+            "fortnightly"
+        }
+
+        fn supports_covariates(&self) -> bool {
+            self.covariates
+        }
+
+        fn quantiles(
+            &self,
+            contexts: &[Vec<f64>],
+            horizon: usize,
+            covariates: Option<&[Vec<f64>]>,
+        ) -> Result<Vec<Vec<[f64; 3]>>, String> {
+            self.calls
+                .borrow_mut()
+                .push((contexts.len(), horizon, covariates.is_some()));
+            if let Some(covariates) = covariates {
+                assert!(
+                    contexts
+                        .iter()
+                        .zip(covariates)
+                        .all(|(c, v)| v.len() == c.len() + horizon)
+                );
+            }
+            if self.fail {
+                return Err("no model".into());
+            }
+            Ok(contexts
+                .iter()
+                .map(|c| {
+                    (0..horizon)
+                        .map(|step| {
+                            let v = c[c.len() - 14 + step % 14];
+                            [v, v, v]
+                        })
+                        .collect()
+                })
+                .collect())
+        }
+    }
+
+    /// Whole weeks (counted back from today) alternate between 30 and 10 a day.
+    fn alternating(days: i64) -> Vec<Tx> {
+        let today = now().date();
+        (1..=days)
+            .map(|back| {
+                let amount = if (back - 1) / 7 % 2 == 0 { "30" } else { "10" };
+                tx(add_days(today, -back), amount, &format!("t{back}"))
+            })
+            .collect()
+    }
+
+    fn run_model(transactions: &[Tx], model: &dyn SeriesForecaster) -> DailySpendingForecast {
+        let now = now();
+        let plans = forecast_plans(&[], date(2026, 9, 1), &[Currency::eur()]);
+        daily_spending_forecasts(&DailyInputs {
+            transactions,
+            payments: &[],
+            subscriptions: &[],
+            fixed_ids: &HashSet::new(),
+            now: &now,
+            current_month: date(2026, 9, 1),
+            month_start: date(2026, 9, 1),
+            budget_plans: &plans,
+            mappings: &[],
+            excluded_categories: &[],
+            forecaster: Some(model),
+        })
+        .remove(0)
+    }
+
+    #[test]
+    fn a_more_accurate_model_wins_the_backtest() {
+        let model = Fortnightly::new(false, false);
+        let forecast = run_model(&alternating(140), &model);
+        assert_eq!(forecast.method, "timesfm");
+        assert_eq!(forecast.model, "fortnightly");
+        assert_eq!(forecast.model_error, Some(Decimal::ZERO));
+        assert_eq!(forecast.baseline_error, Some(Decimal::from(70)));
+        assert_eq!(forecast.planned_model_error, None);
+        assert_eq!(forecast.backtest_windows, 8);
+        // Last week cost 30 a day, so the coming one is a 10-a-day week.
+        assert_eq!(forecast.next_week_habit, Decimal::from(70));
+        // One backtest call for all windows, the live forecast, then the
+        // budget groups' own series with the same model.
+        let calls = model.calls.borrow();
+        let groups = forecast
+            .months
+            .iter()
+            .map(|m| m.groups.len())
+            .sum::<usize>();
+        assert_eq!(calls.len(), 3);
+        assert_eq!(calls[0], (8, 7, false));
+        assert_eq!(calls[1].0, 1);
+        assert_eq!(calls[2], (groups, calls[1].1, false));
+    }
+
+    #[test]
+    fn planned_payments_win_ties() {
+        let model = Fortnightly::new(true, false);
+        let forecast = run_model(&alternating(140), &model);
+        assert_eq!(forecast.method, "timesfm_planned");
+        assert_eq!(forecast.model_error, forecast.planned_model_error);
+        let calls = model.calls.borrow();
+        assert_eq!(
+            calls.iter().map(|c| c.2).collect::<Vec<_>>(),
+            [false, true, false, true, false]
+        );
+    }
+
+    #[test]
+    fn a_failing_model_leaves_the_baseline() {
+        let model = Fortnightly::new(true, true);
+        let forecast = run_model(&alternating(140), &model);
+        assert_eq!(forecast.method, "weekday_baseline");
+        assert_eq!(forecast.model, "weekday-baseline");
+        assert_eq!(forecast.model_error, None);
+        // The backtest failed, so neither the live forecast nor the groups ask.
+        assert_eq!(model.calls.borrow().len(), 1);
+    }
+
+    #[test]
+    fn without_backtest_scores_the_model_is_preferred() {
+        assert_eq!(choose(&[], &[BASELINE]), BASELINE);
+        assert_eq!(choose(&[], &[BASELINE, TIMESFM]), TIMESFM);
+        assert_eq!(
+            choose(&[], &[BASELINE, TIMESFM, TIMESFM_PLANNED]),
+            TIMESFM_PLANNED
+        );
+        // Equal errors: the first scored wins, unless planned payments tie.
+        assert_eq!(choose(&[(BASELINE, 1.0), (TIMESFM, 1.0)], &[]), BASELINE);
+        assert_eq!(
+            choose(
+                &[(BASELINE, 1.0), (TIMESFM, 2.0), (TIMESFM_PLANNED, 1.0)],
+                &[]
+            ),
+            TIMESFM_PLANNED
+        );
     }
 
     #[test]

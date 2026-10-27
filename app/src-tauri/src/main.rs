@@ -6,6 +6,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod bank;
+mod model;
 mod update;
 
 use finance_core::service::Service;
@@ -415,6 +416,7 @@ fn main() {
         .manage(Service::new(path))
         .manage(Updates::default())
         .manage(finance_bank::Syncer::default())
+        .manage(model::Model::default())
         .invoke_handler(tauri::generate_handler![
             dashboard,
             review,
@@ -466,10 +468,13 @@ fn main() {
             bank::adopt_bank_consents,
             bank::set_bank_credentials,
             bank::forget_bank_credentials,
+            model::forecast_model_status,
+            model::download_forecast_model,
         ])
         .setup(|app| {
             update::schedule(app.handle().clone());
             bank::schedule(app.handle().clone());
+            model::install(app.handle());
             #[cfg(target_os = "macos")]
             if let Some(window) = app.get_webview_window("main") {
                 apply_glass(&window);

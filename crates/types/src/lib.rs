@@ -236,6 +236,26 @@ pub struct AvailableUpdate {
     pub date: Option<String>,
 }
 
+/// The daily forecast's TimesFM model on this Mac.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ForecastModelStatus {
+    /// The weights are on this Mac, so daily forecasts may use the model.
+    pub available: bool,
+    /// Where they are: `app` (downloaded into the app's folder) or
+    /// `huggingface` (the Hugging Face cache).
+    pub source: Option<String>,
+    /// Size of the download, in bytes.
+    pub download_bytes: u64,
+    /// A download is running: bytes received so far.
+    pub downloading: Option<u64>,
+    /// Forecasts are being computed in the background.
+    pub running: bool,
+    /// Seconds the last background run took (loading the model included).
+    pub last_run_seconds: Option<f64>,
+    /// Short, data-free description of the last failure.
+    pub error: Option<String>,
+}
+
 /// What the app knows about updates right now.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UpdateStatus {

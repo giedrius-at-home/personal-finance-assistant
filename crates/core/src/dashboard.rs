@@ -14,7 +14,14 @@ use crate::{
 };
 use crate::{allocation, budget, daily, outlook};
 
-pub fn dashboard(store: &Store, snap: &Snapshot, now: &Zoned) -> Result<Dashboard> {
+/// `forecaster` is the model the daily forecast backtests against its
+/// weekday baseline (none: the baseline alone).
+pub fn dashboard(
+    store: &Store,
+    snap: &Snapshot,
+    now: &Zoned,
+    forecaster: Option<&dyn daily::SeriesForecaster>,
+) -> Result<Dashboard> {
     let ctx = Ctx::new(snap, now);
     let inputs = ReportInputs::load(store.connection(), snap.sync_health.0)?;
     let txs = &snap.transactions;
@@ -153,6 +160,7 @@ pub fn dashboard(store: &Store, snap: &Snapshot, now: &Zoned) -> Result<Dashboar
         budget_plans: &forecast_plans,
         mappings: &snap.group_mappings,
         excluded_categories: &snap.settings.forecast_excluded_categories,
+        forecaster,
     });
 
     let daily_ids: HashSet<String> = snap

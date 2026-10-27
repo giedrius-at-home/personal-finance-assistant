@@ -79,6 +79,7 @@ fn main() -> anyhow::Result<()> {
         budget_plans: &plans,
         mappings: &snap.group_mappings,
         excluded_categories: &snap.settings.forecast_excluded_categories,
+        forecaster: None,
     });
     let report = serde_json::json!({
         "savings_outlooks": outlooks,
