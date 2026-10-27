@@ -16,8 +16,8 @@ Design: [docs/specs/2026-10-26-finance-assistant-rust-design.md](docs/specs/2026
 | `crates/types` | Domain types shared by the backend and the UI |
 | `crates/storage` | SQLite schema, ledger import and the ledger queries |
 | `crates/core` | Finance logic: the canonical model, every report and every write (the Python service's port) |
-| `crates/secrets` | Keychain access, zeroizing secret values |
-| `crates/bank` | Enable Banking client (RS256 application token), consents in the Keychain, one sync at a time |
+| `crates/secrets` | Secrets in owner-only files (`Finance/secrets/`, 0600), zeroizing in memory |
+| `crates/bank` | Enable Banking client (RS256 application token), consents in the secret store, one sync at a time |
 | `crates/timesfm` | TimesFM 3.0 inference (ndarray; Accelerate on macOS) for the forecasts |
 | `crates/ai` | Jev (TypeSafe) and Ollama clients for category suggestions, plus merchant research |
 | `crates/notify` | Daily spending email (SMTP) and its Ollama copy writer |
@@ -69,7 +69,7 @@ Banks sync straight from Enable Banking, replacing the old importer and
 Firefly. Set up once in Manage → Banks:
 
 1. **Application key**: the Enable Banking application id and its `.pem`
-   private key. Both go to the Keychain.
+   private key. Both go to the secret store (owner-only files).
 2. **Consents**: "Use saved consents" takes over the consents the old
    importer saved on this Mac, with their run history. To connect a bank or
    renew an expiring consent, use "Connect or renew": approve in the browser,
@@ -98,11 +98,11 @@ TimesFM's answers for the current data.
 
 All off until switched on in Manage → Settings:
 
-- **AI suggestions**: Jev (TypeSafe, key in the Keychain) proposes categories
+- **AI suggestions**: Jev (TypeSafe, key in the secret store) proposes categories
   for new transactions after each sync; proposals at 0.90 or more are applied
   automatically when that is on. Ollama is supported as an alternative.
 - **Notifications**: goal alerts as macOS notifications.
-- **Daily spending email** at 20:00 over SMTP (password in the Keychain),
+- **Daily spending email** at 20:00 over SMTP (password in the secret store),
   with a "Send test" button.
 
 ## Checks
@@ -125,7 +125,7 @@ cargo deny check
 The installed app checks at launch and every 6 hours. Because the repository
 is private it needs a fine-grained GitHub token with read-only **Contents**
 access to this repository; paste it once under **Manage → Settings → Updates** (stored in
-the Keychain). Updates whose signature does not match the public key in
+the secret store). Updates whose signature does not match the public key in
 `tauri.conf.json` are rejected.
 
 The signing key lives in the repository secrets `TAURI_SIGNING_PRIVATE_KEY`

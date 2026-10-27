@@ -131,7 +131,7 @@ pub fn reconcile_bank_account(
 }
 
 /// Store the Enable Banking application id and key. They go straight to the
-/// Keychain and are never returned to the UI.
+/// secret store and are never returned to the UI.
 #[tauri::command(async)]
 pub fn set_bank_credentials(credentials: BankCredentials) -> Result<(), String> {
     Credentials::store(&credentials).map_err(|e| e.to_string())

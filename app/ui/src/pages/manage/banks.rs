@@ -913,7 +913,7 @@ fn KeyCard(
                         input.set_value("");
                     }
                     ops.notice
-                        .set("Application key saved in the Keychain.".into());
+                        .set("Application key saved privately on this Mac.".into());
                 }
                 Err(e) => ops.error.set(e),
             }
@@ -924,7 +924,7 @@ fn KeyCard(
     let forget = move |_| {
         ops.run("forget_bank_credentials", NoArgs {}, move |()| {
             ops.notice
-                .set("Application key removed from the Keychain.".into());
+                .set("Application key removed from this Mac.".into());
             app.revision.update(|n| *n += 1);
         });
     };
@@ -948,12 +948,12 @@ fn KeyCard(
             <Eyebrow level=Heading::P>"ENABLE BANKING"</Eyebrow>
             <CardTitle level=Heading::H2 class="mt-1">"Application key"</CardTitle>
             <CardDescription class="mb-4">
-                "Every bank request is signed with your Enable Banking application key. The id and key stay in the Keychain on this Mac."
+                "Every bank request is signed with your Enable Banking application key. The id and key stay in a private file on this Mac that only your user can read."
             </CardDescription>
             {move || if stored() {
                 view! {
                     <div class="flex flex-wrap items-center justify-between gap-3">
-                        <p class="text-sm">"Stored in the Keychain."</p>
+                        <p class="text-sm">"Stored privately on this Mac."</p>
                         <Button variant=Variant::Secondary size=Size::Sm disabled=busy on_click=Callback::new(forget)>
                             "Remove key"
                         </Button>

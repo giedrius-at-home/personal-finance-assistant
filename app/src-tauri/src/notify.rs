@@ -63,10 +63,10 @@ pub fn evaluate_alerts(app: AppHandle) {
     });
 }
 
-/// Sends with the Keychain password, read only when an email goes out.
-struct KeychainMailer(Smtp);
+/// Sends with the secret store password, read only when an email goes out.
+struct StoredMailer(Smtp);
 
-impl Sender for KeychainMailer {
+impl Sender for StoredMailer {
     fn send(&self, message: &Message) -> Result<(), String> {
         let password = finance_secrets::get(Item::SmtpPassword)
             .map_err(|e| e.to_string())?
@@ -96,7 +96,7 @@ pub fn save_email_settings(
     )
 }
 
-/// The SMTP password goes straight to the Keychain and is never returned.
+/// The SMTP password goes straight to the secret store and is never returned.
 #[tauri::command(async)]
 pub fn set_smtp_password(password: String) -> Result<(), String> {
     let password = Secret::new(password);
@@ -126,7 +126,7 @@ pub async fn send_test_email(app: AppHandle) -> Result<String, String> {
         .map_err(|e| e.to_string())?;
         let ollama = Ollama::local()?;
         let message = service.spending_email_test(jiff::Timestamp::now(), &settings, &ollama)?;
-        KeychainMailer(Smtp::from_settings(&settings)).send(&message)?;
+        StoredMailer(Smtp::from_settings(&settings)).send(&message)?;
         Ok(format!("Test email sent to {}.", settings.recipient))
     });
     crate::traced(
@@ -147,7 +147,7 @@ pub fn schedule(app: AppHandle) {
             let service = app.state::<Service>();
             let outcome = service.email_settings().and_then(|settings| {
                 let ollama = Ollama::local()?;
-                let mailer = KeychainMailer(Smtp::from_settings(&settings));
+                let mailer = StoredMailer(Smtp::from_settings(&settings));
                 service.run_spending_email(jiff::Timestamp::now(), &ollama, &mailer)
             });
             if crate::tracing() {

@@ -1,5 +1,5 @@
 //! The app side of AI suggestions: HTTP clients for local Ollama, TypeSafe
-//! and public research ([`clients`]), the TypeSafe key in the Keychain, and
+//! and public research ([`clients`]), the TypeSafe key in the secret store, and
 //! [`Assistant`], which runs one suggestion pass at a time for the
 //! scheduler, the bank sync and the owner's "Suggest categories". The
 //! prompts, parsing and storage are `finance_core::ai`.
@@ -40,7 +40,7 @@ pub struct Assistant {
     runner: Mutex<Runner>,
     last_run: Mutex<Option<AiRun>>,
     group: Mutex<()>,
-    /// Whether the TypeSafe key may be read from the Keychain (not in the
+    /// Whether the TypeSafe key may be read from the secret store (not in the
     /// development server).
     keychain: bool,
     wake: (Mutex<bool>, Condvar),

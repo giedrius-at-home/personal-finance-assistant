@@ -1,6 +1,6 @@
 //! Manage → Settings → "AI suggestions": which model proposes categories
 //! (off, the local Ollama or TypeSafe "Jev"), research and automatic
-//! approval. The TypeSafe key goes to the Keychain and never comes back.
+//! approval. The TypeSafe key goes to the secret store and never comes back.
 
 use finance_types::ai::{AiSettings, AiStatus, Classifier};
 use leptos::html::Input as InputElement;
@@ -168,7 +168,7 @@ pub fn AiSuggestions() -> impl IntoView {
         el.set_value("");
         ops.run("set_typesafe_key", KeyArgs { key }, move |(): ()| {
             ops.notice
-                .set("TypeSafe key saved in your Keychain.".into());
+                .set("TypeSafe key saved privately on this Mac.".into());
             changed.update(|n| *n += 1);
         });
     };
@@ -287,7 +287,7 @@ pub fn AiSuggestions() -> impl IntoView {
                 {move || if key_set() {
                     view! {
                         <div class="mb-5 flex flex-wrap items-center gap-2">
-                            <p class="text-sm text-fg-muted">"TypeSafe key is in your Keychain."</p>
+                            <p class="text-sm text-fg-muted">"TypeSafe key is saved privately on this Mac."</p>
                             <Button variant=Variant::Ghost size=Size::Sm disabled=Signal::derive(move || busy.get()) on_click=Callback::new(forget_key)>
                                 "Remove key"
                             </Button>
