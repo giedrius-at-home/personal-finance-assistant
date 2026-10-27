@@ -149,7 +149,14 @@ impl Connection {
         if unique.len() != targets.len() {
             return Err(SyncStatus::MappingMismatch);
         }
-        candidate.verified_identity.clear();
+        // The owner's own confirmations in the file stay when they are bound
+        // to exactly this file's sessions and mapping (Python dropped them;
+        // pockets cannot be renewed without them).
+        let sessions = candidate.sessions.clone();
+        let accounts = candidate.accounts.clone();
+        candidate
+            .verified_identity
+            .retain(|uid, b| b.sessions == sessions && accounts.get(uid) == Some(&b.target));
         candidate.import_not_before = None;
         if let Some(old) = old {
             if !old.targets().iter().all(|t| unique.contains(t)) {
@@ -184,7 +191,8 @@ impl Connection {
             })
     }
 
-    /// `noIbanIdentityBound`: neither side has an IBAN, by the owner's word.
+    /// `noIbanIdentityBound`: the ledger account has no IBAN (a pocket) and
+    /// the owner confirmed this mapping for these sessions.
     pub fn no_iban_bound(&self, uid: &str, target: i64, ledger_iban: &str) -> bool {
         ledger_iban.is_empty() && self.binding(uid, target).is_some_and(|b| b.no_iban)
     }
@@ -260,6 +268,16 @@ mod tests {
             .unwrap_err(),
             SyncStatus::MappingMismatch
         );
+        // A binding scoped to the file's own session stays; a stale one goes.
+        let pockets = Connection::renew(
+            Some(&old),
+            r#"{"flow":"eb","enable_banking_sessions":["s3"],"accounts":{"m":5,"p":7},
+                "pfa_verified_identity":{
+                    "p":{"target":7,"sessions":["s3"],"no_iban":true},
+                    "m":{"target":5,"sessions":["old"],"no_iban":true}}}"#,
+        )
+        .unwrap();
+        assert_eq!(pockets.verified_identity.keys().collect::<Vec<_>>(), ["p"]);
         // Same accounts and sessions keep the verified identity.
         let same = Connection::renew(Some(&old), CONFIG).unwrap();
         assert_eq!(same.verified_identity, old.verified_identity);
