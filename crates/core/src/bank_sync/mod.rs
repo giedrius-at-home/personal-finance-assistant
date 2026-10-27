@@ -321,6 +321,42 @@ pub fn save_run(w: &Writer<'_>, bank: &str, run: &BankRun) -> crate::Result<()> 
     )
 }
 
+/// Update the data-refresh health the dashboard reads (Python's
+/// `firefly_sync_health`, written by its sync loop): every bank sync is an
+/// attempt; the data is fresh only while no connected bank's last sync
+/// failed. Banks without consent or key do not count.
+pub fn save_health(w: &Writer<'_>) -> crate::Result<()> {
+    let exists =
+        w.tx.query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'firefly_sync_health'",
+            [],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+    if !exists {
+        return Ok(());
+    }
+    let failed = runs(&w.tx)?.values().any(|r| {
+        r.status.is_some_and(|s| {
+            !s.is_ok()
+                && !matches!(
+                    s,
+                    SyncStatus::MissingConfig | SyncStatus::MissingCredentials
+                )
+        })
+    });
+    let stamp = w.stamp();
+    w.tx.execute(
+        "INSERT INTO firefly_sync_health (singleton, last_success, last_attempt, failed) \
+         VALUES (1, CASE WHEN ?2 THEN NULL ELSE ?1 END, ?1, ?2) \
+         ON CONFLICT(singleton) DO UPDATE SET last_attempt = ?1, failed = ?2, \
+         last_success = CASE WHEN ?2 THEN last_success ELSE ?1 END",
+        rusqlite::params![stamp, failed],
+    )?;
+    Ok(())
+}
+
 /// The old importer's `status.json`, as runs. Statuses this app does not
 /// know (Firefly-only ones) read as a failed attempt.
 pub fn legacy_runs(raw: &str) -> HashMap<String, BankRun> {
@@ -455,6 +491,7 @@ impl Service {
             run.consent_valid_until = expires;
         }
         self.save_bank_run(bank, &run)?;
+        self.write(|w, _| save_health(w))?;
         Ok(BankSyncResult {
             bank: bank.to_owned(),
             status,
@@ -761,6 +798,40 @@ mod tests {
         assert_eq!(failed.last_success, ok.last_success);
         assert_eq!(failed.created, Some(3));
         assert_eq!(failed.status, Some(SyncStatus::RateLimited));
+    }
+
+    #[test]
+    fn health_follows_the_connected_banks() {
+        let mut db = crate::writes::fixture::db();
+        db.store
+            .connection()
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS firefly_sync_health (singleton INTEGER PRIMARY KEY,
+                 last_success TEXT, last_attempt TEXT NOT NULL, failed INTEGER NOT NULL,
+                 last_full_success TEXT);
+                 INSERT OR REPLACE INTO firefly_sync_health VALUES (1, 'old', 'old', 0, 'full');",
+            )
+            .unwrap();
+        let run = |status| BankRun {
+            status: Some(status),
+            ..BankRun::default()
+        };
+        db.write(|w, _| {
+            save_run(w, "abnamro", &run(SyncStatus::Success))?;
+            save_run(w, "swedbank", &run(SyncStatus::MissingConfig))?;
+            save_health(w)
+        })
+        .unwrap();
+        let fresh: String = db.one("SELECT last_success || '|' || failed || '|' || last_full_success FROM firefly_sync_health");
+        assert_eq!(fresh, "2026-10-26T20:00:00.000000Z|0|full");
+        db.write(|w, _| {
+            save_run(w, "revolut", &run(SyncStatus::ReauthorizationRequired))?;
+            save_health(w)
+        })
+        .unwrap();
+        let failed: String =
+            db.one("SELECT last_success || '|' || failed FROM firefly_sync_health");
+        assert_eq!(failed, "2026-10-26T20:00:00.000000Z|1");
     }
 
     #[test]
