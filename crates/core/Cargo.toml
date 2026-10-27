@@ -1,0 +1,26 @@
+[package]
+name = "finance-core"
+description = "Finance logic: the canonical model built from the ledger, and every report and decision the screens show (the Rust port of the Python service)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+finance-storage.workspace = true
+finance-types.workspace = true
+jiff = "0.2.38"
+regex = "1.13.1"
+rusqlite.workspace = true
+rust_decimal.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10.9"
+thiserror.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+anyhow.workspace = true

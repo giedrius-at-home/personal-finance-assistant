@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-audit-daily-review"
+description = "Enables the audit_daily_review command without any pre-configured scope."
+commands.allow = ["audit_daily_review"]
+
+[[permission]]
+identifier = "deny-audit-daily-review"
+description = "Denies the audit_daily_review command without any pre-configured scope."
+commands.deny = ["audit_daily_review"]

@@ -2,8 +2,10 @@
 
 Local-first personal finance app for macOS, written in Rust (Tauri 2 + Leptos).
 Everything runs on this Mac: data lives in one SQLite file, the window uses
-the native macOS sidebar glass, and updates arrive as signed GitHub releases
-the app checks for itself.
+macOS Liquid Glass, and updates arrive as signed GitHub releases the app
+checks for itself. The screens follow the web finance UI
+(finance.giedriusathome.com, `personal-site`): same sections, design tokens,
+Manrope and Tailwind classes, and the Python service's logic ported to Rust.
 
 Design: [docs/specs/2026-10-26-finance-assistant-rust-design.md](docs/specs/2026-10-26-finance-assistant-rust-design.md)
 
@@ -12,11 +14,12 @@ Design: [docs/specs/2026-10-26-finance-assistant-rust-design.md](docs/specs/2026
 | Path | What |
 |---|---|
 | `crates/types` | Domain types shared by the backend and the UI |
-| `crates/storage` | SQLite schema, ledger import and every read query |
+| `crates/storage` | SQLite schema, ledger import and the ledger queries |
+| `crates/core` | Finance logic: the canonical model, every report and every write (the Python service's port) |
 | `crates/secrets` | Keychain access, zeroizing secret values |
 | `crates/migrate` | One-off copy of the data from `laptopthree` |
 | `app/src-tauri` | The macOS app: window, glass, commands, updater |
-| `app/ui` | Leptos screens (compiled to WASM by Trunk) |
+| `app/ui` | Leptos screens (compiled to WASM by Trunk; Tailwind 4 through Trunk) |
 | `app/devserver` | Development only: serves the UI and commands over loopback |
 
 ## Setup
@@ -50,13 +53,19 @@ To look at the UI in a browser against the real data:
 (cd app/ui && trunk build) && cargo run --release -p finance-devserver -- app/ui/dist 1430
 ```
 
+The development server writes too. Point it at a copy, never the real file,
+when trying edits: `DEV_DB=/path/to/copy.sqlite3 cargo run --release -p finance-devserver …`.
+
+Before the first write of each session the app saves a copy of the database
+to `~/Library/Application Support/Finance/backups/` (the last ten are kept).
+
 ## Checks
 
 ```bash
 cargo fmt --all --check
-cargo clippy --workspace --exclude finance-ui -- -D warnings
+cargo clippy --workspace --all-targets -- -D warnings
 cargo clippy -p finance-ui --target wasm32-unknown-unknown -- -D warnings
-cargo test -p finance-storage
+cargo test --workspace
 cargo deny check
 ```
 
@@ -69,7 +78,7 @@ cargo deny check
 
 The installed app checks at launch and every 6 hours. Because the repository
 is private it needs a fine-grained GitHub token with read-only **Contents**
-access to this repository; paste it once under **Data → Updates** (stored in
+access to this repository; paste it once under **Manage → Settings → Updates** (stored in
 the Keychain). Updates whose signature does not match the public key in
 `tauri.conf.json` are rejected.
 

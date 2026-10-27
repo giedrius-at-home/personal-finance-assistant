@@ -1,6 +1,6 @@
 //! Ledger import: replaces all ledger rows in one transaction.
 
-use rusqlite::params;
+use rusqlite::{Connection, OptionalExtension, params};
 use rust_decimal::Decimal;
 use serde::Deserialize;
 
@@ -213,13 +213,15 @@ impl Store {
                         p.foreign_currency,
                     ])?;
                 }
-                let mut text = vec![t.description.as_str()];
-                text.extend(account_names.get(&source.account_id));
-                text.extend(account_names.get(&destination.account_id));
-                text.extend(t.category_id.and_then(|c| category_names.get(&c)));
-                text.extend(t.notes.as_deref());
-                text.extend(t.tags.iter().map(String::as_str));
-                insert_search.execute(params![t.id, text.join(" \u{2022} ")])?;
+                let text = search_text(
+                    &t.description,
+                    account_names.get(&source.account_id).copied(),
+                    account_names.get(&destination.account_id).copied(),
+                    t.category_id.and_then(|c| category_names.get(&c)).copied(),
+                    t.notes.as_deref(),
+                    &t.tags,
+                );
+                insert_search.execute(params![t.id, text])?;
             }
         }
         let stats = serde_json::json!({
@@ -236,4 +238,124 @@ impl Store {
         tx.commit()?;
         Ok(())
     }
+}
+
+/// The text `transactions_search` indexes for one transaction: description,
+/// both account names, category, notes and tags.
+pub fn search_text(
+    description: &str,
+    source: Option<&str>,
+    destination: Option<&str>,
+    category: Option<&str>,
+    notes: Option<&str>,
+    tags: &[String],
+) -> String {
+    let mut text = vec![description];
+    text.extend(source);
+    text.extend(destination);
+    text.extend(category);
+    text.extend(notes);
+    text.extend(tags.iter().map(String::as_str));
+    text.join(" \u{2022} ")
+}
+
+/// A transaction to add to the ledger: two postings of `amount` (positive)
+/// from `source_account_id` to `destination_account_id`.
+#[derive(Clone, Debug)]
+pub struct NewTransaction<'a> {
+    /// `withdrawal`, `deposit` or `transfer`.
+    pub kind: &'a str,
+    /// `YYYY-MM-DD`.
+    pub date: &'a str,
+    pub description: &'a str,
+    pub source_account_id: i64,
+    pub destination_account_id: i64,
+    pub amount: Decimal,
+    pub currency: &'a str,
+    pub external_id: Option<&'a str>,
+    pub notes: Option<&'a str>,
+    pub tags: &'a [String],
+}
+
+/// Add `t` with its two postings and its search row; returns the new
+/// transaction id. Runs on the caller's connection, so it joins the caller's
+/// transaction.
+pub fn insert_transaction(conn: &Connection, t: &NewTransaction<'_>) -> Result<i64> {
+    if t.amount.is_sign_negative() {
+        return Err(Error::Corrupt("negative transaction amount".into()));
+    }
+    let tags = serde_json::to_string(t.tags).map_err(|e| Error::Corrupt(e.to_string()))?;
+    conn.execute(
+        "INSERT INTO transactions (kind, date, booked_at, description, source_account_id,
+            destination_account_id, external_id, notes, tags, reconciled)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 0)",
+        params![
+            t.kind,
+            t.date,
+            format!("{}T00:00:00", t.date),
+            t.description,
+            t.source_account_id,
+            t.destination_account_id,
+            t.external_id,
+            t.notes,
+            tags,
+        ],
+    )?;
+    let id = conn.last_insert_rowid();
+    conn.execute("UPDATE transactions SET group_id = ?1 WHERE id = ?1", [id])?;
+    let mut posting = conn.prepare_cached(
+        "INSERT INTO postings (transaction_id, account_id, amount, currency) VALUES (?1, ?2, ?3, ?4)",
+    )?;
+    posting.execute(params![
+        id,
+        t.source_account_id,
+        (-t.amount).to_string(),
+        t.currency
+    ])?;
+    posting.execute(params![
+        id,
+        t.destination_account_id,
+        t.amount.to_string(),
+        t.currency
+    ])?;
+    let name = |account: i64| -> Result<Option<String>> {
+        Ok(conn
+            .query_row("SELECT name FROM accounts WHERE id = ?1", [account], |r| {
+                r.get(0)
+            })
+            .optional()?)
+    };
+    let text = search_text(
+        t.description,
+        name(t.source_account_id)?.as_deref(),
+        name(t.destination_account_id)?.as_deref(),
+        None,
+        t.notes,
+        t.tags,
+    );
+    conn.execute(
+        "INSERT INTO transactions_search (rowid, text) VALUES (?1, ?2)",
+        params![id, text],
+    )?;
+    Ok(id)
+}
+
+/// The id of the `kind` (`expense` or `revenue`) account called `name`,
+/// created when there is none, as Firefly did for a counterparty name.
+pub fn counterparty_account(conn: &Connection, name: &str, kind: &str) -> Result<i64> {
+    let found: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM accounts WHERE kind = ?1 AND name = ?2 ORDER BY active DESC, id LIMIT 1",
+            params![kind, name],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if let Some(id) = found {
+        return Ok(id);
+    }
+    conn.execute(
+        "INSERT INTO accounts (name, kind, active, include_net_worth) VALUES (?1, ?2, 1, 1)",
+        params![name, kind],
+    )?;
+    Ok(conn.last_insert_rowid())
 }

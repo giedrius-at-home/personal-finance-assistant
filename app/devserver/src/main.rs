@@ -5,23 +5,53 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use finance_storage::Store;
-use finance_types::TxQuery;
+use finance_core::service::Service;
+use finance_types::report::review::TransactionSearchQuery;
 use serde::Deserialize;
 use serde_json::Value;
 
 #[derive(Deserialize)]
-struct TxArgs {
-    query: TxQuery,
+struct PlanArgs {
+    plan: finance_types::gateway::BudgetPlan,
+}
+
+#[derive(Deserialize)]
+struct PlannedPaymentArgs {
+    request: finance_types::gateway::PlannedPaymentRequest,
+}
+
+#[derive(Deserialize)]
+struct ArchivePlanArgs {
+    plan_id: String,
 }
 
 #[derive(Deserialize)]
 struct MonthArgs {
     month: String,
+}
+
+#[derive(Deserialize)]
+struct ClosureActionArgs {
+    action: finance_types::report::closure::ClosureAction,
+}
+
+#[derive(Deserialize)]
+struct PotArgs {
+    pot: finance_types::report::closure::PotDraft,
+}
+
+#[derive(Deserialize)]
+struct RoleArgs {
+    role: finance_types::report::closure::AccountRoleDraft,
+}
+
+#[derive(Deserialize)]
+struct SearchArgs {
+    query: TransactionSearchQuery,
 }
 
 fn main() -> Result<()> {
@@ -31,9 +61,11 @@ fn main() -> Result<()> {
             .unwrap_or_else(|| "app/ui/dist".into()),
     );
     let port = std::env::args().nth(2).unwrap_or_else(|| "1430".into());
-    let store = Arc::new(Mutex::new(Store::open_read_only(
-        &finance_storage::default_db_path()?,
-    )?));
+    // DEV_DB points at a copy of the data, e.g. the parity golden.
+    let db = std::env::var_os("DEV_DB")
+        .map(PathBuf::from)
+        .unwrap_or(finance_storage::default_db_path()?);
+    let store = Arc::new(Service::new(db));
     let dist = Arc::new(dist);
     let listener = TcpListener::bind(format!("127.0.0.1:{port}"))?;
     eprintln!("finance-devserver on http://127.0.0.1:{port}");
@@ -51,7 +83,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn handle(stream: &mut TcpStream, store: &Mutex<Store>, dist: &Path) -> Result<()> {
+fn handle(stream: &mut TcpStream, store: &Service, dist: &Path) -> Result<()> {
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut request_line = String::new();
     reader.read_line(&mut request_line)?;
@@ -75,10 +107,7 @@ fn handle(stream: &mut TcpStream, store: &Mutex<Store>, dist: &Path) -> Result<(
         && let Some(cmd) = path.strip_prefix("/invoke/")
     {
         let args: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
-        let result = match store.lock() {
-            Ok(store) => run(&store, cmd, args),
-            Err(_) => Err("store-poisoned".to_owned()),
-        };
+        let result = run(store, cmd, args);
         return match result {
             Ok(v) => respond(
                 stream,
@@ -109,26 +138,81 @@ fn handle(stream: &mut TcpStream, store: &Mutex<Store>, dist: &Path) -> Result<(
     }
 }
 
-fn ok<T: serde::Serialize>(result: finance_storage::Result<T>) -> Result<Value, String> {
-    result
-        .map_err(|e| e.to_string())
-        .and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string()))
+fn ok<T: serde::Serialize>(result: Result<T, String>) -> Result<Value, String> {
+    result.and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string()))
 }
 
-fn run(store: &Store, cmd: &str, args: Value) -> Result<Value, String> {
+fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
     match cmd {
-        "overview" => ok(store.overview()),
-        "accounts" => ok(store.accounts()),
-        "facets" => ok(store.facets()),
-        "status" => ok(store.status()),
-        "transactions" => {
-            let a: TxArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
-            ok(store.transactions(&a.query))
+        "dashboard" => ok(service.dashboard()),
+        "review" => ok(service.review()),
+        "status" => ok(service.status()),
+        "refresh" => {
+            service.refresh();
+            Ok(Value::Null)
         }
-        "category_totals" => {
+        "save_budget_plan" => {
+            let a: PlanArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
+            ok(service.save_budget_plan(a.plan))
+        }
+        "save_spending_group" => {
+            let a: GroupArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
+            ok(service.save_spending_group(&a.category, a.group.as_deref(), a.revision))
+        }
+        "create_spending_group" => {
+            let a: NewGroupArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
+            ok(service.create_spending_group(&a.group))
+        }
+        "create_planned_payment" => {
+            let a: PlannedPaymentArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
+            ok(service.create_planned_payment(&a.request))
+        }
+        "archive_planned_payment" => {
+            let a: ArchivePlanArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
+            ok(service.archive_planned_payment(&a.plan_id))
+        }
+        "search_transactions" => {
+            let a: SearchArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
+            ok(service.search(&a.query))
+        }
+        "closure" => {
             let a: MonthArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
-            ok(store.category_totals(&a.month))
+            ok(service.closure(&a.month))
         }
+        "closure_action" => {
+            let a: ClosureActionArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
+            ok(service.closure_action(a.action))
+        }
+        "closure_pots" => ok(service.pots()),
+        "save_pot" => {
+            let a: PotArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
+            ok(service.save_pot(a.pot))
+        }
+        "save_account_role" => {
+            let a: RoleArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
+            ok(service.save_account_role(a.role))
+        }
+        "unclassified_accounts" => ok(service.unclassified_accounts()),
+        "personal_transactions" => {
+            ok(service.personal_transactions(&arg::<String>(args.clone(), "query")?))
+        }
+        "save_personal_choice" => ok(service.save_personal_choice(arg(args.clone(), "choice")?)),
+        "set_transaction_category" => {
+            ok(service.set_transaction_category(arg(args.clone(), "change")?))
+        }
+        "review_decisions" => ok(service.review_decisions(arg(args.clone(), "decisions")?)),
+        "review_batch" => ok(service.review_batch(arg(args.clone(), "items")?)),
+        "review_category_options" => {
+            ok(service.review_category_options(&arg::<String>(args.clone(), "proposal")?))
+        }
+        "save_review_details" => ok(service.save_review_details(arg(args.clone(), "details")?)),
+        "audit_daily_review" => {
+            ok(service.audit_daily_review(&arg::<String>(args.clone(), "transaction")?))
+        }
+        "preview_consolidation" => {
+            ok(service.preview_consolidation(&arg(args.clone(), "request")?))
+        }
+        "apply_consolidation" => ok(service.apply_consolidation(arg(args.clone(), "request")?)),
         // Updates only exist in the app; show a plausible state for layout checks.
         "update_status" => {
             let available = std::env::var("DEV_FAKE_UPDATE").ok().map(|version| {
@@ -147,8 +231,27 @@ fn run(store: &Store, cmd: &str, args: Value) -> Result<Value, String> {
             })
             .map_err(|e| e.to_string())
         }
+        "create_bill" => ok(service.create_bill(request(args)?)),
+        "edit_bill" => ok(service.edit_bill(request(args)?)),
+        "archive_bill" => ok(service.archive_bill(request(args)?)),
+        "save_subscription_categories" => ok(service.save_subscription_categories(request(args)?)),
+        "link_bill_payment" => ok(service.link_bill_payment(request(args)?)),
+        "decline_bill_match" => ok(service.decline_bill_match(request(args)?)),
+        "manage_workspace" => ok(service.manage_workspace()),
+        "banks" => ok(service.banks()),
+        "preview_csv_import" => ok(service.preview_csv_import(arg(args, "upload")?)),
+        "commit_csv_import" => ok(service.commit_csv_import(arg(args, "commit")?)),
+        "preview_settings" => ok(service.preview_settings(arg(args, "form")?)),
+        "apply_settings" => ok(service.apply_settings(arg(args, "apply")?)),
+        "rollback_settings" => ok(service.rollback_settings(arg(args, "revision")?)),
         _ => Err(format!("unknown command {cmd}")),
     }
+}
+
+/// The command argument `name`, as Tauri would pass it.
+fn arg<T: serde::de::DeserializeOwned>(mut args: Value, name: &str) -> Result<T, String> {
+    serde_json::from_value(args.get_mut(name).map(Value::take).unwrap_or(Value::Null))
+        .map_err(|e| e.to_string())
 }
 
 fn mime(path: &str) -> &'static str {
@@ -168,4 +271,27 @@ fn respond(stream: &mut TcpStream, status: &str, kind: &str, body: &[u8]) -> Res
         body.len()
     )?;
     stream.write_all(body).context("write body")
+}
+
+#[derive(Deserialize)]
+struct GroupArgs {
+    category: String,
+    group: Option<String>,
+    revision: u32,
+}
+
+#[derive(Deserialize)]
+struct NewGroupArgs {
+    group: String,
+}
+
+/// The `request` argument of a write command.
+fn request<T: serde::de::DeserializeOwned>(args: Value) -> Result<T, String> {
+    #[derive(Deserialize)]
+    struct Args<T> {
+        request: T,
+    }
+    serde_json::from_value::<Args<T>>(args)
+        .map(|a| a.request)
+        .map_err(|e| e.to_string())
 }

@@ -22,10 +22,12 @@ jobs:
         run: cargo fmt --all --check
       - name: Lint
         run: |
-          cargo clippy --locked -p finance-types -p finance-storage -p finance-migrate -p finance-secrets -p finance-devserver -- -D warnings
+          cargo clippy --locked -p finance-types -p finance-storage -p finance-core -p finance-migrate -p finance-secrets -p finance-devserver --all-targets -- -D warnings
           cargo clippy --locked -p finance-ui --target wasm32-unknown-unknown -- -D warnings
       - name: Test
-        run: cargo test --locked -p finance-storage -p finance-types
+        run: cargo test --locked -p finance-storage -p finance-types -p finance-core
+      - name: UI logic tests
+        run: cargo test --locked -p finance-ui --bins
 
   supply-chain:
     runs-on: ubuntu-latest

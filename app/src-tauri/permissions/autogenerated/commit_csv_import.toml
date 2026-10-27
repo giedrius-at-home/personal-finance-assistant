@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-commit-csv-import"
+description = "Enables the commit_csv_import command without any pre-configured scope."
+commands.allow = ["commit_csv_import"]
+
+[[permission]]
+identifier = "deny-commit-csv-import"
+description = "Denies the commit_csv_import command without any pre-configured scope."
+commands.deny = ["commit_csv_import"]

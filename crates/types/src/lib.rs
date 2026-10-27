@@ -4,6 +4,10 @@
 //! the UI and the backend can never disagree about a shape. Money is always an
 //! exact [`Decimal`] serialized as a string; dates are ISO `YYYY-MM-DD` strings.
 
+pub mod gateway;
+pub mod manage;
+pub mod report;
+
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 

@@ -1,0 +1,9 @@
+/* Tailwind entry: the personal site's design system (tokens, base rules,
+   Manrope) plus the native glass layer. Trunk runs the pinned Tailwind CLI. */
+@layer theme, base, components, utilities;
+@import "tailwindcss" source(none);
+@source "../src";
+@import "./design-tokens.css";
+@import "./fonts.css";
+@import "./base.css";
+@import "./glass.css";

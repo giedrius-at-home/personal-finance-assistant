@@ -33,6 +33,11 @@ extern "C" {
     async fn dev_invoke(cmd: &str, args: JsValue) -> Result<JsValue, JsValue>;
 }
 
+/// Running inside the app window (not the development browser).
+pub fn in_app() -> bool {
+    in_tauri()
+}
+
 /// Call a Tauri command. Errors are the short strings the backend returns.
 pub async fn invoke<T: DeserializeOwned>(cmd: &str, args: &impl Serialize) -> Result<T, String> {
     let serializer = serde_wasm_bindgen::Serializer::json_compatible();

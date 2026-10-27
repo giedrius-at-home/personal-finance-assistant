@@ -1,147 +1,141 @@
-//! Finance UI: the app shell, shared state and navigation.
+//! Finance UI: the app shell, shared state and navigation. The layout and
+//! look follow the owner's web finance UI (personal-site `integrated-finance.tsx`).
 
 mod api;
+// The whole design system is ported so screens can follow the site; not
+// every screen uses every part.
+#[allow(dead_code)]
+mod ds;
 mod format;
-mod icons;
 mod pages;
-mod widgets;
 
-use finance_types::{Facets, TxKind, TxQuery, UpdateStatus};
+use finance_types::report::Dashboard;
 use leptos::ev;
 use leptos::prelude::*;
 
 use crate::api::{Loaded, NoArgs, load};
+use crate::ds::{
+    Eyebrow, Heading, Icon, Lucide, SegmentedControl, Size, TABS_LIST, TABS_TRIGGER, Variant,
+    button_class, cn,
+};
 
+/// The five primary sections (the site's top tabs).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Page {
+pub enum Tab {
     Overview,
     Transactions,
-    Accounts,
-    Categories,
-    Data,
+    Spending,
+    Plan,
+    Manage,
 }
 
-impl Page {
+impl Tab {
     const ALL: [Self; 5] = [
         Self::Overview,
         Self::Transactions,
-        Self::Accounts,
-        Self::Categories,
-        Self::Data,
+        Self::Spending,
+        Self::Plan,
+        Self::Manage,
     ];
 
-    fn title(self) -> &'static str {
+    fn label(self) -> &'static str {
         match self {
             Self::Overview => "Overview",
             Self::Transactions => "Transactions",
-            Self::Accounts => "Accounts",
-            Self::Categories => "Categories",
-            Self::Data => "Data",
+            Self::Spending => "Spending",
+            Self::Plan => "Plan",
+            Self::Manage => "Manage",
         }
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub enum CategoryFilter {
-    #[default]
-    Any,
-    Uncategorised,
-    Id(i64),
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SpendingSection {
+    PlanPatterns,
+    Organise,
+    History,
 }
 
-/// Period filter; presets are resolved against today when the query is built.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub enum Period {
-    #[default]
-    All,
-    ThisMonth,
-    LastMonth,
-    Last3Months,
-    ThisYear,
-    LastYear,
-    Month(String),
-    Custom {
-        from: String,
-        to: String,
-    },
-}
+impl SpendingSection {
+    const ALL: [Self; 3] = [Self::PlanPatterns, Self::Organise, Self::History];
 
-impl Period {
-    pub fn range(&self) -> (Option<String>, Option<String>) {
-        let today = format::today();
-        let this_month = today[..7].to_owned();
-        let year: i32 = today[..4].parse().unwrap_or(1970);
-        let some = |a: String, b: String| (Some(a), Some(b));
+    fn label(self) -> &'static str {
         match self {
-            Self::All => (None, None),
-            Self::ThisMonth => some(format!("{this_month}-01"), today),
-            Self::LastMonth => {
-                let m = format::add_months(&this_month, -1);
-                some(format!("{m}-01"), format::month_end(&m))
-            }
-            Self::Last3Months => some(format!("{}-01", format::add_months(&this_month, -2)), today),
-            Self::ThisYear => some(format!("{year}-01-01"), today),
-            Self::LastYear => some(format!("{}-01-01", year - 1), format!("{}-12-31", year - 1)),
-            Self::Month(m) => some(format!("{m}-01"), format::month_end(m)),
-            Self::Custom { from, to } => (
-                Some(from.clone()).filter(|s| !s.is_empty()),
-                Some(to.clone()).filter(|s| !s.is_empty()),
-            ),
+            Self::PlanPatterns => "Plan & patterns",
+            Self::Organise => "Organise categories",
+            Self::History => "All spending history",
         }
     }
 }
 
-/// Transaction filters, shared so other screens can open a filtered list.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Filters {
-    pub text: String,
-    pub account: Option<i64>,
-    pub category: CategoryFilter,
-    pub kind: Option<TxKind>,
-    pub period: Period,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ManageSection {
+    Banks,
+    CloseMonth,
+    Import,
+    Status,
+    Settings,
 }
 
-impl Filters {
-    pub fn is_empty(&self) -> bool {
-        *self == Self::default()
-    }
+impl ManageSection {
+    const ALL: [Self; 5] = [
+        Self::Banks,
+        Self::CloseMonth,
+        Self::Import,
+        Self::Status,
+        Self::Settings,
+    ];
 
-    pub fn query(&self, limit: u32) -> TxQuery {
-        let (from, to) = self.period.range();
-        TxQuery {
-            text: Some(self.text.trim().to_owned()).filter(|t| !t.is_empty()),
-            account_id: self.account,
-            category_id: match self.category {
-                CategoryFilter::Id(id) => Some(id),
-                _ => None,
-            },
-            uncategorised: self.category == CategoryFilter::Uncategorised,
-            kind: self.kind,
-            from,
-            to,
-            limit,
-            offset: 0,
+    fn label(self) -> &'static str {
+        match self {
+            Self::Banks => "Banks",
+            Self::CloseMonth => "Close month",
+            Self::Import => "Import",
+            Self::Status => "Status",
+            Self::Settings => "Settings",
         }
     }
 }
 
+/// Navigation and refresh state every screen can reach.
 #[derive(Clone, Copy, Debug)]
 pub struct AppState {
-    pub page: RwSignal<Page>,
-    pub filters: RwSignal<Filters>,
-    pub facets: Loaded<Facets>,
-    /// Bumped to ask the search box to take focus.
-    pub focus_search: RwSignal<u32>,
-    pub updates: Loaded<UpdateStatus>,
-    /// Bumped to reload `updates`.
-    pub updates_changed: RwSignal<u32>,
+    pub tab: RwSignal<Tab>,
+    pub spending: RwSignal<SpendingSection>,
+    pub manage: RwSignal<ManageSection>,
+    /// Bumped after every write so screens reload their data.
+    pub revision: RwSignal<u32>,
+    /// When the shown data was built (local `YYYY-MM-DD HH:MM`).
+    pub updated: RwSignal<Option<String>>,
+    pub refresh_failed: RwSignal<bool>,
+    pub busy: RwSignal<bool>,
+    /// The dashboard report every screen reads; reloaded on `revision`.
+    pub report: Loaded<Dashboard>,
 }
 
 impl AppState {
-    /// Open Transactions with exactly these filters.
-    pub fn show_transactions(&self, filters: Filters) {
-        self.filters.set(filters);
-        self.page.set(Page::Transactions);
+    pub fn go(&self, tab: Tab) {
+        self.tab.set(tab);
+    }
+
+    pub fn go_spending(&self, section: SpendingSection) {
+        self.spending.set(section);
+        self.tab.set(Tab::Spending);
+    }
+
+    pub fn go_manage(&self, section: ManageSection) {
+        self.manage.set(section);
+        self.tab.set(Tab::Manage);
+    }
+
+    /// Re-read the data from disk and reload every screen.
+    pub fn refresh(&self) {
+        let revision = self.revision;
+        self.busy.set(true);
+        leptos::task::spawn_local(async move {
+            let _ = api::invoke::<()>("refresh", &NoArgs {}).await;
+            revision.update(|n| *n += 1);
+        });
     }
 }
 
@@ -151,132 +145,197 @@ pub fn state() -> AppState {
 
 #[component]
 fn App() -> impl IntoView {
-    let updates_changed = RwSignal::new(0_u32);
+    let revision = RwSignal::new(0_u32);
     let app = AppState {
-        page: RwSignal::new(Page::Overview),
-        filters: RwSignal::new(Filters::default()),
-        facets: load("facets", || NoArgs {}),
-        focus_search: RwSignal::new(0),
-        updates: load("update_status", move || {
-            updates_changed.track();
+        tab: RwSignal::new(Tab::Overview),
+        spending: RwSignal::new(SpendingSection::PlanPatterns),
+        manage: RwSignal::new(ManageSection::Banks),
+        revision,
+        updated: RwSignal::new(None),
+        refresh_failed: RwSignal::new(false),
+        busy: RwSignal::new(false),
+        report: load("dashboard", move || {
+            revision.track();
             NoArgs {}
         }),
-        updates_changed,
     };
     provide_context(app);
-    // The backend announces every change in update state (check, install…).
-    let on_change = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
-        updates_changed.update(|n| *n += 1);
+    Effect::new(move |_| {
+        if let Some(result) = app.report.data.get() {
+            app.busy.set(app.report.loading.get());
+            match result {
+                Ok(report) => {
+                    app.updated.set(Some(report.generated_at.clone()));
+                    app.refresh_failed.set(false);
+                }
+                Err(_) => app.refresh_failed.set(true),
+            }
+        }
     });
-    api::listen("update-status", &on_change);
-    on_change.forget();
+    if api::in_app()
+        && let Some(root) = document().document_element()
+    {
+        let _ = root.class_list().add_1("glass");
+    }
 
-    // ⌘1–5 switch screens, ⌘F searches transactions.
+    // ⌘1–5 switch sections, ⌘R refreshes.
     let handle = window_event_listener(ev::keydown, move |e| {
         if !e.meta_key() || e.shift_key() || e.alt_key() || e.ctrl_key() {
             return;
         }
         let key = e.key();
-        if let Some(page) = key
+        if let Some(tab) = key
             .parse::<usize>()
             .ok()
-            .and_then(|n| Page::ALL.get(n.wrapping_sub(1)))
+            .and_then(|n| Tab::ALL.get(n.wrapping_sub(1)))
         {
             e.prevent_default();
-            app.page.set(*page);
-        } else if key == "f" {
+            app.go(*tab);
+        } else if key == "r" {
             e.prevent_default();
-            app.page.set(Page::Transactions);
-            app.focus_search.update(|n| *n += 1);
+            app.refresh();
         }
     });
     on_cleanup(move || handle.remove());
 
     view! {
-        <div class="app">
-            <Sidebar />
-            <main class="main">
-                <header class="topbar" data-tauri-drag-region="">
-                    <h1 data-tauri-drag-region="">{move || app.page.get().title()}</h1>
-                </header>
-                <div class="content">
-                    {move || match app.page.get() {
-                        Page::Overview => pages::overview::Overview().into_any(),
-                        Page::Transactions => pages::transactions::Transactions().into_any(),
-                        Page::Accounts => pages::accounts::Accounts().into_any(),
-                        Page::Categories => pages::categories::Categories().into_any(),
-                        Page::Data => pages::data::Data().into_any(),
+        <div class="app-surface h-full overflow-y-auto font-sans text-fg">
+            <div class="fixed inset-x-0 top-0 z-40 h-10" data-tauri-drag-region=""></div>
+            <div class="mx-auto w-full min-w-0 max-w-6xl px-4 pb-10 pt-12 sm:px-10 sm:pt-14">
+                <Header />
+                <Tabs />
+                <div role="tabpanel" class="mt-0 min-w-0">
+                    {move || match app.tab.get() {
+                        Tab::Overview => pages::overview::Overview().into_any(),
+                        Tab::Transactions => pages::transactions::Transactions().into_any(),
+                        Tab::Spending => view! { <SpendingTabs /> }.into_any(),
+                        Tab::Plan => pages::plan::Plan().into_any(),
+                        Tab::Manage => view! { <ManageTabs /> }.into_any(),
                     }}
                 </div>
-            </main>
+            </div>
         </div>
     }
 }
 
 #[component]
-fn Sidebar() -> impl IntoView {
+fn Header() -> impl IntoView {
     let app = state();
-    let status = load::<finance_types::DataStatus, _>("status", || NoArgs {});
     view! {
-        <nav class="sidebar" aria-label="Sections">
-            <div class="sidebar-drag" data-tauri-drag-region=""></div>
-            <ul class="nav">
-                {Page::ALL
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, page)| {
-                        view! {
-                            <li>
-                                <button
-                                    class="nav-item"
-                                    class:active=move || app.page.get() == page
-                                    aria-current=move || (app.page.get() == page).then_some("page")
-                                    title=format!("{} (⌘{})", page.title(), i + 1)
-                                    on:click=move |_| app.page.set(page)
-                                >
-                                    {icons::page(page)}
-                                    <span class="nav-label">{page.title()}</span>
-                                </button>
-                            </li>
-                        }
-                    })
-                    .collect_view()}
-            </ul>
-            {move || {
-                app.updates
-                    .data
-                    .get()
-                    .and_then(Result::ok)
-                    .and_then(|u| u.available)
-                    .map(|u| {
-                        view! {
-                            <button
-                                class="update-pill"
-                                title=format!("Version {} is ready to install", u.version)
-                                on:click=move |_| app.page.set(Page::Data)
-                            >
-                                <span class="dot accent"></span>
-                                <span class="nav-label">{format!("Update to {}", u.version)}</span>
-                            </button>
-                        }
-                    })
-            }}
-            <div class="sidebar-foot">
-                {move || {
-                    status
-                        .data
-                        .get()
-                        .and_then(Result::ok)
-                        .and_then(|s| s.last_date)
-                        .map(|d| {
-                            view! {
-                                <span class="dot"></span>
-                                <span class="nav-label">"Data through " {format::date(&d)}</span>
-                            }
-                        })
-                }}
+        <div class="mb-6 flex items-start justify-between gap-4 sm:mb-7 sm:items-center" data-tauri-drag-region="">
+            <div class="min-w-0" data-tauri-drag-region="">
+                <Eyebrow level=Heading::P>"Finance"</Eyebrow>
+                <h1 class="mt-1.5 text-display font-semibold leading-none tracking-tight">"Your money"</h1>
+                <p class="mt-2 flex items-center gap-2 text-xs text-fg-muted">
+                    <span
+                        aria-hidden="true"
+                        class=move || cn([
+                            "size-1.5 shrink-0 rounded-pill",
+                            if app.refresh_failed.get() { "bg-warning" } else { "bg-positive" },
+                        ])
+                    ></span>
+                    <span>{move || app.updated.get().map(|u| format!("Updated {}", format::stamp(&u))).unwrap_or_else(|| "Loading…".into())}</span>
+                </p>
             </div>
-        </nav>
+            <div class="flex shrink-0 items-center gap-2">
+                <button
+                    type="button"
+                    class=cn([button_class(Variant::Secondary, Size::Md).as_str(), "size-9 px-0 sm:size-auto sm:h-10 sm:px-4"])
+                    disabled=move || app.busy.get()
+                    aria-label=move || if app.busy.get() { "Refreshing finance report" } else { "Refresh finance report" }
+                    on:click=move |_| app.refresh()
+                >
+                    <span class=move || if app.busy.get() { "inline-flex motion-safe:animate-spin" } else { "inline-flex" }>
+                        <Lucide icon=Icon::RefreshCw size=15 />
+                    </span>
+                    <span class="sr-only sm:not-sr-only">{move || if app.busy.get() { "Refreshing…" } else { "Refresh" }}</span>
+                </button>
+            </div>
+        </div>
+    }
+}
+
+#[component]
+fn Tabs() -> impl IntoView {
+    let app = state();
+    view! {
+        <div
+            role="tablist"
+            aria-label="Finance sections"
+            class=cn([TABS_LIST, "glass-bar mb-4 flex w-full gap-0.5 sm:mb-6 sm:inline-flex sm:w-auto sm:gap-1"])
+        >
+            {Tab::ALL
+                .into_iter()
+                .enumerate()
+                .map(|(i, tab)| {
+                    view! {
+                        <button
+                            type="button"
+                            role="tab"
+                            aria-selected=move || (app.tab.get() == tab).to_string()
+                            data-state=move || if app.tab.get() == tab { "active" } else { "inactive" }
+                            title=format!("{} (⌘{})", tab.label(), i + 1)
+                            class=cn([TABS_TRIGGER, "min-w-0 grow justify-center truncate px-1.5 text-eyebrow sm:grow-0 sm:px-4 sm:text-xs"])
+                            on:click=move |_| app.go(tab)
+                        >
+                            {tab.label()}
+                        </button>
+                    }
+                })
+                .collect_view()}
+        </div>
+    }
+}
+
+#[component]
+fn SpendingTabs() -> impl IntoView {
+    let app = state();
+    view! {
+        <div class="mb-4 max-w-full overflow-x-auto sm:mb-5">
+            <SegmentedControl
+                label="Spending workspace"
+                class="w-max"
+                value=Signal::derive(move || app.spending.get().label().to_owned())
+                on_change=Callback::new(move |v: String| {
+                    if let Some(s) = SpendingSection::ALL.into_iter().find(|s| s.label() == v) {
+                        app.spending.set(s);
+                    }
+                })
+                items=SpendingSection::ALL.iter().map(|s| (s.label().to_owned(), s.label().to_owned())).collect()
+            />
+        </div>
+        {move || match app.spending.get() {
+            SpendingSection::PlanPatterns => pages::spending::PlanPatterns().into_any(),
+            SpendingSection::Organise => pages::spending::Organise().into_any(),
+            SpendingSection::History => pages::spending::History().into_any(),
+        }}
+    }
+}
+
+#[component]
+fn ManageTabs() -> impl IntoView {
+    let app = state();
+    view! {
+        <div class="mb-4 max-w-full overflow-x-auto sm:mb-5">
+            <SegmentedControl
+                label="Manage finance"
+                class="w-max"
+                value=Signal::derive(move || app.manage.get().label().to_owned())
+                on_change=Callback::new(move |v: String| {
+                    if let Some(s) = ManageSection::ALL.into_iter().find(|s| s.label() == v) {
+                        app.manage.set(s);
+                    }
+                })
+                items=ManageSection::ALL.iter().map(|s| (s.label().to_owned(), s.label().to_owned())).collect()
+            />
+        </div>
+        {move || match app.manage.get() {
+            ManageSection::Banks => pages::manage::Banks().into_any(),
+            ManageSection::CloseMonth => pages::manage::CloseMonth().into_any(),
+            ManageSection::Import => pages::manage::Import().into_any(),
+            ManageSection::Status => pages::manage::Status().into_any(),
+            ManageSection::Settings => pages::manage::Settings().into_any(),
+        }}
     }
 }
 

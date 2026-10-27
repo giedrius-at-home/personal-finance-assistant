@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-save-review-details"
+description = "Enables the save_review_details command without any pre-configured scope."
+commands.allow = ["save_review_details"]
+
+[[permission]]
+identifier = "deny-save-review-details"
+description = "Denies the save_review_details command without any pre-configured scope."
+commands.deny = ["save_review_details"]

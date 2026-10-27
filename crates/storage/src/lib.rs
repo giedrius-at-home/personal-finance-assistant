@@ -13,6 +13,7 @@ use rusqlite::{Connection, OpenFlags};
 
 pub use ledger::{
     Ledger, LedgerAccount, LedgerBill, LedgerCategory, LedgerPosting, LedgerTransaction,
+    NewTransaction, counterparty_account, insert_transaction, search_text,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -41,6 +42,15 @@ pub fn default_db_path() -> Result<PathBuf> {
     Ok(data_dir()?.join("finance.sqlite3"))
 }
 
+/// Reports group and sort large gateway tables (59k category proposals):
+/// keep temporary b-trees in memory and give the page cache room.
+fn tune(conn: &Connection) -> Result<()> {
+    conn.pragma_update(None, "temp_store", "MEMORY")?;
+    conn.pragma_update(None, "cache_size", -65536)?;
+    conn.pragma_update(None, "mmap_size", 268_435_456)?;
+    Ok(())
+}
+
 #[derive(Debug)]
 pub struct Store {
     conn: Connection,
@@ -56,6 +66,7 @@ impl Store {
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
         conn.pragma_update(None, "query_only", true)?;
+        tune(&conn)?;
         Ok(Self { conn })
     }
 
@@ -65,6 +76,7 @@ impl Store {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "foreign_keys", true)?;
         conn.pragma_update(None, "secure_delete", true)?;
+        tune(&conn)?;
         let store = Self { conn };
         store.migrate()?;
         Ok(store)
@@ -96,6 +108,17 @@ impl Store {
             tx.commit()?;
         }
         Ok(())
+    }
+
+    /// The connection, for the computations in `finance-core` that read the
+    /// gateway tables directly.
+    pub fn connection(&self) -> &Connection {
+        &self.conn
+    }
+
+    /// The connection, for write transactions in `finance-core`.
+    pub fn connection_mut(&mut self) -> &mut Connection {
+        &mut self.conn
     }
 
     /// `PRAGMA integrity_check` returned "ok".

@@ -7,82 +7,235 @@
 
 mod update;
 
-use std::path::PathBuf;
-use std::sync::Mutex;
-
+use finance_core::service::Service;
 use finance_secrets::{Item, Secret};
-use finance_storage::Store;
-use finance_types::{
-    AccountSummary, CategoryTotal, DataStatus, Facets, Overview, TxPage, TxQuery, UpdateStatus,
+use finance_types::gateway::BudgetPlan;
+use finance_types::report::closure::{
+    AccountRoleDraft, ClosureAction, ClosureView, PotDraft, PotView, PotsView, UnclassifiedAccounts,
 };
+use finance_types::report::review::{TransactionSearchQuery, TransactionSearchResult};
+use finance_types::report::{Dashboard, ReviewReport};
+use finance_types::{DataStatus, UpdateStatus};
 use tauri::{AppHandle, Manager, State};
 use update::Updates;
 
-/// The store is opened lazily so the app can start (and explain itself)
-/// before any data has been migrated.
-struct Db {
-    path: PathBuf,
-    store: Mutex<Option<Store>>,
-}
-
-/// Errors cross the boundary as short, data-free strings the UI can show.
-const NO_DATA: &str = "no-data";
-
-impl Db {
-    fn with<T>(&self, f: impl FnOnce(&Store) -> finance_storage::Result<T>) -> Result<T, String> {
-        let result = self.run(f);
-        // Diagnostics: command outcome only, never any data.
-        if std::env::var_os("FINANCE_TRACE").is_some() {
-            eprintln!(
-                "finance: command {}",
-                if result.is_ok() { "ok" } else { "failed" }
-            );
-        }
-        result
+/// Diagnostics: command outcome only, never any data.
+fn traced<T>(name: &str, result: Result<T, String>) -> Result<T, String> {
+    if std::env::var_os("FINANCE_TRACE").is_some() {
+        eprintln!(
+            "finance: {name} {}",
+            if result.is_ok() { "ok" } else { "failed" }
+        );
     }
-
-    fn run<T>(&self, f: impl FnOnce(&Store) -> finance_storage::Result<T>) -> Result<T, String> {
-        let mut guard = self.store.lock().map_err(|_| "store-poisoned".to_owned())?;
-        if guard.is_none() {
-            if !self.path.exists() {
-                return Err(NO_DATA.to_owned());
-            }
-            *guard = Some(Store::open_read_only(&self.path).map_err(|e| e.to_string())?);
-        }
-        let store = guard.as_ref().ok_or_else(|| NO_DATA.to_owned())?;
-        f(store).map_err(|e| e.to_string())
-    }
+    result
 }
 
 #[tauri::command(async)]
-fn overview(db: State<'_, Db>) -> Result<Overview, String> {
-    db.with(Store::overview)
+fn dashboard(service: State<'_, Service>) -> Result<Dashboard, String> {
+    traced("dashboard", service.dashboard())
 }
 
 #[tauri::command(async)]
-fn accounts(db: State<'_, Db>) -> Result<Vec<AccountSummary>, String> {
-    db.with(Store::accounts)
+fn review(service: State<'_, Service>) -> Result<ReviewReport, String> {
+    traced("review", service.review())
 }
 
 #[tauri::command(async)]
-fn facets(db: State<'_, Db>) -> Result<Facets, String> {
-    db.with(Store::facets)
+fn search_transactions(
+    service: State<'_, Service>,
+    query: TransactionSearchQuery,
+) -> Result<TransactionSearchResult, String> {
+    traced("search", service.search(&query))
+}
+
+/// Re-read the data from disk on the next request.
+#[tauri::command(async)]
+fn refresh(service: State<'_, Service>) {
+    service.refresh();
 }
 
 #[tauri::command(async)]
-fn transactions(db: State<'_, Db>, query: TxQuery) -> Result<TxPage, String> {
-    db.with(|s| s.transactions(&query))
+fn save_budget_plan(service: State<'_, Service>, plan: BudgetPlan) -> Result<BudgetPlan, String> {
+    traced("save_budget_plan", service.save_budget_plan(plan))
 }
 
 #[tauri::command(async)]
-fn category_totals(db: State<'_, Db>, month: String) -> Result<Vec<CategoryTotal>, String> {
-    db.with(|s| s.category_totals(&month))
+fn save_spending_group(
+    service: State<'_, Service>,
+    category: String,
+    group: Option<String>,
+    revision: u32,
+) -> Result<(), String> {
+    traced(
+        "save_spending_group",
+        service.save_spending_group(&category, group.as_deref(), revision),
+    )
 }
 
 #[tauri::command(async)]
-fn status(db: State<'_, Db>) -> Result<DataStatus, String> {
-    db.with(Store::status)
+fn create_spending_group(service: State<'_, Service>, group: String) -> Result<String, String> {
+    traced(
+        "create_spending_group",
+        service.create_spending_group(&group),
+    )
 }
+
+#[tauri::command(async)]
+fn create_planned_payment(
+    service: State<'_, Service>,
+    request: finance_types::gateway::PlannedPaymentRequest,
+) -> Result<finance_types::gateway::PlannedPayment, String> {
+    traced(
+        "create_planned_payment",
+        service.create_planned_payment(&request),
+    )
+}
+
+/// Snake-case argument keys (`plan_id`), as the UI and devserver send them.
+#[tauri::command(async, rename_all = "snake_case")]
+fn archive_planned_payment(service: State<'_, Service>, plan_id: String) -> Result<(), String> {
+    traced(
+        "archive_planned_payment",
+        service.archive_planned_payment(&plan_id),
+    )
+}
+
+#[tauri::command(async)]
+fn closure(service: State<'_, Service>, month: String) -> Result<ClosureView, String> {
+    traced("closure", service.closure(&month))
+}
+
+#[tauri::command(async)]
+fn closure_action(
+    service: State<'_, Service>,
+    action: ClosureAction,
+) -> Result<ClosureView, String> {
+    traced("closure_action", service.closure_action(action))
+}
+
+#[tauri::command(async)]
+fn closure_pots(service: State<'_, Service>) -> Result<PotsView, String> {
+    traced("closure_pots", service.pots())
+}
+
+#[tauri::command(async)]
+fn save_pot(service: State<'_, Service>, pot: PotDraft) -> Result<PotView, String> {
+    traced("save_pot", service.save_pot(pot))
+}
+
+#[tauri::command(async)]
+fn save_account_role(service: State<'_, Service>, role: AccountRoleDraft) -> Result<(), String> {
+    traced("save_account_role", service.save_account_role(role))
+}
+
+#[tauri::command(async)]
+fn unclassified_accounts(service: State<'_, Service>) -> Result<UnclassifiedAccounts, String> {
+    traced("unclassified_accounts", service.unclassified_accounts())
+}
+
+#[tauri::command(async)]
+fn status(service: State<'_, Service>) -> Result<DataStatus, String> {
+    traced("status", service.status())
+}
+
+// Transactions tab.
+
+#[tauri::command(async)]
+fn personal_transactions(
+    service: State<'_, Service>,
+    query: String,
+) -> Result<rv::PersonalTransactions, String> {
+    traced(
+        "personal_transactions",
+        service.personal_transactions(&query),
+    )
+}
+
+#[tauri::command(async)]
+fn save_personal_choice(
+    service: State<'_, Service>,
+    choice: rv::PersonalChoice,
+) -> Result<rv::PersonalSaved, String> {
+    traced("save_personal_choice", service.save_personal_choice(choice))
+}
+
+#[tauri::command(async)]
+fn set_transaction_category(
+    service: State<'_, Service>,
+    change: rv::CategoryChange,
+) -> Result<rv::CategorySaved, String> {
+    traced(
+        "set_transaction_category",
+        service.set_transaction_category(change),
+    )
+}
+
+#[tauri::command(async)]
+fn review_decisions(
+    service: State<'_, Service>,
+    decisions: Vec<rv::ReviewDecision>,
+) -> Result<rv::DecisionsSaved, String> {
+    traced("review_decisions", service.review_decisions(decisions))
+}
+
+#[tauri::command(async)]
+fn review_batch(
+    service: State<'_, Service>,
+    items: Vec<rv::BatchDecision>,
+) -> Result<rv::BatchSaved, String> {
+    traced("review_batch", service.review_batch(items))
+}
+
+#[tauri::command(async)]
+fn review_category_options(
+    service: State<'_, Service>,
+    proposal: String,
+) -> Result<rv::CategoryOptions, String> {
+    traced(
+        "review_category_options",
+        service.review_category_options(&proposal),
+    )
+}
+
+#[tauri::command(async)]
+fn save_review_details(
+    service: State<'_, Service>,
+    details: rv::DetailsSave,
+) -> Result<finance_types::gateway::SavedDetails, String> {
+    traced("save_review_details", service.save_review_details(details))
+}
+
+#[tauri::command(async)]
+fn audit_daily_review(
+    service: State<'_, Service>,
+    transaction: String,
+) -> Result<rv::Audited, String> {
+    traced(
+        "audit_daily_review",
+        service.audit_daily_review(&transaction),
+    )
+}
+
+#[tauri::command(async)]
+fn preview_consolidation(
+    service: State<'_, Service>,
+    request: rv::Consolidation,
+) -> Result<rv::ConsolidationPreview, String> {
+    traced(
+        "preview_consolidation",
+        service.preview_consolidation(&request),
+    )
+}
+
+#[tauri::command(async)]
+fn apply_consolidation(
+    service: State<'_, Service>,
+    request: rv::Consolidation,
+) -> Result<rv::ConsolidationApplied, String> {
+    traced("apply_consolidation", service.apply_consolidation(request))
+}
+
+use finance_types::report::review as rv;
 
 #[tauri::command]
 fn update_status(app: AppHandle, updates: State<'_, Updates>) -> UpdateStatus {
@@ -117,45 +270,195 @@ fn forget_release_token() -> Result<(), String> {
     finance_secrets::delete(Item::ReleaseToken).map_err(|e| e.to_string())
 }
 
+#[tauri::command(async)]
+fn manage_workspace(
+    service: State<'_, Service>,
+) -> Result<finance_types::manage::ManageWorkspace, String> {
+    traced("manage_workspace", service.manage_workspace())
+}
+
+#[tauri::command(async)]
+fn banks(service: State<'_, Service>) -> Result<finance_types::manage::BanksReport, String> {
+    traced("banks", service.banks())
+}
+
+#[tauri::command(async)]
+fn preview_csv_import(
+    service: State<'_, Service>,
+    upload: finance_types::manage::CsvUpload,
+) -> Result<finance_types::manage::CsvPreview, String> {
+    traced("preview_csv_import", service.preview_csv_import(upload))
+}
+
+#[tauri::command(async)]
+fn commit_csv_import(
+    service: State<'_, Service>,
+    commit: finance_types::manage::CsvCommit,
+) -> Result<finance_types::manage::CsvCommitResult, String> {
+    traced("commit_csv_import", service.commit_csv_import(commit))
+}
+
+#[tauri::command(async)]
+fn preview_settings(
+    service: State<'_, Service>,
+    form: finance_types::manage::SettingsForm,
+) -> Result<finance_types::manage::SettingsPreview, String> {
+    traced("preview_settings", service.preview_settings(form))
+}
+
+#[tauri::command(async)]
+fn apply_settings(
+    service: State<'_, Service>,
+    apply: finance_types::manage::SettingsApply,
+) -> Result<i64, String> {
+    traced("apply_settings", service.apply_settings(apply))
+}
+
+#[tauri::command(async)]
+fn rollback_settings(service: State<'_, Service>, revision: i64) -> Result<(), String> {
+    traced("rollback_settings", service.rollback_settings(revision))
+}
+
+/// macOS 26 Liquid Glass behind the transparent web view; on older systems
+/// the translucent window-background material (the same look as Finder's
+/// sidebars). The UI tints it with the site's page colour.
+#[cfg(target_os = "macos")]
+fn apply_glass(window: &tauri::WebviewWindow) {
+    use window_vibrancy::{
+        LiquidGlassOptions, NSGlassEffectViewStyle, NSVisualEffectMaterial, NSVisualEffectState,
+        apply_liquid_glass, apply_vibrancy,
+    };
+    let glass = apply_liquid_glass(
+        window,
+        LiquidGlassOptions::new(NSGlassEffectViewStyle::Regular),
+    );
+    if std::env::var_os("FINANCE_TRACE").is_some() {
+        eprintln!(
+            "finance: liquid glass {}",
+            if glass.is_ok() { "on" } else { "unavailable" }
+        );
+    }
+    if glass.is_err() {
+        apply_vibrancy(
+            window,
+            NSVisualEffectMaterial::UnderWindowBackground,
+            Some(NSVisualEffectState::Active),
+            None,
+        )
+        .expect("vibrancy is supported on macOS");
+    }
+}
+
+#[tauri::command(async)]
+fn create_bill(
+    service: State<'_, Service>,
+    request: finance_types::gateway::BillCreateRequest,
+) -> Result<finance_types::gateway::BillSaved, String> {
+    traced("create_bill", service.create_bill(request))
+}
+
+#[tauri::command(async)]
+fn edit_bill(
+    service: State<'_, Service>,
+    request: finance_types::gateway::BillEditRequest,
+) -> Result<(), String> {
+    traced("edit_bill", service.edit_bill(request))
+}
+
+#[tauri::command(async)]
+fn archive_bill(
+    service: State<'_, Service>,
+    request: finance_types::gateway::BillRef,
+) -> Result<(), String> {
+    traced("archive_bill", service.archive_bill(request))
+}
+
+#[tauri::command(async)]
+fn save_subscription_categories(
+    service: State<'_, Service>,
+    request: finance_types::gateway::SubscriptionCategoriesRequest,
+) -> Result<finance_types::gateway::SubscriptionCategoryRule, String> {
+    traced(
+        "save_subscription_categories",
+        service.save_subscription_categories(request),
+    )
+}
+
+#[tauri::command(async)]
+fn link_bill_payment(
+    service: State<'_, Service>,
+    request: finance_types::gateway::BillMatchRequest,
+) -> Result<(), String> {
+    traced("link_bill_payment", service.link_bill_payment(request))
+}
+
+#[tauri::command(async)]
+fn decline_bill_match(
+    service: State<'_, Service>,
+    request: finance_types::gateway::BillMatchRequest,
+) -> Result<(), String> {
+    traced("decline_bill_match", service.decline_bill_match(request))
+}
+
 fn main() {
     let path = finance_storage::default_db_path().expect("application data folder");
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         // Reopen with the size and position the owner left the window at.
         .plugin(tauri_plugin_window_state::Builder::new().build())
-        .manage(Db {
-            path,
-            store: Mutex::new(None),
-        })
+        .manage(Service::new(path))
         .manage(Updates::default())
         .invoke_handler(tauri::generate_handler![
-            overview,
-            accounts,
-            facets,
-            transactions,
-            category_totals,
+            dashboard,
+            review,
+            search_transactions,
+            refresh,
+            save_budget_plan,
+            save_spending_group,
+            create_spending_group,
             status,
             update_status,
             check_for_updates,
             install_update,
             set_release_token,
             forget_release_token,
+            create_bill,
+            edit_bill,
+            archive_bill,
+            save_subscription_categories,
+            link_bill_payment,
+            decline_bill_match,
+            create_planned_payment,
+            archive_planned_payment,
+            closure,
+            closure_action,
+            closure_pots,
+            save_pot,
+            save_account_role,
+            unclassified_accounts,
+            manage_workspace,
+            banks,
+            preview_csv_import,
+            commit_csv_import,
+            preview_settings,
+            apply_settings,
+            rollback_settings,
+            personal_transactions,
+            save_personal_choice,
+            set_transaction_category,
+            review_decisions,
+            review_batch,
+            review_category_options,
+            save_review_details,
+            audit_daily_review,
+            preview_consolidation,
+            apply_consolidation,
         ])
         .setup(|app| {
             update::schedule(app.handle().clone());
             #[cfg(target_os = "macos")]
             if let Some(window) = app.get_webview_window("main") {
-                use window_vibrancy::{
-                    NSVisualEffectMaterial, NSVisualEffectState, apply_vibrancy,
-                };
-                // Sidebar material is the system's translucent, wallpaper-tinted glass.
-                apply_vibrancy(
-                    &window,
-                    NSVisualEffectMaterial::Sidebar,
-                    Some(NSVisualEffectState::Active),
-                    None,
-                )
-                .expect("vibrancy is supported on macOS");
+                apply_glass(&window);
             }
             Ok(())
         })
