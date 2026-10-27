@@ -2,7 +2,7 @@
 //!
 //! The release workflow publishes `latest.json` next to the signed app
 //! archive. The repository is private, so both are fetched through the GitHub
-//! API with a read-only token kept in the Keychain. The updater plugin checks
+//! API with a read-only token kept in the secret store. The updater plugin checks
 //! the archive's signature against the public key compiled into the app and
 //! refuses anything that does not verify or is not newer.
 

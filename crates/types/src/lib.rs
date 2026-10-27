@@ -262,7 +262,7 @@ pub struct ForecastModelStatus {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UpdateStatus {
     pub current_version: String,
-    /// A release token is stored in the Keychain.
+    /// A release token is stored in the secret store.
     pub token_set: bool,
     pub checking: bool,
     pub installing: bool,

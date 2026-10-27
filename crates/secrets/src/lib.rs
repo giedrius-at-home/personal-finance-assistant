@@ -1,14 +1,19 @@
-//! Secrets live in the macOS Keychain under the app's service name. In memory
-//! they are [`Secret`]s: wiped on drop and never printed by `Debug`.
+//! The app's secrets (tokens, keys, bank consents), each in its own file in
+//! `~/Library/Application Support/Finance/secrets/`: the folder is readable
+//! by the owner only (0700) and every file too (0600), as the old bank
+//! importer kept the same secrets. The Keychain was dropped because every new
+//! (ad-hoc signed) build of the app had to be approved again with the
+//! keychain password. In memory secrets are [`Secret`]s: wiped on drop and
+//! never printed by `Debug`.
 
 use std::fmt;
+use std::fs;
+use std::io::Write;
+use std::path::PathBuf;
 
 use zeroize::Zeroizing;
 
-#[cfg(target_os = "macos")]
-const SERVICE: &str = "local.giedrius.finance";
-
-/// Keychain items the app uses.
+/// Secrets the app keeps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Item {
     /// Fine-grained, read-only GitHub token for downloading releases.
@@ -46,8 +51,7 @@ impl Bank {
 }
 
 impl Item {
-    #[cfg(target_os = "macos")]
-    fn account(self) -> &'static str {
+    fn file(self) -> &'static str {
         match self {
             Self::ReleaseToken => "github-release-token",
             Self::EnableBankingAppId => "enable-banking-app-id",
@@ -63,12 +67,12 @@ impl Item {
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("keychain error {0}")]
-    Keychain(i32),
+    #[error("secret store: {0}")]
+    Io(#[from] std::io::Error),
     #[error("stored secret is not text")]
     NotText,
-    #[error("the keychain is only available on macOS")]
-    Unsupported,
+    #[error("no home folder")]
+    NoHome,
 }
 
 /// A secret value that is zeroed when dropped.
@@ -90,55 +94,111 @@ impl fmt::Debug for Secret {
     }
 }
 
-#[cfg(target_os = "macos")]
-mod keychain {
-    use security_framework::passwords;
-    use zeroize::Zeroizing;
-
-    use super::{Error, Item, SERVICE, Secret};
-
-    /// errSecItemNotFound
-    const NOT_FOUND: i32 = -25300;
-
-    pub fn get(item: Item) -> Result<Option<Secret>, Error> {
-        match passwords::get_generic_password(SERVICE, item.account()) {
-            Ok(bytes) => {
-                let bytes = Zeroizing::new(bytes);
-                let text = std::str::from_utf8(&bytes).map_err(|_| Error::NotText)?;
-                Ok(Some(Secret::new(text.to_owned())))
-            }
-            Err(e) if e.code() == NOT_FOUND => Ok(None),
-            Err(e) => Err(Error::Keychain(e.code())),
-        }
+/// The secrets folder: `FINANCE_SECRETS_DIR` when set (tests), else
+/// `~/Library/Application Support/Finance/secrets`.
+fn dir() -> Result<PathBuf, Error> {
+    if let Some(dir) = std::env::var_os("FINANCE_SECRETS_DIR") {
+        return Ok(PathBuf::from(dir));
     }
+    let home = std::env::var_os("HOME").ok_or(Error::NoHome)?;
+    Ok(PathBuf::from(home).join("Library/Application Support/Finance/secrets"))
+}
 
-    pub fn set(item: Item, value: &Secret) -> Result<(), Error> {
-        passwords::set_generic_password(SERVICE, item.account(), value.expose().as_bytes())
-            .map_err(|e| Error::Keychain(e.code()))
-    }
+#[cfg(unix)]
+fn private_dir(path: &std::path::Path) -> Result<(), Error> {
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+    fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(path)?;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+    Ok(())
+}
 
-    pub fn delete(item: Item) -> Result<(), Error> {
-        match passwords::delete_generic_password(SERVICE, item.account()) {
-            Ok(()) => Ok(()),
-            Err(e) if e.code() == NOT_FOUND => Ok(()),
-            Err(e) => Err(Error::Keychain(e.code())),
+#[cfg(not(unix))]
+fn private_dir(path: &std::path::Path) -> Result<(), Error> {
+    fs::create_dir_all(path)?;
+    Ok(())
+}
+
+pub fn get(item: Item) -> Result<Option<Secret>, Error> {
+    get_in(&dir()?, item)
+}
+
+pub fn set(item: Item, value: &Secret) -> Result<(), Error> {
+    set_in(&dir()?, item, value)
+}
+
+pub fn delete(item: Item) -> Result<(), Error> {
+    delete_in(&dir()?, item)
+}
+
+fn get_in(dir: &std::path::Path, item: Item) -> Result<Option<Secret>, Error> {
+    match fs::read(dir.join(item.file())) {
+        Ok(bytes) => {
+            let bytes = Zeroizing::new(bytes);
+            let text = std::str::from_utf8(&bytes).map_err(|_| Error::NotText)?;
+            Ok(Some(Secret::new(text.to_owned())))
         }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e.into()),
     }
 }
 
-#[cfg(not(target_os = "macos"))]
-mod keychain {
-    use super::{Error, Item, Secret};
+/// Write `value` to a fresh owner-only file, then move it into place, so a
+/// reader never sees half a secret.
+fn set_in(dir: &std::path::Path, item: Item, value: &Secret) -> Result<(), Error> {
+    private_dir(dir)?;
+    let path = dir.join(item.file());
+    let temporary = dir.join(format!(".{}.tmp", item.file()));
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(&temporary)?;
+    file.write_all(value.expose().as_bytes())?;
+    file.sync_all()?;
+    drop(file);
+    fs::rename(&temporary, &path)?;
+    Ok(())
+}
 
-    pub fn get(_: Item) -> Result<Option<Secret>, Error> {
-        Err(Error::Unsupported)
-    }
-    pub fn set(_: Item, _: &Secret) -> Result<(), Error> {
-        Err(Error::Unsupported)
-    }
-    pub fn delete(_: Item) -> Result<(), Error> {
-        Err(Error::Unsupported)
+fn delete_in(dir: &std::path::Path, item: Item) -> Result<(), Error> {
+    match fs::remove_file(dir.join(item.file())) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e.into()),
     }
 }
 
-pub use keychain::{delete, get, set};
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stores_owner_only_files() {
+        let dir = std::env::temp_dir()
+            .join(format!("finance-secrets-{}", std::process::id()))
+            .join("secrets");
+        let _ = fs::remove_dir_all(&dir);
+        let item = Item::BankConsent(Bank::Revolut);
+        assert!(get_in(&dir, item).unwrap().is_none());
+        set_in(&dir, item, &Secret::new("first".into())).unwrap();
+        set_in(&dir, item, &Secret::new("second".into())).unwrap();
+        assert_eq!(get_in(&dir, item).unwrap().unwrap().expose(), "second");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = |p: &std::path::Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode(&dir), 0o700);
+            assert_eq!(mode(&dir.join("bank-consent-revolut")), 0o600);
+        }
+        delete_in(&dir, item).unwrap();
+        delete_in(&dir, item).unwrap();
+        assert!(get_in(&dir, item).unwrap().is_none());
+        let _ = fs::remove_dir_all(dir.parent().unwrap());
+    }
+}

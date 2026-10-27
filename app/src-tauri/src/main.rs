@@ -263,7 +263,7 @@ async fn install_update(app: AppHandle) -> Result<(), String> {
     update::install(app).await
 }
 
-/// Store the read-only release token. It goes straight to the Keychain and is
+/// Store the read-only release token. It goes straight to the secret store and is
 /// never returned to the UI.
 #[tauri::command]
 async fn set_release_token(app: AppHandle, token: String) -> Result<(), String> {

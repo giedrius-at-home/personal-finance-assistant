@@ -1,6 +1,6 @@
 //! Manage → Settings → Daily email: the Rafael spending email the Python
 //! service sent (its `PFA_SPENDING_EMAIL_*` and `PFA_SMTP_*` settings), with
-//! the SMTP password kept in the Keychain and a "Send test" button.
+//! the SMTP password kept in the secret store and a "Send test" button.
 
 use finance_types::notify::{EmailSettings, EmailStatus, SmtpSecurity};
 use leptos::html::Input as InputElement;
@@ -176,15 +176,15 @@ pub fn EmailCard() -> impl IntoView {
             "set_smtp_password",
             PasswordArgs { password: value },
             move |(): ()| {
-                ops.notice.set("Password saved in your Keychain.".into());
+                ops.notice
+                    .set("Password saved privately on this Mac.".into());
                 changed.update(|n| *n += 1);
             },
         );
     };
     let forget_password = move |_| {
         ops.run("forget_smtp_password", NoArgs {}, move |(): ()| {
-            ops.notice
-                .set("Password removed from your Keychain.".into());
+            ops.notice.set("Password removed from this Mac.".into());
             changed.update(|n| *n += 1);
         });
     };
@@ -263,9 +263,9 @@ pub fn EmailCard() -> impl IntoView {
             <div class="mt-5 grid gap-3 border-t border-line pt-5">
                 <p class="text-sm text-fg-muted">
                     {if password_set {
-                        "An SMTP password is saved in your Keychain. For Gmail, use an app password."
+                        "An SMTP password is saved privately on this Mac. For Gmail, use an app password."
                     } else {
-                        "No SMTP password saved. For Gmail, create an app password; it is kept in your Keychain."
+                        "No SMTP password saved. For Gmail, create an app password; it is kept privately on this Mac."
                     }}
                 </p>
                 <form class="flex flex-col gap-3 sm:flex-row sm:items-end" on:submit=save_password>

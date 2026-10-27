@@ -1540,7 +1540,6 @@ dependencies = [
 name = "finance-secrets"
 version = "0.1.0"
 dependencies = [
- "security-framework",
  "thiserror 2.0.21",
  "zeroize",
 ]
