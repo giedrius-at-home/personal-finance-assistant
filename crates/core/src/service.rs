@@ -100,6 +100,26 @@ impl Service {
         f(&open.store, snapshot).map_err(|e| e.to_string())
     }
 
+    /// Run `f` on the store alone, without building a snapshot.
+    pub(crate) fn read_store<T>(
+        &self,
+        f: impl FnOnce(&rusqlite::Connection) -> crate::Result<T>,
+    ) -> Result<T, String> {
+        let mut guard = self.state.lock().map_err(|_| "store-poisoned".to_owned())?;
+        if guard.is_none() {
+            if !self.path.exists() {
+                return Err(NO_DATA.to_owned());
+            }
+            let store = Store::open_read_only(&self.path).map_err(|e| e.to_string())?;
+            *guard = Some(Open {
+                store,
+                snapshot: None,
+            });
+        }
+        let open = guard.as_ref().ok_or_else(|| NO_DATA.to_owned())?;
+        f(open.store.connection()).map_err(|e| e.to_string())
+    }
+
     /// Forget the cached snapshot so the next read sees the latest data.
     pub fn refresh(&self) {
         if let Ok(mut guard) = self.state.lock()
@@ -248,9 +268,9 @@ impl Service {
     }
 
     /// Run one closure step, then return the month's screen as it now stands.
-    /// A sync or finalize first re-reads the data in its own write (bank
-    /// refresh is a later phase), so late arrivals are flagged even when the
-    /// step itself is refused.
+    /// A sync or finalize first re-reads the data in its own write (the
+    /// screen syncs the banks before it asks), so late arrivals are flagged
+    /// even when the step itself is refused.
     pub fn closure_action(&self, action: ClosureAction) -> Result<ClosureView, String> {
         if matches!(
             action,

@@ -1129,6 +1129,7 @@ fn commit_staged(
                 amount: row.amount.abs(),
                 currency: &row.currency,
                 external_id: Some(&external_id),
+                internal_reference: None,
                 notes: None,
                 tags: &[],
             },

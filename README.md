@@ -17,6 +17,7 @@ Design: [docs/specs/2026-10-26-finance-assistant-rust-design.md](docs/specs/2026
 | `crates/storage` | SQLite schema, ledger import and the ledger queries |
 | `crates/core` | Finance logic: the canonical model, every report and every write (the Python service's port) |
 | `crates/secrets` | Keychain access, zeroizing secret values |
+| `crates/bank` | Enable Banking client (RS256 application token), consents in the Keychain, one sync at a time |
 | `crates/migrate` | One-off copy of the data from `laptopthree` |
 | `app/src-tauri` | The macOS app: window, glass, commands, updater |
 | `app/ui` | Leptos screens (compiled to WASM by Trunk; Tailwind 4 through Trunk) |
@@ -58,6 +59,23 @@ when trying edits: `DEV_DB=/path/to/copy.sqlite3 cargo run --release -p finance-
 
 Before the first write of each session the app saves a copy of the database
 to `~/Library/Application Support/Finance/backups/` (the last ten are kept).
+
+## Bank sync
+
+Banks sync straight from Enable Banking, replacing the old importer and
+Firefly. Set up once in Manage → Banks:
+
+1. **Application key**: the Enable Banking application id and its `.pem`
+   private key. Both go to the Keychain.
+2. **Consents**: "Use saved consents" takes over the consents the old
+   importer saved on this Mac, with their run history. A new consent
+   (an importer configuration file) goes through "Renew consent"; every
+   ledger account the old one filled must stay mapped.
+
+While the app is open it checks every 15 minutes and syncs each bank once a
+day (hourly retries after a failure, six hours after a rate limit). Each sync
+downloads the last 30 days, writes booked transactions it has not seen (by the
+bank's entry reference) and flags closed months that received late ones.
 
 ## Checks
 

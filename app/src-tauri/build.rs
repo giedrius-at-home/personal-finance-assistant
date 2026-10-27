@@ -44,6 +44,12 @@ const COMMANDS: &[&str] = &[
     "audit_daily_review",
     "preview_consolidation",
     "apply_consolidation",
+    "bank_sync_status",
+    "sync_bank",
+    "renew_bank_consent",
+    "adopt_bank_consents",
+    "set_bank_credentials",
+    "forget_bank_credentials",
 ];
 
 fn main() {
