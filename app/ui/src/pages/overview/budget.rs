@@ -61,6 +61,10 @@ struct Editor {
     source_groups: Vec<String>,
     categories: Vec<String>,
     transaction_ids: Vec<String>,
+    /// Cut order: blank never cuts, 1 protects most.
+    importance: String,
+    /// The lowest the group may be cut to; blank is 0.
+    floor: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -107,6 +111,32 @@ impl Editor {
                 .all(|b| b.is_ascii_digit())
             && Decimal::from_str(text)
                 .is_ok_and(|d| d.normalize().scale() <= u32::from(self.plan.currency.minor_unit))
+    }
+
+    /// Blank, or a whole number from 1 to 255.
+    fn parsed_importance(&self) -> Result<Option<u8>, ()> {
+        match self.importance.trim() {
+            "" => Ok(None),
+            text => match text.parse::<u8>() {
+                Ok(n) if n >= 1 => Ok(Some(n)),
+                _ => Err(()),
+            },
+        }
+    }
+
+    /// Blank, or a non-negative amount.
+    fn parsed_floor(&self) -> Result<Option<Decimal>, ()> {
+        match self.floor.trim() {
+            "" => Ok(None),
+            text => match Decimal::from_str(text) {
+                Ok(d) if d >= Decimal::ZERO => Ok(Some(d)),
+                _ => Err(()),
+            },
+        }
+    }
+
+    fn valid_ranking(&self) -> bool {
+        self.parsed_importance().is_ok() && self.parsed_floor().is_ok()
     }
 
     /// The other group of this plan that already uses `value`.
@@ -158,6 +188,14 @@ impl PanelState {
             source_groups: group.map(|g| g.source_groups.clone()).unwrap_or_default(),
             categories: group.map(|g| g.categories.clone()).unwrap_or_default(),
             transaction_ids: group.map(|g| g.transaction_ids.clone()).unwrap_or_default(),
+            importance: group
+                .and_then(|g| g.importance)
+                .map(|n| n.to_string())
+                .unwrap_or_default(),
+            floor: group
+                .and_then(|g| g.floor)
+                .map(|f| f.to_string())
+                .unwrap_or_default(),
         }));
     }
 
@@ -195,8 +233,12 @@ impl PanelState {
             categories: editor.categories.clone(),
             transaction_ids: editor.transaction_ids.clone(),
             account_id: (!editor.account_id.is_empty()).then(|| editor.account_id.clone()),
-            importance: None,
-            floor: None,
+            importance: editor.parsed_importance().unwrap_or_default(),
+            floor: editor.parsed_floor().unwrap_or_default().map(|mut f| {
+                f = f.round_dp(minor);
+                f.rescale(minor);
+                f
+            }),
         };
         let mut plan = editor.plan.clone();
         if remove {
@@ -849,7 +891,7 @@ fn editor_form(
                 let name_taken = move || s.editor.with(|e| e.as_ref().is_some_and(Editor::name_taken));
                 let can_save = move || {
                     s.editor.with(|e| {
-                        e.as_ref().is_some_and(|e| e.valid_amount() && !e.name.trim().is_empty() && !e.name_taken())
+                        e.as_ref().is_some_and(|e| e.valid_amount() && e.valid_ranking() && !e.name.trim().is_empty() && !e.name_taken())
                     })
                 };
                 let group_choices = groups
@@ -950,7 +992,7 @@ fn editor_form(
                                             type="number"
                                             required=true
                                             min="0"
-                                            step=step
+                                            step=step.clone()
                                             placeholder="0.00"
                                             prop:value=field(|e| e.amount.clone())
                                             on:input=set(|e, v| e.amount = v)
@@ -971,6 +1013,45 @@ fn editor_form(
                                                 <Lucide icon=Icon::ChevronDown size=16 />
                                             </span>
                                         </div>
+                                    </div>
+                                </div>
+                                                <div class="mb-4 grid gap-4 sm:grid-cols-2">
+                                    <div class="grid gap-1.5">
+                                        <label for="budget-group-importance" class="text-sm font-medium text-fg">"Cut order"</label>
+                                        <input
+                                            id="budget-group-importance"
+                                            class=CONTROL
+                                            type="number"
+                                            min="1"
+                                            max="255"
+                                            step="1"
+                                            placeholder="Never cut"
+                                            aria-describedby="budget-group-importance-hint"
+                                            prop:value=field(|e| e.importance.clone())
+                                            on:input=set(|e, v| e.importance = v)
+                                        />
+                                        <p id="budget-group-importance-hint" class="text-xs text-fg-muted">
+                                            "Blank = never cut, 1 = protect most. Wishes cut the highest number first."
+                                        </p>
+                                    </div>
+                                    <div class="grid gap-1.5">
+                                        <label for="budget-group-floor" class="text-sm font-medium text-fg">
+                                            {format!("Lowest ({})", unit.code)}
+                                        </label>
+                                        <input
+                                            id="budget-group-floor"
+                                            class=CONTROL
+                                            type="number"
+                                            min="0"
+                                            step=step
+                                            placeholder="0.00"
+                                            aria-describedby="budget-group-floor-hint"
+                                            prop:value=field(|e| e.floor.clone())
+                                            on:input=set(|e, v| e.floor = v)
+                                        />
+                                        <p id="budget-group-floor-hint" class="text-xs text-fg-muted">
+                                            "A wish never cuts this group below this amount."
+                                        </p>
                                     </div>
                                 </div>
                                 <Show when=name_taken>
