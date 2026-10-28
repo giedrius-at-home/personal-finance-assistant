@@ -38,6 +38,19 @@
 }
 
 @layer components {
+  /* An open tooltip or popover lifts its card above the neighbouring cards:
+     every glass card is its own stacking context, so a later card would
+     otherwise paint over it. */
+  .glass-card:has([role="tooltip"], [role="dialog"]) {
+    position: relative;
+    z-index: 40;
+  }
+  /* Tooltips stay readable over other content in the translucent window. */
+  html.glass [role="tooltip"] {
+    background: light-dark(oklch(1 0 0), oklch(0.2947 0.0072 118.26));
+    backdrop-filter: blur(24px);
+  }
+
   /* The window: page tint plus the site's accent glow, over the native glass. */
   .app-surface {
     background-color: var(--glass-page, var(--ds-page));
