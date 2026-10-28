@@ -7,12 +7,15 @@ use std::sync::{Arc, Mutex};
 
 use finance_storage::Store;
 use finance_types::DataStatus;
+use finance_types::gateway::{Wish, WishDraft, WishPurchase, WishSettings};
 use finance_types::report::closure::{
     AccountRoleDraft, ClosureAction, ClosureView, PotDraft, PotView, PotsView, UnclassifiedAccounts,
 };
 use finance_types::report::review::{self as rv, TransactionSearchQuery, TransactionSearchResult};
+use finance_types::report::wishes::WishesView;
 use finance_types::report::{Dashboard, ReviewReport};
 use jiff::Zoned;
+use rust_decimal::Decimal;
 
 use crate::alerts::{Notification, Notifier, Outcome};
 use crate::daily::SeriesForecaster;
@@ -369,6 +372,38 @@ impl Service {
 
     pub fn dashboard(&self) -> Result<Dashboard, String> {
         self.read_forecast(|store, snap, now, model| dashboard::dashboard(store, snap, now, model))
+    }
+
+    pub fn wishes(&self) -> Result<WishesView, String> {
+        self.read_forecast(|store, snap, now, model| {
+            let dash = dashboard::dashboard(store, snap, now, model)?;
+            let wishes = crate::wishes::store::load_wishes(store.connection())?;
+            let settings = crate::wishes::store::load_wish_settings(store.connection())?;
+            Ok(crate::wishes::wishes_view(&dash, &wishes, &settings))
+        })
+    }
+
+    pub fn save_wish(&self, draft: WishDraft) -> Result<Wish, String> {
+        self.write(|w, snap| crate::writes::wishes::save_wish(w, snap, draft))
+    }
+
+    pub fn record_wish_saved(&self, wish_id: &str, saved: Decimal) -> Result<Wish, String> {
+        self.write(|w, _| crate::writes::wishes::record_saved(w, wish_id, saved))
+    }
+
+    pub fn drop_wish(&self, wish_id: &str) -> Result<(), String> {
+        self.write(|w, _| crate::writes::wishes::drop_wish(w, wish_id))
+    }
+
+    /// Buys a wish, recording the cuts month 0 makes for it. The view is read
+    /// first and the write follows, so they do not share one lock.
+    pub fn mark_wish_bought(&self, wish_id: &str, purchase: WishPurchase) -> Result<Wish, String> {
+        let cuts = crate::wishes::month_zero_cuts(&self.wishes()?, wish_id);
+        self.write(|w, snap| crate::writes::wishes::mark_bought(w, snap, wish_id, purchase, &cuts))
+    }
+
+    pub fn save_wish_settings(&self, settings: WishSettings) -> Result<WishSettings, String> {
+        self.write(|w, _| crate::writes::wishes::save_wish_settings(w, settings))
     }
 
     pub fn review(&self) -> Result<ReviewReport, String> {

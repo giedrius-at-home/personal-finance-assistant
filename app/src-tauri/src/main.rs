@@ -13,13 +13,15 @@ mod update;
 
 use finance_core::service::Service;
 use finance_secrets::{Item, Secret};
-use finance_types::gateway::BudgetPlan;
+use finance_types::gateway::{BudgetPlan, Wish, WishDraft, WishPurchase, WishSettings};
 use finance_types::report::closure::{
     AccountRoleDraft, ClosureAction, ClosureView, PotDraft, PotView, PotsView, UnclassifiedAccounts,
 };
 use finance_types::report::review::{TransactionSearchQuery, TransactionSearchResult};
+use finance_types::report::wishes::WishesView;
 use finance_types::report::{Dashboard, ReviewReport};
 use finance_types::{DataStatus, UpdateStatus};
+use rust_decimal::Decimal;
 use tauri::{AppHandle, Manager, State};
 use update::Updates;
 
@@ -132,6 +134,53 @@ fn closure_pots(service: State<'_, Service>) -> Result<PotsView, String> {
 #[tauri::command(async)]
 fn save_pot(service: State<'_, Service>, pot: PotDraft) -> Result<PotView, String> {
     traced("save_pot", service.save_pot(pot))
+}
+
+#[tauri::command(async)]
+fn wishes(service: State<'_, Service>) -> Result<WishesView, String> {
+    traced("wishes", service.wishes())
+}
+
+#[tauri::command(async)]
+fn save_wish(service: State<'_, Service>, draft: WishDraft) -> Result<Wish, String> {
+    traced("save_wish", service.save_wish(draft))
+}
+
+#[tauri::command(async, rename_all = "snake_case")]
+fn record_wish_saved(
+    service: State<'_, Service>,
+    wish_id: String,
+    saved: Decimal,
+) -> Result<Wish, String> {
+    traced(
+        "record_wish_saved",
+        service.record_wish_saved(&wish_id, saved),
+    )
+}
+
+#[tauri::command(async, rename_all = "snake_case")]
+fn drop_wish(service: State<'_, Service>, wish_id: String) -> Result<(), String> {
+    traced("drop_wish", service.drop_wish(&wish_id))
+}
+
+#[tauri::command(async, rename_all = "snake_case")]
+fn mark_wish_bought(
+    service: State<'_, Service>,
+    wish_id: String,
+    purchase: WishPurchase,
+) -> Result<Wish, String> {
+    traced(
+        "mark_wish_bought",
+        service.mark_wish_bought(&wish_id, purchase),
+    )
+}
+
+#[tauri::command(async)]
+fn save_wish_settings(
+    service: State<'_, Service>,
+    settings: WishSettings,
+) -> Result<WishSettings, String> {
+    traced("save_wish_settings", service.save_wish_settings(settings))
 }
 
 #[tauri::command(async)]
@@ -449,6 +498,12 @@ fn main() {
             closure_action,
             closure_pots,
             save_pot,
+            wishes,
+            save_wish,
+            record_wish_saved,
+            drop_wish,
+            mark_wish_bought,
+            save_wish_settings,
             save_account_role,
             unclassified_accounts,
             manage_workspace,

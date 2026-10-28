@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-mark-wish-bought"
+description = "Enables the mark_wish_bought command without any pre-configured scope."
+commands.allow = ["mark_wish_bought"]
+
+[[permission]]
+identifier = "deny-mark-wish-bought"
+description = "Denies the mark_wish_bought command without any pre-configured scope."
+commands.deny = ["mark_wish_bought"]

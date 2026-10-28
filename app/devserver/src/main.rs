@@ -44,6 +44,33 @@ struct ClosureActionArgs {
 }
 
 #[derive(Deserialize)]
+struct WishDraftArgs {
+    draft: finance_types::gateway::WishDraft,
+}
+
+#[derive(Deserialize)]
+struct WishSavedArgs {
+    wish_id: String,
+    saved: rust_decimal::Decimal,
+}
+
+#[derive(Deserialize)]
+struct WishIdArgs {
+    wish_id: String,
+}
+
+#[derive(Deserialize)]
+struct WishBoughtArgs {
+    wish_id: String,
+    purchase: finance_types::gateway::WishPurchase,
+}
+
+#[derive(Deserialize)]
+struct WishSettingsArgs {
+    settings: finance_types::gateway::WishSettings,
+}
+
+#[derive(Deserialize)]
 struct PotArgs {
     pot: finance_types::report::closure::PotDraft,
 }
@@ -194,6 +221,27 @@ fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
         "save_pot" => {
             let a: PotArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
             ok(service.save_pot(a.pot))
+        }
+        "wishes" => ok(service.wishes()),
+        "save_wish" => {
+            let a: WishDraftArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
+            ok(service.save_wish(a.draft))
+        }
+        "record_wish_saved" => {
+            let a: WishSavedArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
+            ok(service.record_wish_saved(&a.wish_id, a.saved))
+        }
+        "drop_wish" => {
+            let a: WishIdArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
+            ok(service.drop_wish(&a.wish_id))
+        }
+        "mark_wish_bought" => {
+            let a: WishBoughtArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
+            ok(service.mark_wish_bought(&a.wish_id, a.purchase))
+        }
+        "save_wish_settings" => {
+            let a: WishSettingsArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
+            ok(service.save_wish_settings(a.settings))
         }
         "save_account_role" => {
             let a: RoleArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;

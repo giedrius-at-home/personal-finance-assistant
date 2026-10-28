@@ -7,7 +7,7 @@ pub mod store;
 
 use finance_types::gateway::{BudgetPlan, Wish, WishSettings, WishStatus};
 use finance_types::report::allocation::CurrencyAllocation;
-use finance_types::report::wishes::{Verdict, WishMonth, WishRow, WishesView};
+use finance_types::report::wishes::{Cut, Verdict, WishMonth, WishRow, WishesView};
 use finance_types::report::{Currency, Dashboard};
 use ladder::Demand;
 use rust_decimal::Decimal;
@@ -155,6 +155,27 @@ impl RowContext<'_> {
     }
 }
 
+/// The cuts month 0 makes for one wish, a group cut twice keeping the first
+/// `from` and the lowest `to`.
+pub fn month_zero_cuts(view: &WishesView, wish_id: &str) -> Vec<Cut> {
+    let Some(month) = view.months.first() else {
+        return Vec::new();
+    };
+    let mut out: Vec<Cut> = Vec::new();
+    for cut in month
+        .verdicts
+        .iter()
+        .filter(|v| v.wish_id.as_deref() == Some(wish_id))
+        .flat_map(|v| &v.cuts)
+    {
+        match out.iter_mut().find(|c| c.group_id == cut.group_id) {
+            Some(seen) => seen.to = seen.to.min(cut.to),
+            None => out.push(cut.clone()),
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::baseline::tests::{alloc, d, plan, plan_group, row};
@@ -268,5 +289,52 @@ mod tests {
         assert_eq!(view.wishes[0].short, Decimal::ZERO);
         assert!(!view.wishes[0].tradeoffs);
         assert_eq!(view.currency, Currency::eur());
+    }
+
+    #[test]
+    fn month_zero_cuts_merge_repeated_groups() {
+        let cut = |g: &str, from: &str, to: &str| Cut {
+            group_id: g.into(),
+            name: g.into(),
+            from: d(from),
+            to: d(to),
+        };
+        let verdict = |id: Option<&str>, cuts: Vec<Cut>| Verdict {
+            wish_id: id.map(String::from),
+            label: String::new(),
+            amount: Decimal::ZERO,
+            from_free: Decimal::ZERO,
+            cuts,
+            on_card: Decimal::ZERO,
+            short: Decimal::ZERO,
+        };
+        let month = |verdicts| WishMonth {
+            month: "2026-10-01".into(),
+            free_before: Decimal::ZERO,
+            free_left: Decimal::ZERO,
+            card_charge_in: Decimal::ZERO,
+            card_used: Decimal::ZERO,
+            verdicts,
+        };
+        let view = WishesView {
+            currency: Currency::eur(),
+            settings: WishSettings::default(),
+            card_stale: false,
+            months: vec![
+                month(vec![
+                    verdict(
+                        Some("tv"),
+                        vec![cut("g1", "120", "90"), cut("g2", "50", "40")],
+                    ),
+                    verdict(Some("other"), vec![cut("g3", "10", "0")]),
+                    verdict(Some("tv"), vec![cut("g1", "90", "70")]),
+                ]),
+                month(vec![verdict(Some("tv"), vec![cut("g4", "5", "0")])]),
+            ],
+            wishes: vec![],
+        };
+        let cuts = month_zero_cuts(&view, "tv");
+        assert_eq!(cuts, vec![cut("g1", "120", "70"), cut("g2", "50", "40")]);
+        assert!(month_zero_cuts(&view, "none").is_empty());
     }
 }

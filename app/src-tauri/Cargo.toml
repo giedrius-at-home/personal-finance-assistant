@@ -27,6 +27,7 @@ tauri = { version = "2.12.5", features = ["macos-private-api"] }
 window-vibrancy = "0.8.1"
 finance-secrets.workspace = true
 serde_json.workspace = true
+rust_decimal.workspace = true
 jiff = "0.2.38"
 reqwest = { version = "0.13.5", default-features = false, features = ["blocking", "json", "rustls"] }
 sha2 = "0.10.9"
