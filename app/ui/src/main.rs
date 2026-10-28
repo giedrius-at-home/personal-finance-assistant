@@ -219,7 +219,7 @@ fn App() -> impl IntoView {
             <div class="mx-auto w-full min-w-0 max-w-6xl px-4 pb-10 pt-12 sm:px-10 sm:pt-14">
                 <Header />
                 <Tabs />
-                <div role="tabpanel" class="mt-0 min-w-0">
+                <div role="tabpanel" class="page-stack mt-0 min-w-0">
                     {move || match app.tab.get() {
                         Tab::Overview => pages::overview::Overview().into_any(),
                         Tab::Transactions => pages::transactions::Transactions().into_any(),

@@ -630,9 +630,9 @@ fn CurrencyOverview(
     let next_result = allocation_result(next_label, next_value, &unit, next_negative);
     let breakdown = view! { <BankBalanceBreakdown allocation=allocation.clone() /> }.into_any();
     view! {
-        <section class="mt-3.5 flex flex-col gap-3.5 text-fg" aria-label=section_label>
+        <section class="flex flex-col gap-5 text-fg" aria-label=section_label>
             {status}
-            <div class="grid grid-cols-1 gap-3.5 md:grid-cols-2">
+            <div class="grid grid-cols-1 gap-5 md:grid-cols-2">
                 <Card class="min-w-0">
                     <header class="flex items-start justify-between gap-4">
                         <div class="min-w-0">

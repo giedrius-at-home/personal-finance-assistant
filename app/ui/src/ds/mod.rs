@@ -101,10 +101,10 @@ pub enum CardTone {
 pub fn card_class(tone: CardTone) -> &'static str {
     match tone {
         CardTone::Default => {
-            "glass-card rounded-xl border border-border bg-card-strong p-5 text-fg sm:p-6"
+            "glass-card rounded-xl border border-border bg-card-strong p-6 text-fg sm:p-7"
         }
         CardTone::Muted => {
-            "glass-card rounded-xl border border-border bg-card-muted p-5 text-fg sm:p-6"
+            "glass-card rounded-xl border border-border bg-card-muted p-6 text-fg sm:p-7"
         }
         CardTone::Contrast => {
             "rounded-xl border border-transparent bg-contrast p-5 text-fg-on-contrast sm:p-6"
