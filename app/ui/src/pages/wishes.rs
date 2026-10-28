@@ -897,6 +897,7 @@ fn done_row(row: &WishRow, ctx: &Context) -> impl IntoView + use<> {
             ctx.source_label(&p.source)
         ),
         (WishStatus::Bought, None) => format!("{} · bought", wish.name),
+        (WishStatus::Started, _) => format!("{} · started", wish.name),
         _ => format!("{} · dropped · {}", wish.name, amount(wish.amount, code)),
     };
     view! { <p class="py-1">{text}</p> }
@@ -947,6 +948,7 @@ mod tests {
                 saved: Decimal::ZERO,
                 status: WishStatus::Planned,
                 bought: None,
+                kind: Default::default(),
                 created_at: "2026-10-01T00:00:00Z".into(),
             },
             children: Vec::new(),

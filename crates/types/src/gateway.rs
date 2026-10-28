@@ -410,6 +410,38 @@ pub enum WishStatus {
     Planned,
     Bought,
     Dropped,
+    /// A recurring wish or bill change that has begun.
+    Started,
+}
+
+/// How often a recurring wish or bill repeats.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Repeat {
+    Weekly,
+    Biweekly,
+    Monthly,
+    Yearly,
+}
+
+/// What a wish is: a one-off purchase, a repeating cost, or a change to a bill.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum WishKind {
+    #[default]
+    OneOff,
+    /// Costs `amount` on every occurrence from `due_on`, through `ends_on`.
+    Recurring {
+        every: Repeat,
+        #[serde(default)]
+        ends_on: Option<String>,
+    },
+    /// Moves an existing bill to `amount` from `due_on`, through `ends_on`.
+    BillChange {
+        bill_id: String,
+        #[serde(default)]
+        ends_on: Option<String>,
+    },
 }
 
 /// What a wish actually cost, once bought.
@@ -441,6 +473,8 @@ pub struct Wish {
     pub status: WishStatus,
     #[serde(default)]
     pub bought: Option<WishPurchase>,
+    #[serde(default)]
+    pub kind: WishKind,
     pub created_at: String,
 }
 
@@ -457,6 +491,8 @@ pub struct WishDraft {
     /// `YYYY-MM-DD`.
     pub due_on: String,
     pub source: WishSource,
+    #[serde(default)]
+    pub kind: WishKind,
 }
 
 /// `wish_settings.payload_json`: the credit card the wishes may lean on.
@@ -493,5 +529,21 @@ mod tests {
         assert_eq!(group.floor, None);
         let back = serde_json::to_string(&group).unwrap();
         assert!(!back.contains("importance") && !back.contains("floor"));
+    }
+
+    #[test]
+    fn old_wish_json_without_kind_is_one_off() {
+        let json = r#"{"wish_id":"w","name":"Bike","amount":"900","currency":{"code":"EUR","minor_unit":2},"due_on":"2026-12-01","source":{"kind":"card"},"created_at":"x"}"#;
+        let wish: Wish = serde_json::from_str(json).unwrap();
+        assert_eq!(wish.kind, WishKind::OneOff);
+        let kind: WishKind =
+            serde_json::from_str(r#"{"type":"recurring","every":"biweekly"}"#).unwrap();
+        assert_eq!(
+            kind,
+            WishKind::Recurring {
+                every: Repeat::Biweekly,
+                ends_on: None
+            }
+        );
     }
 }

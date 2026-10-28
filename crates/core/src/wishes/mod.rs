@@ -5,13 +5,14 @@ pub mod ladder;
 pub mod schedule;
 pub mod store;
 
-use finance_types::gateway::{BudgetPlan, Wish, WishSettings, WishStatus};
+use finance_types::gateway::{BudgetPlan, Repeat, Wish, WishKind, WishSettings, WishStatus};
 use finance_types::report::allocation::CurrencyAllocation;
 use finance_types::report::wishes::{Cut, Verdict, WishMonth, WishRow, WishesView};
 use finance_types::report::{Currency, Dashboard};
 use ladder::Demand;
 use rust_decimal::Decimal;
-use schedule::Family;
+use schedule::{BillNow, Family};
+use std::collections::HashMap;
 
 /// The wishes screen, judged against the dashboard's allocation.
 pub fn wishes_view(dashboard: &Dashboard, wishes: &[Wish], settings: &WishSettings) -> WishesView {
@@ -40,7 +41,32 @@ pub fn wishes_view(dashboard: &Dashboard, wishes: &[Wish], settings: &WishSettin
                 .find(|row| row.bill_id == bill_id)
         })
         .map_or(Decimal::ZERO, |row| row.amount_max);
-    view_from(alloc, &plans, card_bill, wishes, settings)
+    let bills = bills_now(dashboard);
+    view_from(alloc, &plans, card_bill, wishes, settings, &bills)
+}
+
+/// Every bill that repeats weekly, monthly or yearly, at its highest amount.
+fn bills_now(dashboard: &Dashboard) -> HashMap<String, BillNow> {
+    dashboard
+        .next_month_subscriptions
+        .as_ref()
+        .unwrap_or(&dashboard.subscriptions)
+        .rows
+        .iter()
+        .filter_map(|row| {
+            let every = match row.frequency.to_lowercase().as_str() {
+                "weekly" => Repeat::Weekly,
+                "monthly" => Repeat::Monthly,
+                "yearly" => Repeat::Yearly,
+                _ => return None,
+            };
+            let bill = BillNow {
+                amount: row.amount_max,
+                every,
+            };
+            Some((row.bill_id.clone(), bill))
+        })
+        .collect()
 }
 
 /// The wishes screen, judged against one currency's allocation.
@@ -50,10 +76,11 @@ pub fn view_from(
     card_bill: Decimal,
     wishes: &[Wish],
     settings: &WishSettings,
+    bills: &HashMap<String, BillNow>,
 ) -> WishesView {
     let judged = alloc.and_then(|a| {
         let month0 = baseline::current_month(a)?;
-        let (items, families) = schedule::plan_items(wishes, month0);
+        let (items, families) = schedule::plan_items(wishes, month0, bills);
         let months = schedule::horizon(&items, month0);
         let demands = schedule::demands(&items, month0, months);
         let (bases, card_stale) = baseline::baselines(
@@ -131,12 +158,15 @@ impl RowContext<'_> {
         let family = self.families.iter().find(|f| f.parent_id == wish.wish_id);
         let (mut short, mut tradeoffs, mut monthly_set_aside) =
             (Decimal::ZERO, false, Decimal::ZERO);
+        let one_off = wish.kind == WishKind::OneOff;
         if wish.status == WishStatus::Planned {
             for v in self.verdicts(&wish.wish_id) {
                 short += v.short;
                 tradeoffs |= !v.cuts.is_empty() || v.on_card > Decimal::ZERO;
             }
-            monthly_set_aside = self.set_aside(&wish.wish_id);
+            if one_off {
+                monthly_set_aside = self.set_aside(&wish.wish_id);
+            }
             for child in &children {
                 short += child.short;
                 tradeoffs |= child.tradeoffs;
@@ -197,6 +227,7 @@ mod tests {
             saved: Decimal::ZERO,
             status: WishStatus::Planned,
             bought: None,
+            kind: WishKind::OneOff,
             created_at: format!("2026-01-01T00:00:{id}"),
         }
     }
@@ -222,6 +253,7 @@ mod tests {
             Decimal::ZERO,
             &[wish("tv", None, "150", "2026-10-20")],
             &WishSettings::default(),
+            &HashMap::new(),
         );
         assert_eq!(view.currency, Currency::eur());
         assert_eq!(view.months.len(), 2);
@@ -252,7 +284,7 @@ mod tests {
             card_limit: Decimal::ZERO,
             ..WishSettings::default()
         };
-        let view = view_from(Some(&a), &[], Decimal::ZERO, &ws, &s);
+        let view = view_from(Some(&a), &[], Decimal::ZERO, &ws, &s, &HashMap::new());
         let ids: Vec<_> = view
             .wishes
             .iter()
@@ -283,6 +315,7 @@ mod tests {
             Decimal::ZERO,
             &[wish("tv", None, "150", "2026-10-20")],
             &WishSettings::default(),
+            &HashMap::new(),
         );
         assert!(view.months.is_empty());
         assert_eq!(view.wishes.len(), 1);

@@ -80,6 +80,7 @@ pub fn save_wish(w: &Writer<'_>, snap: &Snapshot, draft: WishDraft) -> Result<Wi
                 currency: draft.currency,
                 due_on: draft.due_on,
                 source: draft.source,
+                kind: draft.kind,
                 ..old
             }
         }
@@ -98,6 +99,7 @@ pub fn save_wish(w: &Writer<'_>, snap: &Snapshot, draft: WishDraft) -> Result<Wi
                 saved: Decimal::ZERO,
                 status: WishStatus::Planned,
                 bought: None,
+                kind: draft.kind,
                 created_at: w.stamp(),
             }
         }
@@ -240,6 +242,7 @@ mod tests {
             currency: Currency::new("EUR"),
             due_on: "2026-12-01".into(),
             source: WishSource::Card,
+            kind: Default::default(),
         }
     }
 

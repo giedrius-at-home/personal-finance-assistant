@@ -79,6 +79,20 @@ pub fn judge(
 
         let mut verdicts = Vec::with_capacity(queue.len());
         for demand in queue {
+            if demand.amount < Decimal::ZERO {
+                // A cheaper bill: money comes back.
+                free -= demand.amount;
+                verdicts.push(Verdict {
+                    wish_id: demand.wish_id,
+                    label: demand.label,
+                    amount: demand.amount,
+                    from_free: demand.amount,
+                    cuts: Vec::new(),
+                    on_card: Decimal::ZERO,
+                    short: Decimal::ZERO,
+                });
+                continue;
+            }
             let mut rem = demand.amount;
             let mut on_card = Decimal::ZERO;
             if demand.on_card {
@@ -307,5 +321,20 @@ mod tests {
         assert_eq!(charge.label, "Credit card");
         assert_eq!(charge.on_card, d("300"));
         assert_eq!(out[2].card_charge_in, d("300"));
+    }
+
+    #[test]
+    fn bill_change_down_frees_money() {
+        let out = judge(
+            &[base("100", vec![], "0")],
+            &[vec![demand("rent", "-50", false)]],
+            d("2500"),
+        );
+        assert_eq!(out[0].free_left, d("150"));
+        let v = &out[0].verdicts[0];
+        assert_eq!(v.from_free, d("-50"));
+        assert!(v.cuts.is_empty());
+        assert_eq!(v.on_card, Decimal::ZERO);
+        assert_eq!(v.short, Decimal::ZERO);
     }
 }

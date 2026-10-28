@@ -82,6 +82,7 @@ mod tests {
             saved: Decimal::from(50),
             status: WishStatus::Planned,
             bought: None,
+            kind: Default::default(),
             created_at: "2026-10-28T10:00:00Z".into(),
         };
         let settings = WishSettings {
