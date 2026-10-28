@@ -52,6 +52,8 @@ fn group(id: &str, name: &str, amount: i64, source_groups: &[&str]) -> BudgetGro
         categories: Vec::new(),
         transaction_ids: Vec::new(),
         account_id: None,
+        importance: None,
+        floor: None,
     }
 }
 
@@ -587,6 +589,8 @@ mod tests {
             categories: Vec::new(),
             transaction_ids: Vec::new(),
             account_id: None,
+            importance: None,
+            floor: None,
         }
     }
 

@@ -195,6 +195,8 @@ impl PanelState {
             categories: editor.categories.clone(),
             transaction_ids: editor.transaction_ids.clone(),
             account_id: (!editor.account_id.is_empty()).then(|| editor.account_id.clone()),
+            importance: None,
+            floor: None,
         };
         let mut plan = editor.plan.clone();
         if remove {

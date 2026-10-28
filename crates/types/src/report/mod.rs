@@ -13,6 +13,7 @@ pub mod reporting;
 pub mod review;
 pub mod subscriptions;
 pub mod trends;
+pub mod wishes;
 
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
