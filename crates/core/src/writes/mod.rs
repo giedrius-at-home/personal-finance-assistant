@@ -68,3 +68,4 @@ pub mod plans;
 pub mod review;
 pub mod settings;
 pub mod transactions;
+pub mod wishes;

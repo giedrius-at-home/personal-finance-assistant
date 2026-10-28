@@ -444,6 +444,21 @@ pub struct Wish {
     pub created_at: String,
 }
 
+/// What the owner submits to create or edit a wish (`wish_id` set: edit).
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct WishDraft {
+    #[serde(default)]
+    pub wish_id: Option<String>,
+    #[serde(default)]
+    pub parent_id: Option<String>,
+    pub name: String,
+    pub amount: Decimal,
+    pub currency: Currency,
+    /// `YYYY-MM-DD`.
+    pub due_on: String,
+    pub source: WishSource,
+}
+
 /// `wish_settings.payload_json`: the credit card the wishes may lean on.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
