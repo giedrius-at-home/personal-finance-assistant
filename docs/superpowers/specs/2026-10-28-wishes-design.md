@@ -176,3 +176,44 @@ Any wish can have sub-wishes; a trip is just the most common case (owner:
   (e.g. reuse the current month's budget as the template).
 - Tests: the ladder and sub-wish recalculation need thorough unit tests in
   core.
+
+## Addendum (2026-10-28): recurring wishes and bill changes
+
+Owner's examples: a new subscription, a psychologist every two weeks, rent
+going up when moving out, a cheaper plan going down.
+
+A wish now has a **kind**:
+
+1. **One-off**: everything above (sub-wishes, saving up, bought).
+2. **Recurring**: amount per occurrence, every **week, two weeks, month or
+   year** (owner: "both weekly, monthly, yearly", plus "biweekly"), first
+   date, optional end date, paid by card or an account. No saving up, no
+   sub-wishes.
+3. **Bill change**: an existing bill, its new amount per occurrence, the date
+   the new amount starts, optional end date. The bill's own frequency is
+   used. Cancelling a bill is a change to €0.
+
+Judging:
+
+- Each month in the look-ahead gets one demand: (occurrences that month) ×
+  amount. For a bill change it is occurrences × (new − old). The look-ahead
+  is at least 12 months when any recurring wish or bill change is planned
+  *(Claude's call)*.
+- A positive amount runs through the same ladder as any wish. On the card,
+  each month's charge comes back the next month.
+- A negative amount (a cheaper bill) adds to that month's free money and is
+  reported as "Frees €N a month from <month>".
+- Sentences *(Claude's call)*: "Affordable every month.", "Affordable if
+  going out drops to €Y each month.", "€N a month on the card, paid the
+  following month.", "Fits until <month>. From <month>, short by €N.",
+  "Frees €N a month from <month>."
+
+Starting it:
+
+- **Start** replaces Bought for these kinds. A recurring wish becomes a new
+  bill: the owner picks the bill's category when starting, and two-weekly is
+  stored as weekly with `skip = 1`. A bill change edits the bill's amount,
+  or archives it when the new amount is €0. The wish is then Started and no
+  longer judged, because the bill is in the rest of the app from then on.
+- Month-0 cuts are written into the budget on Start, as for Bought.
+  *(Claude's call: later months' budgets don't exist yet.)*
