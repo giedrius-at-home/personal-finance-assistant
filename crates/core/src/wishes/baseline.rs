@@ -80,7 +80,8 @@ pub fn baselines(
         let unset = settings.card_used_month.is_empty() && settings.card_used.is_zero();
         (Decimal::ZERO, !unset)
     };
-    let next_free = alloc.next_wiggle_room + card_bill;
+    // `next_wiggle_room` is clamped at zero; the deficit is `next_shortfall`.
+    let next_free = alloc.next_wiggle_room - alloc.next_shortfall + card_bill;
     let out = (0..months)
         .map(|i| {
             let month = shift_month(month0, i32::try_from(i).unwrap_or(i32::MAX));
@@ -310,6 +311,15 @@ pub(crate) mod tests {
         assert!(!stale);
         let (_, stale) = baselines(&a, &[], Decimal::ZERO, &settings("0", ""), Decimal::ZERO, 2);
         assert!(!stale);
+    }
+
+    #[test]
+    fn next_month_shortfall_makes_free_negative() {
+        let mut a = alloc("0", "0", vec![], vec![]);
+        a.next_shortfall = d("50");
+        let (months, _) = baselines(&a, &[], d("9.98"), &settings("0", ""), Decimal::ZERO, 3);
+        assert_eq!(months[1].free, d("-40.02"));
+        assert_eq!(months[2].free, d("-40.02"));
     }
 
     #[test]

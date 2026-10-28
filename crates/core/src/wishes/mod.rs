@@ -33,9 +33,10 @@ pub fn wishes_view(dashboard: &Dashboard, wishes: &[Wish], settings: &WishSettin
         .and_then(|bill_id| {
             dashboard
                 .next_month_subscriptions
+                .as_ref()
+                .unwrap_or(&dashboard.subscriptions)
+                .rows
                 .iter()
-                .chain(std::iter::once(&dashboard.subscriptions))
-                .flat_map(|report| &report.rows)
                 .find(|row| row.bill_id == bill_id)
         })
         .map_or(Decimal::ZERO, |row| row.amount_max);
