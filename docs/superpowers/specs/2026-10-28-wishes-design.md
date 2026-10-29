@@ -262,7 +262,9 @@ whatever is left as savings that can be taken back when needed.
   "(amount − saved) spread over the months left", but a month that cannot
   fit a set-aside without going on the card **skips it** (optional wishes
   first, must wishes last), and the gap spreads over the months that
-  remain.
+  remain. "Cannot fit" is judged after ladder steps 1 and 2 (owner's
+  decision): a set-aside cuts groups down to their floors like a purchase
+  does, and skips only when the cards would be next.
 - A set-aside goes on the card only when it is the wish's last month
   before its date (i.e. the purchase itself) or the wish is must and
   skipping would leave too few months to catch up *(Claude's call)*.
