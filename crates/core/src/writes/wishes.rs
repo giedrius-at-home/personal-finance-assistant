@@ -1,7 +1,7 @@
 //! Wishes: planned purchases the owner saves toward, drops or buys.
 
 use finance_types::gateway::{
-    BillCreateRequest, BillEditRequest, BillRef, BudgetPlan, CardSettings, Repeat, Wish, WishDraft,
+    BillCreateRequest, BillEditRequest, BillRef, BudgetPlan, CardCharge, Repeat, Wish, WishDraft,
     WishKind, WishPurchase, WishSettings, WishSource, WishStatus,
 };
 use finance_types::report::Currency;
@@ -256,18 +256,6 @@ pub fn drop_wish(w: &Writer<'_>, wish_id: &str) -> Result<()> {
     Ok(())
 }
 
-/// `settings` with its first card changed. Temporary, like `first()`.
-fn with_first_card(
-    mut settings: WishSettings,
-    change: impl FnOnce(&mut CardSettings),
-) -> WishSettings {
-    if settings.cards.is_empty() {
-        settings = WishSettings::default();
-    }
-    change(&mut settings.cards[0]);
-    settings
-}
-
 fn put_settings(w: &Writer<'_>, settings: &WishSettings) -> Result<()> {
     w.put_json(
         "INSERT INTO wish_settings (singleton, payload_json) VALUES (1, ?1) \
@@ -275,6 +263,52 @@ fn put_settings(w: &Writer<'_>, settings: &WishSettings) -> Result<()> {
         settings,
         &[],
     )
+}
+
+/// What each card takes of a card purchase: the owner's split, checked, or
+/// (none given) the cards filled in list order up to their free limit for
+/// `month`, the last card taking any overflow.
+fn card_charges(
+    settings: &WishSettings,
+    purchase: &WishPurchase,
+    month: Date,
+) -> Result<Vec<CardCharge>> {
+    if !purchase.cards.is_empty() {
+        let known = purchase
+            .cards
+            .iter()
+            .all(|c| settings.cards.iter().any(|s| s.card_id == c.card_id));
+        if !known {
+            return Err(invalid("unknown card"));
+        }
+        let total: Decimal = purchase.cards.iter().map(|c| c.amount).sum();
+        if total != purchase.amount || purchase.cards.iter().any(|c| c.amount < Decimal::ZERO) {
+            return Err(invalid("card amounts must add up to the purchase"));
+        }
+        return Ok(purchase.cards.clone());
+    }
+    let mut left = purchase.amount;
+    let mut charges = Vec::new();
+    let last = settings.cards.len().saturating_sub(1);
+    for (i, card) in settings.cards.iter().enumerate() {
+        let used = match card.used_month.parse::<Date>() {
+            Ok(d) if d.first_of_month() == month => card.used,
+            _ => Decimal::ZERO,
+        };
+        let take = if i == last {
+            left
+        } else {
+            left.min((card.limit - used).max(Decimal::ZERO))
+        };
+        if take > Decimal::ZERO {
+            charges.push(CardCharge {
+                card_id: card.card_id.clone(),
+                amount: take,
+            });
+            left -= take;
+        }
+    }
+    Ok(charges)
 }
 
 /// Buy a planned wish (on or before today). A card purchase raises the card
@@ -304,6 +338,14 @@ pub fn mark_bought(
         return Err(invalid("wish account is unknown"));
     }
     let wish = planned(find(&load_wishes(&w.tx)?, wish_id)?)?;
+    let month = ctx.resolver.period_for(on, None);
+    let mut settings = load_wish_settings(&w.tx)?;
+    let mut purchase = purchase;
+    if purchase.source == WishSource::Card {
+        purchase.cards = card_charges(&settings, &purchase, month)?;
+    } else {
+        purchase.cards.clear();
+    }
     let bought = Wish {
         status: WishStatus::Bought,
         bought: Some(purchase.clone()),
@@ -311,28 +353,37 @@ pub fn mark_bought(
     };
     store(w, &bought)?;
     if purchase.source == WishSource::Card {
-        let month = ctx.resolver.period_for(on, None);
-        let settings = load_wish_settings(&w.tx)?;
-        let card = settings.first();
-        let recorded = card
-            .used_month
-            .parse::<Date>()
-            .ok()
-            .map(|d| d.first_of_month());
-        let settings = match recorded {
-            // Bought before this budget month: already charged.
-            _ if month < ctx.current_month() => None,
-            Some(m) if m == month => Some(with_first_card(settings, |c| {
-                c.used = card.used + purchase.amount;
-            })),
-            // The recorded month is later: this purchase was charged already.
-            Some(m) if m > month => None,
-            _ => Some(with_first_card(settings, |c| {
-                c.used = purchase.amount;
-                c.used_month = month.to_string();
-            })),
-        };
-        if let Some(settings) = settings {
+        let mut changed = false;
+        for charge in &purchase.cards {
+            let Some(card) = settings
+                .cards
+                .iter_mut()
+                .find(|c| c.card_id == charge.card_id)
+            else {
+                continue;
+            };
+            let recorded = card
+                .used_month
+                .parse::<Date>()
+                .ok()
+                .map(|d| d.first_of_month());
+            match recorded {
+                // Bought before this budget month: already charged.
+                _ if month < ctx.current_month() => {}
+                Some(m) if m == month => {
+                    card.used += charge.amount;
+                    changed = true;
+                }
+                // The recorded month is later: this purchase was charged already.
+                Some(m) if m > month => {}
+                _ => {
+                    card.used = charge.amount;
+                    card.used_month = month.to_string();
+                    changed = true;
+                }
+            }
+        }
+        if changed {
             put_settings(w, &settings)?;
         }
     }
@@ -510,7 +561,7 @@ pub fn save_wish_settings(w: &Writer<'_>, mut settings: WishSettings) -> Result<
 mod tests {
     use super::*;
     use crate::writes::fixture::{Db, db};
-    use finance_types::gateway::{BudgetGroup, BudgetPlan, Repeat, WishKind};
+    use finance_types::gateway::{BudgetGroup, BudgetPlan, CardSettings, Repeat, WishKind};
     use finance_types::report::Currency;
 
     fn draft(name: &str) -> WishDraft {
@@ -760,11 +811,102 @@ mod tests {
     fn settings(used: &str, month: &str) -> WishSettings {
         WishSettings {
             cards: vec![CardSettings {
+                card_id: "card-1".into(),
+                name: "Credit card".into(),
+                limit: Decimal::from(2500),
                 used: used.parse().unwrap(),
                 used_month: month.into(),
-                ..WishSettings::default().first()
+                bill_id: None,
             }],
         }
+    }
+
+    fn db_with_cards(cards: &[(&str, &str, &str)]) -> Db {
+        let mut db = db();
+        let cards = cards
+            .iter()
+            .map(|(id, limit, used)| CardSettings {
+                card_id: (*id).into(),
+                name: (*id).into(),
+                limit: limit.parse().unwrap(),
+                used: used.parse().unwrap(),
+                used_month: "2026-10-01".into(),
+                bill_id: None,
+            })
+            .collect();
+        db.write(|w, _| save_wish_settings(w, WishSettings { cards }))
+            .unwrap();
+        db
+    }
+
+    fn charge(id: &str, amount: &str) -> CardCharge {
+        CardCharge {
+            card_id: id.into(),
+            amount: amount.parse().unwrap(),
+        }
+    }
+
+    #[test]
+    fn bought_card_amounts_must_sum() {
+        let mut db = db_with_cards(&[("visa", "100", "30"), ("mc", "200", "0")]);
+        let wish = db.write(|w, s| save_wish(w, s, draft("Bike"))).unwrap();
+        let mut bad = purchase(150, "2026-10-26", WishSource::Card);
+        bad.cards = vec![charge("visa", "100")];
+        assert_eq!(
+            message(db.write(|w, s| mark_bought(w, s, &wish.wish_id, bad, &[]))),
+            "card amounts must add up to the purchase"
+        );
+        let mut unknown = purchase(150, "2026-10-26", WishSource::Card);
+        unknown.cards = vec![charge("amex", "150")];
+        assert_eq!(
+            message(db.write(|w, s| mark_bought(w, s, &wish.wish_id, unknown, &[]))),
+            "unknown card"
+        );
+        let auto = purchase(150, "2026-10-26", WishSource::Card);
+        let bought = db
+            .write(|w, s| mark_bought(w, s, &wish.wish_id, auto, &[]))
+            .unwrap();
+        assert_eq!(
+            bought.bought.unwrap().cards,
+            vec![charge("visa", "70"), charge("mc", "80")]
+        );
+        let s = load_wish_settings(db.store.connection()).unwrap();
+        assert_eq!(s.cards[0].used, Decimal::from(100));
+        assert_eq!(s.cards[1].used, Decimal::from(80));
+    }
+
+    #[test]
+    fn bought_with_explicit_split_raises_each_card() {
+        let mut db = db_with_cards(&[("visa", "100", "30"), ("mc", "200", "0")]);
+        let wish = db.write(|w, s| save_wish(w, s, draft("Bike"))).unwrap();
+        let mut p = purchase(150, "2026-10-26", WishSource::Card);
+        p.cards = vec![charge("visa", "10"), charge("mc", "140")];
+        db.write(|w, s| mark_bought(w, s, &wish.wish_id, p, &[]))
+            .unwrap();
+        let s = load_wish_settings(db.store.connection()).unwrap();
+        assert_eq!(s.cards[0].used, Decimal::from(40));
+        assert_eq!(s.cards[1].used, Decimal::from(140));
+    }
+
+    #[test]
+    fn auto_split_overflow_goes_to_last_card() {
+        let mut db = db_with_cards(&[("visa", "100", "30"), ("mc", "50", "0")]);
+        let wish = db.write(|w, s| save_wish(w, s, draft("Bike"))).unwrap();
+        let bought = db
+            .write(|w, s| {
+                mark_bought(
+                    w,
+                    s,
+                    &wish.wish_id,
+                    purchase(200, "2026-10-26", WishSource::Card),
+                    &[],
+                )
+            })
+            .unwrap();
+        assert_eq!(
+            bought.bought.unwrap().cards,
+            vec![charge("visa", "70"), charge("mc", "130")]
+        );
     }
 
     #[test]
@@ -787,10 +929,7 @@ mod tests {
         assert_eq!(bought.status, WishStatus::Bought);
         assert_eq!(bought.bought.unwrap().amount, Decimal::from(100));
         assert_eq!(
-            load_wish_settings(db.store.connection())
-                .unwrap()
-                .first()
-                .used,
+            load_wish_settings(db.store.connection()).unwrap().cards[0].used,
             "109.98".parse::<Decimal>().unwrap()
         );
         assert_eq!(
@@ -822,10 +961,7 @@ mod tests {
         })
         .unwrap();
         assert_eq!(
-            load_wish_settings(db.store.connection())
-                .unwrap()
-                .first()
-                .used,
+            load_wish_settings(db.store.connection()).unwrap().cards[0].used,
             "9.98".parse::<Decimal>().unwrap()
         );
     }
@@ -887,8 +1023,8 @@ mod tests {
             })
             .unwrap();
             let now = load_wish_settings(db.store.connection()).unwrap();
-            assert_eq!(now.first().used, Decimal::from(100));
-            assert_eq!(now.first().used_month, "2026-10-01");
+            assert_eq!(now.cards[0].used, Decimal::from(100));
+            assert_eq!(now.cards[0].used_month, "2026-10-01");
         }
     }
 
@@ -957,10 +1093,7 @@ mod tests {
         })
         .unwrap();
         assert_eq!(
-            load_wish_settings(db.store.connection())
-                .unwrap()
-                .first()
-                .used,
+            load_wish_settings(db.store.connection()).unwrap().cards[0].used,
             "109.98".parse::<Decimal>().unwrap()
         );
         assert_eq!(
