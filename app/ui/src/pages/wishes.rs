@@ -1107,17 +1107,9 @@ fn wish_body(
     };
     let one_off = wish.kind == WishKind::OneOff;
     let start_text = match &wish.kind {
-        WishKind::BillChange { bill_id, .. } => {
-            let bill = ctx.with_value(|c| c.bill(bill_id).map(|b| b.name.clone()));
-            let bill = bill.unwrap_or_else(|| "the bill".to_owned());
-            if wish.amount.is_zero() {
-                format!("Archive {bill} now? Its payments stop counting from today.")
-            } else {
-                format!(
-                    "Change {bill} to {} now? The bill keeps its schedule.",
-                    amount(wish.amount, &code)
-                )
-            }
+        WishKind::BillChange { bill_id, ends_on } => {
+            let bill = ctx.with_value(|c| c.bill(bill_id).map(|b| (b.name.clone(), b.amount)));
+            start_confirm(bill, wish.amount, ends_on.as_deref(), &code)
         }
         _ => String::new(),
     };
@@ -1310,6 +1302,7 @@ fn wish_body(
                         <input
                             id=buy_on_id.get_value()
                             type="date"
+                            max=today()
                             required
                             class=CONTROL
                             prop:value=move || ui.buy_on.get()
@@ -1368,6 +1361,39 @@ fn wish_body(
             </Show>
             {feedback(ui, target)}
         </div>
+    }
+}
+
+/// What starting a bill change asks; with an end date it warns that the
+/// old amount does not come back on its own.
+fn start_confirm(
+    bill: Option<(String, Decimal)>,
+    new_amount: Decimal,
+    ends_on: Option<&str>,
+    code: &str,
+) -> String {
+    let (name, old) = bill.map_or((None, None), |(n, a)| (Some(n), Some(a)));
+    let name = name.unwrap_or_else(|| "the bill".to_owned());
+    let ask = if new_amount.is_zero() {
+        format!("Archive {name} now? Its payments stop counting from today.")
+    } else {
+        format!(
+            "Change {name} to {} now? The bill keeps its schedule.",
+            amount(new_amount, code)
+        )
+    };
+    match ends_on {
+        None => ask,
+        Some(end) => {
+            let back = old.map_or_else(
+                || "the old amount".to_owned(),
+                |o| format!("the old amount ({})", amount(o, code)),
+            );
+            format!(
+                "{ask} After {}, {back} won't come back on its own: change the bill back then.",
+                format::date(end)
+            )
+        }
     }
 }
 
@@ -1822,6 +1848,20 @@ mod tests {
             month_short(&month(Decimal::ZERO, Decimal::ZERO, vec![charge, tv])),
             d(42, 0)
         );
+    }
+
+    #[test]
+    fn bill_change_with_an_end_warns_on_start() {
+        let gym = Some(("Gym".to_owned(), d(30, 0)));
+        assert_eq!(
+            start_confirm(gym.clone(), d(45, 0), None, "EUR"),
+            "Change Gym to €45 now? The bill keeps its schedule."
+        );
+        let text = start_confirm(gym, d(45, 0), Some("2027-03-01"), "EUR");
+        assert!(text.starts_with("Change Gym to €45 now? The bill keeps its schedule. After "));
+        assert!(text.ends_with(
+            ", the old amount (€30) won't come back on its own: change the bill back then."
+        ));
     }
 
     #[test]

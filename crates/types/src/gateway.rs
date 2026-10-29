@@ -191,6 +191,9 @@ pub struct BillCreateRequest {
     /// Periods skipped between payments: 1 with `weekly` is every two weeks.
     #[serde(default)]
     pub skip: u32,
+    /// Last pay date, `YYYY-MM-DD`; none repeats for ever.
+    #[serde(default)]
+    pub end_date: Option<String>,
 }
 
 /// New settings for a bill (Python `/subscriptions/edit`).

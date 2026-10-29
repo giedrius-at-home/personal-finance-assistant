@@ -515,6 +515,7 @@ fn create_form(
                     date: due_on,
                     repeat_freq: repeat,
                     skip: 0,
+                    end_date: None,
                 };
                 spawn_local(async move {
                     match invoke::<BillSaved>("create_bill", &Request { request }).await {

@@ -395,10 +395,18 @@ impl Service {
         self.write(|w, _| crate::writes::wishes::drop_wish(w, wish_id))
     }
 
-    /// Buys a wish, recording the cuts month 0 makes for it. The view is read
-    /// first and the write follows, so they do not share one lock.
+    /// Buys a wish, recording the cuts its unsaved gap needs this month. The
+    /// judging is read first and the write follows, so they do not share one
+    /// lock.
     pub fn mark_wish_bought(&self, wish_id: &str, purchase: WishPurchase) -> Result<Wish, String> {
-        let cuts = crate::wishes::month_zero_cuts(&self.wishes()?, wish_id);
+        let cuts = self.read_forecast(|store, snap, now, model| {
+            let dash = dashboard::dashboard(store, snap, now, model)?;
+            let wishes = crate::wishes::store::load_wishes(store.connection())?;
+            let settings = crate::wishes::store::load_wish_settings(store.connection())?;
+            Ok(crate::wishes::purchase_cuts(
+                &dash, &wishes, &settings, wish_id, &purchase,
+            ))
+        })?;
         self.write(|w, snap| crate::writes::wishes::mark_bought(w, snap, wish_id, purchase, &cuts))
     }
 

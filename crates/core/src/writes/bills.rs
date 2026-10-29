@@ -257,6 +257,13 @@ pub fn create_bill(
     let Some(date) = date else {
         return Err(invalid(INVALID));
     };
+    let end = match request.end_date.as_deref().map(str::trim) {
+        None | Some("") => None,
+        Some(value) => match parse_date(value) {
+            Some(end) if end >= date => Some(end),
+            _ => return Err(invalid(INVALID)),
+        },
+    };
     let key = casefold(&category);
     if rules(w)?
         .iter()
@@ -280,7 +287,7 @@ pub fn create_bill(
     )?;
     w.tx.execute(
         "INSERT INTO bills (id, name, currency, amount_min, amount_max, start_date, end_date, \
-         repeat_freq, skip, active) VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, ?7, ?8, 1)",
+         repeat_freq, skip, active) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1)",
         params![
             id,
             name,
@@ -288,6 +295,7 @@ pub fn create_bill(
             stored_amount(minimum),
             stored_amount(maximum),
             date.to_string(),
+            end.map(|e| e.to_string()),
             request.repeat_freq,
             request.skip
         ],
@@ -573,6 +581,7 @@ mod tests {
             date: "2026-11-02".into(),
             repeat_freq: "monthly".into(),
             skip: 0,
+            end_date: None,
         }
     }
 
@@ -651,6 +660,12 @@ mod tests {
             let mut no_date = create("A", "Sport", "1");
             no_date.date = "2026-13-01".into();
             assert_eq!(rejected(create_bill(w, &checks, no_date)), INVALID);
+            let mut ends_first = create("A", "Sport", "1");
+            ends_first.end_date = Some("2026-11-01".into());
+            assert_eq!(rejected(create_bill(w, &checks, ends_first)), INVALID);
+            let mut bad_end = create("A", "Sport", "1");
+            bad_end.end_date = Some("soon".into());
+            assert_eq!(rejected(create_bill(w, &checks, bad_end)), INVALID);
             assert_eq!(
                 rejected(create_bill(w, &checks, create("A", "Groceries", "1"))),
                 UNKNOWN_CATEGORY

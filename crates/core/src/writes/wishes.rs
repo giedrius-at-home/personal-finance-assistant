@@ -211,8 +211,9 @@ fn put_settings(w: &Writer<'_>, settings: &WishSettings) -> Result<()> {
     )
 }
 
-/// Buy a planned wish; a card purchase in the tracked month raises the card
-/// usage, and `cuts` trim the purchase month's budget.
+/// Buy a planned wish (on or before today). A card purchase raises the card
+/// usage of its budget month, rolling an older recorded month forward, and
+/// `cuts` trim the running budget month (the month the view calls month 0).
 pub fn mark_bought(
     w: &Writer<'_>,
     snap: &Snapshot,
@@ -227,6 +228,10 @@ pub fn mark_bought(
         .on
         .parse()
         .map_err(|_| invalid("purchase date is invalid"))?;
+    let ctx = Ctx::new(snap, &w.now);
+    if on > ctx.today() {
+        return Err(invalid("purchase date is in the future"));
+    }
     if let WishSource::Account { account_id } = &purchase.source
         && !snap.accounts.iter().any(|a| &a.account_id == account_id)
     {
@@ -240,22 +245,37 @@ pub fn mark_bought(
     };
     store(w, &bought)?;
     if purchase.source == WishSource::Card {
+        let month = ctx.resolver.period_for(on, None);
         let settings = load_wish_settings(&w.tx)?;
-        if settings.card_used_month.get(..7) == Some(&purchase.on[..7]) {
-            put_settings(
-                w,
-                &WishSettings {
-                    card_used: settings.card_used + purchase.amount,
-                    ..settings
-                },
-            )?;
+        let recorded = settings
+            .card_used_month
+            .parse::<Date>()
+            .ok()
+            .map(|d| d.first_of_month());
+        let settings = match recorded {
+            Some(m) if m == month => Some(WishSettings {
+                card_used: settings.card_used + purchase.amount,
+                ..settings
+            }),
+            // The recorded month is later: this purchase was charged already.
+            Some(m) if m > month => None,
+            _ => Some(WishSettings {
+                card_used: purchase.amount,
+                card_used_month: month.to_string(),
+                ..settings
+            }),
+        };
+        if let Some(settings) = settings {
+            put_settings(w, &settings)?;
         }
     }
-    write_cuts(w, snap, on.first_of_month(), &bought.currency, cuts)?;
+    write_cuts(w, snap, ctx.current_month(), &bought.currency, cuts)?;
     Ok(bought)
 }
 
-/// Trim `month`'s budget groups to the cuts' amounts (unknown groups ignored).
+/// Lower `month`'s budget groups by what each cut takes (`from − to`), so
+/// cuts that earlier, unbought wishes would make are not written too.
+/// Unknown groups are ignored.
 fn write_cuts(
     w: &Writer<'_>,
     snap: &Snapshot,
@@ -275,7 +295,7 @@ fn write_cuts(
         .unwrap_or_else(|| default_budget(month, currency));
     for cut in cuts {
         if let Some(group) = plan.groups.iter_mut().find(|g| g.id == cut.group_id) {
-            group.amount = cut.to;
+            group.amount = (group.amount - (cut.from - cut.to)).max(Decimal::ZERO);
         }
     }
     save_budget_plan(w, snap, plan)?;
@@ -297,7 +317,7 @@ pub fn mark_started(
         WishKind::OneOff => {
             return Err(invalid("only recurring wishes and bill changes can start"));
         }
-        WishKind::Recurring { every, .. } => {
+        WishKind::Recurring { every, ends_on } => {
             let Some(category) = match_category
                 .map(|c| c.trim().to_owned())
                 .filter(|c| !c.is_empty())
@@ -323,6 +343,7 @@ pub fn mark_started(
                     date: wish.due_on.clone(),
                     repeat_freq: repeat_freq.to_owned(),
                     skip,
+                    end_date: ends_on.clone(),
                 },
             )?;
         }
@@ -581,7 +602,7 @@ mod tests {
     }
 
     #[test]
-    fn mark_bought_outside_card_month_leaves_usage() {
+    fn mark_bought_in_an_earlier_card_month_leaves_usage() {
         let mut db = db();
         let wish = db.write(|w, s| save_wish(w, s, draft("Bike"))).unwrap();
         db.write(|w, _| save_wish_settings(w, settings("9.98", "2026-10-01")))
@@ -591,7 +612,7 @@ mod tests {
                 w,
                 s,
                 &wish.wish_id,
-                purchase(100, "2026-11-02", WishSource::Card),
+                purchase(100, "2026-09-28", WishSource::Card),
                 &[],
             )
         })
@@ -599,6 +620,151 @@ mod tests {
         assert_eq!(
             load_wish_settings(db.store.connection()).unwrap().card_used,
             "9.98".parse::<Decimal>().unwrap()
+        );
+    }
+
+    #[test]
+    fn mark_bought_rejects_a_future_date() {
+        let mut db = db();
+        let wish = db.write(|w, s| save_wish(w, s, draft("Bike"))).unwrap();
+        assert_eq!(
+            message(db.write(|w, s| mark_bought(
+                w,
+                s,
+                &wish.wish_id,
+                purchase(100, "2026-10-27", WishSource::Card),
+                &[]
+            ))),
+            "purchase date is in the future"
+        );
+    }
+
+    #[test]
+    fn card_purchase_rolls_old_usage_forward() {
+        for old in [settings("9.98", "2026-09-01"), WishSettings::default()] {
+            let mut db = db();
+            let wish = db.write(|w, s| save_wish(w, s, draft("Bike"))).unwrap();
+            db.write(|w, _| {
+                put_settings(w, &old)?;
+                Ok(())
+            })
+            .unwrap();
+            db.write(|w, s| {
+                mark_bought(
+                    w,
+                    s,
+                    &wish.wish_id,
+                    purchase(100, "2026-10-20", WishSource::Card),
+                    &[],
+                )
+            })
+            .unwrap();
+            let now = load_wish_settings(db.store.connection()).unwrap();
+            assert_eq!(now.card_used, Decimal::from(100));
+            assert_eq!(now.card_used_month, "2026-10-01");
+        }
+    }
+
+    fn going_out(month: &str, amount: i64) -> BudgetPlan {
+        BudgetPlan {
+            month: month.into(),
+            currency: Currency::new("EUR"),
+            revision: 0,
+            groups: vec![BudgetGroup {
+                id: "going-out".into(),
+                name: "Going out".into(),
+                amount: Decimal::from(amount),
+                source_groups: Vec::new(),
+                categories: Vec::new(),
+                transaction_ids: Vec::new(),
+                account_id: None,
+                importance: Some(2),
+                floor: None,
+            }],
+        }
+    }
+
+    fn stored_plan(db: &Db, month: &str) -> BudgetPlan {
+        serde_json::from_str(&db.one::<String>(&format!(
+            "SELECT payload_json FROM monthly_budget_plans WHERE month = '{month}'"
+        )))
+        .unwrap()
+    }
+
+    #[test]
+    fn card_purchase_after_early_cutoff_counts_in_the_budget_month() {
+        let mut db = db();
+        // October closed early on the 25th: the 26th belongs to November.
+        db.store
+            .connection()
+            .execute(
+                "INSERT INTO month_periods(month, revision, updated_at, payload_json) \
+                 VALUES ('2026-10-01', 1, '2026-10-25T10:00:00Z', ?1)",
+                [serde_json::json!({
+                    "month": "2026-10-01",
+                    "starts_at": "2026-10-01T00:00:00+02:00",
+                    "cutoff_at": "2026-10-25T10:00:00Z",
+                })
+                .to_string()],
+            )
+            .unwrap();
+        db.write(|w, s| save_budget_plan(w, s, going_out("2026-11-01", 120)))
+            .unwrap();
+        db.write(|w, _| save_wish_settings(w, settings("9.98", "2026-11-01")))
+            .unwrap();
+        let wish = db.write(|w, s| save_wish(w, s, draft("Bike"))).unwrap();
+        let cut = Cut {
+            group_id: "going-out".into(),
+            name: "Going out".into(),
+            from: Decimal::from(120),
+            to: Decimal::from(100),
+        };
+        db.write(|w, s| {
+            mark_bought(
+                w,
+                s,
+                &wish.wish_id,
+                purchase(100, "2026-10-26", WishSource::Card),
+                &[cut],
+            )
+        })
+        .unwrap();
+        assert_eq!(
+            load_wish_settings(db.store.connection()).unwrap().card_used,
+            "109.98".parse::<Decimal>().unwrap()
+        );
+        assert_eq!(
+            stored_plan(&db, "2026-11-01").groups[0].amount,
+            Decimal::from(100)
+        );
+    }
+
+    #[test]
+    fn cuts_take_only_this_wishs_share() {
+        let mut db = db();
+        db.write(|w, s| save_budget_plan(w, s, going_out("2026-10-01", 120)))
+            .unwrap();
+        let wish = db.write(|w, s| save_wish(w, s, draft("Bike"))).unwrap();
+        // An unbought wish judged first took going out from 120 to 70.
+        let cut = Cut {
+            group_id: "going-out".into(),
+            name: "Going out".into(),
+            from: Decimal::from(70),
+            to: Decimal::from(40),
+        };
+        db.write(|w, s| {
+            mark_bought(
+                w,
+                s,
+                &wish.wish_id,
+                purchase(30, "2026-10-26", WishSource::Card),
+                &[cut],
+            )
+        })
+        .unwrap();
+        assert_eq!(
+            stored_plan(&db, "2026-10-01").groups[0].amount,
+            Decimal::from(90)
         );
     }
 
@@ -781,6 +947,24 @@ mod tests {
             ))),
             "wish is not planned"
         );
+    }
+
+    #[test]
+    fn start_keeps_the_end_date() {
+        let mut db = db();
+        let mut draft = recurring("Course", Repeat::Monthly);
+        draft.kind = WishKind::Recurring {
+            every: Repeat::Monthly,
+            ends_on: Some("2027-03-04".into()),
+        };
+        let wish = db.write(|w, s| save_wish(w, s, draft)).unwrap();
+        db.write(|w, s| mark_started(w, s, &wish.wish_id, Some("Groceries".into()), &[]))
+            .unwrap();
+        let end: Option<String> = db.one("SELECT end_date FROM bills WHERE name = 'Course'");
+        assert_eq!(end.as_deref(), Some("2027-03-04"));
+        let snap = db.snap();
+        let bill = snap.bills.iter().find(|b| b.name == "Course").unwrap();
+        assert_eq!(bill.end, Some("2027-03-04".parse().unwrap()));
     }
 
     #[test]

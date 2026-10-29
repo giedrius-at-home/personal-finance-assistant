@@ -5,23 +5,63 @@ pub mod ladder;
 pub mod schedule;
 pub mod store;
 
-use finance_types::gateway::{BudgetPlan, Repeat, Wish, WishKind, WishSettings, WishStatus};
+use finance_types::gateway::{
+    BudgetPlan, Repeat, Wish, WishKind, WishPurchase, WishSettings, WishSource, WishStatus,
+};
 use finance_types::report::allocation::CurrencyAllocation;
 use finance_types::report::wishes::{Cut, Verdict, WishMonth, WishRow, WishesView};
 use finance_types::report::{Currency, Dashboard};
+use jiff::civil::Date;
 use ladder::Demand;
 use rust_decimal::Decimal;
-use schedule::{BillNow, Family};
+use schedule::{BillNow, Family, Planned};
 use std::collections::HashMap;
 
 /// The wishes screen, judged against the dashboard's allocation.
 pub fn wishes_view(dashboard: &Dashboard, wishes: &[Wish], settings: &WishSettings) -> WishesView {
-    let alloc = dashboard.monthly_allocation.as_ref().and_then(|m| {
+    let (plans, card_bill, bills) = dashboard_parts(dashboard, settings);
+    Inputs {
+        alloc: allocation(dashboard),
+        plans,
+        card_bill,
+        bills: &bills,
+    }
+    .view(wishes, settings)
+}
+
+/// The cuts buying `wish_id` with `purchase` needs in month 0: the unsaved
+/// gap judged as a purchase of its own, after everything else planned.
+pub fn purchase_cuts(
+    dashboard: &Dashboard,
+    wishes: &[Wish],
+    settings: &WishSettings,
+    wish_id: &str,
+    purchase: &WishPurchase,
+) -> Vec<Cut> {
+    let (plans, card_bill, bills) = dashboard_parts(dashboard, settings);
+    Inputs {
+        alloc: allocation(dashboard),
+        plans,
+        card_bill,
+        bills: &bills,
+    }
+    .purchase_cuts(wishes, settings, wish_id, purchase)
+}
+
+fn allocation(dashboard: &Dashboard) -> Option<&CurrencyAllocation> {
+    dashboard.monthly_allocation.as_ref().and_then(|m| {
         m.currencies
             .iter()
             .find(|c| c.currency.code == "EUR")
             .or_else(|| m.currencies.first())
-    });
+    })
+}
+
+/// The budget plans, the card bill's amount and the bills as they stand.
+fn dashboard_parts(
+    dashboard: &Dashboard,
+    settings: &WishSettings,
+) -> (Vec<BudgetPlan>, Decimal, HashMap<String, BillNow>) {
     let plans: Vec<BudgetPlan> = dashboard
         .monthly_budgets
         .iter()
@@ -41,8 +81,7 @@ pub fn wishes_view(dashboard: &Dashboard, wishes: &[Wish], settings: &WishSettin
                 .find(|row| row.bill_id == bill_id)
         })
         .map_or(Decimal::ZERO, |row| row.amount_max);
-    let bills = bills_now(dashboard);
-    view_from(alloc, &plans, card_bill, wishes, settings, &bills)
+    (plans, card_bill, bills_now(dashboard))
 }
 
 /// Every bill that repeats weekly, monthly or yearly, at its highest amount.
@@ -69,6 +108,120 @@ fn bills_now(dashboard: &Dashboard) -> HashMap<String, BillNow> {
         .collect()
 }
 
+/// What the judging reads besides the wishes.
+#[derive(Debug)]
+pub struct Inputs<'a> {
+    pub alloc: Option<&'a CurrencyAllocation>,
+    pub plans: Vec<BudgetPlan>,
+    pub card_bill: Decimal,
+    pub bills: &'a HashMap<String, BillNow>,
+}
+
+impl Inputs<'_> {
+    /// Judge `items` from month 0 on.
+    fn judge(
+        &self,
+        alloc: &CurrencyAllocation,
+        month0: Date,
+        items: &[Planned],
+        wishes: &[Wish],
+        settings: &WishSettings,
+    ) -> (Vec<WishMonth>, Vec<Vec<Demand>>, bool) {
+        let months = schedule::horizon(items, month0);
+        let demands = schedule::demands(items, month0, months);
+        let (bases, card_stale) = baseline::baselines(
+            alloc,
+            &self.plans,
+            self.card_bill,
+            settings,
+            schedule::earmarked(wishes),
+            months,
+        );
+        let judged = ladder::judge(&bases, &demands, settings.card_limit);
+        (judged, demands, card_stale)
+    }
+
+    /// The wishes screen.
+    pub fn view(&self, wishes: &[Wish], settings: &WishSettings) -> WishesView {
+        let judged = self.alloc.and_then(|a| {
+            let month0 = baseline::current_month(a)?;
+            let (items, families) = schedule::plan_items(wishes, month0, self.bills);
+            let (judged, demands, card_stale) = self.judge(a, month0, &items, wishes, settings);
+            Some((judged, families, demands, card_stale))
+        });
+        let currency = self.alloc.map_or_else(
+            || {
+                wishes
+                    .first()
+                    .map_or_else(Currency::eur, |w| w.currency.clone())
+            },
+            |a| a.currency.clone(),
+        );
+        let (months, families, demands, card_stale) = judged.unwrap_or_default();
+        let ctx = RowContext {
+            wishes,
+            months: &months,
+            families: &families,
+            month0: demands.first().map_or(&[], Vec::as_slice),
+        };
+        let mut tops: Vec<&Wish> = wishes.iter().filter(|w| w.parent_id.is_none()).collect();
+        sort_by_due(&mut tops);
+        WishesView {
+            currency,
+            settings: settings.clone(),
+            card_stale,
+            wishes: tops.into_iter().map(|w| ctx.row(w)).collect(),
+            months,
+        }
+    }
+
+    /// See [`purchase_cuts`].
+    pub fn purchase_cuts(
+        &self,
+        wishes: &[Wish],
+        settings: &WishSettings,
+        wish_id: &str,
+        purchase: &WishPurchase,
+    ) -> Vec<Cut> {
+        let Some(alloc) = self.alloc else {
+            return Vec::new();
+        };
+        let (Some(month0), Some(wish)) = (
+            baseline::current_month(alloc),
+            wishes.iter().find(|w| w.wish_id == wish_id),
+        ) else {
+            return Vec::new();
+        };
+        let gap = purchase.amount - wish.saved;
+        if gap <= Decimal::ZERO {
+            return Vec::new();
+        }
+        let (mut items, _) = schedule::plan_items(wishes, month0, self.bills);
+        items.retain(|i| i.wish_id != wish_id);
+        let due = purchase.on.parse::<Date>().unwrap_or(month0).max(month0);
+        items.push(Planned {
+            wish_id: wish_id.to_owned(),
+            label: wish.name.clone(),
+            due,
+            remaining: gap,
+            on_card: purchase.source == WishSource::Card,
+            created_at: wish.created_at.clone(),
+            per_month: None,
+        });
+        let (judged, _, _) = self.judge(alloc, month0, &items, wishes, settings);
+        judged
+            .first()
+            .map(|m| {
+                merge_cuts(
+                    m.verdicts
+                        .iter()
+                        .filter(|v| v.wish_id.as_deref() == Some(wish_id) && !v.set_aside),
+                )
+            })
+            .unwrap_or_default()
+    }
+}
+
 /// The wishes screen, judged against one currency's allocation.
 pub fn view_from(
     alloc: Option<&CurrencyAllocation>,
@@ -78,46 +231,13 @@ pub fn view_from(
     settings: &WishSettings,
     bills: &HashMap<String, BillNow>,
 ) -> WishesView {
-    let judged = alloc.and_then(|a| {
-        let month0 = baseline::current_month(a)?;
-        let (items, families) = schedule::plan_items(wishes, month0, bills);
-        let months = schedule::horizon(&items, month0);
-        let demands = schedule::demands(&items, month0, months);
-        let (bases, card_stale) = baseline::baselines(
-            a,
-            plans,
-            card_bill,
-            settings,
-            schedule::earmarked(wishes),
-            months,
-        );
-        let judged = ladder::judge(&bases, &demands, settings.card_limit);
-        Some((judged, families, demands, card_stale))
-    });
-    let currency = alloc.map_or_else(
-        || {
-            wishes
-                .first()
-                .map_or_else(Currency::eur, |w| w.currency.clone())
-        },
-        |a| a.currency.clone(),
-    );
-    let (months, families, demands, card_stale) = judged.unwrap_or_default();
-    let ctx = RowContext {
-        wishes,
-        months: &months,
-        families: &families,
-        month0: demands.first().map_or(&[], Vec::as_slice),
-    };
-    let mut tops: Vec<&Wish> = wishes.iter().filter(|w| w.parent_id.is_none()).collect();
-    sort_by_due(&mut tops);
-    WishesView {
-        currency,
-        settings: settings.clone(),
-        card_stale,
-        wishes: tops.into_iter().map(|w| ctx.row(w)).collect(),
-        months,
+    Inputs {
+        alloc,
+        plans: plans.to_vec(),
+        card_bill,
+        bills,
     }
+    .view(wishes, settings)
 }
 
 fn sort_by_due(wishes: &mut [&Wish]) {
@@ -142,7 +262,7 @@ impl RowContext<'_> {
     fn set_aside(&self, wish_id: &str) -> Decimal {
         self.month0
             .iter()
-            .filter(|d| d.wish_id.as_deref() == Some(wish_id) && d.label.starts_with("Saving for "))
+            .filter(|d| d.wish_id.as_deref() == Some(wish_id) && d.set_aside)
             .map(|d| d.amount)
             .sum()
     }
@@ -185,19 +305,11 @@ impl RowContext<'_> {
     }
 }
 
-/// The cuts month 0 makes for one wish, a group cut twice keeping the first
-/// `from` and the lowest `to`.
-pub fn month_zero_cuts(view: &WishesView, wish_id: &str) -> Vec<Cut> {
-    let Some(month) = view.months.first() else {
-        return Vec::new();
-    };
+/// One cut per group, in first-cut order, keeping the first `from` and the
+/// lowest `to`.
+fn merge_cuts<'a>(verdicts: impl Iterator<Item = &'a Verdict>) -> Vec<Cut> {
     let mut out: Vec<Cut> = Vec::new();
-    for cut in month
-        .verdicts
-        .iter()
-        .filter(|v| v.wish_id.as_deref() == Some(wish_id))
-        .flat_map(|v| &v.cuts)
-    {
+    for cut in verdicts.flat_map(|v| &v.cuts) {
         match out.iter_mut().find(|c| c.group_id == cut.group_id) {
             Some(seen) => seen.to = seen.to.min(cut.to),
             None => out.push(cut.clone()),
@@ -206,11 +318,26 @@ pub fn month_zero_cuts(view: &WishesView, wish_id: &str) -> Vec<Cut> {
     out
 }
 
+/// The cuts month 0 makes for one wish's own demands (not its set-asides).
+pub fn month_zero_cuts(view: &WishesView, wish_id: &str) -> Vec<Cut> {
+    view.months
+        .first()
+        .map(|month| {
+            merge_cuts(
+                month
+                    .verdicts
+                    .iter()
+                    .filter(|v| v.wish_id.as_deref() == Some(wish_id) && !v.set_aside),
+            )
+        })
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::baseline::tests::{alloc, d, plan, plan_group, row};
     use super::*;
-    use finance_types::gateway::{WishSource, WishStatus};
+    use finance_types::gateway::{WishPurchase, WishSource, WishStatus};
     use finance_types::report::Currency;
 
     fn wish(id: &str, parent: Option<&str>, amount: &str, due: &str) -> Wish {
@@ -287,6 +414,75 @@ mod tests {
         assert_eq!(charge.short, d("500"));
         assert_eq!(view.wishes[0].short, d("500"));
         assert!(view.wishes[0].tradeoffs);
+    }
+
+    fn buy(amount: &str, on: &str, source: WishSource) -> WishPurchase {
+        WishPurchase {
+            amount: d(amount),
+            on: on.into(),
+            source,
+        }
+    }
+
+    fn account() -> WishSource {
+        WishSource::Account {
+            account_id: "a".into(),
+        }
+    }
+
+    #[test]
+    fn early_buy_judges_the_unsaved_gap() {
+        // 100 free covers the 100 already saved (earmarked).
+        let a = alloc(
+            "100",
+            "0",
+            vec![row("Going out", "1000", "0")],
+            vec![row("Going out", "1000", "0")],
+        );
+        let mut tv = wish("tv", None, "900", "2026-12-20");
+        tv.saved = d("100");
+        let s = WishSettings {
+            card_limit: Decimal::ZERO,
+            ..WishSettings::default()
+        };
+        let wishes = [tv];
+        let bills = HashMap::new();
+        let inputs = Inputs {
+            alloc: Some(&a),
+            plans: going_out_plan(),
+            card_bill: Decimal::ZERO,
+            bills: &bills,
+        };
+        // While planned, month 0 only sets aside a third of the gap, and a
+        // set-aside's cuts are not a purchase's.
+        let view = inputs.view(&wishes, &s);
+        assert!(view.months[0].verdicts[0].set_aside);
+        assert!(month_zero_cuts(&view, "tv").is_empty());
+        let cuts = inputs.purchase_cuts(&wishes, &s, "tv", &buy("900", "2026-10-15", account()));
+        assert_eq!(
+            cuts,
+            vec![Cut {
+                group_id: "g-out".into(),
+                name: "Going out".into(),
+                from: d("1000"),
+                to: d("200"),
+            }]
+        );
+        // On the card, the gap goes on the card and nothing is cut.
+        let s = WishSettings::default();
+        let card = inputs.purchase_cuts(
+            &wishes,
+            &s,
+            "tv",
+            &buy("900", "2026-10-15", WishSource::Card),
+        );
+        assert!(card.is_empty());
+        // Fully saved: nothing to judge.
+        assert!(
+            inputs
+                .purchase_cuts(&wishes, &s, "tv", &buy("100", "2026-10-15", account()))
+                .is_empty()
+        );
     }
 
     #[test]
