@@ -328,3 +328,27 @@ whatever is left as savings that can be taken back when needed.
 - How "too few months to catch up" is decided for a must set-aside.
 - Tests: must-before-optional ordering, free money ignoring goals,
   skip-and-catch-up, pooled card room and per-card fill order.
+
+## Addendum (2026-10-29, later): the savings pot
+
+Owner: "I have savings, so let's track the savings better and I am free to
+use them … it takes from never spendable first."
+
+- **Savings pot** = the balances of savings-role accounts (what the
+  allocation reports as `savings_balance`, "never spendable") plus goal
+  amounts protected in ordinary accounts (`protected_savings`). One number
+  per currency, shown on the Wishes page as "Savings: €P".
+- **Ladder order** becomes: 1 free money → **2 savings pot** → 3 budget
+  groups by importance down to their floors → 4 cards → 5 short. Savings
+  come before lifestyle cuts (owner's decision).
+- **Tracking** is stateless like the rest: month 0 starts with the pot as
+  reported; each month's draws lower the pot the later months see; nothing
+  refills it. The view shows per month "Savings before / after".
+- A must wish draws before an optional one, as with every other step.
+- Wording: "Affordable — €X from savings, leaving €Y." When both savings and
+  a later step are used, the savings phrase comes first in the sentence
+  (e.g. "Affordable — €X from savings, then going out drops to €Z.").
+- *(Claude's call)* Buying a wish does not move money between accounts;
+  the owner transfers it themself. The pot is a judging aid.
+- *(Claude's call)* The skip test for a set-aside is unchanged: "cannot fit
+  without the cards" now includes savings and group cuts before the cards.

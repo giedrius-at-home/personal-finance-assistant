@@ -15,6 +15,7 @@
 - All money is `Decimal`; round shares with `.round_dp(2)` as the existing code does.
 - Stored JSON must keep parsing: every new field on `Wish`, `WishSettings`, `WishPurchase`, `Verdict`, `WishMonth` is `#[serde(default)]` or converted from the old shape. Existing tests `old_wish_json_without_kind_is_one_off` and `stored_rows_round_trip` must keep passing.
 - Default settings: one card named "Credit card", limit 2500, used 0.
+- Savings pot (spec addendum "the savings pot"): pot = `alloc.savings_balance + alloc.protected_savings`; ladder order free → savings → groups → cards → short; draws lower the pot for later months; sentence "Affordable — {X} from savings, leaving {Y}." and page line "Savings: {P}".
 - Sentences (exact copy from the spec): "Nothing set aside in {Month}; {X}/month from {Month}.", "{X} on the cards, so {Month} starts {X} short.", "Pay back {Y} on 1 {Month} ({Card} {a}, {Card} {b}).", free-money line: "Free money each month: salary minus bills, planned payments and budget groups. Savings goals are not held back."
 - CI gate before every commit: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo clippy -p finance-ui --target wasm32-unknown-unknown -- -D warnings`, `cargo test -p finance-types -p finance-storage -p finance-core`, `cargo test -p finance-ui --bins`.
 - Commit messages: conventional, end with `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.
@@ -289,7 +290,22 @@ git add -A && git commit -m "feat(wishes): saver hands the ladder each month's s
   5. Card fill: `Purse.cards: Vec<(CardRoom, Decimal used)>`; `card_room()` = Σ max(limit − used, 0); taking fills cards in list order up to each limit.
 - `RowContext::set_aside(wish_id)` now reads month 0's set-aside verdicts (amount, skipped excluded) instead of demands; `Inputs::judge` returns `(Vec<WishMonth>, Vec<String> stale)`.
 
+**Savings pot (added 2026-10-29):** `MonthBaseline` gains `pub savings: Decimal` (month 0 only is read: `alloc.savings_balance + alloc.protected_savings`, set in `baseline::baselines` for every month to the same value); `Verdict` gains `#[serde(default)] pub from_savings: Decimal` (types crate); `WishMonth` gains `#[serde(default)] pub savings_before: Decimal` and `#[serde(default)] pub savings_left: Decimal`. `Purse` carries `savings: Decimal`, seeded for month 0 from the baseline and for month i>0 from the previous month's `savings_left`. In `Purse::pay`, after free money and before group cuts: `let from_savings = rem.min(self.savings.max(0)); self.savings -= from_savings; rem -= from_savings;`. A set-aside's "fits without the cards" trial therefore includes savings.
+
 - [ ] **Step 1: Write the failing tests** in `ladder.rs` tests (helpers: `base(free, cards)`, `saver_for(...)`, two cards "visa" limit 100 / "mc" limit 200)
+
+```rust
+#[test]
+fn savings_are_drawn_before_groups_and_carry_down() {
+    // free 0, savings 150, going out 100 (floor 0); purchase 120 in month 0, purchase 100 in month 1.
+    let out = judge(&bases_savings(["0", "0"], "150"), &[vec![]; 2], &mut saver(vec![purchase_in("a", "120", 0), purchase_in("b", "100", 1)]));
+    assert_eq!(out[0].verdicts[0].from_savings, d("120")); assert!(out[0].verdicts[0].cuts.is_empty());
+    assert_eq!(out[0].savings_left, d("30"));
+    assert_eq!(out[1].savings_before, d("30"));
+    assert_eq!(out[1].verdicts[0].from_savings, d("30"));
+    assert_eq!(out[1].verdicts[0].cuts[0].to, d("30"));   // going out 100 → 30 for the remaining 70
+}
+```
 
 ```rust
 #[test]
@@ -535,7 +551,9 @@ git add -A && git commit -m "feat(wishes): buying on card records which cards to
 - Produces:
   - Add form: a "Must happen" checkbox bound to a new `ui.must: RwSignal<bool>`, sent as `draft.must`; reset on success.
   - Wish row: a small "Must" tag beside the name when `wish.must`; a text button "Mark must" / "Not a must" in the row's action strip that calls `set_wish_must` through `ui.write("must-<id>", "set_wish_must", MustArgs { wish_id, must }, "Saved.", || {})`, where `#[derive(Serialize)] struct MustArgs { wish_id: String, must: bool }`.
-  - `page`: one `<p class="text-sm text-muted-fg">` under the "Planned purchases" heading with the free-money sentence from Global Constraints.
+  - `page`: one `<p class="text-sm text-muted-fg">` under the "Planned purchases" heading with the free-money sentence from Global Constraints, followed on the same line by "Savings: {P}." where P = `months[0].savings_before`.
+  - `one_off_line`: when the row's verdicts drew from savings, the sentence starts "Affordable — {X} from savings, leaving {Y}." (Y = that month's `savings_left`); with cuts or card as well: "Affordable — {X} from savings, then {cuts phrase}." / "… from savings, then {n} on the cards — {next} starts {n} lighter."; `month_card` shows "Savings before" and "Savings after" stats.
+  - Test: `savings_sentence_names_amount_and_remainder` — verdict `from_savings` 120 in a month with `savings_left` 30 → "Affordable — €120.00 from savings, leaving €30.00".
   - `one_off_line`: when a month's verdict for the row is `skipped`, prefix "Nothing set aside in {Month}; {X}/month from {Next}." where X is the next month's set-aside amount for the row; the on-card sentence uses "on the cards" wording: "{n} on the cards, so {next} starts {short} short." and "Affordable with {n} on the cards — {next} starts {n} lighter…".
 
 - [ ] **Step 1: Write the failing tests** in the page's tests module (reuse its `row`, `d` helpers; `month(...)` helper building a `WishMonth`)
