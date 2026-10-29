@@ -18,8 +18,8 @@ use serde::de::IgnoredAny;
 
 use crate::api::{NoArgs, invoke, load};
 use crate::ds::{
-    Button, CONTROL, Card, CardTone, Eyebrow, Field, Icon, Lucide, Size, Skeleton, Stat, Variant,
-    cn,
+    Badge, Button, CONTROL, Card, CardTone, Checkbox, Eyebrow, Field, Icon, Lucide, Size, Skeleton,
+    Stat, Tone, Variant, cn,
 };
 use crate::pages::Problem;
 use crate::{format, state};
@@ -134,12 +134,54 @@ pub fn verdict_line(row: &WishRow, months: &[WishMonth]) -> String {
     }
 }
 
+/// A one-off's verdict, after a word on any month its set-aside skipped.
 fn one_off_line(by_month: &[(&WishMonth, Vec<&Verdict>)], code: &str) -> String {
+    let rest = one_off_verdict(by_month, code);
+    match skipped_note(by_month, code) {
+        None => rest,
+        Some(note) if rest == "Affordable." => note,
+        Some(note) => format!("{note} {rest}"),
+    }
+}
+
+/// `Nothing set aside in November; €300/month from December.` for the
+/// first month whose set-aside was skipped, with the next month that
+/// sets money aside again.
+fn skipped_note(by_month: &[(&WishMonth, Vec<&Verdict>)], code: &str) -> Option<String> {
+    let at = by_month
+        .iter()
+        .position(|(_, v)| v.iter().any(|v| v.skipped))?;
+    let skipped = format!("Nothing set aside in {}", month_name(&by_month[at].0.month));
+    let next = by_month[at + 1..].iter().find_map(|(m, v)| {
+        let sum = v
+            .iter()
+            .filter(|v| v.set_aside && !v.skipped)
+            .map(|v| v.amount)
+            .sum::<Decimal>();
+        (sum > Decimal::ZERO).then_some((m, sum))
+    });
+    Some(match next {
+        Some((month, n)) => format!(
+            "{skipped}; {}/month from {}.",
+            amount(n, code),
+            month_name(&month.month)
+        ),
+        None => format!("{skipped}."),
+    })
+}
+
+fn one_off_verdict(by_month: &[(&WishMonth, Vec<&Verdict>)], code: &str) -> String {
     let short: Decimal = by_month.iter().map(|(_, v)| total(v, |v| v.short)).sum();
     if short > Decimal::ZERO {
         return format!("Not affordable — short by {}.", amount(short, code));
     }
     let cuts = first_cuts(by_month);
+    let from_savings: Decimal = by_month
+        .iter()
+        .map(|(_, v)| total(v, |v| v.from_savings))
+        .sum();
+    let savings = (from_savings > Decimal::ZERO)
+        .then(|| format!("Affordable — {} from savings", amount(from_savings, code)));
     let on_card: Decimal = by_month.iter().map(|(_, v)| total(v, |v| v.on_card)).sum();
     let first_card = by_month
         .iter()
@@ -164,7 +206,7 @@ fn one_off_line(by_month: &[(&WishMonth, Vec<&Verdict>)], code: &str) -> String 
                 format!(" even after {}", cuts_phrase(&next_cuts, code))
             };
             return format!(
-                "Not affordable — {n} on the card, so {next} starts {} short{even}.",
+                "Not affordable — {n} on the cards, so {next} starts {} short{even}.",
                 amount(next_short, code)
             );
         }
@@ -178,9 +220,29 @@ fn one_off_line(by_month: &[(&WishMonth, Vec<&Verdict>)], code: &str) -> String 
         } else {
             format!(" — after {}", cuts_phrase(&cuts, code))
         };
-        return format!(
-            "Affordable with {n} on the card — {next} starts {n} lighter{there}{after}."
-        );
+        return match savings {
+            Some(savings) => {
+                format!(
+                    "{savings}, then {n} on the cards — {next} starts {n} lighter{there}{after}."
+                )
+            }
+            None => {
+                format!(
+                    "Affordable with {n} on the cards — {next} starts {n} lighter{there}{after}."
+                )
+            }
+        };
+    }
+    if let Some(savings) = savings {
+        if !cuts.is_empty() {
+            return format!("{savings}, then {}.", cuts_phrase(&cuts, code));
+        }
+        let left = by_month
+            .iter()
+            .rev()
+            .find(|(_, v)| total(v, |v| v.from_savings) > Decimal::ZERO)
+            .map_or(Decimal::ZERO, |(m, _)| m.savings_left);
+        return format!("{savings}, leaving {}.", amount(left, code));
     }
     if !cuts.is_empty() {
         return format!("Affordable if {}.", cuts_phrase(&cuts, code));
@@ -276,6 +338,16 @@ fn repeating_line(by_month: &[(&WishMonth, Vec<&Verdict>)], code: &str) -> Strin
     "Affordable every month.".to_owned()
 }
 
+/// What "free money" means on this page, with the savings pot the months
+/// start from.
+fn free_money_note(months: &[WishMonth], code: &str) -> String {
+    let note = "Free money each month: salary minus bills, planned payments and budget groups. Savings goals are not held back.";
+    match months.first() {
+        Some(first) => format!("{note} Savings: {}.", amount(first.savings_before, code)),
+        None => note.to_owned(),
+    }
+}
+
 /// What a month could not pay, across all its verdicts.
 fn month_short(month: &WishMonth) -> Decimal {
     month.verdicts.iter().map(|v| v.short).sum()
@@ -303,6 +375,7 @@ struct Draft {
     due_on: String,
     source: WishSource,
     kind: WishKind,
+    must: bool,
 }
 
 #[derive(Serialize)]
@@ -314,6 +387,12 @@ struct DraftArgs {
 struct SavedArgs {
     wish_id: String,
     saved: Decimal,
+}
+
+#[derive(Serialize)]
+struct MustArgs {
+    wish_id: String,
+    must: bool,
 }
 
 #[derive(Serialize)]
@@ -507,6 +586,8 @@ struct Ui {
     due_on: RwSignal<String>,
     source: RwSignal<String>,
     parent: RwSignal<String>,
+    /// The add form's "Must happen".
+    must: RwSignal<bool>,
     /// The wish whose "Bought" form is open.
     buying: RwSignal<Option<String>>,
     buy_amount: RwSignal<String>,
@@ -536,6 +617,7 @@ impl Ui {
             due_on: RwSignal::new(String::new()),
             source: RwSignal::new("card".into()),
             parent: RwSignal::new(String::new()),
+            must: RwSignal::new(false),
             buying: RwSignal::new(None),
             buy_amount: RwSignal::new(String::new()),
             buy_on: RwSignal::new(String::new()),
@@ -699,6 +781,7 @@ fn page(ui: Ui, view: &WishesView, ctx: &Context) -> impl IntoView + use<> {
         .map(|m| month_card(m, &currency.code))
         .collect_view();
     let has_months = !view.months.is_empty();
+    let note = free_money_note(&view.months, &currency.code);
     let strip = card_strip(ui, view, &ctx.get_value(), current_month);
     let form = add_form(
         ui,
@@ -718,6 +801,7 @@ fn page(ui: Ui, view: &WishesView, ctx: &Context) -> impl IntoView + use<> {
             <Card>
                 <Eyebrow>"WISHES"</Eyebrow>
                 <h2 class="mt-2 text-lg font-semibold">"Planned purchases"</h2>
+                <p class="mt-1 text-sm text-fg-muted">{note}</p>
                 {feedback(ui, "dropped".into())}
                 <div class="mt-3 grid">{rows}</div>
                 {empty.then(|| view! { <p class="mt-3 text-sm text-fg-muted">"No planned wishes yet."</p> })}
@@ -946,6 +1030,7 @@ fn add_form(
             due_on: ui.due_on.get_untracked(),
             source,
             kind,
+            must: ui.must.get_untracked(),
         };
         ui.write(
             "add".into(),
@@ -958,6 +1043,7 @@ fn add_form(
                 ] {
                     field.set(String::new());
                 }
+                ui.must.set(false);
             },
         );
     };
@@ -1017,6 +1103,13 @@ fn add_form(
                 />
             </Field>
             {fields}
+            <label class="flex items-center gap-2.5 text-sm sm:col-start-1">
+                <Checkbox
+                    checked=Signal::derive(move || ui.must.get())
+                    on_change=Callback::new(move |v| ui.must.set(v))
+                />
+                "Must happen"
+            </label>
             <Button submit=true variant=Variant::Secondary class="sm:col-start-1" disabled=Signal::derive(move || ui.busy.get())>
                 <Lucide icon=Icon::Plus size=15 />
                 "Add wish"
@@ -1259,11 +1352,31 @@ fn wish_body(
     let buy_on_id = StoredValue::new(format!("buy-on-{}", wish.wish_id));
     let buy_source_id = StoredValue::new(format!("buy-source-{}", wish.wish_id));
     let drop_text = format!("Drop {}? It stops counting against your months.", wish.name);
+    let must = wish.must;
+    let must_target = format!("must-{}", wish.wish_id);
+    let toggle_must = {
+        let target = must_target.clone();
+        move |_| {
+            ui.write(
+                target.clone(),
+                "set_wish_must",
+                MustArgs {
+                    wish_id: id.get_value(),
+                    must: !must,
+                },
+                "Saved.",
+                || {},
+            );
+        }
+    };
     let buy_sources = StoredValue::new(sources);
     view! {
         <div class="grid gap-2 py-3">
             <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                <h3 class=if sub { "text-sm font-semibold" } else { "text-base font-semibold" }>{wish.name.clone()}</h3>
+                <h3 class=cn(["flex items-center gap-2 font-semibold", if sub { "text-sm" } else { "text-base" }])>
+                    {wish.name.clone()}
+                    {must.then(|| view! { <Badge tone=Tone::Accent>"Must"</Badge> })}
+                </h3>
                 <span class="text-sm tabular-nums text-fg-muted">{detail}</span>
             </div>
             <p class=cn(["text-sm font-medium", tone])>{line}</p>
@@ -1311,6 +1424,14 @@ fn wish_body(
                     })
                 >
                     "Drop"
+                </Button>
+                <Button
+                    size=Size::Sm
+                    variant=Variant::Ghost
+                    disabled=Signal::derive(move || ui.busy.get())
+                    on_click=Callback::new(toggle_must)
+                >
+                    {if must { "Not a must" } else { "Mark must" }}
                 </Button>
             </div>
             <Show when=buying>
@@ -1388,6 +1509,7 @@ fn wish_body(
                     <Button size=Size::Sm variant=Variant::Secondary on_click=Callback::new(move |_| ui.dropping.set(None))>"Keep"</Button>
                 </div>
             </Show>
+            {feedback(ui, must_target)}
             {feedback(ui, target)}
         </div>
     }
@@ -1473,6 +1595,7 @@ fn month_card(month: &WishMonth, code: &str) -> impl IntoView + use<> {
         money(month.card_charge_in),
         money(month.card_used),
     );
+    let (savings_before, savings_after) = (money(month.savings_before), money(month.savings_left));
     let short = month_short(month);
     let short = (short > Decimal::ZERO).then(|| {
         view! {
@@ -1487,6 +1610,8 @@ fn month_card(month: &WishMonth, code: &str) -> impl IntoView + use<> {
             <div class="grid grid-cols-2 gap-3">
                 <Stat label="Free before">{before}</Stat>
                 <Stat label="Free after">{after}</Stat>
+                <Stat label="Savings before">{savings_before}</Stat>
+                <Stat label="Savings after">{savings_after}</Stat>
                 <Stat label="Card charge in">{charge}</Stat>
                 <Stat label="Card used">{used}</Stat>
             </div>
@@ -1637,7 +1762,7 @@ mod tests {
         ];
         assert_eq!(
             verdict_line(&row("w"), &months),
-            "Affordable with €130 on the card — November starts €130 lighter."
+            "Affordable with €130 on the cards — November starts €130 lighter."
         );
     }
 
@@ -1657,7 +1782,7 @@ mod tests {
         ];
         assert_eq!(
             verdict_line(&row("w"), &months),
-            "Affordable with €130 on the card — December starts €130 lighter — after going out drops to €0 and groceries to €300."
+            "Affordable with €130 on the cards — December starts €130 lighter — after going out drops to €0 and groceries to €300."
         );
     }
 
@@ -1837,7 +1962,7 @@ mod tests {
         let months = [month(Decimal::ZERO, Decimal::ZERO, vec![v])];
         assert_eq!(
             verdict_line(&row("w"), &months),
-            "Not affordable — €500 on the card, so November starts €500 short."
+            "Not affordable — €500 on the cards, so November starts €500 short."
         );
     }
 
@@ -1852,7 +1977,7 @@ mod tests {
         let months = [month(Decimal::ZERO, Decimal::ZERO, vec![v])];
         assert_eq!(
             verdict_line(&row("w"), &months),
-            "Not affordable — €500 on the card, so November starts €380 short even after going out drops to €0."
+            "Not affordable — €500 on the cards, so November starts €380 short even after going out drops to €0."
         );
     }
 
@@ -1866,7 +1991,7 @@ mod tests {
         let months = [month(Decimal::ZERO, Decimal::ZERO, vec![v])];
         assert_eq!(
             verdict_line(&row("w"), &months),
-            "Affordable with €100 on the card — November starts €100 lighter, so going out drops to €20 in November."
+            "Affordable with €100 on the cards — November starts €100 lighter, so going out drops to €20 in November."
         );
     }
 
@@ -1954,7 +2079,129 @@ mod tests {
         let months = [month(Decimal::ZERO, Decimal::ZERO, vec![v])];
         assert_eq!(
             verdict_line(&parent, &months),
-            "Affordable with €900 on the card — November starts €900 lighter."
+            "Affordable with €900 on the cards — November starts €900 lighter."
+        );
+    }
+
+    fn verdict_skipped(id: &str) -> Verdict {
+        Verdict {
+            set_aside: true,
+            skipped: true,
+            ..verdict(id, Decimal::ZERO)
+        }
+    }
+
+    fn verdict_set_aside(id: &str, amount: Decimal) -> Verdict {
+        Verdict {
+            set_aside: true,
+            from_free: amount,
+            ..verdict(id, amount)
+        }
+    }
+
+    #[test]
+    fn skipped_month_is_said_then_catch_up() {
+        let months = vec![
+            month_at("2026-11-01", vec![verdict_skipped("w")]),
+            month_at("2026-12-01", vec![verdict_set_aside("w", d(30000, 2))]),
+            month_at("2027-01-01", vec![verdict_set_aside("w", d(30000, 2))]),
+        ];
+        assert_eq!(
+            verdict_line(&row("w"), &months),
+            "Nothing set aside in November; €300/month from December."
+        );
+    }
+
+    #[test]
+    fn skipped_month_comes_before_the_rest_of_the_verdict() {
+        let charged = Verdict {
+            on_card: d(100, 0),
+            ..verdict("w", d(100, 0))
+        };
+        let months = vec![
+            month_at("2026-11-01", vec![verdict_skipped("w")]),
+            month_at("2026-12-01", vec![verdict_set_aside("w", d(50, 0))]),
+            month_at("2027-01-01", vec![charged]),
+        ];
+        assert_eq!(
+            verdict_line(&row("w"), &months),
+            "Nothing set aside in November; €50/month from December. Affordable with €100 on the cards — February starts €100 lighter."
+        );
+    }
+
+    #[test]
+    fn card_sentence_says_cards() {
+        let v = Verdict {
+            on_card: d(566, 0),
+            next_short: d(3048, 2),
+            ..verdict("w", d(566, 0))
+        };
+        let months = [month(Decimal::ZERO, Decimal::ZERO, vec![v])];
+        assert_eq!(
+            verdict_line(&row("w"), &months),
+            "Not affordable — €566 on the cards, so November starts €30.48 short."
+        );
+    }
+
+    fn with_savings(at: &str, savings_left: Decimal, verdicts: Vec<Verdict>) -> WishMonth {
+        WishMonth {
+            savings_before: savings_left + d(500, 0),
+            savings_left,
+            ..month_at(at, verdicts)
+        }
+    }
+
+    #[test]
+    fn savings_sentence_names_amount_and_remainder() {
+        let v = Verdict {
+            from_savings: d(120, 0),
+            ..verdict("w", d(120, 0))
+        };
+        let months = [with_savings("2026-10-01", d(30, 0), vec![v])];
+        assert_eq!(
+            verdict_line(&row("w"), &months),
+            "Affordable — €120 from savings, leaving €30."
+        );
+    }
+
+    #[test]
+    fn savings_then_cuts() {
+        let v = Verdict {
+            from_savings: d(120, 0),
+            cuts: vec![cut("g1", "Going out", 120, 40)],
+            ..verdict("w", d(200, 0))
+        };
+        let months = [with_savings("2026-10-01", Decimal::ZERO, vec![v])];
+        assert_eq!(
+            verdict_line(&row("w"), &months),
+            "Affordable — €120 from savings, then going out drops to €40."
+        );
+    }
+
+    #[test]
+    fn savings_then_cards() {
+        let v = Verdict {
+            from_savings: d(120, 0),
+            on_card: d(80, 0),
+            ..verdict("w", d(200, 0))
+        };
+        let months = [with_savings("2026-10-01", Decimal::ZERO, vec![v])];
+        assert_eq!(
+            verdict_line(&row("w"), &months),
+            "Affordable — €120 from savings, then €80 on the cards — November starts €80 lighter."
+        );
+    }
+
+    #[test]
+    fn free_money_note_names_the_savings_pot() {
+        let months = [with_savings("2026-10-01", d(250, 0), Vec::new())];
+        assert_eq!(
+            free_money_note(&months, "EUR"),
+            "Free money each month: salary minus bills, planned payments and budget groups. Savings goals are not held back. Savings: €750."
+        );
+        assert_eq!(
+            free_money_note(&[], "EUR"),
+            "Free money each month: salary minus bills, planned payments and budget groups. Savings goals are not held back."
         );
     }
 }
