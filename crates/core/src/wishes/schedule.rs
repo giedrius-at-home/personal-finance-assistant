@@ -337,22 +337,6 @@ impl Saver {
             .collect()
     }
 
-    /// Whether a must set-aside may skip `month`: what is unsaved, spread
-    /// over the months after it up to the due month, fits in each of those
-    /// months' free money. `later_free[j]` is month `month + 1 + j`'s.
-    pub fn may_skip_must(&self, wish_id: &str, month: usize, later_free: &[Decimal]) -> bool {
-        let Some(s) = self.find(wish_id) else {
-            return false;
-        };
-        let Some(after) = s.due_idx.checked_sub(month).filter(|n| *n > 0) else {
-            return false;
-        };
-        let Some(lowest) = later_free.get(..after).and_then(|f| f.iter().min()) else {
-            return false;
-        };
-        s.left / Decimal::from(after) <= *lowest
-    }
-
     /// Record that `amount` of `wish_id` was paid (set-aside or purchase).
     pub fn paid(&mut self, wish_id: &str, amount: Decimal) {
         if let Some(s) = self.savings.iter_mut().find(|s| s.item.wish_id == wish_id) {
@@ -469,13 +453,6 @@ mod tests {
             per_month: None,
             saved_this_month: false,
             must: false,
-        }
-    }
-
-    fn planned_must(id: &str, amount: &str, due: &str) -> Planned {
-        Planned {
-            must: true,
-            ..planned(id, amount, due)
         }
     }
 
@@ -781,25 +758,6 @@ mod tests {
         let s = Saver::new(&items, oct(), 3);
         assert!(s.set_asides(0).is_empty());
         assert_eq!(s.remaining("w"), Decimal::ZERO);
-    }
-
-    #[test]
-    fn must_set_aside_may_skip_only_when_later_months_can_carry_it() {
-        let items = vec![planned_must("w", "900", "2026-12-15")];
-        let s = Saver::new(&items, oct(), 3);
-        assert!(s.may_skip_must("w", 0, &[d("450"), d("500")]));
-        assert!(!s.may_skip_must("w", 0, &[d("449"), d("500")]));
-        assert!(!s.may_skip_must("w", 2, &[])); // nothing after the due month
-        // From month 1 only month 2 is left to carry all 900.
-        assert!(s.may_skip_must("w", 1, &[d("900")]));
-        assert!(!s.may_skip_must("w", 1, &[d("899.99")]));
-        // Fewer free months known than the window needs: cannot skip.
-        assert!(!s.may_skip_must("w", 0, &[d("1000")]));
-        // Unrounded share: 100 over 3 months is 33.333..., more than 33.33.
-        let items = vec![planned_must("x", "100", "2027-01-15")];
-        let s = Saver::new(&items, oct(), 4);
-        assert!(!s.may_skip_must("x", 0, &[d("33.33"); 3]));
-        assert!(s.may_skip_must("x", 0, &[d("33.34"); 3]));
     }
 
     #[test]

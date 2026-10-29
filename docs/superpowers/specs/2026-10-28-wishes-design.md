@@ -352,3 +352,20 @@ use them … it takes from never spendable first."
   the owner transfers it themself. The pot is a judging aid.
 - *(Claude's call)* The skip test for a set-aside is unchanged: "cannot fit
   without the cards" now includes savings and group cuts before the cards.
+
+## Addendum (2026-10-29, evening): set aside what fits, cards only for the purchase
+
+Owner: "not that we would use that card to set aside but we would set aside
+maximum possible and then probably the last purchase is used with the credit
+card, not that every month I put something and then pay the money back."
+
+- A set-aside takes **as much of its share as fits** from free money, the
+  savings pot and group cuts, never the cards. The unsaved rest spreads over
+  the months left. A month where nothing fits is a skip, as before.
+- This holds for must set-asides too: they come first in the month, but
+  never go on the cards. The "can later months carry it" test is gone.
+- The cards are for the **purchase** in its due month (and for a card-source
+  wish), as before. A wish is "not affordable" only if the purchase does not
+  fit even with the cards.
+- A month that already starts short (money committed before any wish) still
+  covers its hole on the cards, as before (owner: "that is fine").
