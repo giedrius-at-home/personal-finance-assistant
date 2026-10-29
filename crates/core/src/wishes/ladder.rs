@@ -32,8 +32,17 @@ pub struct MonthBaseline {
     pub month: Date,
     pub free: Decimal,
     pub groups: Vec<GroupRoom>,
-    /// What is already on the card this month before any wish.
-    pub card_used: Decimal,
+    /// What is already on each card this month before any wish.
+    pub cards: Vec<CardRoom>,
+}
+
+/// One card's limit and what is already on it.
+#[derive(Clone, Debug)]
+pub struct CardRoom {
+    pub card_id: String,
+    pub name: String,
+    pub limit: Decimal,
+    pub used: Decimal,
 }
 
 /// Something to pay for in a month.
@@ -182,7 +191,7 @@ pub fn judge(
         });
         let mut purse = Purse {
             free: base.free.max(Decimal::ZERO),
-            card_used: base.card_used,
+            card_used: base.cards.iter().map(|c| c.used).sum(),
             card_limit,
             groups,
         };
@@ -257,7 +266,12 @@ mod tests {
             month: Date::new(2026, 11, 1).unwrap(),
             free: d(free),
             groups,
-            card_used: d(card_used),
+            cards: vec![CardRoom {
+                card_id: "card-1".into(),
+                name: "Credit card".into(),
+                limit: d("2500"),
+                used: d(card_used),
+            }],
         }
     }
 

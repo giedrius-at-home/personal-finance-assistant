@@ -5,7 +5,7 @@
 //! Month 0's card usage is what the owner typed; each later month starts with
 //! the card bill's amount as its regular card spending.
 
-use super::ladder::{GroupRoom, MonthBaseline};
+use super::ladder::{CardRoom, GroupRoom, MonthBaseline};
 use crate::period::shift_month;
 use crate::text::casefold;
 use finance_types::gateway::{BudgetGroup, BudgetPlan, WishSettings};
@@ -79,31 +79,54 @@ fn rooms(rows: &[GroupAllocation], plans: &[&BudgetPlan], keep_spent: bool) -> V
         .collect()
 }
 
-/// One baseline per month for `months` months, and whether the recorded card
-/// usage is from an earlier month.
+/// One baseline per month for `months` months, and the ids of the cards whose
+/// recorded usage is from an earlier month. `card_bills` is each card's linked
+/// bill amount (a card without a linked bill has no entry).
 pub fn baselines(
     alloc: &CurrencyAllocation,
     plans: &[BudgetPlan],
-    card_bill: Decimal,
+    card_bills: &[(String, Decimal)],
     settings: &WishSettings,
     earmarked: Decimal,
     months: usize,
-) -> (Vec<MonthBaseline>, bool) {
+) -> (Vec<MonthBaseline>, Vec<String>) {
     let Some(month0) = current_month(alloc) else {
-        return (Vec::new(), false);
+        return (Vec::new(), Vec::new());
     };
-    let card = settings.first();
-    let (card_used, card_stale) = if parse_month(&card.used_month) == Some(month0) {
-        (card.used, false)
-    } else {
-        let unset = card.used_month.is_empty() && card.used.is_zero();
-        (Decimal::ZERO, !unset)
-    };
+    let mut stale = Vec::new();
+    let mut month0_cards = Vec::new();
+    let mut next_cards = Vec::new();
+    for card in &settings.cards {
+        let used = if parse_month(&card.used_month) == Some(month0) {
+            card.used
+        } else {
+            let unset = card.used_month.is_empty() && card.used.is_zero();
+            if !unset {
+                stale.push(card.card_id.clone());
+            }
+            Decimal::ZERO
+        };
+        let bill = card_bills
+            .iter()
+            .find(|(id, _)| *id == card.card_id)
+            .map_or(Decimal::ZERO, |(_, amount)| *amount);
+        let room = |used| CardRoom {
+            card_id: card.card_id.clone(),
+            name: card.name.clone(),
+            limit: card.limit,
+            used,
+        };
+        month0_cards.push(room(used));
+        next_cards.push(room(bill));
+    }
+    let bills_total: Decimal = card_bills.iter().map(|(_, amount)| *amount).sum();
     // `next_wiggle_room` is clamped at zero; the deficit is `next_shortfall`.
-    // The card bill is a fixed cost there; every later month pays the card
-    // through the ladder instead (last month's usage), so it is added back
-    // and the month's own regular card spending is seeded as its usage.
-    let next_free = alloc.next_wiggle_room - alloc.next_shortfall + card_bill;
+    // Next month's fixed costs count each card bill and its savings goals'
+    // contributions; every later month pays the cards through the ladder
+    // instead (last month's usage), and its goals are not money to spend, so
+    // the bills are added back and each card's regular spending is seeded as
+    // its usage. The goals are added back too: they are set aside, not spent.
+    let next_free = alloc.next_wiggle_room - alloc.next_shortfall + alloc.next_goals + bills_total;
     // Without a plan for next month there are no next rows: repeat this
     // month's groups with nothing spent.
     let (next_rows, next_spent) = if alloc.next_group_rows.is_empty() {
@@ -120,18 +143,18 @@ pub fn baselines(
                     month,
                     free: alloc.current_wiggle_room - earmarked,
                     groups: rooms(&alloc.groups, &plans, true),
-                    card_used,
+                    cards: month0_cards.clone(),
                 },
                 _ => MonthBaseline {
                     month,
                     free: next_free,
                     groups: rooms(next_rows, &plans, i == 1 && next_spent),
-                    card_used: card_bill,
+                    cards: next_cards.clone(),
                 },
             }
         })
         .collect();
-    (out, card_stale)
+    (out, stale)
 }
 
 #[cfg(test)]
@@ -231,10 +254,26 @@ pub(crate) mod tests {
         }
     }
 
+    fn card(id: &str, used_month: &str, used: &str, bill_id: Option<&str>) -> CardSettings {
+        CardSettings {
+            card_id: id.into(),
+            name: id.into(),
+            limit: d("2500"),
+            used: d(used),
+            used_month: used_month.into(),
+            bill_id: bill_id.map(Into::into),
+        }
+    }
+
+    /// The first card's linked bill, as `dashboard_parts` reports it.
+    fn bill(amount: &str) -> Vec<(String, Decimal)> {
+        vec![("card-1".to_string(), d(amount))]
+    }
+
     #[test]
     fn month_zero_uses_wiggle_room_minus_earmark() {
         let a = alloc("400", "0", vec![], vec![]);
-        let (months, _) = baselines(&a, &[], Decimal::ZERO, &settings("0", ""), d("300"), 2);
+        let (months, _) = baselines(&a, &[], &[], &settings("0", ""), d("300"), 2);
         assert_eq!(months.len(), 2);
         assert_eq!(months[0].free, d("100"));
         assert_eq!(months[0].month, Date::new(2026, 10, 1).unwrap());
@@ -262,14 +301,7 @@ pub(crate) mod tests {
                 plan_group("g-coffee", "Coffee", None, None),
             ],
         )];
-        let (months, _) = baselines(
-            &a,
-            &plans,
-            Decimal::ZERO,
-            &settings("0", ""),
-            Decimal::ZERO,
-            3,
-        );
+        let (months, _) = baselines(&a, &plans, &[], &settings("0", ""), Decimal::ZERO, 3);
         let g = &months[0].groups;
         assert_eq!(g.len(), 2);
         assert_eq!(g[0].id, "g-out");
@@ -309,14 +341,7 @@ pub(crate) mod tests {
                 vec![plan_group("groceries", "Groceries", None, None)],
             ),
         ];
-        let (months, _) = baselines(
-            &a,
-            &plans,
-            Decimal::ZERO,
-            &settings("0", ""),
-            Decimal::ZERO,
-            3,
-        );
+        let (months, _) = baselines(&a, &plans, &[], &settings("0", ""), Decimal::ZERO, 3);
         for m in &months[1..] {
             assert_eq!(m.groups.len(), 1);
             assert_eq!(m.groups[0].id, "groceries");
@@ -333,14 +358,7 @@ pub(crate) mod tests {
             "2026-10-01",
             vec![plan_group("g", "Going out", Some(2), None)],
         )];
-        let (months, _) = baselines(
-            &a,
-            &plans,
-            Decimal::ZERO,
-            &settings("0", ""),
-            Decimal::ZERO,
-            3,
-        );
+        let (months, _) = baselines(&a, &plans, &[], &settings("0", ""), Decimal::ZERO, 3);
         assert_eq!(months[0].groups[0].min, d("90"));
         for m in &months[1..] {
             assert_eq!(m.groups[0].limit, d("120"));
@@ -355,19 +373,12 @@ pub(crate) mod tests {
             "2026-10-01",
             vec![plan_group("g", "Going Out", Some(2), None)],
         )];
-        let (months, _) = baselines(
-            &a,
-            &plans,
-            Decimal::ZERO,
-            &settings("0", ""),
-            Decimal::ZERO,
-            3,
-        );
+        let (months, _) = baselines(&a, &plans, &[], &settings("0", ""), Decimal::ZERO, 3);
         assert_eq!(months[1].groups[0].min, d("30"));
         assert_eq!(months[2].groups[0].min, Decimal::ZERO);
         assert_eq!(months[2].free, d("50"));
         assert_eq!(months[2].month, Date::new(2026, 12, 1).unwrap());
-        assert_eq!(months[1].card_used, Decimal::ZERO);
+        assert_eq!(months[1].cards[0].used, Decimal::ZERO);
     }
 
     #[test]
@@ -376,13 +387,13 @@ pub(crate) mod tests {
         let (months, stale) = baselines(
             &a,
             &[],
-            Decimal::ZERO,
+            &[],
             &settings("800", "2026-09-01"),
             Decimal::ZERO,
             2,
         );
-        assert_eq!(months[0].card_used, Decimal::ZERO);
-        assert!(stale);
+        assert_eq!(months[0].cards[0].used, Decimal::ZERO);
+        assert_eq!(stale, vec!["card-1".to_string()]);
     }
 
     #[test]
@@ -391,22 +402,22 @@ pub(crate) mod tests {
         let (months, stale) = baselines(
             &a,
             &[],
-            Decimal::ZERO,
+            &[],
             &settings("800", "2026-10-01"),
             Decimal::ZERO,
             2,
         );
-        assert_eq!(months[0].card_used, d("800"));
-        assert!(!stale);
-        let (_, stale) = baselines(&a, &[], Decimal::ZERO, &settings("0", ""), Decimal::ZERO, 2);
-        assert!(!stale);
+        assert_eq!(months[0].cards[0].used, d("800"));
+        assert!(stale.is_empty());
+        let (_, stale) = baselines(&a, &[], &[], &settings("0", ""), Decimal::ZERO, 2);
+        assert!(stale.is_empty());
     }
 
     #[test]
     fn next_month_shortfall_makes_free_negative() {
         let mut a = alloc("0", "0", vec![], vec![]);
         a.next_shortfall = d("50");
-        let (months, _) = baselines(&a, &[], d("9.98"), &settings("0", ""), Decimal::ZERO, 3);
+        let (months, _) = baselines(&a, &[], &bill("9.98"), &settings("0", ""), Decimal::ZERO, 3);
         assert_eq!(months[1].free, d("-40.02"));
         assert_eq!(months[2].free, d("-40.02"));
     }
@@ -417,15 +428,15 @@ pub(crate) mod tests {
         let (months, _) = baselines(
             &a,
             &[],
-            d("100"),
+            &bill("100"),
             &settings("40", "2026-10-01"),
             Decimal::ZERO,
             4,
         );
-        assert_eq!(months[0].card_used, d("40"));
+        assert_eq!(months[0].cards[0].used, d("40"));
         for m in &months[1..] {
             assert_eq!(m.free, d("300"));
-            assert_eq!(m.card_used, d("100"));
+            assert_eq!(m.cards[0].used, d("100"));
         }
         // Each later month pays the month before's regular card spending.
         let judged =
@@ -439,8 +450,43 @@ pub(crate) mod tests {
     #[test]
     fn card_bill_added_back_next_month() {
         let a = alloc("0", "200", vec![], vec![]);
-        let (months, _) = baselines(&a, &[], d("9.98"), &settings("0", ""), Decimal::ZERO, 2);
+        let (months, _) = baselines(&a, &[], &bill("9.98"), &settings("0", ""), Decimal::ZERO, 2);
         assert_eq!(months[1].free, d("209.98"));
         assert_eq!(months[0].free, Decimal::ZERO);
+    }
+
+    #[test]
+    fn later_months_add_goal_contributions_back() {
+        let mut a = alloc("0", "100", vec![], vec![]);
+        a.next_shortfall = Decimal::ZERO;
+        a.next_goals = d("250");
+        let (months, _) = baselines(&a, &[], &[], &WishSettings::default(), Decimal::ZERO, 3);
+        assert_eq!(months[1].free, d("350"));
+        assert_eq!(months[2].free, d("350"));
+    }
+
+    #[test]
+    fn cards_seed_from_their_own_bills_and_stale_is_per_card() {
+        let settings = WishSettings {
+            cards: vec![
+                card("visa", "2026-10-01", "40", Some("b1")),
+                card("mc", "2026-09-01", "70", None),
+            ],
+        };
+        let a = alloc("0", "200", vec![], vec![]);
+        let (months, stale) = baselines(
+            &a,
+            &[],
+            &[("visa".into(), d("500"))],
+            &settings,
+            Decimal::ZERO,
+            3,
+        );
+        assert_eq!(months[0].cards[0].used, d("40"));
+        assert_eq!(months[0].cards[1].used, Decimal::ZERO);
+        assert_eq!(stale, vec!["mc".to_string()]);
+        assert_eq!(months[1].cards[0].used, d("500"));
+        assert_eq!(months[1].cards[1].used, Decimal::ZERO);
+        assert_eq!(months[1].free, a.next_wiggle_room + a.next_goals + d("500"));
     }
 }
