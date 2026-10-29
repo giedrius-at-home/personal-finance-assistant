@@ -163,6 +163,7 @@ impl Inputs<'_> {
             months: &months,
             families: &families,
             month0: demands.first().map_or(&[], Vec::as_slice),
+            bills: self.bills,
         };
         let mut tops: Vec<&Wish> = wishes.iter().filter(|w| w.parent_id.is_none()).collect();
         sort_by_due(&mut tops);
@@ -207,6 +208,7 @@ impl Inputs<'_> {
             on_card: purchase.source == WishSource::Card,
             created_at: wish.created_at.clone(),
             per_month: None,
+            saved_this_month: false,
         });
         let (judged, _, _) = self.judge(alloc, month0, &items, wishes, settings);
         judged
@@ -249,6 +251,7 @@ struct RowContext<'a> {
     months: &'a [WishMonth],
     families: &'a [Family],
     month0: &'a [Demand],
+    bills: &'a HashMap<String, BillNow>,
 }
 
 impl RowContext<'_> {
@@ -265,6 +268,55 @@ impl RowContext<'_> {
             .filter(|d| d.wish_id.as_deref() == Some(wish_id) && d.set_aside)
             .map(|d| d.amount)
             .sum()
+    }
+
+    /// Why a planned wish with money still to find has no verdicts.
+    fn why_unjudged(
+        &self,
+        wish: &Wish,
+        children: &[WishRow],
+        family: Option<&Family>,
+    ) -> Option<&'static str> {
+        let ids: Vec<&str> = std::iter::once(wish.wish_id.as_str())
+            .chain(children.iter().map(|c| c.wish.wish_id.as_str()))
+            .collect();
+        let judged = self
+            .months
+            .iter()
+            .flat_map(|m| &m.verdicts)
+            .any(|v| v.wish_id.as_deref().is_some_and(|id| ids.contains(&id)));
+        if judged {
+            return None;
+        }
+        let unknown_bill = match &wish.kind {
+            WishKind::BillChange { bill_id, .. } => match self.bills.get(bill_id) {
+                Some(bill) if bill.amount == wish.amount => return None,
+                Some(_) => false,
+                None => true,
+            },
+            WishKind::Recurring { .. } => false,
+            WishKind::OneOff => {
+                let own = family.map_or(wish.amount, |f| f.rest) - wish.saved;
+                let parts: Decimal = children
+                    .iter()
+                    .filter(|c| c.wish.status == WishStatus::Planned)
+                    .map(|c| (c.wish.amount - c.wish.saved).max(Decimal::ZERO))
+                    .sum();
+                if own.max(Decimal::ZERO) + parts <= Decimal::ZERO {
+                    return None;
+                }
+                false
+            }
+        };
+        if self.months.is_empty() {
+            return Some("no budget data");
+        }
+        if unknown_bill {
+            return Some("bill can't be judged");
+        }
+        let last = self.months.last()?.month.parse::<Date>().ok()?;
+        let due = wish.due_on.parse::<Date>().ok()?;
+        (due.first_of_month() > last).then_some("too far ahead")
     }
 
     fn row(&self, wish: &Wish) -> WishRow {
@@ -293,6 +345,10 @@ impl RowContext<'_> {
                 monthly_set_aside += child.monthly_set_aside;
             }
         }
+        let not_judged = (wish.status == WishStatus::Planned)
+            .then(|| self.why_unjudged(wish, &children, family))
+            .flatten()
+            .map(str::to_owned);
         WishRow {
             wish: wish.clone(),
             children,
@@ -301,6 +357,7 @@ impl RowContext<'_> {
             monthly_set_aside,
             short,
             tradeoffs,
+            not_judged,
         }
     }
 }
@@ -352,6 +409,7 @@ mod tests {
                 account_id: "a".into(),
             },
             saved: Decimal::ZERO,
+            saved_month: None,
             status: WishStatus::Planned,
             bought: None,
             kind: WishKind::OneOff,
@@ -486,6 +544,45 @@ mod tests {
     }
 
     #[test]
+    fn unjudged_rows_say_why() {
+        let a = alloc("1000", "1000", vec![], vec![]);
+        let mut saved = wish("saved", None, "40", "2026-10-20");
+        saved.saved = d("40");
+        let mut change = wish("change", None, "45", "2026-11-01");
+        change.kind = WishKind::BillChange {
+            bill_id: "gone".into(),
+            ends_on: None,
+        };
+        let ws = [
+            wish("near", None, "50", "2026-10-20"),
+            wish("far", None, "50", "2032-10-20"),
+            saved,
+            change,
+        ];
+        let view = view_from(
+            Some(&a),
+            &[],
+            Decimal::ZERO,
+            &ws,
+            &WishSettings::default(),
+            &HashMap::new(),
+        );
+        let why = |id: &str| {
+            view.wishes
+                .iter()
+                .find(|r| r.wish.wish_id == id)
+                .unwrap()
+                .not_judged
+                .clone()
+        };
+        assert_eq!(view.months.len(), 60);
+        assert_eq!(why("near"), None);
+        assert_eq!(why("far").as_deref(), Some("too far ahead"));
+        assert_eq!(why("saved"), None);
+        assert_eq!(why("change").as_deref(), Some("bill can't be judged"));
+    }
+
+    #[test]
     fn parent_row_aggregates_children_and_rest() {
         let a = alloc("0", "0", vec![], vec![]);
         let mut gone = wish("gone", None, "10", "2026-09-01");
@@ -535,6 +632,7 @@ mod tests {
         );
         assert!(view.months.is_empty());
         assert_eq!(view.wishes.len(), 1);
+        assert_eq!(view.wishes[0].not_judged.as_deref(), Some("no budget data"));
         assert_eq!(view.wishes[0].short, Decimal::ZERO);
         assert!(!view.wishes[0].tradeoffs);
         assert_eq!(view.currency, Currency::eur());

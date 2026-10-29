@@ -22,6 +22,8 @@ pub struct Planned {
     /// Repeat, last day, and amount per occurrence (a bill change's delta).
     /// `due` is the first occurrence.
     pub per_month: Option<(Repeat, Option<Date>, Decimal)>,
+    /// Saving was recorded in month 0, so month 0 sets nothing more aside.
+    pub saved_this_month: bool,
 }
 
 /// A bill as it stands now.
@@ -48,6 +50,14 @@ fn months_ahead(due: Date, current_month: Date) -> usize {
     usize::try_from(month_index(due) - month_index(current_month)).unwrap_or(0)
 }
 
+/// Whether `w`'s saving was recorded in `current_month`.
+fn saved_in(w: &Wish, current_month: Date) -> bool {
+    w.saved_month
+        .as_deref()
+        .and_then(|m| m.parse::<Date>().ok())
+        .is_some_and(|m| m.first_of_month() == current_month.first_of_month())
+}
+
 fn leaf(w: &Wish, label: String, remaining: Decimal, current_month: Date) -> Planned {
     let due = w.due_on.parse::<Date>().unwrap_or(current_month);
     Planned {
@@ -58,18 +68,25 @@ fn leaf(w: &Wish, label: String, remaining: Decimal, current_month: Date) -> Pla
         on_card: matches!(w.source, WishSource::Card),
         created_at: w.created_at.clone(),
         per_month: None,
+        saved_this_month: saved_in(w, current_month),
     }
 }
 
 /// A recurring wish or bill change as one planned item; `None` when it
 /// cannot be judged (unknown bill, bad date).
 fn repeating(w: &Wish, bills: &HashMap<String, BillNow>) -> Option<Planned> {
-    let (every, ends_on, amount) = match &w.kind {
+    let (every, ends_on, amount, on_card) = match &w.kind {
         WishKind::OneOff => return None,
-        WishKind::Recurring { every, ends_on } => (*every, ends_on, w.amount),
+        WishKind::Recurring { every, ends_on } => (
+            *every,
+            ends_on,
+            w.amount,
+            matches!(w.source, WishSource::Card),
+        ),
+        // The bill keeps however it is paid today.
         WishKind::BillChange { bill_id, ends_on } => {
             let bill = bills.get(bill_id)?;
-            (bill.every, ends_on, w.amount - bill.amount)
+            (bill.every, ends_on, w.amount - bill.amount, false)
         }
     };
     let due = w.due_on.parse::<Date>().ok()?;
@@ -78,8 +95,9 @@ fn repeating(w: &Wish, bills: &HashMap<String, BillNow>) -> Option<Planned> {
         label: w.name.clone(),
         due,
         remaining: Decimal::ZERO,
-        on_card: false,
+        on_card,
         created_at: w.created_at.clone(),
+        saved_this_month: false,
         per_month: Some((
             every,
             ends_on.as_deref().and_then(|e| e.parse::<Date>().ok()),
@@ -217,7 +235,7 @@ pub fn demands(items: &[Planned], current_month: Date, months: usize) -> Vec<Vec
                         wish_id: Some(item.wish_id.clone()),
                         label: item.label.clone(),
                         amount,
-                        on_card: false,
+                        on_card: item.on_card,
                         set_aside: false,
                     });
                 }
@@ -228,10 +246,13 @@ pub fn demands(items: &[Planned], current_month: Date, months: usize) -> Vec<Vec
         if due_idx >= months || item.remaining <= Decimal::ZERO {
             continue;
         }
-        let n = Decimal::from(due_idx + 1);
+        // Saved this month: month 0 already put money aside, so the rest
+        // spreads over the months after it.
+        let first = usize::from(item.saved_this_month && due_idx > 0);
+        let n = Decimal::from(due_idx + 1 - first);
         let portion = (item.remaining / n).round_dp(2);
         if portion > Decimal::ZERO {
-            for month in set_asides.iter_mut().take(due_idx) {
+            for month in set_asides.iter_mut().take(due_idx).skip(first) {
                 month.push(Demand {
                     wish_id: Some(item.wish_id.clone()),
                     label: format!("Saving for {}", item.label),
@@ -241,7 +262,7 @@ pub fn demands(items: &[Planned], current_month: Date, months: usize) -> Vec<Vec
                 });
             }
         }
-        let last = item.remaining - portion * Decimal::from(due_idx);
+        let last = item.remaining - portion * Decimal::from(due_idx - first);
         if last > Decimal::ZERO {
             due_items[due_idx].push((
                 item.due,
@@ -272,7 +293,10 @@ pub fn demands(items: &[Planned], current_month: Date, months: usize) -> Vec<Vec
         .collect()
 }
 
-/// Months to look ahead: through the latest due month, 2 to 24, and at least
+/// The most months the look-ahead covers.
+pub const MAX_MONTHS: usize = 60;
+
+/// Months to look ahead: through the latest due month, 2 to 60, and at least
 /// 12 when anything recurs.
 pub fn horizon(items: &[Planned], current_month: Date) -> usize {
     let latest = items
@@ -287,14 +311,21 @@ pub fn horizon(items: &[Planned], current_month: Date) -> usize {
         })
         .max()
         .unwrap_or(0);
-    latest.clamp(2, 24)
+    latest.clamp(2, MAX_MONTHS)
 }
 
-/// Money already set aside for planned wishes.
+/// Money already set aside for planned wishes. Parts of a parent that is no
+/// longer planned (or gone) are not judged, so their savings are not held.
 pub fn earmarked(wishes: &[Wish]) -> Decimal {
+    let parent_planned = |id: &str| {
+        wishes
+            .iter()
+            .any(|p| p.wish_id == id && p.status == WishStatus::Planned)
+    };
     wishes
         .iter()
         .filter(|w| w.status == WishStatus::Planned && w.kind == WishKind::OneOff)
+        .filter(|w| w.parent_id.as_deref().is_none_or(parent_planned))
         .map(|w| w.saved)
         .sum()
 }
@@ -330,6 +361,7 @@ mod tests {
                 }
             },
             saved: Decimal::ZERO,
+            saved_month: None,
             status: WishStatus::Planned,
             bought: None,
             kind: WishKind::OneOff,
@@ -532,7 +564,13 @@ mod tests {
             cur,
             &HashMap::new(),
         );
-        assert_eq!(horizon(&items, cur), 24);
+        assert_eq!(horizon(&items, cur), 49);
+        let (items, _) = plan_items(
+            &[wish("w", None, "50", "2032-10-20", false)],
+            cur,
+            &HashMap::new(),
+        );
+        assert_eq!(horizon(&items, cur), 60);
         assert_eq!(horizon(&[], cur), 2);
     }
 
@@ -546,6 +584,80 @@ mod tests {
         c.saved = d("99");
         c.status = WishStatus::Dropped;
         assert_eq!(earmarked(&[a, b, c]), d("15"));
+    }
+
+    #[test]
+    fn saving_recorded_this_month_skips_month_zero() {
+        let cur = month("2026-10-01");
+        let mut w = wish("flights", None, "900", "2026-12-20", false);
+        w.saved = d("300");
+        w.saved_month = Some("2026-10-01".into());
+        let (items, _) = plan_items(&[w.clone()], cur, &HashMap::new());
+        let out = demands(&items, cur, 3);
+        assert!(out[0].is_empty());
+        assert_eq!(amounts(&out[1]), vec![d("300")]);
+        assert_eq!(amounts(&out[2]), vec![d("300")]);
+        // Saved in an earlier month: spread from month 0 as before.
+        w.saved_month = Some("2026-09-01".into());
+        let (items, _) = plan_items(&[w.clone()], cur, &HashMap::new());
+        assert_eq!(amounts(&demands(&items, cur, 3)[0]), vec![d("200")]);
+        // Due this month: unchanged.
+        w.due_on = "2026-10-20".into();
+        w.saved_month = Some("2026-10-01".into());
+        let (items, _) = plan_items(&[w], cur, &HashMap::new());
+        assert_eq!(amounts(&demands(&items, cur, 3)[0]), vec![d("600")]);
+    }
+
+    #[test]
+    fn parent_rest_saved_this_month_skips_month_zero() {
+        let cur = month("2026-10-01");
+        let mut trip = wish("trip", None, "1000", "2026-12-20", false);
+        trip.saved = d("100");
+        trip.saved_month = Some("2026-10-01".into());
+        let ws = [trip, wish("fl", Some("trip"), "400", "2026-12-01", false)];
+        let (items, _) = plan_items(&ws, cur, &HashMap::new());
+        let out = demands(&items, cur, 3);
+        let rest: Vec<_> = out
+            .iter()
+            .map(|m| {
+                m.iter()
+                    .filter(|x| x.wish_id.as_deref() == Some("trip"))
+                    .map(|x| x.amount)
+                    .sum::<Decimal>()
+            })
+            .collect();
+        assert_eq!(rest, vec![Decimal::ZERO, d("250"), d("250")]);
+    }
+
+    #[test]
+    fn earmarked_skips_parts_of_settled_parents() {
+        let mut p = wish("p", None, "500", "2026-12-20", false);
+        p.status = WishStatus::Bought;
+        let mut c = wish("c", Some("p"), "50", "2026-12-20", false);
+        c.saved = d("20");
+        let mut orphan = wish("o", Some("gone"), "50", "2026-12-20", false);
+        orphan.saved = d("7");
+        let mut live = wish("l", None, "50", "2026-12-20", false);
+        live.saved = d("5");
+        assert_eq!(earmarked(&[p, c, orphan, live]), d("5"));
+    }
+
+    #[test]
+    fn recurring_on_card_goes_on_card() {
+        let cur = month("2026-10-01");
+        let mut w = recurring("psy", "80", "2026-10-03", Repeat::Monthly, None);
+        w.source = WishSource::Card;
+        let mut change = wish("up", None, "1250", "2026-10-01", true);
+        change.kind = WishKind::BillChange {
+            bill_id: "rent".into(),
+            ends_on: None,
+        };
+        let (items, _) = plan_items(&[w, change], cur, &rent_bill());
+        let out = demands(&items, cur, 2);
+        let psy = out[0].iter().find(|x| x.label == "psy").unwrap();
+        assert!(psy.on_card);
+        let up = out[0].iter().find(|x| x.label == "up").unwrap();
+        assert!(!up.on_card);
     }
 
     fn recurring(id: &str, amount: &str, due: &str, every: Repeat, ends: Option<&str>) -> Wish {

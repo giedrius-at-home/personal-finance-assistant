@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use finance_types::gateway::{
-    Repeat, WishKind, WishPurchase, WishSettings, WishSource, WishStatus,
+    Repeat, Wish, WishKind, WishPurchase, WishSettings, WishSource, WishStatus,
 };
 use finance_types::report::Currency;
 use finance_types::report::Dashboard;
@@ -110,6 +110,9 @@ fn first_cuts(by_month: &[(&WishMonth, Vec<&Verdict>)]) -> Vec<Cut> {
 
 /// The row's verdict in plain words: one sentence, the worst news first.
 pub fn verdict_line(row: &WishRow, months: &[WishMonth]) -> String {
+    if let Some(why) = &row.not_judged {
+        return format!("Not judged yet: {why}.");
+    }
     let by_month = row_months(row, months);
     let code = row.wish.currency.code.as_str();
     if row.wish.kind == WishKind::OneOff {
@@ -1066,7 +1069,9 @@ fn wish_body(
     let wish = row.wish.clone();
     let code = wish.currency.code.clone();
     let line = months.with_value(|m| verdict_line(row, m));
-    let tone = if row.short > Decimal::ZERO {
+    let tone = if row.not_judged.is_some() {
+        "text-fg-muted"
+    } else if row.short > Decimal::ZERO {
         "text-negative-fg"
     } else if row.tradeoffs {
         "text-warning-fg"
@@ -1397,11 +1402,23 @@ fn start_confirm(
     }
 }
 
-/// A bought or dropped wish, in one muted line.
+/// A bought, started or dropped wish in one muted line, with its parts
+/// below it (they are no longer judged once the parent is settled).
 fn done_row(row: &WishRow, ctx: &Context) -> impl IntoView + use<> {
-    let wish = &row.wish;
+    let parts = row
+        .children
+        .iter()
+        .map(|child| view! { <p class="py-1 pl-4 sm:pl-6">{done_text(&child.wish, ctx)}</p> })
+        .collect_view();
+    view! {
+        <p class="py-1">{done_text(&row.wish, ctx)}</p>
+        {parts}
+    }
+}
+
+fn done_text(wish: &Wish, ctx: &Context) -> String {
     let code = &wish.currency.code;
-    let text = match (&wish.status, &wish.bought) {
+    match (&wish.status, &wish.bought) {
         (WishStatus::Bought, Some(p)) => format!(
             "{} · bought {} on {} · {}",
             wish.name,
@@ -1411,9 +1428,15 @@ fn done_row(row: &WishRow, ctx: &Context) -> impl IntoView + use<> {
         ),
         (WishStatus::Bought, None) => format!("{} · bought", wish.name),
         (WishStatus::Started, _) => format!("{} · started", wish.name),
-        _ => format!("{} · dropped · {}", wish.name, amount(wish.amount, code)),
-    };
-    view! { <p class="py-1">{text}</p> }
+        (WishStatus::Planned, _) => format!(
+            "{} · not bought · {} (no longer judged)",
+            wish.name,
+            amount(wish.amount, code)
+        ),
+        (WishStatus::Dropped, _) => {
+            format!("{} · dropped · {}", wish.name, amount(wish.amount, code))
+        }
+    }
 }
 
 fn month_card(month: &WishMonth, code: &str) -> impl IntoView + use<> {
@@ -1451,7 +1474,6 @@ fn month_card(month: &WishMonth, code: &str) -> impl IntoView + use<> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use finance_types::gateway::Wish;
 
     fn d(n: i64, scale: u32) -> Decimal {
         Decimal::new(n, scale)
@@ -1468,6 +1490,7 @@ mod tests {
                 due_on: "2026-10-20".into(),
                 source: WishSource::Card,
                 saved: Decimal::ZERO,
+                saved_month: None,
                 status: WishStatus::Planned,
                 bought: None,
                 kind: Default::default(),
@@ -1479,6 +1502,7 @@ mod tests {
             monthly_set_aside: Decimal::ZERO,
             short: Decimal::ZERO,
             tradeoffs: false,
+            not_judged: None,
         }
     }
 
@@ -1862,6 +1886,13 @@ mod tests {
         assert!(text.ends_with(
             ", the old amount (€30) won't come back on its own: change the bill back then."
         ));
+    }
+
+    #[test]
+    fn unjudged_wish_says_why() {
+        let mut r = row("w");
+        r.not_judged = Some("too far ahead".into());
+        assert_eq!(verdict_line(&r, &[]), "Not judged yet: too far ahead.");
     }
 
     #[test]

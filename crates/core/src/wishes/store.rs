@@ -80,6 +80,7 @@ mod tests {
                 account_id: "a1".into(),
             },
             saved: Decimal::from(50),
+            saved_month: None,
             status: WishStatus::Planned,
             bought: None,
             kind: Default::default(),

@@ -65,6 +65,10 @@ pub struct WishRow {
     pub short: Decimal,
     /// Any verdict with cuts or card use.
     pub tradeoffs: bool,
+    /// Why a planned wish with money still to find has no verdicts: "no
+    /// budget data", "too far ahead" or "bill can't be judged".
+    #[serde(default)]
+    pub not_judged: Option<String>,
 }
 
 /// Everything the wishes screen shows.

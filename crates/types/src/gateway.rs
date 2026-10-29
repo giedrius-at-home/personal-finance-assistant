@@ -475,6 +475,9 @@ pub struct Wish {
     pub source: WishSource,
     #[serde(default)]
     pub saved: Decimal,
+    /// The budget month (`YYYY-MM-01`) `saved` was last recorded in.
+    #[serde(default)]
+    pub saved_month: Option<String>,
     #[serde(default)]
     pub status: WishStatus,
     #[serde(default)]

@@ -388,7 +388,7 @@ impl Service {
     }
 
     pub fn record_wish_saved(&self, wish_id: &str, saved: Decimal) -> Result<Wish, String> {
-        self.write(|w, _| crate::writes::wishes::record_saved(w, wish_id, saved))
+        self.write(|w, snap| crate::writes::wishes::record_saved(w, snap, wish_id, saved))
     }
 
     pub fn drop_wish(&self, wish_id: &str) -> Result<(), String> {

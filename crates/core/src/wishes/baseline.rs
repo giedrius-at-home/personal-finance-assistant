@@ -26,38 +26,42 @@ pub fn current_month(alloc: &CurrencyAllocation) -> Option<Date> {
     parse_month(&alloc.current_month)
 }
 
-/// The plan for `month` in the allocation's currency, else the latest earlier one.
-fn plan_for<'a>(
+/// The allocation currency's plans at or before `month`, latest first.
+fn plans_upto<'a>(
     plans: &'a [BudgetPlan],
     alloc: &CurrencyAllocation,
     month: Date,
-) -> Option<&'a BudgetPlan> {
-    plans
+) -> Vec<&'a BudgetPlan> {
+    let mut upto: Vec<(Date, &BudgetPlan)> = plans
         .iter()
         .filter(|p| p.currency == alloc.currency)
         .filter_map(|p| parse_month(&p.month).map(|m| (m, p)))
         .filter(|(m, _)| *m <= month)
-        .max_by_key(|(m, _)| *m)
-        .map(|(_, p)| p)
+        .collect();
+    upto.sort_by(|a, b| b.0.cmp(&a.0));
+    upto.into_iter().map(|(_, p)| p).collect()
 }
 
 /// The ranked groups among `rows`; `keep_spent` false treats nothing as spent.
-fn rooms(rows: &[GroupAllocation], plan: Option<&BudgetPlan>, keep_spent: bool) -> Vec<GroupRoom> {
-    let Some(plan) = plan else {
-        return Vec::new();
-    };
+/// A group's id is the latest plan's; its importance and floor come from the
+/// latest plan that ranks it, so a default plan keeps last month's ranking.
+fn rooms(rows: &[GroupAllocation], plans: &[&BudgetPlan], keep_spent: bool) -> Vec<GroupRoom> {
     rows.iter()
         .filter_map(|row| {
             let key = casefold(&row.group);
-            let group = plan.groups.iter().find(|g| casefold(&g.name) == key)?;
-            let importance = group.importance?;
+            let mut named = plans
+                .iter()
+                .filter_map(|p| p.groups.iter().find(|g| casefold(&g.name) == key));
+            let latest = named.clone().next()?;
+            let ranked = named.find(|g| g.importance.is_some())?;
+            let importance = ranked.importance?;
             let spent = if keep_spent { row.spent } else { Decimal::ZERO };
             Some(GroupRoom {
-                id: group.id.clone(),
+                id: latest.id.clone(),
                 name: row.group.clone(),
                 importance,
                 limit: row.limit,
-                min: group.floor.unwrap_or(Decimal::ZERO).max(spent),
+                min: ranked.floor.unwrap_or(Decimal::ZERO).max(spent),
             })
         })
         .collect()
@@ -87,21 +91,28 @@ pub fn baselines(
     // through the ladder instead (last month's usage), so it is added back
     // and the month's own regular card spending is seeded as its usage.
     let next_free = alloc.next_wiggle_room - alloc.next_shortfall + card_bill;
+    // Without a plan for next month there are no next rows: repeat this
+    // month's groups with nothing spent.
+    let (next_rows, next_spent) = if alloc.next_group_rows.is_empty() {
+        (&alloc.groups, false)
+    } else {
+        (&alloc.next_group_rows, true)
+    };
     let out = (0..months)
         .map(|i| {
             let month = shift_month(month0, i32::try_from(i).unwrap_or(i32::MAX));
-            let plan = plan_for(plans, alloc, month);
+            let plans = plans_upto(plans, alloc, month);
             match i {
                 0 => MonthBaseline {
                     month,
                     free: alloc.current_wiggle_room - earmarked,
-                    groups: rooms(&alloc.groups, plan, true),
+                    groups: rooms(&alloc.groups, &plans, true),
                     card_used,
                 },
                 _ => MonthBaseline {
                     month,
                     free: next_free,
-                    groups: rooms(&alloc.next_group_rows, plan, i == 1),
+                    groups: rooms(next_rows, &plans, i == 1 && next_spent),
                     card_used: card_bill,
                 },
             }
@@ -262,6 +273,64 @@ pub(crate) mod tests {
         assert_eq!(months[1].groups.len(), 2);
         assert_eq!(months[2].groups[0].min, Decimal::ZERO);
         assert_eq!(months[2].groups[1].min, d("300"));
+    }
+
+    #[test]
+    fn importance_carries_from_an_earlier_plan() {
+        let a = alloc(
+            "0",
+            "0",
+            vec![row("Groceries", "450", "100")],
+            vec![row("Groceries", "300", "0")],
+        );
+        let plans = [
+            plan(
+                "2026-10-01",
+                vec![plan_group("g-oct", "Groceries", Some(1), Some("250"))],
+            ),
+            // November is the default plan: no importance, its own id.
+            plan(
+                "2026-11-01",
+                vec![plan_group("groceries", "Groceries", None, None)],
+            ),
+        ];
+        let (months, _) = baselines(
+            &a,
+            &plans,
+            Decimal::ZERO,
+            &settings("0", ""),
+            Decimal::ZERO,
+            3,
+        );
+        for m in &months[1..] {
+            assert_eq!(m.groups.len(), 1);
+            assert_eq!(m.groups[0].id, "groceries");
+            assert_eq!(m.groups[0].importance, 1);
+            assert_eq!(m.groups[0].min, d("250"));
+        }
+        assert_eq!(months[0].groups[0].id, "g-oct");
+    }
+
+    #[test]
+    fn missing_next_rows_fall_back_to_this_months_groups() {
+        let a = alloc("0", "0", vec![row("Going out", "120", "90")], vec![]);
+        let plans = [plan(
+            "2026-10-01",
+            vec![plan_group("g", "Going out", Some(2), None)],
+        )];
+        let (months, _) = baselines(
+            &a,
+            &plans,
+            Decimal::ZERO,
+            &settings("0", ""),
+            Decimal::ZERO,
+            3,
+        );
+        assert_eq!(months[0].groups[0].min, d("90"));
+        for m in &months[1..] {
+            assert_eq!(m.groups[0].limit, d("120"));
+            assert_eq!(m.groups[0].min, Decimal::ZERO);
+        }
     }
 
     #[test]

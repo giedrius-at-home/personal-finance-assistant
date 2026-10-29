@@ -1,8 +1,8 @@
 //! Wishes: planned purchases the owner saves toward, drops or buys.
 
 use finance_types::gateway::{
-    BillCreateRequest, BillEditRequest, BillRef, Repeat, Wish, WishDraft, WishKind, WishPurchase,
-    WishSettings, WishSource, WishStatus,
+    BillCreateRequest, BillEditRequest, BillRef, BudgetPlan, Repeat, Wish, WishDraft, WishKind,
+    WishPurchase, WishSettings, WishSource, WishStatus,
 };
 use finance_types::report::Currency;
 use finance_types::report::wishes::Cut;
@@ -13,6 +13,7 @@ use super::bills::{Checks, archive_bill, create_bill, edit_bill};
 use super::budget::save_budget_plan;
 use super::{Writer, invalid};
 use crate::budget::default_budget;
+use crate::text::casefold;
 use crate::wishes::store::{load_wish_settings, load_wishes};
 use crate::{Ctx, Result, Snapshot};
 
@@ -154,6 +155,7 @@ pub fn save_wish(w: &Writer<'_>, snap: &Snapshot, draft: WishDraft) -> Result<Wi
                 due_on: draft.due_on,
                 source: draft.source,
                 saved: Decimal::ZERO,
+                saved_month: None,
                 status: WishStatus::Planned,
                 bought: None,
                 kind: draft.kind,
@@ -165,13 +167,22 @@ pub fn save_wish(w: &Writer<'_>, snap: &Snapshot, draft: WishDraft) -> Result<Wi
     Ok(wish)
 }
 
-/// Set the total saved so far toward a planned wish.
-pub fn record_saved(w: &Writer<'_>, wish_id: &str, saved: Decimal) -> Result<Wish> {
+/// Set the total saved so far toward a planned wish, in this budget month.
+pub fn record_saved(
+    w: &Writer<'_>,
+    snap: &Snapshot,
+    wish_id: &str,
+    saved: Decimal,
+) -> Result<Wish> {
     if saved < Decimal::ZERO {
         return Err(invalid("saved amount cannot be negative"));
     }
     let wish = planned(find(&load_wishes(&w.tx)?, wish_id)?)?;
-    let wish = Wish { saved, ..wish };
+    let wish = Wish {
+        saved,
+        saved_month: Some(Ctx::new(snap, &w.now).current_month().to_string()),
+        ..wish
+    };
     store(w, &wish)?;
     Ok(wish)
 }
@@ -292,7 +303,7 @@ fn write_cuts(
         .iter()
         .find(|p| p.month == key && &p.currency == currency)
         .cloned()
-        .unwrap_or_else(|| default_budget(month, currency));
+        .unwrap_or_else(|| ranked_default(snap, month, currency));
     for cut in cuts {
         if let Some(group) = plan.groups.iter_mut().find(|g| g.id == cut.group_id) {
             group.amount = (group.amount - (cut.from - cut.to)).max(Decimal::ZERO);
@@ -300,6 +311,31 @@ fn write_cuts(
     }
     save_budget_plan(w, snap, plan)?;
     Ok(())
+}
+
+/// The default plan for `month`, each group keeping the importance and
+/// floor the latest earlier plan gave a group of its name.
+fn ranked_default(snap: &Snapshot, month: Date, currency: &Currency) -> BudgetPlan {
+    let mut plan = default_budget(month, currency);
+    let key = month.to_string();
+    let mut earlier: Vec<&BudgetPlan> = snap
+        .budget_plans
+        .iter()
+        .filter(|p| &p.currency == currency && p.month < key)
+        .collect();
+    earlier.sort_by(|a, b| b.month.cmp(&a.month));
+    for group in &mut plan.groups {
+        let name = casefold(&group.name);
+        if let Some(ranked) = earlier
+            .iter()
+            .filter_map(|p| p.groups.iter().find(|g| casefold(&g.name) == name))
+            .find(|g| g.importance.is_some())
+        {
+            group.importance = ranked.importance;
+            group.floor = ranked.floor;
+        }
+    }
+    plan
 }
 
 /// Start a planned recurring wish (it becomes a bill in `match_category`)
@@ -440,8 +476,10 @@ mod tests {
 
         let mut edit = draft("Better bike");
         edit.wish_id = Some(wish.wish_id.clone());
-        db.write(|w, _| record_saved(w, &wish.wish_id, Decimal::from(40)))
+        let saved = db
+            .write(|w, s| record_saved(w, s, &wish.wish_id, Decimal::from(40)))
             .unwrap();
+        assert_eq!(saved.saved_month.as_deref(), Some("2026-10-01"));
         let edited = db.write(|w, snap| save_wish(w, snap, edit)).unwrap();
         assert_eq!(edited.name, "Better bike");
         assert_eq!(edited.saved, Decimal::from(40));
@@ -518,16 +556,16 @@ mod tests {
         let mut db = db();
         let wish = db.write(|w, s| save_wish(w, s, draft("Bike"))).unwrap();
         assert!(
-            db.write(|w, _| record_saved(w, &wish.wish_id, Decimal::from(-1)))
+            db.write(|w, s| record_saved(w, s, &wish.wish_id, Decimal::from(-1)))
                 .is_err()
         );
         assert!(
-            db.write(|w, _| record_saved(w, "wish-nope", Decimal::ONE))
+            db.write(|w, s| record_saved(w, s, "wish-nope", Decimal::ONE))
                 .is_err()
         );
         db.write(|w, _| drop_wish(w, &wish.wish_id)).unwrap();
         assert_eq!(
-            message(db.write(|w, _| record_saved(w, &wish.wish_id, Decimal::ONE))),
+            message(db.write(|w, s| record_saved(w, s, &wish.wish_id, Decimal::ONE))),
             "wish is not planned"
         );
     }
@@ -737,6 +775,41 @@ mod tests {
             stored_plan(&db, "2026-11-01").groups[0].amount,
             Decimal::from(100)
         );
+    }
+
+    #[test]
+    fn cuts_into_a_default_budget_keep_importance() {
+        let mut db = db();
+        let mut september = going_out("2026-09-01", 120);
+        september.groups[0].id = "groceries-old".into();
+        september.groups[0].name = "Groceries".into();
+        september.groups[0].importance = Some(1);
+        september.groups[0].floor = Some(Decimal::from(200));
+        db.write(|w, s| save_budget_plan(w, s, september)).unwrap();
+        let wish = db.write(|w, s| save_wish(w, s, draft("Bike"))).unwrap();
+        let cut = Cut {
+            group_id: "groceries".into(),
+            name: "Groceries".into(),
+            from: Decimal::from(300),
+            to: Decimal::from(250),
+        };
+        db.write(|w, s| {
+            mark_bought(
+                w,
+                s,
+                &wish.wish_id,
+                purchase(50, "2026-10-26", WishSource::Card),
+                &[cut],
+            )
+        })
+        .unwrap();
+        let october = stored_plan(&db, "2026-10-01");
+        let groceries = october.groups.iter().find(|g| g.id == "groceries").unwrap();
+        assert_eq!(groceries.amount, Decimal::from(250));
+        assert_eq!(groceries.importance, Some(1));
+        assert_eq!(groceries.floor, Some(Decimal::from(200)));
+        let food = october.groups.iter().find(|g| g.id == "food-out").unwrap();
+        assert_eq!(food.importance, None);
     }
 
     #[test]
