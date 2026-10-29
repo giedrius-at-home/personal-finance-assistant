@@ -104,13 +104,23 @@ mod tests {
             created_at: "2026-10-28T10:00:00Z".into(),
         };
         let settings = WishSettings {
-            cards: vec![CardSettings {
-                limit: Decimal::from(3000),
-                used: Decimal::from(120),
-                used_month: "2026-10-01".into(),
-                bill_id: Some("b1".into()),
-                ..WishSettings::default().first()
-            }],
+            cards: vec![
+                CardSettings {
+                    limit: Decimal::from(3000),
+                    used: Decimal::from(120),
+                    used_month: "2026-10-01".into(),
+                    bill_id: Some("b1".into()),
+                    ..WishSettings::default().first()
+                },
+                CardSettings {
+                    card_id: "card-2".into(),
+                    name: "Mastercard".into(),
+                    limit: Decimal::from(1000),
+                    used: Decimal::from(10),
+                    used_month: "2026-09-01".into(),
+                    bill_id: None,
+                },
+            ],
         };
         conn.execute(
             "INSERT INTO wishes (wish_id, payload_json) VALUES ('w1', ?1)",

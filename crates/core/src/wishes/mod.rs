@@ -600,6 +600,37 @@ mod tests {
         assert!(view.wishes[0].tradeoffs);
     }
 
+    fn named_card(id: &str, used: &str, used_month: &str) -> CardSettings {
+        CardSettings {
+            card_id: id.into(),
+            name: id.into(),
+            used: d(used),
+            used_month: used_month.into(),
+            ..WishSettings::default().first()
+        }
+    }
+
+    #[test]
+    fn view_reports_stale_cards_and_per_card_payback() {
+        let a = alloc("0", "0", vec![], vec![]);
+        let mut tv = wish("w", None, "120", "2026-10-20");
+        tv.source = WishSource::Card;
+        let settings = WishSettings {
+            cards: vec![
+                named_card("visa", "50", "2026-10-01"),
+                named_card("mc", "10", "2026-09-01"),
+            ],
+        };
+        let view = view_from(Some(&a), &[], Vec::new(), &[tv], &settings, &HashMap::new());
+        assert_eq!(view.stale_cards, vec!["mc".to_string()]);
+        assert!(view.card_stale);
+        assert_eq!(
+            view.months[0].cards.iter().map(|c| c.used).sum::<Decimal>(),
+            d("170")
+        );
+        assert_eq!(view.months[1].card_charge_in, d("170"));
+    }
+
     fn no_card_room() -> WishSettings {
         WishSettings {
             cards: vec![CardSettings {
