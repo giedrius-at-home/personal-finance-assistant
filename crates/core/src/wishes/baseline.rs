@@ -38,7 +38,7 @@ fn plans_upto<'a>(
         .filter_map(|p| parse_month(&p.month).map(|m| (m, p)))
         .filter(|(m, _)| *m <= month)
         .collect();
-    upto.sort_by(|a, b| b.0.cmp(&a.0));
+    upto.sort_by_key(|(m, _)| std::cmp::Reverse(*m));
     upto.into_iter().map(|(_, p)| p).collect()
 }
 
