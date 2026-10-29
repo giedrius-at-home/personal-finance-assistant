@@ -719,7 +719,9 @@ mod tests {
             vec![row("Going out", "1000", "0")],
             vec![row("Going out", "1000", "0")],
         );
-        // An optional wish setting aside 200 in month 0 (600 over 3 months).
+        // The must hotel's set-aside (100) comes first; the optional tv keeps
+        // all 600 from the 150 free left plus a 450 cut to going out (set-asides
+        // cut groups before they skip, and never use the cards).
         let tv = wish("tv", None, "600", "2026-12-20");
         let mut trip = wish("trip", None, "100", "2026-12-31");
         trip.must = true;
@@ -733,12 +735,13 @@ mod tests {
             bills: &bills,
         };
         let view = inputs.view(&wishes, &no_card_room());
-        assert!(
-            view.months[0]
-                .verdicts
-                .iter()
-                .any(|v| v.wish_id.as_deref() == Some("tv") && v.set_aside && v.amount == d("200"))
-        );
+        let tv: Vec<_> = view.months[0]
+            .verdicts
+            .iter()
+            .filter(|v| v.wish_id.as_deref() == Some("tv"))
+            .map(|v| (v.set_aside, v.skipped, v.amount, v.from_free, v.cuts.len()))
+            .collect();
+        assert_eq!(tv, vec![(true, false, d("600"), d("150"), 1)]);
         // The must purchase is judged before the optional set-aside, so the
         // 250 free covers it and nothing is cut.
         let cuts = inputs.purchase_cuts(
@@ -854,9 +857,10 @@ mod tests {
             .iter()
             .find(|r| r.wish.wish_id == "trip")
             .unwrap();
-        // Month 0 set-asides: hotel 400/2, rest 600/3.
-        assert_eq!(trip.children[0].monthly_set_aside, d("200"));
-        assert_eq!(trip.monthly_set_aside, d("400"));
+        // Month 0 set-asides, soonest first: hotel (10 Nov) keeps all 400,
+        // "later" (1 Dec) its 60, the trip's rest (31 Dec) the 540 left.
+        assert_eq!(trip.children[0].monthly_set_aside, d("400"));
+        assert_eq!(trip.monthly_set_aside, d("940"));
         assert_eq!(trip.short, Decimal::ZERO);
     }
 

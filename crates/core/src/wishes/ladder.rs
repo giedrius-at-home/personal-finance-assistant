@@ -11,12 +11,12 @@
 //! which may not go back on the card: what free money, savings and cuts
 //! cannot pay is short, and that short and those cuts are traced back to the
 //! verdicts that put money on the card the month before. Then money a cheaper
-//! bill frees, then the must wishes, then the rest: within each, set-asides,
-//! purchases, then repeating costs.
+//! bill frees, then the must wishes, then the rest: within each, purchases
+//! due now, set-asides soonest due first, then repeating costs.
 //!
-//! A set-aside takes as much of its share as free money, savings and cuts
-//! allow and never touches the cards; the saver spreads what was not saved
-//! over the months left. A month where nothing fits is a skip.
+//! A set-aside asks for everything still unsaved and keeps as much as free
+//! money, savings and cuts allow, never the cards; what was not saved is asked
+//! for again next month. A month where nothing fits is a skip.
 
 use super::schedule::Saver;
 use finance_types::report::wishes::{CardUsed, Cut, Verdict, WishMonth};
@@ -218,8 +218,8 @@ fn own(label: &str, amount: Decimal) -> Demand {
     }
 }
 
-/// Pay as much of a set-aside as fits without the cards; what does not fit
-/// is left for later months. Nothing fitting is a skip.
+/// Keep as much of a set-aside as fits without the cards; what does not fit
+/// is asked for again next month. Nothing fitting is a skip.
 fn set_aside(purse: &mut Purse, demand: Demand) -> Verdict {
     let mut trial = purse.clone();
     let tried = trial.pay(demand.clone(), false);
@@ -288,6 +288,12 @@ pub fn judge(
         }
         let set_asides = saver.set_asides(i);
         for must in [true, false] {
+            for demand in saver.purchases(i).into_iter().filter(|d| d.must == must) {
+                if let Some(id) = &demand.wish_id {
+                    saver.paid(id, demand.amount);
+                }
+                verdicts.push(purse.pay(demand, true));
+            }
             for demand in set_asides.iter().filter(|d| d.must == must).cloned() {
                 let id = demand.wish_id.clone().unwrap_or_default();
                 let v = set_aside(&mut purse, demand);
@@ -295,12 +301,6 @@ pub fn judge(
                     saver.paid(&id, v.amount);
                 }
                 verdicts.push(v);
-            }
-            for demand in saver.purchases(i).into_iter().filter(|d| d.must == must) {
-                if let Some(id) = &demand.wish_id {
-                    saver.paid(id, demand.amount);
-                }
-                verdicts.push(purse.pay(demand, true));
             }
             for demand in costs.iter().filter(|d| d.must == must).cloned() {
                 verdicts.push(purse.pay(demand, true));
@@ -826,8 +826,8 @@ mod tests {
 
     #[test]
     fn kept_set_aside_lowers_what_later_months_save() {
-        // free 300 / 300 / 300; wish 600 due month 2 → 200 kept in month 0,
-        // so month 1 sets aside 400 / 2 = 200 and month 2 buys the last 200.
+        // free 300 / 300 / 300; wish 600 due month 2: month 0 keeps all 300
+        // that fit, month 1 the other 300, so nothing is left to buy.
         let out = judge(
             &bases(["300", "300", "300"]),
             &[vec![], vec![], vec![]],
@@ -835,18 +835,17 @@ mod tests {
         );
         let v0 = &out[0].verdicts[0];
         assert!(v0.set_aside && !v0.skipped);
-        assert_eq!(v0.amount, d("200"));
-        assert_eq!(out[0].free_left, d("100"));
-        assert_eq!(out[1].verdicts[0].amount, d("200"));
+        assert_eq!(v0.amount, d("300"));
+        assert_eq!(out[0].free_left, Decimal::ZERO);
+        assert_eq!(out[1].verdicts[0].amount, d("300"));
         assert!(out[1].verdicts[0].set_aside);
-        let bought = &out[2].verdicts[0];
-        assert_eq!((bought.amount, bought.set_aside), (d("200"), false));
+        assert!(out[2].verdicts.is_empty());
     }
 
     #[test]
-    fn set_aside_takes_what_fits_and_spreads_the_rest() {
-        // free 100 / 400 / 400; wish 600 due month 2 → 200 a month, but
-        // month 0 fits only 100. The 500 left spreads over the two months after.
+    fn set_aside_takes_what_fits_and_asks_again() {
+        // free 100 / 400 / 400; wish 600 due month 2: month 0 fits 100,
+        // month 1 keeps 400, month 2 buys the last 100.
         let out = judge(
             &bases(["100", "400", "400"]),
             &[vec![], vec![], vec![]],
@@ -856,13 +855,44 @@ mod tests {
         assert!(first.set_aside && !first.skipped);
         assert_eq!((first.amount, first.from_free), (d("100"), d("100")));
         assert_eq!(out[0].free_left, Decimal::ZERO);
-        assert_eq!(out[1].verdicts[0].amount, d("250"));
-        assert_eq!(out[2].verdicts[0].amount, d("250"));
+        assert_eq!(out[1].verdicts[0].amount, d("400"));
+        let bought = &out[2].verdicts[0];
+        assert_eq!((bought.amount, bought.set_aside), (d("100"), false));
         assert!(out.iter().all(|m| {
             m.verdicts
                 .iter()
                 .all(|v| v.short.is_zero() && v.on_card.is_zero())
         }));
+    }
+
+    #[test]
+    fn soonest_wish_is_saved_for_before_a_later_one() {
+        // free 250 a month; "later" (created first) 600 due month 2 and
+        // "soon" 300 due month 1. Month 0: soon takes the 250 that fit,
+        // later gets nothing. Month 1: soon's purchase of 50 comes before
+        // later's set-aside, which keeps the 200 left.
+        let out = judge(
+            &bases(["250", "250", "250"]),
+            &[vec![], vec![], vec![]],
+            &mut saver(vec![due_in("later", "600", 2), due_in("soon", "300", 1)]),
+        );
+        let v = &out[0].verdicts;
+        assert_eq!(
+            (v[0].wish_id.as_deref(), v[0].amount),
+            (Some("soon"), d("250"))
+        );
+        assert_eq!(v[1].wish_id.as_deref(), Some("later"));
+        assert!(v[1].skipped);
+        let v = &out[1].verdicts;
+        assert_eq!(
+            (v[0].wish_id.as_deref(), v[0].amount, v[0].set_aside),
+            (Some("soon"), d("50"), false)
+        );
+        assert_eq!(
+            (v[1].wish_id.as_deref(), v[1].amount, v[1].set_aside),
+            (Some("later"), d("200"), true)
+        );
+        assert!(v.iter().all(|v| v.short.is_zero()));
     }
 
     #[test]
@@ -874,8 +904,8 @@ mod tests {
             &mut saver(vec![due_in("w", "600", 2)]),
         );
         assert!(out[0].verdicts[0].skipped && out[0].verdicts[0].amount.is_zero());
-        assert_eq!(out[1].verdicts[0].amount, d("300"));
-        assert_eq!(out[2].verdicts[0].amount, d("300"));
+        assert_eq!(out[1].verdicts[0].amount, d("400"));
+        assert_eq!(out[2].verdicts[0].amount, d("200"));
     }
 
     #[test]
@@ -892,8 +922,8 @@ mod tests {
 
     #[test]
     fn must_set_aside_stays_off_the_cards() {
-        // free 100 / 250 / 250; must 600 due month 2. Month 0 saves the 100
-        // that fits, month 1 saves 250, month 2 buys the last 250: no cards.
+        // free 100 / 250 / 250; must 600 due month 2. Month 0 keeps the 100
+        // that fits, month 1 250, month 2 buys the last 250: no cards.
         let out = judge(
             &bases_with_cards(["100", "250", "250"]),
             &[vec![], vec![], vec![]],

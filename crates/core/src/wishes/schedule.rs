@@ -1,7 +1,7 @@
 //! From stored wishes to what must be paid in each month.
 //!
-//! Pure arithmetic, no I/O. A wish is saved for over the months left, one
-//! equal set-aside per month, and the last portion is the purchase itself.
+//! Pure arithmetic, no I/O. A wish is saved for as fast as the months allow,
+//! soonest due first, and whatever is still unsaved is the purchase itself.
 
 use super::ladder::Demand;
 use finance_types::gateway::{Repeat, Wish, WishKind, WishSource, WishStatus};
@@ -276,7 +276,7 @@ pub struct Saver {
 impl Saver {
     /// One saving per one-off item still to pay and due within `months`.
     pub fn new(items: &[Planned], current_month: Date, months: usize) -> Self {
-        let savings = items
+        let mut savings: Vec<Saving> = items
             .iter()
             .filter(|i| i.per_month.is_none() && i.remaining > Decimal::ZERO)
             .map(|i| Saving {
@@ -286,6 +286,10 @@ impl Saver {
             })
             .filter(|s| s.due_idx < months)
             .collect();
+        // The soonest wish is saved for first; a later one gets what is left.
+        savings.sort_by(|a, b| {
+            (a.item.due, &a.item.created_at).cmp(&(b.item.due, &b.item.created_at))
+        });
         Self { savings }
     }
 
@@ -293,25 +297,22 @@ impl Saver {
         self.savings.iter().find(|s| s.item.wish_id == wish_id)
     }
 
-    /// Set-asides this month: one per item due after `month`, its unsaved
-    /// rest spread over the months left (the due month included). Saving
-    /// recorded this month means month 0 sets nothing more aside.
+    /// Set-asides this month, soonest due first: one per item due after
+    /// `month`, asking for its whole unsaved rest (the ladder keeps what
+    /// fits). Saving recorded this month means month 0 sets nothing more
+    /// aside.
     pub fn set_asides(&self, month: usize) -> Vec<Demand> {
         self.savings
             .iter()
             .filter(|s| s.due_idx > month && s.left > Decimal::ZERO)
             .filter(|s| !(month == 0 && s.item.saved_this_month))
-            .filter_map(|s| {
-                let months_left = Decimal::from(s.due_idx - month + 1);
-                let amount = (s.left / months_left).round_dp(2);
-                (amount > Decimal::ZERO).then(|| Demand {
-                    wish_id: Some(s.item.wish_id.clone()),
-                    label: format!("Saving for {}", s.item.label),
-                    amount,
-                    on_card: false,
-                    set_aside: true,
-                    must: s.item.must,
-                })
+            .map(|s| Demand {
+                wish_id: Some(s.item.wish_id.clone()),
+                label: format!("Saving for {}", s.item.label),
+                amount: s.left,
+                on_card: false,
+                set_aside: true,
+                must: s.item.must,
             })
             .collect()
     }
@@ -486,7 +487,7 @@ mod tests {
     }
 
     #[test]
-    fn spreads_over_months_left() {
+    fn asks_for_the_whole_rest_until_it_is_saved() {
         let cur = oct();
         let (items, _) = plan_items(
             &[wish("flights", None, "900", "2026-12-20", true)],
@@ -494,15 +495,19 @@ mod tests {
             &HashMap::new(),
         );
         let out = saved_in_full(&items, 3);
-        for m in &out {
-            assert_eq!(amounts(m), vec![d("300")]);
-        }
-        assert!(!out[0][0].on_card && !out[1][0].on_card);
-        assert!(out[0][0].set_aside && !out[2][0].set_aside);
-        assert!(out[2][0].on_card);
+        assert_eq!(amounts(&out[0]), vec![d("900")]);
+        assert!(out[0][0].set_aside && !out[0][0].on_card);
         assert_eq!(out[0][0].label, "Saving for flights");
-        assert_eq!(out[2][0].label, "flights");
+        assert!(out[1].is_empty() && out[2].is_empty());
         assert_eq!(horizon(&items, cur), 3);
+        // Nothing saved by the due month: the purchase is the whole amount, on the card.
+        let s = Saver::new(&items, cur, 3);
+        let bought = &s.purchases(2)[0];
+        assert_eq!(
+            (bought.amount, bought.on_card, bought.set_aside),
+            (d("900"), true, false)
+        );
+        assert_eq!(bought.label, "flights");
     }
 
     #[test]
@@ -510,28 +515,22 @@ mod tests {
         let mut w = wish("flights", None, "900", "2026-12-20", false);
         w.saved = d("300");
         let (items, _) = plan_items(&[w], oct(), &HashMap::new());
-        for m in &saved_in_full(&items, 3) {
-            assert_eq!(amounts(m), vec![d("200")]);
-        }
+        assert_eq!(amounts(&saved_in_full(&items, 3)[0]), vec![d("600")]);
     }
 
     #[test]
-    fn due_month_takes_whatever_is_left() {
+    fn purchase_takes_what_was_not_saved() {
         let (items, _) = plan_items(
             &[wish("w", None, "100", "2026-12-20", false)],
             oct(),
             &HashMap::new(),
         );
-        let out = saved_in_full(&items, 3);
-        // Each month spreads what is still unsaved: 100/3, then 66.67/2
-        // (33.335 rounds to even), and the purchase takes the rest.
-        assert_eq!(amounts(&out[0]), vec![d("33.33")]);
-        assert_eq!(amounts(&out[1]), vec![d("33.34")]);
-        assert_eq!(amounts(&out[2]), vec![d("33.33")]);
-        assert_eq!(
-            out.iter().flatten().map(|x| x.amount).sum::<Decimal>(),
-            d("100")
-        );
+        let mut s = Saver::new(&items, oct(), 3);
+        assert_eq!(amounts(&s.set_asides(0)), vec![d("100")]);
+        s.paid("w", d("40"));
+        assert_eq!(amounts(&s.set_asides(1)), vec![d("60")]);
+        assert!(s.set_asides(2).is_empty());
+        assert_eq!(amounts(&s.purchases(2)), vec![d("60")]);
     }
 
     #[test]
@@ -654,7 +653,7 @@ mod tests {
     }
 
     #[test]
-    fn ordering_set_asides_then_due_by_date_then_created() {
+    fn ordering_set_asides_by_due_then_purchases_by_date_then_created() {
         let a = wish("a", None, "10", "2026-10-25", false);
         let b = wish("b", None, "20", "2026-10-05", false);
         let c = wish("c", None, "60", "2026-11-05", false);
@@ -703,12 +702,12 @@ mod tests {
         let (items, _) = plan_items(&[w.clone()], cur, &HashMap::new());
         let out = saved_in_full(&items, 3);
         assert!(out[0].is_empty());
-        assert_eq!(amounts(&out[1]), vec![d("300")]);
-        assert_eq!(amounts(&out[2]), vec![d("300")]);
-        // Saved in an earlier month: spread from month 0 as before.
+        assert_eq!(amounts(&out[1]), vec![d("600")]);
+        assert!(out[2].is_empty());
+        // Saved in an earlier month: month 0 asks for the rest as before.
         w.saved_month = Some("2026-09-01".into());
         let (items, _) = plan_items(&[w.clone()], cur, &HashMap::new());
-        assert_eq!(amounts(&saved_in_full(&items, 3)[0]), vec![d("200")]);
+        assert_eq!(amounts(&saved_in_full(&items, 3)[0]), vec![d("600")]);
         // Due this month: unchanged.
         w.due_on = "2026-10-20".into();
         w.saved_month = Some("2026-10-01".into());
@@ -732,17 +731,17 @@ mod tests {
                     .sum::<Decimal>()
             })
             .collect();
-        assert_eq!(rest, vec![Decimal::ZERO, d("250"), d("250")]);
+        assert_eq!(rest, vec![Decimal::ZERO, d("500"), Decimal::ZERO]);
     }
 
     #[test]
-    fn saver_spreads_then_recomputes_after_a_skip() {
-        // 900 due in 2 months (idx 2), nothing saved: 300 / 300 / 300.
+    fn saver_asks_for_the_rest_until_it_is_saved() {
+        // 900 due in 2 months (idx 2), nothing saved: every month asks for all of it.
         let items = vec![planned("w", "900", "2026-12-15")];
         let mut s = Saver::new(&items, oct(), 3);
-        assert_eq!(s.set_asides(0)[0].amount, d("300"));
-        // Month 0 skipped: nothing paid. Month 1 now spreads 900 over 2.
-        assert_eq!(s.set_asides(1)[0].amount, d("450"));
+        assert_eq!(s.set_asides(0)[0].amount, d("900"));
+        // Month 0 skipped: nothing paid. Month 1 asks for the 900 again.
+        assert_eq!(s.set_asides(1)[0].amount, d("900"));
         s.paid("w", d("450"));
         assert_eq!(s.remaining("w"), d("450"));
         assert_eq!(s.set_asides(2), vec![]); // due month: purchase, not set-aside
@@ -758,6 +757,22 @@ mod tests {
         let s = Saver::new(&items, oct(), 3);
         assert!(s.set_asides(0).is_empty());
         assert_eq!(s.remaining("w"), Decimal::ZERO);
+    }
+
+    #[test]
+    fn set_asides_come_soonest_due_first() {
+        let items = vec![
+            planned("later", "900", "2027-03-15"),
+            planned("soon", "300", "2026-12-15"),
+            planned("soon_b", "300", "2026-12-15"),
+        ];
+        let s = Saver::new(&items, oct(), 6);
+        let ids: Vec<_> = s
+            .set_asides(0)
+            .into_iter()
+            .map(|d| d.wish_id.unwrap())
+            .collect();
+        assert_eq!(ids, ["soon", "soon_b", "later"]);
     }
 
     #[test]

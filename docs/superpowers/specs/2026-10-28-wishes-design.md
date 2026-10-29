@@ -359,9 +359,16 @@ Owner: "not that we would use that card to set aside but we would set aside
 maximum possible and then probably the last purchase is used with the credit
 card, not that every month I put something and then pay the money back."
 
-- A set-aside takes **as much of its share as fits** from free money, the
-  savings pot and group cuts, never the cards. The unsaved rest spreads over
-  the months left. A month where nothing fits is a skip, as before.
+- A set-aside takes **as much as fits** of everything still unsaved, from
+  free money, the savings pot and group cuts, never the cards. There is no
+  equal monthly share any more: whatever was not saved is asked for again
+  next month. A month where nothing fits is a skip, as before.
+- Owner: "the earlier savings should be covered first and then we save more
+  for later savings, not that we try to save for all equally … mostly
+  everything is dumped to the earlier ones." So within a month, after the
+  must tier, purchases due now come first, then set-asides **soonest due
+  first**: the nearest wish takes all it can, the next one gets what is
+  left.
 - This holds for must set-asides too: they come first in the month, but
   never go on the cards. The "can later months carry it" test is gone.
 - The cards are for the **purchase** in its due month (and for a card-source
