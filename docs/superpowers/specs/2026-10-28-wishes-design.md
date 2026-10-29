@@ -217,3 +217,88 @@ Starting it:
   longer judged, because the bill is in the rest of the app from then on.
 - Month-0 cuts are written into the budget on Start, as for Bought.
   *(Claude's call: later months' budgets don't exist yet.)*
+
+## Addendum (2026-10-29): must wishes, honest free money, flexible saving, several cards
+
+Owner's problem: with four wishes planned, every one shows "Not affordable"
+and November starts about €40 short before any wish. Two reasons: the app
+subtracts savings-goal contributions before wishes get a look, and it
+insists on an equal set-aside every month. The owner's rule: cover what is
+most immediate first, plan against salary minus fixed expenses minus
+groceries minus going out (the budget as set, not a forecast), and treat
+whatever is left as savings that can be taken back when needed.
+
+### Must wishes
+
+- A wish gains a **must** flag (one-off, recurring or bill change; a
+  parent's flag covers its sub-wishes, and a sub-wish cannot be more
+  "must" than its parent *(Claude's call)*).
+- **Order within a month**: must demands first, then optional ones. Inside
+  each tier the existing order holds: set-asides, then purchases by date,
+  then creation order. A must wish therefore sees the free money, group
+  room and card room before any optional wish does.
+- A must wish is never the one that gives way. When the month cannot fit
+  everything, optional wishes are what end up short or postponed.
+- The page marks must wishes visibly (a "Must" tag beside the name) and
+  lets the owner toggle the flag on an existing wish without re-entering
+  it.
+
+### Free money for wishes
+
+- Each month's free money = salary + expected income − fixed bills −
+  planned payments − budget group limits. **Savings-goal contributions are
+  no longer subtracted** for the purpose of judging wishes. Savings is what
+  remains; the owner takes from it when something comes up.
+- The outlook, budget page and goals keep their own arithmetic. Only the
+  wishes view changes.
+- The Wishes page states this in one line near the top, e.g. "Free money
+  each month: salary minus bills, planned payments and budget groups.
+  Savings goals are not held back." *(Claude's call: the owner should see
+  why the number differs from the outlook.)*
+
+### Flexible saving
+
+- A set-aside is no longer a fixed equal share. The plan is still
+  "(amount − saved) spread over the months left", but a month that cannot
+  fit a set-aside without going on the card **skips it** (optional wishes
+  first, must wishes last), and the gap spreads over the months that
+  remain.
+- A set-aside goes on the card only when it is the wish's last month
+  before its date (i.e. the purchase itself) or the wish is must and
+  skipping would leave too few months to catch up *(Claude's call)*.
+- Verdict wording for a skipped month: "Nothing set aside in November;
+  €X/month from December." A wish is "Not affordable" only when its amount
+  cannot be reached by its date even using card room in the final month.
+
+### Credit cards, plural
+
+- Settings hold a **list of cards**, each with a name, limit, "used this
+  month so far" (entered by hand, flagged stale after the month ends, as
+  today) and an optional linked bill. The existing single card becomes the
+  first entry on upgrade.
+- **Card room is pooled**: the ladder's step 3 may use the sum of every
+  card's free room. When a wish does not fit in a month, the shortfall goes
+  on the cards; the charge comes back the following month and that month is
+  run through the ladder again, exactly as today.
+- *(Claude's call)* Charges fill cards in the order they are listed, each
+  up to its limit, so the owner controls which card is used first by
+  ordering the list. The page shows the next month's payback as a total
+  and per card.
+- A wish paid from the card (source = card) is charged against pooled room
+  the same way. When marked bought, the owner picks which card(s) took it;
+  the recorded usage on each card rises accordingly.
+- Wording: "€X on the cards, so December starts €X short." and, at the top
+  of each month, "Pay back €Y on 1 December (Visa €a, Mastercard €b)."
+
+### Not changing
+
+- The cutting ladder's steps and group floors.
+- How bought wishes write their cuts into the budget.
+- Sub-wish mechanics, recurring wishes and bill changes.
+
+### Left to the builder
+
+- Storage shape for the card list and the migration of the single card.
+- How "too few months to catch up" is decided for a must set-aside.
+- Tests: must-before-optional ordering, free money ignoring goals,
+  skip-and-catch-up, pooled card room and per-card fill order.
