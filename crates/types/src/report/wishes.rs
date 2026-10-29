@@ -37,6 +37,20 @@ pub struct Verdict {
     pub next_short: Decimal,
     #[serde(default)]
     pub next_cuts: Vec<Cut>,
+    /// A must-have wish.
+    #[serde(default)]
+    pub must: bool,
+    /// A wish left unpaid so the plan stays whole.
+    #[serde(default)]
+    pub skipped: bool,
+}
+
+/// What one card owes at the end of a month.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CardUsed {
+    pub card_id: String,
+    pub name: String,
+    pub used: Decimal,
 }
 
 /// One month of the schedule.
@@ -48,6 +62,9 @@ pub struct WishMonth {
     pub free_left: Decimal,
     pub card_charge_in: Decimal,
     pub card_used: Decimal,
+    /// End-of-month usage per card: next month's payback.
+    #[serde(default)]
+    pub cards: Vec<CardUsed>,
     pub verdicts: Vec<Verdict>,
 }
 
@@ -84,6 +101,9 @@ pub struct WishesView {
     pub currency: Currency,
     pub settings: WishSettings,
     pub card_stale: bool,
+    /// Card ids whose usage was entered in an earlier month.
+    #[serde(default)]
+    pub stale_cards: Vec<String>,
     pub months: Vec<WishMonth>,
     /// Top-level only, newest due last.
     pub wishes: Vec<WishRow>,

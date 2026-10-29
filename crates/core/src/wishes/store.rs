@@ -51,7 +51,7 @@ pub fn load_wish_settings(conn: &Connection) -> Result<WishSettings> {
 mod tests {
     use super::*;
     use finance_storage::Store;
-    use finance_types::gateway::{WishSource, WishStatus};
+    use finance_types::gateway::{CardSettings, WishSource, WishStatus};
     use finance_types::report::Currency;
     use rust_decimal::Decimal;
     use std::path::Path;
@@ -61,7 +61,7 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         assert!(load_wishes(&conn).unwrap().is_empty());
         assert_eq!(
-            load_wish_settings(&conn).unwrap().card_limit,
+            load_wish_settings(&conn).unwrap().first().limit,
             Decimal::from(2500)
         );
     }
@@ -100,13 +100,17 @@ mod tests {
             status: WishStatus::Planned,
             bought: None,
             kind: Default::default(),
+            must: false,
             created_at: "2026-10-28T10:00:00Z".into(),
         };
         let settings = WishSettings {
-            card_limit: Decimal::from(3000),
-            card_used: Decimal::from(120),
-            card_used_month: "2026-10-01".into(),
-            card_bill_id: Some("b1".into()),
+            cards: vec![CardSettings {
+                limit: Decimal::from(3000),
+                used: Decimal::from(120),
+                used_month: "2026-10-01".into(),
+                bill_id: Some("b1".into()),
+                ..WishSettings::default().first()
+            }],
         };
         conn.execute(
             "INSERT INTO wishes (wish_id, payload_json) VALUES ('w1', ?1)",

@@ -92,10 +92,11 @@ pub fn baselines(
     let Some(month0) = current_month(alloc) else {
         return (Vec::new(), false);
     };
-    let (card_used, card_stale) = if parse_month(&settings.card_used_month) == Some(month0) {
-        (settings.card_used, false)
+    let card = settings.first();
+    let (card_used, card_stale) = if parse_month(&card.used_month) == Some(month0) {
+        (card.used, false)
     } else {
-        let unset = settings.card_used_month.is_empty() && settings.card_used.is_zero();
+        let unset = card.used_month.is_empty() && card.used.is_zero();
         (Decimal::ZERO, !unset)
     };
     // `next_wiggle_room` is clamped at zero; the deficit is `next_shortfall`.
@@ -136,7 +137,7 @@ pub fn baselines(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use finance_types::gateway::BudgetGroup;
+    use finance_types::gateway::{BudgetGroup, CardSettings};
     use finance_types::report::Currency;
     use std::str::FromStr;
 
@@ -222,9 +223,11 @@ pub(crate) mod tests {
 
     fn settings(card_used: &str, month: &str) -> WishSettings {
         WishSettings {
-            card_used: d(card_used),
-            card_used_month: month.into(),
-            ..WishSettings::default()
+            cards: vec![CardSettings {
+                used: d(card_used),
+                used_month: month.into(),
+                ..WishSettings::default().first()
+            }],
         }
     }
 

@@ -101,7 +101,8 @@ fn dashboard_parts(
     );
     // The card bill is already counted in next month's fixed costs.
     let card_bill = settings
-        .card_bill_id
+        .first()
+        .bill_id
         .as_deref()
         .and_then(|bill_id| {
             dashboard
@@ -180,7 +181,7 @@ impl Inputs<'_> {
             schedule::earmarked(wishes),
             months,
         );
-        let judged = ladder::judge(&bases, &demands, settings.card_limit);
+        let judged = ladder::judge(&bases, &demands, settings.first().limit);
         (judged, demands, card_stale)
     }
 
@@ -223,6 +224,7 @@ impl Inputs<'_> {
             currency,
             settings: settings.clone(),
             card_stale,
+            stale_cards: Vec::new(),
             wishes: tops.into_iter().map(|w| ctx.row(w)).collect(),
             months,
             changeable_bills,
@@ -447,7 +449,7 @@ pub fn month_zero_cuts(view: &WishesView, wish_id: &str) -> Vec<Cut> {
 mod tests {
     use super::baseline::tests::{alloc, d, plan, plan_group, row};
     use super::*;
-    use finance_types::gateway::{WishPurchase, WishSource, WishStatus};
+    use finance_types::gateway::{CardSettings, WishPurchase, WishSource, WishStatus};
     use finance_types::report::Currency;
 
     fn wish(id: &str, parent: Option<&str>, amount: &str, due: &str) -> Wish {
@@ -466,6 +468,7 @@ mod tests {
             status: WishStatus::Planned,
             bought: None,
             kind: WishKind::OneOff,
+            must: false,
             created_at: format!("2026-01-01T00:00:{id}"),
         }
     }
@@ -511,10 +514,7 @@ mod tests {
                 plan_group("g-groc", "Groceries", Some(1), Some("300")),
             ],
         )];
-        let s = WishSettings {
-            card_limit: Decimal::ZERO,
-            ..WishSettings::default()
-        };
+        let s = no_card_room();
         let ws = [wish("tv", None, "200", "2026-10-20")];
         let alone = view_from(
             Some(&a),
@@ -597,11 +597,21 @@ mod tests {
         assert!(view.wishes[0].tradeoffs);
     }
 
+    fn no_card_room() -> WishSettings {
+        WishSettings {
+            cards: vec![CardSettings {
+                limit: Decimal::ZERO,
+                ..WishSettings::default().first()
+            }],
+        }
+    }
+
     fn buy(amount: &str, on: &str, source: WishSource) -> WishPurchase {
         WishPurchase {
             amount: d(amount),
             on: on.into(),
             source,
+            cards: Vec::new(),
         }
     }
 
@@ -622,10 +632,7 @@ mod tests {
         );
         let mut tv = wish("tv", None, "900", "2026-12-20");
         tv.saved = d("100");
-        let s = WishSettings {
-            card_limit: Decimal::ZERO,
-            ..WishSettings::default()
-        };
+        let s = no_card_room();
         let wishes = [tv];
         let bills = HashMap::new();
         let inputs = Inputs {
@@ -716,10 +723,7 @@ mod tests {
             wish("later", None, "60", "2026-12-01"),
             gone,
         ];
-        let s = WishSettings {
-            card_limit: Decimal::ZERO,
-            ..WishSettings::default()
-        };
+        let s = no_card_room();
         let view = view_from(Some(&a), &[], Decimal::ZERO, &ws, &s, &HashMap::new());
         let ids: Vec<_> = view
             .wishes
@@ -780,6 +784,8 @@ mod tests {
             set_aside: false,
             next_short: Decimal::ZERO,
             next_cuts: Vec::new(),
+            must: false,
+            skipped: false,
         };
         let month = |verdicts| WishMonth {
             month: "2026-10-01".into(),
@@ -787,12 +793,14 @@ mod tests {
             free_left: Decimal::ZERO,
             card_charge_in: Decimal::ZERO,
             card_used: Decimal::ZERO,
+            cards: Vec::new(),
             verdicts,
         };
         let view = WishesView {
             currency: Currency::eur(),
             settings: WishSettings::default(),
             card_stale: false,
+            stale_cards: Vec::new(),
             changeable_bills: Vec::new(),
             months: vec![
                 month(vec![

@@ -77,6 +77,8 @@ impl Purse<'_> {
             set_aside: demand.set_aside,
             next_short: Decimal::ZERO,
             next_cuts: Vec::new(),
+            must: false,
+            skipped: false,
         };
         if demand.amount < Decimal::ZERO {
             // A cheaper bill: money comes back.
@@ -224,6 +226,7 @@ pub fn judge(
             free_left: purse.free,
             card_charge_in,
             card_used: purse.card_used,
+            cards: Vec::new(),
             verdicts,
         });
     }

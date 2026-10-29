@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use finance_types::gateway::{
-    Repeat, Wish, WishKind, WishPurchase, WishSettings, WishSource, WishStatus,
+    CardSettings, Repeat, Wish, WishKind, WishPurchase, WishSettings, WishSource, WishStatus,
 };
 use finance_types::report::Currency;
 use finance_types::report::Dashboard;
@@ -745,17 +745,18 @@ fn card_strip(
     current_month: String,
 ) -> impl IntoView + use<> {
     let settings = view.settings.clone();
-    let limit = RwSignal::new(settings.card_limit.to_string());
-    let used = RwSignal::new(settings.card_used.to_string());
-    let bill = RwSignal::new(settings.card_bill_id.clone().unwrap_or_default());
+    let card = settings.first();
+    let limit = RwSignal::new(card.limit.to_string());
+    let used = RwSignal::new(card.used.to_string());
+    let bill = RwSignal::new(card.bill_id.clone().unwrap_or_default());
     let bills: Vec<(String, String)> = std::iter::once((String::new(), "No card bill".to_owned()))
         .chain(ctx.bills.iter().map(|b| (b.id.clone(), b.name.clone())))
         .collect();
     let stale = view.card_stale.then(|| {
-        let entered = if settings.card_used_month.is_empty() {
+        let entered = if card.used_month.is_empty() {
             "an earlier month".to_owned()
         } else {
-            format::month_long(&settings.card_used_month)
+            format::month_long(&card.used_month)
         };
         view! {
             <p role="status" class="mt-2 text-sm text-warning-fg">
@@ -766,7 +767,7 @@ fn card_strip(
     let month_label = format::month_long(&current_month);
     let submit = move |ev: SubmitEvent| {
         ev.prevent_default();
-        let (Ok(card_limit), Ok(card_used)) = (
+        let (Ok(limit), Ok(used)) = (
             parse_amount(&limit.get_untracked()),
             parse_amount(&used.get_untracked()),
         ) else {
@@ -774,11 +775,16 @@ fn card_strip(
             return;
         };
         let bill_id = bill.get_untracked();
-        let settings = WishSettings {
-            card_limit,
-            card_used,
-            card_used_month: current_month.clone(),
-            card_bill_id: (!bill_id.is_empty()).then_some(bill_id),
+        let mut settings = settings.clone();
+        if settings.cards.is_empty() {
+            settings = WishSettings::default();
+        }
+        settings.cards[0] = CardSettings {
+            limit,
+            used,
+            used_month: current_month.clone(),
+            bill_id: (!bill_id.is_empty()).then_some(bill_id),
+            ..settings.first()
         };
         ui.write(
             "card".into(),
@@ -1224,6 +1230,7 @@ fn wish_body(
             amount: value,
             on: ui.buy_on.get_untracked(),
             source: parse_source(&ui.buy_source.get_untracked()),
+            cards: Vec::new(),
         };
         ui.write(
             buy_target.clone(),
@@ -1511,6 +1518,7 @@ mod tests {
                 status: WishStatus::Planned,
                 bought: None,
                 kind: Default::default(),
+                must: false,
                 created_at: "2026-10-01T00:00:00Z".into(),
             },
             children: Vec::new(),
@@ -1535,6 +1543,8 @@ mod tests {
             set_aside: false,
             next_short: Decimal::ZERO,
             next_cuts: Vec::new(),
+            must: false,
+            skipped: false,
         }
     }
 
@@ -1545,6 +1555,7 @@ mod tests {
             free_left,
             card_charge_in: Decimal::ZERO,
             card_used: d(998, 2),
+            cards: Vec::new(),
             verdicts,
         }
     }

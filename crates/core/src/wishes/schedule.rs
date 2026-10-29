@@ -365,6 +365,7 @@ mod tests {
             status: WishStatus::Planned,
             bought: None,
             kind: WishKind::OneOff,
+            must: false,
             created_at: format!("2026-01-01T00:00:{id}"),
         }
     }
@@ -465,6 +466,7 @@ mod tests {
             amount: d("800"),
             on: "2026-10-05".into(),
             source: WishSource::Card,
+            cards: Vec::new(),
         });
         let ws = [wish("trip", None, "3000", "2026-12-31", false), sub];
         let (items, fams) = plan_items(&ws, cur, &HashMap::new());
