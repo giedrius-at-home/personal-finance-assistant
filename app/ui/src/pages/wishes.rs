@@ -24,6 +24,18 @@ use crate::ds::{
 use crate::pages::Problem;
 use crate::{format, state};
 
+/// What an amount box accepts: a plain amount with a point or a comma.
+const AMOUNT_PATTERN: &str = "[0-9]+([.,][0-9]{1,2})?";
+
+/// Drops a control that sits beside fields by its label's height
+/// (`text-sm` line plus the field's gap), so it lines up with their boxes.
+const LABEL_OFFSET: &str = "sm:mt-[26px]";
+
+/// Reads an amount box; a comma counts as the decimal point.
+fn parse_amount(value: &str) -> Result<Decimal, rust_decimal::Error> {
+    value.trim().replace(',', ".").parse()
+}
+
 /// An amount the way the verdicts say it: `€70`, `€40.02`.
 fn amount(value: Decimal, code: &str) -> String {
     let decimals = if value.fract().is_zero() { 0 } else { 2 };
@@ -755,8 +767,8 @@ fn card_strip(
     let submit = move |ev: SubmitEvent| {
         ev.prevent_default();
         let (Ok(card_limit), Ok(card_used)) = (
-            limit.get_untracked().trim().parse::<Decimal>(),
-            used.get_untracked().trim().parse::<Decimal>(),
+            parse_amount(&limit.get_untracked()),
+            parse_amount(&used.get_untracked()),
         ) else {
             ui.set_message("card", "Enter the limit and the amount used.", true);
             return;
@@ -781,13 +793,13 @@ fn card_strip(
             <Eyebrow>"CREDIT CARD"</Eyebrow>
             <h2 class="mt-2 text-lg font-semibold">"What the wishes may lean on"</h2>
             {stale}
-            <form class="mt-4 grid items-end gap-3 sm:grid-cols-2 lg:grid-cols-4" on:submit=submit>
+            <form class="mt-4 grid items-start gap-3 sm:grid-cols-2 lg:grid-cols-4" on:submit=submit>
                 <Field label="Limit" id="card-limit">
                     <input
                         id="card-limit"
-                        type="number"
-                        min="0.01"
-                        step="0.01"
+                        type="text"
+                        inputmode="decimal"
+                        pattern=AMOUNT_PATTERN
                         required
                         class=CONTROL
                         prop:value=move || limit.get()
@@ -797,9 +809,9 @@ fn card_strip(
                 <Field label="Used this month" id="card-used" hint=format!("So far in {month_label}.")>
                     <input
                         id="card-used"
-                        type="number"
-                        min="0"
-                        step="0.01"
+                        type="text"
+                        inputmode="decimal"
+                        pattern=AMOUNT_PATTERN
                         required
                         class=CONTROL
                         prop:value=move || used.get()
@@ -809,7 +821,7 @@ fn card_strip(
                 <Field label="Card bill" id="card-bill" hint="The bill the card is paid by.">
                     {select("card-bill".into(), bill, bills)}
                 </Field>
-                <Button submit=true variant=Variant::Secondary disabled=Signal::derive(move || ui.busy.get())>
+                <Button submit=true variant=Variant::Secondary class=LABEL_OFFSET disabled=Signal::derive(move || ui.busy.get())>
                     "Save card"
                 </Button>
             </form>
@@ -818,14 +830,14 @@ fn card_strip(
     }
 }
 
-/// A number input bound to `value`.
-fn number(id: &'static str, value: RwSignal<String>, min: &'static str) -> impl IntoView + use<> {
+/// A decimal amount input bound to `value`.
+fn number(id: &'static str, value: RwSignal<String>) -> impl IntoView + use<> {
     view! {
         <input
             id=id
-            type="number"
-            min=min
-            step="0.01"
+            type="text"
+            inputmode="decimal"
+            pattern=AMOUNT_PATTERN
             required
             placeholder="0.00"
             class=CONTROL
@@ -882,7 +894,7 @@ fn add_form(
     ]);
     let submit = move |ev: SubmitEvent| {
         ev.prevent_default();
-        let Ok(amount) = ui.amount.get_untracked().trim().parse::<Decimal>() else {
+        let Ok(amount) = parse_amount(&ui.amount.get_untracked()) else {
             ui.set_message("add", "Enter an amount.", true);
             return;
         };
@@ -947,7 +959,7 @@ fn add_form(
     let fields = move || {
         match ui.kind.get().as_str() {
         "repeats" => view! {
-            <Field label="Each time" id="wish-amount">{number("wish-amount", ui.amount, "0.01")}</Field>
+            <Field label="Each time" id="wish-amount">{number("wish-amount", ui.amount)}</Field>
             <Field label="Repeats" id="wish-every">
                 {select("wish-every".into(), ui.every, repeats.get_value())}
             </Field>
@@ -963,7 +975,7 @@ fn add_form(
                 {select("wish-bill".into(), ui.bill, bill_options.get_value())}
             </Field>
             <Field label="New amount" id="wish-amount" hint="Per payment; 0 cancels the bill.">
-                {number("wish-amount", ui.amount, "0")}
+                {number("wish-amount", ui.amount)}
             </Field>
             <Field label="From" id="wish-date">{date_input("wish-date", ui.due_on, true)}</Field>
             <Field label="Ends" id="wish-ends" hint="Optional.">{date_input("wish-ends", ui.ends_on, false)}</Field>
@@ -971,7 +983,7 @@ fn add_form(
         .into_any(),
         _ => view! {
             <Field label="Amount" id="wish-amount" hint="For a wish with parts, the most it may cost.">
-                {number("wish-amount", ui.amount, "0.01")}
+                {number("wish-amount", ui.amount)}
             </Field>
             <Field label="Date" id="wish-date">{date_input("wish-date", ui.due_on, true)}</Field>
             <Field label="Pay with" id="wish-source">
@@ -985,7 +997,7 @@ fn add_form(
     }
     };
     view! {
-        <form class="mt-4 grid items-end gap-3 sm:grid-cols-2 lg:grid-cols-3" on:submit=submit>
+        <form class="mt-4 grid items-start gap-3 sm:grid-cols-2 lg:grid-cols-3" on:submit=submit>
             <Field label="Kind" id="wish-kind">{select("wish-kind".into(), ui.kind, kinds)}</Field>
             <Field label="Name" id="wish-name">
                 <input
@@ -999,7 +1011,7 @@ fn add_form(
                 />
             </Field>
             {fields}
-            <Button submit=true variant=Variant::Secondary disabled=Signal::derive(move || ui.busy.get())>
+            <Button submit=true variant=Variant::Secondary class="sm:col-start-1" disabled=Signal::derive(move || ui.busy.get())>
                 <Lucide icon=Icon::Plus size=15 />
                 "Add wish"
             </Button>
@@ -1131,7 +1143,7 @@ fn wish_body(
         let target = target.clone();
         move |ev: SubmitEvent| {
             ev.prevent_default();
-            let Ok(value) = saved.get_untracked().trim().parse::<Decimal>() else {
+            let Ok(value) = parse_amount(&saved.get_untracked()) else {
                 ui.set_message(&target, "Enter the amount saved.", true);
                 return;
             };
@@ -1204,7 +1216,7 @@ fn wish_body(
     let buy_target = target.clone();
     let buy_submit = move |ev: SubmitEvent| {
         ev.prevent_default();
-        let Ok(value) = ui.buy_amount.get_untracked().trim().parse::<Decimal>() else {
+        let Ok(value) = parse_amount(&ui.buy_amount.get_untracked()) else {
             ui.set_message(&buy_target, "Enter what it cost.", true);
             return;
         };
@@ -1255,9 +1267,9 @@ fn wish_body(
                         <label for=saved_id.clone() class="text-xs text-fg-muted">"Saved so far"</label>
                         <input
                             id=saved_id
-                            type="number"
-                            min="0"
-                            step="0.01"
+                            type="text"
+                            inputmode="decimal"
+                            pattern=AMOUNT_PATTERN
                             class=cn([CONTROL, "h-8 w-28"])
                             prop:value=move || saved.get()
                             on:input=move |e| saved.set(event_target_value(&e))
@@ -1299,9 +1311,9 @@ fn wish_body(
                     <Field label="Cost" id=buy_amount_id.get_value()>
                         <input
                             id=buy_amount_id.get_value()
-                            type="number"
-                            min="0.01"
-                            step="0.01"
+                            type="text"
+                            inputmode="decimal"
+                            pattern=AMOUNT_PATTERN
                             required
                             class=CONTROL
                             prop:value=move || ui.buy_amount.get()
@@ -1343,7 +1355,7 @@ fn wish_body(
                     >
                         {select(start_category_id.get_value(), ui.start_category, categories.get_value())}
                     </Field>
-                    <div class="flex gap-2">
+                    <div class=cn(["flex gap-2", LABEL_OFFSET])>
                         <Button submit=true size=Size::Sm disabled=Signal::derive(move || ui.busy.get())>"Start"</Button>
                         <Button size=Size::Sm variant=Variant::Ghost on_click=Callback::new(move |_| ui.starting.set(None))>"Cancel"</Button>
                     </div>
