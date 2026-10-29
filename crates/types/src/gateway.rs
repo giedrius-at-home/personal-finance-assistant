@@ -96,6 +96,12 @@ pub struct BudgetGroup {
     pub transaction_ids: Vec<String>,
     #[serde(default)]
     pub account_id: Option<String>,
+    /// How much the group matters (for ranking cuts).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub importance: Option<u8>,
+    /// The least the group may be cut to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub floor: Option<Decimal>,
 }
 
 /// `monthly_budget_plans.payload_json`; `month` is the first day (`YYYY-MM-01`).
@@ -182,6 +188,12 @@ pub struct BillCreateRequest {
     pub date: String,
     /// One of [`BILL_FREQUENCIES`].
     pub repeat_freq: String,
+    /// Periods skipped between payments: 1 with `weekly` is every two weeks.
+    #[serde(default)]
+    pub skip: u32,
+    /// Last pay date, `YYYY-MM-DD`; none repeats for ever.
+    #[serde(default)]
+    pub end_date: Option<String>,
 }
 
 /// New settings for a bill (Python `/subscriptions/edit`).
@@ -386,4 +398,161 @@ pub struct PlannedPaymentRequest {
     /// Text the matching bank description must contain.
     #[serde(default)]
     pub match_description: Option<String>,
+}
+
+/// Where a wish is paid from.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum WishSource {
+    Card,
+    Account { account_id: String },
+}
+
+/// Where a wish stands.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WishStatus {
+    #[default]
+    Planned,
+    Bought,
+    Dropped,
+    /// A recurring wish or bill change that has begun.
+    Started,
+}
+
+/// How often a recurring wish or bill repeats.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Repeat {
+    Weekly,
+    Biweekly,
+    Monthly,
+    Yearly,
+}
+
+/// What a wish is: a one-off purchase, a repeating cost, or a change to a bill.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum WishKind {
+    #[default]
+    OneOff,
+    /// Costs `amount` on every occurrence from `due_on`, through `ends_on`.
+    Recurring {
+        every: Repeat,
+        #[serde(default)]
+        ends_on: Option<String>,
+    },
+    /// Moves an existing bill to `amount` from `due_on`, through `ends_on`.
+    BillChange {
+        bill_id: String,
+        #[serde(default)]
+        ends_on: Option<String>,
+    },
+}
+
+/// What a wish actually cost, once bought.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WishPurchase {
+    pub amount: Decimal,
+    /// `YYYY-MM-DD`.
+    pub on: String,
+    pub source: WishSource,
+}
+
+/// `wishes.payload_json`: a planned purchase. A parent wish is a cap over
+/// its sub-wishes (`parent_id`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Wish {
+    pub wish_id: String,
+    #[serde(default)]
+    pub parent_id: Option<String>,
+    pub name: String,
+    /// A parent's cap.
+    pub amount: Decimal,
+    pub currency: Currency,
+    /// `YYYY-MM-DD`.
+    pub due_on: String,
+    pub source: WishSource,
+    #[serde(default)]
+    pub saved: Decimal,
+    /// The budget month (`YYYY-MM-01`) `saved` was last recorded in.
+    #[serde(default)]
+    pub saved_month: Option<String>,
+    #[serde(default)]
+    pub status: WishStatus,
+    #[serde(default)]
+    pub bought: Option<WishPurchase>,
+    #[serde(default)]
+    pub kind: WishKind,
+    pub created_at: String,
+}
+
+/// What the owner submits to create or edit a wish (`wish_id` set: edit).
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct WishDraft {
+    #[serde(default)]
+    pub wish_id: Option<String>,
+    #[serde(default)]
+    pub parent_id: Option<String>,
+    pub name: String,
+    pub amount: Decimal,
+    pub currency: Currency,
+    /// `YYYY-MM-DD`.
+    pub due_on: String,
+    pub source: WishSource,
+    #[serde(default)]
+    pub kind: WishKind,
+}
+
+/// `wish_settings.payload_json`: the credit card the wishes may lean on.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WishSettings {
+    pub card_limit: Decimal,
+    pub card_used: Decimal,
+    /// The month `card_used` was recorded for (`YYYY-MM-01`).
+    pub card_used_month: String,
+    pub card_bill_id: Option<String>,
+}
+
+impl Default for WishSettings {
+    fn default() -> Self {
+        Self {
+            card_limit: Decimal::from(2500),
+            card_used: Decimal::ZERO,
+            card_used_month: String::new(),
+            card_bill_id: None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn budget_group_without_importance_parses() {
+        let json = r#"{"id":"g","name":"Going out","amount":"100"}"#;
+        let group: BudgetGroup = serde_json::from_str(json).unwrap();
+        assert_eq!(group.importance, None);
+        assert_eq!(group.floor, None);
+        let back = serde_json::to_string(&group).unwrap();
+        assert!(!back.contains("importance") && !back.contains("floor"));
+    }
+
+    #[test]
+    fn old_wish_json_without_kind_is_one_off() {
+        let json = r#"{"wish_id":"w","name":"Bike","amount":"900","currency":{"code":"EUR","minor_unit":2},"due_on":"2026-12-01","source":{"kind":"card"},"created_at":"x"}"#;
+        let wish: Wish = serde_json::from_str(json).unwrap();
+        assert_eq!(wish.kind, WishKind::OneOff);
+        let kind: WishKind =
+            serde_json::from_str(r#"{"type":"recurring","every":"biweekly"}"#).unwrap();
+        assert_eq!(
+            kind,
+            WishKind::Recurring {
+                every: Repeat::Biweekly,
+                ends_on: None
+            }
+        );
+    }
 }

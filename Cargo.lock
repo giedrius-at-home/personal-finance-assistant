@@ -1452,6 +1452,7 @@ dependencies = [
  "finance-types",
  "jiff",
  "reqwest",
+ "rust_decimal",
  "serde",
  "serde_json",
  "sha2",
@@ -1507,6 +1508,7 @@ dependencies = [
  "finance-core",
  "finance-storage",
  "finance-types",
+ "rust_decimal",
  "serde",
  "serde_json",
 ]

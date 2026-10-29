@@ -19,22 +19,24 @@ use crate::ds::{
     button_class, cn,
 };
 
-/// The five primary sections (the site's top tabs).
+/// The six primary sections (the site's top tabs).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tab {
     Overview,
     Transactions,
     Spending,
     Plan,
+    Wishes,
     Manage,
 }
 
 impl Tab {
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 6] = [
         Self::Overview,
         Self::Transactions,
         Self::Spending,
         Self::Plan,
+        Self::Wishes,
         Self::Manage,
     ];
 
@@ -44,6 +46,7 @@ impl Tab {
             Self::Transactions => "Transactions",
             Self::Spending => "Spending",
             Self::Plan => "Plan",
+            Self::Wishes => "Wishes",
             Self::Manage => "Manage",
         }
     }
@@ -193,7 +196,7 @@ fn App() -> impl IntoView {
     api::listen("daily-forecast", &on_forecast);
     on_forecast.forget();
 
-    // ⌘1–5 switch sections, ⌘R refreshes.
+    // ⌘1–6 switch sections, ⌘R refreshes.
     let handle = window_event_listener(ev::keydown, move |e| {
         if !e.meta_key() || e.shift_key() || e.alt_key() || e.ctrl_key() {
             return;
@@ -225,6 +228,7 @@ fn App() -> impl IntoView {
                         Tab::Transactions => pages::transactions::Transactions().into_any(),
                         Tab::Spending => view! { <SpendingTabs /> }.into_any(),
                         Tab::Plan => pages::plan::Plan().into_any(),
+                        Tab::Wishes => pages::wishes::Wishes().into_any(),
                         Tab::Manage => view! { <ManageTabs /> }.into_any(),
                     }}
                 </div>

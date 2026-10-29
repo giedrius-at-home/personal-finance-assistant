@@ -34,6 +34,7 @@ pub mod subscriptions;
 pub mod text;
 pub mod transfers;
 pub mod trends;
+pub mod wishes;
 pub mod writes;
 
 pub use context::Ctx;

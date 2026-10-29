@@ -249,12 +249,20 @@ pub fn create_bill(
         || minimum <= Decimal::ZERO
         || maximum < minimum
         || !valid_frequency(&request.repeat_freq)
+        || request.skip > 1
         || !checks.currencies.contains(&request.currency_code)
     {
         return Err(invalid(INVALID));
     }
     let Some(date) = date else {
         return Err(invalid(INVALID));
+    };
+    let end = match request.end_date.as_deref().map(str::trim) {
+        None | Some("") => None,
+        Some(value) => match parse_date(value) {
+            Some(end) if end >= date => Some(end),
+            _ => return Err(invalid(INVALID)),
+        },
     };
     let key = casefold(&category);
     if rules(w)?
@@ -279,7 +287,7 @@ pub fn create_bill(
     )?;
     w.tx.execute(
         "INSERT INTO bills (id, name, currency, amount_min, amount_max, start_date, end_date, \
-         repeat_freq, skip, active) VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, ?7, 0, 1)",
+         repeat_freq, skip, active) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1)",
         params![
             id,
             name,
@@ -287,7 +295,9 @@ pub fn create_bill(
             stored_amount(minimum),
             stored_amount(maximum),
             date.to_string(),
-            request.repeat_freq
+            end.map(|e| e.to_string()),
+            request.repeat_freq,
+            request.skip
         ],
     )?;
     let bill_id = id.to_string();
@@ -570,6 +580,8 @@ mod tests {
             currency_code: "EUR".into(),
             date: "2026-11-02".into(),
             repeat_freq: "monthly".into(),
+            skip: 0,
+            end_date: None,
         }
     }
 
@@ -639,12 +651,21 @@ mod tests {
             let mut weird = create("A", "Sport", "1");
             weird.repeat_freq = "daily".into();
             assert_eq!(rejected(create_bill(w, &checks, weird)), INVALID);
+            let mut every_third = create("A", "Sport", "1");
+            every_third.skip = 2;
+            assert_eq!(rejected(create_bill(w, &checks, every_third)), INVALID);
             let mut usd = create("A", "Sport", "1");
             usd.currency_code = "USD".into();
             assert_eq!(rejected(create_bill(w, &checks, usd)), INVALID);
             let mut no_date = create("A", "Sport", "1");
             no_date.date = "2026-13-01".into();
             assert_eq!(rejected(create_bill(w, &checks, no_date)), INVALID);
+            let mut ends_first = create("A", "Sport", "1");
+            ends_first.end_date = Some("2026-11-01".into());
+            assert_eq!(rejected(create_bill(w, &checks, ends_first)), INVALID);
+            let mut bad_end = create("A", "Sport", "1");
+            bad_end.end_date = Some("soon".into());
+            assert_eq!(rejected(create_bill(w, &checks, bad_end)), INVALID);
             assert_eq!(
                 rejected(create_bill(w, &checks, create("A", "Groceries", "1"))),
                 UNKNOWN_CATEGORY

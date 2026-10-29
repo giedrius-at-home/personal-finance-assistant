@@ -1277,6 +1277,8 @@ mod tests {
                 categories: vec!["Jumbo".into()],
                 transaction_ids: Vec::new(),
                 account_id: None,
+                importance: None,
+                floor: None,
             }],
         }
     }

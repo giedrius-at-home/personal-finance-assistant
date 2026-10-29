@@ -50,6 +50,8 @@ pub fn save_budget_plan(w: &Writer<'_>, snap: &Snapshot, plan: BudgetPlan) -> Re
                 .all(|id| purchases.contains(id.as_str()))
             && !group.name.trim().is_empty()
             && group.amount >= rust_decimal::Decimal::ZERO
+            && group.importance != Some(0)
+            && group.floor.is_none_or(|f| f >= rust_decimal::Decimal::ZERO)
             && seen_names.insert(group.name.trim().to_lowercase());
         if !valid {
             return Err(invalid("invalid budget or overlapping groups"));
@@ -79,4 +81,47 @@ pub fn save_budget_plan(w: &Writer<'_>, snap: &Snapshot, plan: BudgetPlan) -> Re
         return Err(invalid("budget changed; refresh"));
     }
     Ok(saved)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::writes::fixture::db;
+    use finance_types::gateway::BudgetGroup;
+    use finance_types::report::Currency;
+    use rust_decimal::Decimal;
+
+    fn plan(importance: Option<u8>, floor: Option<i64>) -> BudgetPlan {
+        BudgetPlan {
+            month: "2026-10-01".into(),
+            currency: Currency::new("EUR"),
+            revision: 0,
+            groups: vec![BudgetGroup {
+                id: "going-out".into(),
+                name: "Going out".into(),
+                amount: Decimal::from(120),
+                source_groups: Vec::new(),
+                categories: Vec::new(),
+                transaction_ids: Vec::new(),
+                account_id: None,
+                importance,
+                floor: floor.map(Decimal::from),
+            }],
+        }
+    }
+
+    #[test]
+    fn rejects_zero_importance_and_negative_floor() {
+        let mut db = db();
+        for bad in [plan(Some(0), None), plan(None, Some(-1))] {
+            let err = db
+                .write(|w, snap| save_budget_plan(w, snap, bad))
+                .unwrap_err();
+            assert_eq!(err.to_string(), "invalid budget or overlapping groups");
+        }
+        let ok = db
+            .write(|w, snap| save_budget_plan(w, snap, plan(Some(3), Some(0))))
+            .unwrap();
+        assert_eq!(ok.revision, 1);
+    }
 }

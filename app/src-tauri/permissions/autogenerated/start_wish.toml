@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-start-wish"
+description = "Enables the start_wish command without any pre-configured scope."
+commands.allow = ["start_wish"]
+
+[[permission]]
+identifier = "deny-start-wish"
+description = "Denies the start_wish command without any pre-configured scope."
+commands.deny = ["start_wish"]

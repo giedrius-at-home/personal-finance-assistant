@@ -8,6 +8,7 @@ pub mod overview;
 pub mod plan;
 pub mod spending;
 pub mod transactions;
+pub mod wishes;
 
 use finance_types::report::Dashboard;
 use leptos::prelude::*;
