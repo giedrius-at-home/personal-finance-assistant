@@ -66,6 +66,13 @@ struct WishBoughtArgs {
 }
 
 #[derive(Deserialize)]
+struct WishStartArgs {
+    wish_id: String,
+    #[serde(default)]
+    match_category: Option<String>,
+}
+
+#[derive(Deserialize)]
 struct WishSettingsArgs {
     settings: finance_types::gateway::WishSettings,
 }
@@ -238,6 +245,10 @@ fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
         "mark_wish_bought" => {
             let a: WishBoughtArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
             ok(service.mark_wish_bought(&a.wish_id, a.purchase))
+        }
+        "start_wish" => {
+            let a: WishStartArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
+            ok(service.start_wish(&a.wish_id, a.match_category))
         }
         "save_wish_settings" => {
             let a: WishSettingsArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;

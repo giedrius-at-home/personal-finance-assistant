@@ -188,6 +188,9 @@ pub struct BillCreateRequest {
     pub date: String,
     /// One of [`BILL_FREQUENCIES`].
     pub repeat_freq: String,
+    /// Periods skipped between payments: 1 with `weekly` is every two weeks.
+    #[serde(default)]
+    pub skip: u32,
 }
 
 /// New settings for a bill (Python `/subscriptions/edit`).

@@ -175,6 +175,15 @@ fn mark_wish_bought(
     )
 }
 
+#[tauri::command(async, rename_all = "snake_case")]
+fn start_wish(
+    service: State<'_, Service>,
+    wish_id: String,
+    match_category: Option<String>,
+) -> Result<Wish, String> {
+    traced("start_wish", service.start_wish(&wish_id, match_category))
+}
+
 #[tauri::command(async)]
 fn save_wish_settings(
     service: State<'_, Service>,
@@ -503,6 +512,7 @@ fn main() {
             record_wish_saved,
             drop_wish,
             mark_wish_bought,
+            start_wish,
             save_wish_settings,
             save_account_role,
             unclassified_accounts,

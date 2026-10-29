@@ -30,6 +30,7 @@ const COMMANDS: &[&str] = &[
     "record_wish_saved",
     "drop_wish",
     "mark_wish_bought",
+    "start_wish",
     "save_wish_settings",
     "save_account_role",
     "unclassified_accounts",

@@ -150,6 +150,40 @@ fn feedback_in(ui: Ui, target: String, class: &'static str) -> impl IntoView {
     }
 }
 
+/// Categories of the bills' suggested payments.
+fn candidate_categories(report: &Dashboard) -> impl Iterator<Item = String> + '_ {
+    report
+        .subscriptions
+        .rows
+        .iter()
+        .flat_map(|r| r.link_candidates.iter().filter_map(|c| c.category.clone()))
+}
+
+/// The categories a new plan or bill can match, sorted.
+pub(crate) fn plan_categories(report: &Dashboard) -> Vec<String> {
+    unique_categories(
+        report
+            .category_catalog
+            .entries
+            .iter()
+            .map(|e| e.name.clone())
+            .chain(
+                report
+                    .monthly_spending
+                    .mappings
+                    .iter()
+                    .map(|m| m.category.clone()),
+            )
+            .chain(candidate_categories(report))
+            .chain(
+                report
+                    .planned_payments
+                    .iter()
+                    .map(|p| p.match_category.clone()),
+            ),
+    )
+}
+
 /// Distinct (case-insensitively) trimmed names, sorted.
 fn unique_categories(categories: impl IntoIterator<Item = String>) -> Vec<String> {
     let mut by_name: HashMap<String, String> = HashMap::new();
@@ -242,34 +276,7 @@ fn page(ui: Ui, report: &Dashboard) -> impl IntoView + use<> {
             currencies.push(c.currency.code.clone());
         }
     }
-    let candidate_categories = || {
-        report
-            .subscriptions
-            .rows
-            .iter()
-            .flat_map(|r| r.link_candidates.iter().filter_map(|c| c.category.clone()))
-    };
-    let available = unique_categories(
-        report
-            .category_catalog
-            .entries
-            .iter()
-            .map(|e| e.name.clone())
-            .chain(
-                report
-                    .monthly_spending
-                    .mappings
-                    .iter()
-                    .map(|m| m.category.clone()),
-            )
-            .chain(candidate_categories())
-            .chain(
-                report
-                    .planned_payments
-                    .iter()
-                    .map(|p| p.match_category.clone()),
-            ),
-    );
+    let available = plan_categories(report);
     let subscription_categories = unique_categories(
         report
             .monthly_spending
@@ -283,7 +290,7 @@ fn page(ui: Ui, report: &Dashboard) -> impl IntoView + use<> {
                     .iter()
                     .flat_map(|r| r.category_match_categories.clone()),
             )
-            .chain(candidate_categories()),
+            .chain(candidate_categories(report)),
     );
     // Lower-cased category → (bill id, bill name).
     let mut owners: HashMap<String, (String, String)> = HashMap::new();
@@ -507,6 +514,7 @@ fn create_form(
                     currency_code: currency,
                     date: due_on,
                     repeat_freq: repeat,
+                    skip: 0,
                 };
                 spawn_local(async move {
                     match invoke::<BillSaved>("create_bill", &Request { request }).await {

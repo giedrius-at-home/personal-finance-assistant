@@ -3,7 +3,9 @@
 
 use std::collections::HashMap;
 
-use finance_types::gateway::{WishPurchase, WishSettings, WishSource, WishStatus};
+use finance_types::gateway::{
+    Repeat, WishKind, WishPurchase, WishSettings, WishSource, WishStatus,
+};
 use finance_types::report::Currency;
 use finance_types::report::Dashboard;
 use finance_types::report::wishes::{Cut, Verdict, WishMonth, WishRow, WishesView};
@@ -56,62 +58,150 @@ fn merged_cuts<'a>(verdicts: impl Iterator<Item = &'a Verdict>) -> Vec<Cut> {
     out
 }
 
+/// `going out drops to €0 and groceries to €300`.
+fn cuts_phrase(cuts: &[Cut], code: &str) -> String {
+    cuts.iter()
+        .enumerate()
+        .map(|(i, cut)| {
+            let name = cut.name.to_lowercase();
+            let to = amount(cut.to, code);
+            if i == 0 {
+                format!("{name} drops to {to}")
+            } else {
+                format!("{name} to {to}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" and ")
+}
+
+/// The row's verdicts month by month, from the first month that has one.
+fn row_months<'a>(
+    row: &WishRow,
+    months: &'a [WishMonth],
+) -> Vec<(&'a WishMonth, Vec<&'a Verdict>)> {
+    let ids = row_ids(row);
+    months
+        .iter()
+        .map(|m| {
+            let mine = m
+                .verdicts
+                .iter()
+                .filter(|v| v.wish_id.as_deref().is_some_and(|id| ids.contains(&id)))
+                .collect::<Vec<_>>();
+            (m, mine)
+        })
+        .filter(|(_, mine)| !mine.is_empty())
+        .collect()
+}
+
+fn total(verdicts: &[&Verdict], part: impl Fn(&Verdict) -> Decimal) -> Decimal {
+    verdicts.iter().map(|v| part(v)).sum()
+}
+
+/// The merged cuts of the first month that has any.
+fn first_cuts(by_month: &[(&WishMonth, Vec<&Verdict>)]) -> Vec<Cut> {
+    by_month
+        .iter()
+        .map(|(_, mine)| merged_cuts(mine.iter().copied()))
+        .find(|cuts| !cuts.is_empty())
+        .unwrap_or_default()
+}
+
 /// The row's verdict in plain words: one sentence, the worst news first.
 pub fn verdict_line(row: &WishRow, months: &[WishMonth]) -> String {
-    let ids = row_ids(row);
-    let mine = |v: &&Verdict| v.wish_id.as_deref().is_some_and(|id| ids.contains(&id));
+    let by_month = row_months(row, months);
     let code = row.wish.currency.code.as_str();
-    let short: Decimal = months
-        .iter()
-        .flat_map(|m| m.verdicts.iter().filter(mine))
-        .map(|v| v.short)
-        .sum();
+    if row.wish.kind == WishKind::OneOff {
+        one_off_line(&by_month, code)
+    } else {
+        repeating_line(&by_month, code)
+    }
+}
+
+fn one_off_line(by_month: &[(&WishMonth, Vec<&Verdict>)], code: &str) -> String {
+    let short: Decimal = by_month.iter().map(|(_, v)| total(v, |v| v.short)).sum();
     if short > Decimal::ZERO {
         return format!("Not affordable — short by {}.", amount(short, code));
     }
-    let card = months.iter().find_map(|m| {
-        let on_card: Decimal = m.verdicts.iter().filter(mine).map(|v| v.on_card).sum();
-        (on_card > Decimal::ZERO).then_some((m, on_card))
-    });
-    if let Some((month, on_card)) = card {
+    let cuts = first_cuts(by_month);
+    let on_card: Decimal = by_month.iter().map(|(_, v)| total(v, |v| v.on_card)).sum();
+    let first_card = by_month
+        .iter()
+        .find(|(_, v)| total(v, |v| v.on_card) > Decimal::ZERO);
+    if let (Some((month, _)), true) = (first_card, on_card > Decimal::ZERO) {
         let next = month_name(&format::add_months(&month.month, 1));
         let n = amount(on_card, code);
-        return format!("Affordable with {n} on the card — {next} starts {n} lighter.");
+        let after = if cuts.is_empty() {
+            String::new()
+        } else {
+            format!(" — after {}", cuts_phrase(&cuts, code))
+        };
+        return format!("Affordable with {n} on the card — {next} starts {n} lighter{after}.");
     }
-    let cuts = months.iter().find_map(|m| {
-        let cuts = merged_cuts(m.verdicts.iter().filter(mine));
-        (!cuts.is_empty()).then_some(cuts)
-    });
-    if let Some(cuts) = cuts {
-        let parts: Vec<String> = cuts
-            .iter()
-            .enumerate()
-            .map(|(i, cut)| {
-                let name = cut.name.to_lowercase();
-                let to = amount(cut.to, code);
-                if i == 0 {
-                    format!("{name} drops to {to}")
-                } else {
-                    format!("{name} to {to}")
-                }
-            })
-            .collect();
-        return format!("Affordable if {}.", parts.join(" and "));
+    if !cuts.is_empty() {
+        return format!("Affordable if {}.", cuts_phrase(&cuts, code));
     }
-    let drop = months.iter().find(|m| {
-        m.free_left < m.free_before
-            && m.verdicts
-                .iter()
-                .filter(mine)
-                .any(|v| v.from_free > Decimal::ZERO)
+    let drop = by_month.iter().find(|(m, v)| {
+        m.free_left < m.free_before && v.iter().any(|v| v.from_free > Decimal::ZERO)
     });
-    if let Some(month) = drop {
+    if let Some((month, _)) = drop {
         return format!(
             "Affordable — savings drop to {}.",
             amount(month.free_left, code)
         );
     }
     "Affordable.".to_owned()
+}
+
+/// A recurring wish or bill change, judged over every month it touches.
+fn repeating_line(by_month: &[(&WishMonth, Vec<&Verdict>)], code: &str) -> String {
+    let first_short = by_month
+        .iter()
+        .position(|(_, v)| total(v, |v| v.short) > Decimal::ZERO);
+    if let Some(i) = first_short {
+        let (month, mine) = &by_month[i];
+        let n = amount(total(mine, |v| v.short), code);
+        let from = month_name(&month.month);
+        return match i.checked_sub(1).map(|j| by_month[j].0) {
+            None => format!("Not affordable — short by {n} from {from}."),
+            Some(last) => format!(
+                "Fits until {}. From {from}, short by {n}.",
+                month_name(&last.month)
+            ),
+        };
+    }
+    let freed = by_month.iter().find_map(|(m, v)| {
+        let sum = total(v, |v| v.amount);
+        (sum < Decimal::ZERO).then_some((m, -sum))
+    });
+    if let Some((month, n)) = freed {
+        return format!(
+            "Frees {} a month from {}.",
+            amount(n, code),
+            month_name(&month.month)
+        );
+    }
+    let cuts = first_cuts(by_month);
+    let card = by_month
+        .iter()
+        .map(|(_, v)| total(v, |v| v.on_card))
+        .find(|n| *n > Decimal::ZERO);
+    if let Some(n) = card {
+        let after = if cuts.is_empty() {
+            String::new()
+        } else {
+            format!(" — after {} each month", cuts_phrase(&cuts, code))
+        };
+        return format!(
+            "{} a month on the card, paid the following month{after}.",
+            amount(n, code)
+        );
+    }
+    if !cuts.is_empty() {
+        return format!("Affordable if {} each month.", cuts_phrase(&cuts, code));
+    }
+    "Affordable every month.".to_owned()
 }
 
 /// `YYYY-MM-DD` of today, local time.
@@ -135,6 +225,7 @@ struct Draft {
     currency: Currency,
     due_on: String,
     source: WishSource,
+    kind: WishKind,
 }
 
 #[derive(Serialize)]
@@ -157,6 +248,12 @@ struct WishIdArgs {
 struct BoughtArgs {
     wish_id: String,
     purchase: WishPurchase,
+}
+
+#[derive(Serialize)]
+struct StartArgs {
+    wish_id: String,
+    match_category: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -189,13 +286,59 @@ fn error_or(error: String, fallback: &str) -> String {
     }
 }
 
+/// `week`, `2 weeks`, `month`, `year`.
+fn period(every: Repeat) -> &'static str {
+    match every {
+        Repeat::Weekly => "week",
+        Repeat::Biweekly => "2 weeks",
+        Repeat::Monthly => "month",
+        Repeat::Yearly => "year",
+    }
+}
+
+/// The add form's repeat `<select>` value.
+fn parse_repeat(value: &str) -> Repeat {
+    match value {
+        "weekly" => Repeat::Weekly,
+        "biweekly" => Repeat::Biweekly,
+        "yearly" => Repeat::Yearly,
+        _ => Repeat::Monthly,
+    }
+}
+
+/// A bill the page can name or change.
+#[derive(Clone, Debug)]
+struct BillOption {
+    id: String,
+    name: String,
+    amount: Decimal,
+    /// Firefly's name: weekly, monthly, …
+    frequency: String,
+}
+
+impl BillOption {
+    /// The schedules a bill change can be judged on.
+    fn changeable(&self) -> bool {
+        matches!(self.frequency.as_str(), "weekly" | "monthly" | "yearly")
+    }
+
+    fn per(&self) -> &'static str {
+        match self.frequency.as_str() {
+            "weekly" => "week",
+            "yearly" => "year",
+            _ => "month",
+        }
+    }
+}
+
 /// What the page reads from the dashboard.
 #[derive(Clone, Debug, Default)]
 struct Context {
     /// Spendable accounts: (id, name).
     accounts: Vec<(String, String)>,
-    /// Bills: (id, name).
-    bills: Vec<(String, String)>,
+    bills: Vec<BillOption>,
+    /// Categories a new bill can match: known, and no bill's yet.
+    categories: Vec<String>,
 }
 
 impl Context {
@@ -212,18 +355,41 @@ impl Context {
                 accounts.push((bank.account_id.clone(), bank.name.clone()));
             }
         }
-        let mut bills: Vec<(String, String)> = Vec::new();
+        let mut bills: Vec<BillOption> = Vec::new();
+        let mut owned: Vec<String> = Vec::new();
         for row in report
             .subscriptions
             .rows
             .iter()
             .chain(report.next_month_subscriptions.iter().flat_map(|s| &s.rows))
         {
-            if !bills.iter().any(|(id, _)| *id == row.bill_id) {
-                bills.push((row.bill_id.clone(), row.name.clone()));
+            owned.extend(
+                row.category_match_categories
+                    .iter()
+                    .map(|c| c.to_lowercase()),
+            );
+            if !bills.iter().any(|b| b.id == row.bill_id) {
+                bills.push(BillOption {
+                    id: row.bill_id.clone(),
+                    name: row.name.clone(),
+                    amount: row.amount_max,
+                    frequency: row.frequency.to_lowercase(),
+                });
             }
         }
-        Self { accounts, bills }
+        let categories = crate::pages::plan::plan_categories(report)
+            .into_iter()
+            .filter(|c| !owned.contains(&c.to_lowercase()))
+            .collect();
+        Self {
+            accounts,
+            bills,
+            categories,
+        }
+    }
+
+    fn bill(&self, bill_id: &str) -> Option<&BillOption> {
+        self.bills.iter().find(|b| b.id == bill_id)
     }
 
     fn source_label(&self, source: &WishSource) -> String {
@@ -267,6 +433,15 @@ struct Ui {
     buy_source: RwSignal<String>,
     /// The wish whose drop is being confirmed.
     dropping: RwSignal<Option<String>>,
+    /// The add form's kind: `one_off`, `repeats` or `bill`.
+    kind: RwSignal<String>,
+    /// `weekly`, `biweekly`, `monthly` or `yearly`.
+    every: RwSignal<String>,
+    ends_on: RwSignal<String>,
+    bill: RwSignal<String>,
+    /// The wish whose "Start" form is open.
+    starting: RwSignal<Option<String>>,
+    start_category: RwSignal<String>,
 }
 
 impl Ui {
@@ -285,7 +460,20 @@ impl Ui {
             buy_on: RwSignal::new(String::new()),
             buy_source: RwSignal::new(String::new()),
             dropping: RwSignal::new(None),
+            kind: RwSignal::new("one_off".into()),
+            every: RwSignal::new("monthly".into()),
+            ends_on: RwSignal::new(String::new()),
+            bill: RwSignal::new(String::new()),
+            starting: RwSignal::new(None),
+            start_category: RwSignal::new(String::new()),
         }
+    }
+
+    /// Close every row form.
+    fn close_forms(self) {
+        self.buying.set(None);
+        self.dropping.set(None);
+        self.starting.set(None);
     }
 
     fn set_message(self, target: &str, text: impl Into<String>, error: bool) {
@@ -411,7 +599,7 @@ fn page(ui: Ui, view: &WishesView, ctx: &Context) -> impl IntoView + use<> {
         .partition(|r| r.wish.status == WishStatus::Planned);
     let parents: Vec<(String, String)> = open
         .iter()
-        .filter(|r| r.wish.parent_id.is_none())
+        .filter(|r| r.wish.parent_id.is_none() && r.wish.kind == WishKind::OneOff)
         .map(|r| (r.wish.wish_id.clone(), r.wish.name.clone()))
         .collect();
     let empty = open.is_empty();
@@ -474,7 +662,7 @@ fn card_strip(
     let used = RwSignal::new(settings.card_used.to_string());
     let bill = RwSignal::new(settings.card_bill_id.clone().unwrap_or_default());
     let bills: Vec<(String, String)> = std::iter::once((String::new(), "No card bill".to_owned()))
-        .chain(ctx.bills.iter().cloned())
+        .chain(ctx.bills.iter().map(|b| (b.id.clone(), b.name.clone())))
         .collect();
     let stale = view.card_stale.then(|| {
         let entered = if settings.card_used_month.is_empty() {
@@ -555,32 +743,124 @@ fn card_strip(
     }
 }
 
+/// A number input bound to `value`.
+fn number(id: &'static str, value: RwSignal<String>, min: &'static str) -> impl IntoView + use<> {
+    view! {
+        <input
+            id=id
+            type="number"
+            min=min
+            step="0.01"
+            required
+            placeholder="0.00"
+            class=CONTROL
+            prop:value=move || value.get()
+            on:input=move |e| value.set(event_target_value(&e))
+        />
+    }
+}
+
+/// A date input bound to `value`.
+fn date_input(id: &'static str, value: RwSignal<String>, required: bool) -> impl IntoView + use<> {
+    view! {
+        <input
+            id=id
+            type="date"
+            required=required
+            class=CONTROL
+            prop:value=move || value.get()
+            on:input=move |e| value.set(event_target_value(&e))
+        />
+    }
+}
+
 fn add_form(
     ui: Ui,
     ctx: &Context,
     parents: Vec<(String, String)>,
     currency: Currency,
 ) -> impl IntoView + use<> {
-    let sources = ctx.source_options();
-    let parent_options: Vec<(String, String)> =
+    let sources = StoredValue::new(ctx.source_options());
+    let parent_options: StoredValue<Vec<(String, String)>> = StoredValue::new(
         std::iter::once((String::new(), "Nothing".to_owned()))
             .chain(parents)
-            .collect();
+            .collect(),
+    );
+    let bills: Vec<BillOption> = ctx
+        .bills
+        .iter()
+        .filter(|b| b.changeable())
+        .cloned()
+        .collect();
+    let code = currency.code.clone();
+    let bill_options: StoredValue<Vec<(String, String)>> = StoredValue::new(
+        std::iter::once((String::new(), "Choose a bill".to_owned()))
+            .chain(bills.iter().map(|b| {
+                let label = format!("{} · {} per {}", b.name, amount(b.amount, &code), b.per());
+                (b.id.clone(), label)
+            }))
+            .collect(),
+    );
+    let bill_names = StoredValue::new(bills);
+    let kinds = vec![
+        ("one_off".to_owned(), "One-off".to_owned()),
+        ("repeats".to_owned(), "Repeats".to_owned()),
+        ("bill".to_owned(), "Change a bill".to_owned()),
+    ];
+    let repeats = StoredValue::new(vec![
+        ("weekly".to_owned(), "Every week".to_owned()),
+        ("biweekly".to_owned(), "Every 2 weeks".to_owned()),
+        ("monthly".to_owned(), "Every month".to_owned()),
+        ("yearly".to_owned(), "Every year".to_owned()),
+    ]);
     let submit = move |ev: SubmitEvent| {
         ev.prevent_default();
         let Ok(amount) = ui.amount.get_untracked().trim().parse::<Decimal>() else {
             ui.set_message("add", "Enter an amount.", true);
             return;
         };
-        let parent = ui.parent.get_untracked();
+        let ends_on = Some(ui.ends_on.get_untracked()).filter(|e| !e.is_empty());
+        let mut name = ui.name.get_untracked().trim().to_owned();
+        let (kind, parent) = match ui.kind.get_untracked().as_str() {
+            "repeats" => (
+                WishKind::Recurring {
+                    every: parse_repeat(&ui.every.get_untracked()),
+                    ends_on,
+                },
+                None,
+            ),
+            "bill" => {
+                let bill_id = ui.bill.get_untracked();
+                let Some(bill) =
+                    bill_names.with_value(|b| b.iter().find(|b| b.id == bill_id).cloned())
+                else {
+                    ui.set_message("add", "Choose a bill.", true);
+                    return;
+                };
+                if name.is_empty() {
+                    name = bill.name;
+                }
+                (WishKind::BillChange { bill_id, ends_on }, None)
+            }
+            _ => {
+                let parent = ui.parent.get_untracked();
+                (WishKind::OneOff, (!parent.is_empty()).then_some(parent))
+            }
+        };
+        let source = if matches!(kind, WishKind::BillChange { .. }) {
+            WishSource::Card
+        } else {
+            parse_source(&ui.source.get_untracked())
+        };
         let draft = Draft {
             wish_id: None,
-            parent_id: (!parent.is_empty()).then_some(parent),
-            name: ui.name.get_untracked().trim().to_owned(),
+            parent_id: parent,
+            name,
             amount,
             currency: currency.clone(),
             due_on: ui.due_on.get_untracked(),
-            source: parse_source(&ui.source.get_untracked()),
+            source,
+            kind,
         };
         ui.write(
             "add".into(),
@@ -588,54 +868,70 @@ fn add_form(
             DraftArgs { draft },
             "Wish added.",
             move || {
-                for field in [ui.name, ui.amount, ui.due_on, ui.parent] {
+                for field in [
+                    ui.name, ui.amount, ui.due_on, ui.parent, ui.ends_on, ui.bill,
+                ] {
                     field.set(String::new());
                 }
             },
         );
     };
+    // The fields that differ by kind.
+    let fields = move || {
+        match ui.kind.get().as_str() {
+        "repeats" => view! {
+            <Field label="Each time" id="wish-amount">{number("wish-amount", ui.amount, "0.01")}</Field>
+            <Field label="Repeats" id="wish-every">
+                {select("wish-every".into(), ui.every, repeats.get_value())}
+            </Field>
+            <Field label="First date" id="wish-date">{date_input("wish-date", ui.due_on, true)}</Field>
+            <Field label="Ends" id="wish-ends" hint="Optional.">{date_input("wish-ends", ui.ends_on, false)}</Field>
+            <Field label="Pay with" id="wish-source">
+                {select("wish-source".into(), ui.source, sources.get_value())}
+            </Field>
+        }
+        .into_any(),
+        "bill" => view! {
+            <Field label="Bill" id="wish-bill">
+                {select("wish-bill".into(), ui.bill, bill_options.get_value())}
+            </Field>
+            <Field label="New amount" id="wish-amount" hint="Per payment; 0 cancels the bill.">
+                {number("wish-amount", ui.amount, "0")}
+            </Field>
+            <Field label="From" id="wish-date">{date_input("wish-date", ui.due_on, true)}</Field>
+            <Field label="Ends" id="wish-ends" hint="Optional.">{date_input("wish-ends", ui.ends_on, false)}</Field>
+        }
+        .into_any(),
+        _ => view! {
+            <Field label="Amount" id="wish-amount" hint="For a wish with parts, the most it may cost.">
+                {number("wish-amount", ui.amount, "0.01")}
+            </Field>
+            <Field label="Date" id="wish-date">{date_input("wish-date", ui.due_on, true)}</Field>
+            <Field label="Pay with" id="wish-source">
+                {select("wish-source".into(), ui.source, sources.get_value())}
+            </Field>
+            <Field label="Part of" id="wish-parent">
+                {select("wish-parent".into(), ui.parent, parent_options.get_value())}
+            </Field>
+        }
+        .into_any(),
+    }
+    };
     view! {
         <form class="mt-4 grid items-end gap-3 sm:grid-cols-2 lg:grid-cols-3" on:submit=submit>
+            <Field label="Kind" id="wish-kind">{select("wish-kind".into(), ui.kind, kinds)}</Field>
             <Field label="Name" id="wish-name">
                 <input
                     id="wish-name"
-                    required
+                    required=move || ui.kind.get() != "bill"
                     maxlength="128"
-                    placeholder="e.g. Winter jacket"
+                    placeholder=move || if ui.kind.get() == "bill" { "The bill's name" } else { "e.g. Winter jacket" }
                     class=CONTROL
                     prop:value=move || ui.name.get()
                     on:input=move |e| ui.name.set(event_target_value(&e))
                 />
             </Field>
-            <Field label="Amount" id="wish-amount" hint="For a wish with parts, the most it may cost.">
-                <input
-                    id="wish-amount"
-                    type="number"
-                    min="0.01"
-                    step="0.01"
-                    required
-                    placeholder="0.00"
-                    class=CONTROL
-                    prop:value=move || ui.amount.get()
-                    on:input=move |e| ui.amount.set(event_target_value(&e))
-                />
-            </Field>
-            <Field label="Date" id="wish-date">
-                <input
-                    id="wish-date"
-                    type="date"
-                    required
-                    class=CONTROL
-                    prop:value=move || ui.due_on.get()
-                    on:input=move |e| ui.due_on.set(event_target_value(&e))
-                />
-            </Field>
-            <Field label="Pay with" id="wish-source">
-                {select("wish-source".into(), ui.source, sources)}
-            </Field>
-            <Field label="Part of" id="wish-parent">
-                {select("wish-parent".into(), ui.parent, parent_options)}
-            </Field>
+            {fields}
             <Button submit=true variant=Variant::Secondary disabled=Signal::derive(move || ui.busy.get())>
                 <Lucide icon=Icon::Plus size=15 />
                 "Add wish"
@@ -718,12 +1014,55 @@ fn wish_body(
     } else {
         "text-positive-fg"
     };
-    let detail = format!(
-        "{} · by {} · {}",
-        amount(wish.amount, &code),
-        format::date(&wish.due_on),
-        ctx.with_value(|c| c.source_label(&wish.source))
-    );
+    let until = |ends_on: &Option<String>| {
+        ends_on
+            .as_deref()
+            .map(|e| format!(" · until {}", format::date(e)))
+            .unwrap_or_default()
+    };
+    let detail = match &wish.kind {
+        WishKind::OneOff => format!(
+            "{} · by {} · {}",
+            amount(wish.amount, &code),
+            format::date(&wish.due_on),
+            ctx.with_value(|c| c.source_label(&wish.source))
+        ),
+        WishKind::Recurring { every, ends_on } => format!(
+            "{} per {} · from {}{} · {}",
+            amount(wish.amount, &code),
+            period(*every),
+            format::date(&wish.due_on),
+            until(ends_on),
+            ctx.with_value(|c| c.source_label(&wish.source))
+        ),
+        WishKind::BillChange { bill_id, ends_on } => {
+            let old = ctx.with_value(|c| c.bill(bill_id).map(|b| amount(b.amount, &code)));
+            format!(
+                "{}→ {} · from {}{}",
+                old.map(|o| format!("{o} ")).unwrap_or_default(),
+                amount(wish.amount, &code),
+                format::date(&wish.due_on),
+                until(ends_on)
+            )
+        }
+    };
+    let one_off = wish.kind == WishKind::OneOff;
+    let start_text = match &wish.kind {
+        WishKind::BillChange { bill_id, .. } => {
+            let bill = ctx.with_value(|c| c.bill(bill_id).map(|b| b.name.clone()));
+            let bill = bill.unwrap_or_else(|| "the bill".to_owned());
+            if wish.amount.is_zero() {
+                format!("Archive {bill} now? Its payments stop counting from today.")
+            } else {
+                format!(
+                    "Change {bill} to {} now? The bill keeps its schedule.",
+                    amount(wish.amount, &code)
+                )
+            }
+        }
+        _ => String::new(),
+    };
+    let recurring = matches!(wish.kind, WishKind::Recurring { .. });
     let target = format!("wish:{}", wish.wish_id);
     let saved = RwSignal::new(wish.saved.to_string());
     let id = StoredValue::new(wish.wish_id.clone());
@@ -750,14 +1089,55 @@ fn wish_body(
     let open_buy = {
         let wish = wish.clone();
         move |_| {
-            ui.dropping.set(None);
+            ui.close_forms();
             ui.buy_amount.set(wish.amount.to_string());
             ui.buy_on.set(today());
             ui.buy_source.set(source_value(&wish.source));
             ui.buying.set(Some(wish.wish_id.clone()));
         }
     };
+    let open_start = move |_| {
+        ui.close_forms();
+        ui.start_category.set(String::new());
+        ui.starting.set(Some(id.get_value()));
+    };
     let buying = move || ui.buying.get().as_deref() == Some(id.get_value().as_str());
+    let starting = move || ui.starting.get().as_deref() == Some(id.get_value().as_str());
+    let start_target = target.clone();
+    let start = move || {
+        let match_category = if recurring {
+            let category = ui.start_category.get_untracked();
+            if category.is_empty() {
+                ui.set_message(&start_target, "Choose the bill's category.", true);
+                return;
+            }
+            Some(category)
+        } else {
+            None
+        };
+        ui.write(
+            start_target.clone(),
+            "start_wish",
+            StartArgs {
+                wish_id: id.get_value(),
+                match_category,
+            },
+            "Started.",
+            move || ui.starting.set(None),
+        );
+    };
+    let start = StoredValue::new(start);
+    let categories: StoredValue<Vec<(String, String)>> = StoredValue::new(
+        std::iter::once((String::new(), "Choose a category".to_owned()))
+            .chain(ctx.with_value(|c| {
+                c.categories
+                    .iter()
+                    .map(|x| (x.clone(), x.clone()))
+                    .collect::<Vec<_>>()
+            }))
+            .collect(),
+    );
+    let start_category_id = StoredValue::new(format!("start-category-{}", wish.wish_id));
     let dropping = move || ui.dropping.get().as_deref() == Some(id.get_value().as_str());
     let sources = ctx.with_value(Context::source_options);
     let buy_target = target.clone();
@@ -808,6 +1188,7 @@ fn wish_body(
             </div>
             <p class=cn(["text-sm font-medium", tone])>{line}</p>
             <div class="flex flex-wrap items-end gap-2">
+                {one_off.then(move || view! {
                 <form class="flex items-end gap-2" on:submit=save_saved>
                     <div class="grid gap-1">
                         <label for=saved_id.clone() class="text-xs text-fg-muted">"Saved so far"</label>
@@ -825,14 +1206,27 @@ fn wish_body(
                         "Save"
                     </Button>
                 </form>
-                <Button size=Size::Sm variant=Variant::Secondary on_click=Callback::new(open_buy)>
-                    "Bought"
-                </Button>
+                })}
+                {if one_off {
+                    view! {
+                        <Button size=Size::Sm variant=Variant::Secondary on_click=Callback::new(open_buy)>
+                            "Bought"
+                        </Button>
+                    }
+                    .into_any()
+                } else {
+                    view! {
+                        <Button size=Size::Sm variant=Variant::Secondary on_click=Callback::new(open_start)>
+                            "Start"
+                        </Button>
+                    }
+                    .into_any()
+                }}
                 <Button
                     size=Size::Sm
                     variant=Variant::Ghost
                     on_click=Callback::new(move |_| {
-                        ui.buying.set(None);
+                        ui.close_forms();
                         ui.dropping.set(Some(id.get_value()));
                     })
                 >
@@ -871,6 +1265,40 @@ fn wish_body(
                         <Button size=Size::Sm variant=Variant::Ghost on_click=Callback::new(move |_| ui.buying.set(None))>"Cancel"</Button>
                     </div>
                 </form>
+            </Show>
+            <Show when=move || starting() && recurring>
+                <form
+                    class="grid items-end gap-2 sm:grid-cols-3"
+                    on:submit=move |ev: SubmitEvent| {
+                        ev.prevent_default();
+                        start.with_value(|f| f());
+                    }
+                >
+                    <Field
+                        label="Bill category"
+                        id=start_category_id.get_value()
+                        hint="Payments in this category mark the new bill paid."
+                    >
+                        {select(start_category_id.get_value(), ui.start_category, categories.get_value())}
+                    </Field>
+                    <div class="flex gap-2">
+                        <Button submit=true size=Size::Sm disabled=Signal::derive(move || ui.busy.get())>"Start"</Button>
+                        <Button size=Size::Sm variant=Variant::Ghost on_click=Callback::new(move |_| ui.starting.set(None))>"Cancel"</Button>
+                    </div>
+                </form>
+            </Show>
+            <Show when=move || starting() && !recurring>
+                <div class="flex flex-wrap items-center gap-2 text-sm">
+                    <span>{start_text.clone()}</span>
+                    <Button
+                        size=Size::Sm
+                        disabled=Signal::derive(move || ui.busy.get())
+                        on_click=Callback::new(move |_| start.with_value(|f| f()))
+                    >
+                        "Start"
+                    </Button>
+                    <Button size=Size::Sm variant=Variant::Secondary on_click=Callback::new(move |_| ui.starting.set(None))>"Keep"</Button>
+                </div>
             </Show>
             <Show when=dropping>
                 <div class="flex flex-wrap items-center gap-2 text-sm">
@@ -929,7 +1357,7 @@ fn month_card(month: &WishMonth, code: &str) -> impl IntoView + use<> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use finance_types::gateway::{Wish, WishSource, WishStatus};
+    use finance_types::gateway::Wish;
 
     fn d(n: i64, scale: u32) -> Decimal {
         Decimal::new(n, scale)
@@ -980,6 +1408,13 @@ mod tests {
             card_charge_in: Decimal::ZERO,
             card_used: d(998, 2),
             verdicts,
+        }
+    }
+
+    fn month_at(at: &str, verdicts: Vec<Verdict>) -> WishMonth {
+        WishMonth {
+            month: at.into(),
+            ..month(Decimal::ZERO, Decimal::ZERO, verdicts)
         }
     }
 
@@ -1037,6 +1472,26 @@ mod tests {
     #[test]
     fn card_use_names_the_next_month() {
         let v = Verdict {
+            on_card: d(100, 0),
+            ..verdict("w", d(400, 0))
+        };
+        let later = Verdict {
+            on_card: d(30, 0),
+            ..verdict("w", d(30, 0))
+        };
+        let months = [
+            month(Decimal::ZERO, Decimal::ZERO, vec![v]),
+            month_at("2026-11-01", vec![later]),
+        ];
+        assert_eq!(
+            verdict_line(&row("w"), &months),
+            "Affordable with €130 on the card — November starts €130 lighter."
+        );
+    }
+
+    #[test]
+    fn card_use_also_names_the_cuts() {
+        let v = Verdict {
             cuts: vec![
                 cut("g1", "Going out", 120, 0),
                 cut("g2", "Groceries", 450, 300),
@@ -1044,11 +1499,156 @@ mod tests {
             on_card: d(130, 0),
             ..verdict("w", d(400, 0))
         };
-        let months = [month(Decimal::ZERO, Decimal::ZERO, vec![v])];
+        let months = [
+            month_at("2026-09-01", vec![verdict("other", d(5, 0))]),
+            month_at("2026-11-01", vec![v]),
+        ];
         assert_eq!(
             verdict_line(&row("w"), &months),
-            "Affordable with €130 on the card — November starts €130 lighter."
+            "Affordable with €130 on the card — December starts €130 lighter — after going out drops to €0 and groceries to €300."
         );
+    }
+
+    fn repeating(id: &str, every: Repeat) -> WishRow {
+        let mut r = row(id);
+        r.wish.kind = WishKind::Recurring {
+            every,
+            ends_on: None,
+        };
+        r
+    }
+
+    fn paid(amount: i64) -> Verdict {
+        Verdict {
+            from_free: d(amount, 0),
+            ..verdict("w", d(amount, 0))
+        }
+    }
+
+    #[test]
+    fn recurring_that_fits_is_affordable_every_month() {
+        let months = [
+            month_at("2026-10-01", vec![verdict("other", d(5, 0))]),
+            month_at("2026-11-01", vec![paid(60)]),
+            month_at("2026-12-01", vec![paid(60)]),
+        ];
+        assert_eq!(
+            verdict_line(&repeating("w", Repeat::Monthly), &months),
+            "Affordable every month."
+        );
+    }
+
+    #[test]
+    fn recurring_cuts_hold_each_month() {
+        let v = Verdict {
+            cuts: vec![cut("g1", "Going out", 120, 60)],
+            ..verdict("w", d(60, 0))
+        };
+        let months = [
+            month_at("2026-10-01", vec![paid(60)]),
+            month_at("2026-11-01", vec![v]),
+        ];
+        assert_eq!(
+            verdict_line(&repeating("w", Repeat::Monthly), &months),
+            "Affordable if going out drops to €60 each month."
+        );
+    }
+
+    #[test]
+    fn recurring_on_the_card_is_paid_the_following_month() {
+        let card = |n| Verdict {
+            on_card: d(n, 0),
+            ..verdict("w", d(n, 0))
+        };
+        let months = [
+            month_at("2026-10-01", vec![paid(60)]),
+            month_at("2026-11-01", vec![card(40)]),
+            month_at("2026-12-01", vec![card(60)]),
+        ];
+        assert_eq!(
+            verdict_line(&repeating("w", Repeat::Monthly), &months),
+            "€40 a month on the card, paid the following month."
+        );
+        let with_cuts = Verdict {
+            cuts: vec![cut("g1", "Going out", 120, 0)],
+            ..card(40)
+        };
+        let months = [month_at("2026-10-01", vec![with_cuts])];
+        assert_eq!(
+            verdict_line(&repeating("w", Repeat::Monthly), &months),
+            "€40 a month on the card, paid the following month — after going out drops to €0 each month."
+        );
+    }
+
+    #[test]
+    fn recurring_fits_until_a_short_month() {
+        let short = Verdict {
+            short: d(25, 0),
+            ..verdict("w", d(60, 0))
+        };
+        let later = Verdict {
+            short: d(60, 0),
+            ..verdict("w", d(60, 0))
+        };
+        let months = [
+            month_at("2026-10-01", vec![paid(60)]),
+            month_at("2026-11-01", vec![paid(60)]),
+            month_at("2026-12-01", vec![short]),
+            month_at("2027-01-01", vec![later]),
+        ];
+        assert_eq!(
+            verdict_line(&repeating("w", Repeat::Monthly), &months),
+            "Fits until November. From December, short by €25."
+        );
+    }
+
+    #[test]
+    fn recurring_short_from_the_start_is_not_affordable() {
+        let short = Verdict {
+            short: d(15, 0),
+            on_card: d(45, 0),
+            ..verdict("w", d(60, 0))
+        };
+        let months = [
+            month_at("2026-10-01", vec![verdict("other", d(5, 0))]),
+            month_at("2026-11-01", vec![short]),
+        ];
+        assert_eq!(
+            verdict_line(&repeating("w", Repeat::Weekly), &months),
+            "Not affordable — short by €15 from November."
+        );
+    }
+
+    #[test]
+    fn cheaper_bill_frees_money() {
+        let mut r = row("w");
+        r.wish.kind = WishKind::BillChange {
+            bill_id: "7".into(),
+            ends_on: None,
+        };
+        let freed = Verdict {
+            from_free: d(-15, 0),
+            ..verdict("w", d(-15, 0))
+        };
+        let months = [
+            month_at("2026-10-01", vec![verdict("other", d(5, 0))]),
+            month_at("2026-11-01", vec![freed.clone()]),
+            month_at("2026-12-01", vec![freed]),
+        ];
+        assert_eq!(
+            verdict_line(&r, &months),
+            "Frees €15 a month from November."
+        );
+    }
+
+    #[test]
+    fn freed_money_is_not_a_savings_drop() {
+        let freed = Verdict {
+            from_free: d(-15, 0),
+            ..verdict("w", d(-15, 0))
+        };
+        let months = [month(d(100, 0), d(115, 0), vec![freed])];
+        assert_eq!(verdict_line(&row("w"), &months), "Affordable.");
     }
 
     #[test]

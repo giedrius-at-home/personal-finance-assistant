@@ -402,6 +402,19 @@ impl Service {
         self.write(|w, snap| crate::writes::wishes::mark_bought(w, snap, wish_id, purchase, &cuts))
     }
 
+    /// Starts a recurring wish or bill change, recording the cuts month 0
+    /// makes for it. The view is read before the write, as for buying.
+    pub fn start_wish(
+        &self,
+        wish_id: &str,
+        match_category: Option<String>,
+    ) -> Result<Wish, String> {
+        let cuts = crate::wishes::month_zero_cuts(&self.wishes()?, wish_id);
+        self.write(|w, snap| {
+            crate::writes::wishes::mark_started(w, snap, wish_id, match_category, &cuts)
+        })
+    }
+
     pub fn save_wish_settings(&self, settings: WishSettings) -> Result<WishSettings, String> {
         self.write(|w, _| crate::writes::wishes::save_wish_settings(w, settings))
     }

@@ -1,15 +1,20 @@
 //! Wishes: planned purchases the owner saves toward, drops or buys.
 
-use finance_types::gateway::{Wish, WishDraft, WishPurchase, WishSettings, WishSource, WishStatus};
+use finance_types::gateway::{
+    BillCreateRequest, BillEditRequest, BillRef, Repeat, Wish, WishDraft, WishKind, WishPurchase,
+    WishSettings, WishSource, WishStatus,
+};
+use finance_types::report::Currency;
 use finance_types::report::wishes::Cut;
 use jiff::civil::Date;
 use rust_decimal::Decimal;
 
+use super::bills::{Checks, archive_bill, create_bill, edit_bill};
 use super::budget::save_budget_plan;
 use super::{Writer, invalid};
 use crate::budget::default_budget;
 use crate::wishes::store::{load_wish_settings, load_wishes};
-use crate::{Result, Snapshot};
+use crate::{Ctx, Result, Snapshot};
 
 fn find(wishes: &[Wish], id: &str) -> Result<Wish> {
     wishes
@@ -36,30 +41,82 @@ fn planned(wish: Wish) -> Result<Wish> {
     }
 }
 
+/// A recurring wish's or bill change's end date and bill.
+fn check_kind(snap: &Snapshot, kind: &WishKind, due_on: Date) -> Result<()> {
+    let ends_on = match kind {
+        WishKind::OneOff => return Ok(()),
+        WishKind::Recurring { ends_on, .. } => ends_on,
+        WishKind::BillChange { bill_id, ends_on } => {
+            let bill = snap
+                .bills
+                .iter()
+                .find(|b| &b.id == bill_id && b.active)
+                .ok_or_else(|| invalid("bill is unknown"))?;
+            // The judging knows these schedules only (no skips).
+            if !matches!(bill.repeat_freq.as_str(), "weekly" | "monthly" | "yearly")
+                || bill.skip != 0
+            {
+                return Err(invalid(
+                    "only weekly, monthly or yearly bills can be changed here",
+                ));
+            }
+            ends_on
+        }
+    };
+    if let Some(ends_on) = ends_on {
+        let ends_on: Date = ends_on
+            .parse()
+            .map_err(|_| invalid("end date is invalid"))?;
+        if ends_on < due_on {
+            return Err(invalid("end date is before the start"));
+        }
+    }
+    Ok(())
+}
+
 /// Create a wish, or edit a planned one (keeping its progress).
 pub fn save_wish(w: &Writer<'_>, snap: &Snapshot, draft: WishDraft) -> Result<Wish> {
     let name = draft.name.trim();
     if name.is_empty() || name.chars().count() > 128 {
         return Err(invalid("wish needs a name"));
     }
-    if draft.amount <= Decimal::ZERO {
+    if matches!(draft.kind, WishKind::BillChange { .. }) {
+        // A new amount of 0 cancels the bill.
+        if draft.amount < Decimal::ZERO {
+            return Err(invalid("the new amount cannot be negative"));
+        }
+    } else if draft.amount <= Decimal::ZERO {
         return Err(invalid("wish amount must be positive"));
     }
-    if draft.due_on.parse::<Date>().is_err() {
+    let Ok(due_on) = draft.due_on.parse::<Date>() else {
         return Err(invalid("wish date is invalid"));
-    }
+    };
+    check_kind(snap, &draft.kind, due_on)?;
     if let WishSource::Account { account_id } = &draft.source
         && !snap.accounts.iter().any(|a| &a.account_id == account_id)
     {
         return Err(invalid("wish account is unknown"));
     }
     let wishes = load_wishes(&w.tx)?;
+    if draft.kind != WishKind::OneOff {
+        if draft.parent_id.is_some() {
+            return Err(invalid("recurring wishes cannot be part of another wish"));
+        }
+        if let Some(id) = &draft.wish_id
+            && wishes.iter().any(|x| x.parent_id.as_deref() == Some(id))
+        {
+            return Err(invalid("recurring wishes cannot have parts"));
+        }
+    }
     if let Some(parent_id) = &draft.parent_id {
         let parent =
             planned(find(&wishes, parent_id).map_err(|_| invalid("parent wish is not planned"))?)
                 .map_err(|_| invalid("parent wish is not planned"))?;
         if parent.parent_id.is_some() {
             return Err(invalid("sub-wishes cannot have sub-wishes"));
+        }
+        if parent.kind != WishKind::OneOff {
+            return Err(invalid("recurring wishes cannot have parts"));
         }
         if draft.wish_id.as_deref() == Some(parent_id.as_str()) {
             return Err(invalid("a wish cannot be its own parent"));
@@ -194,23 +251,119 @@ pub fn mark_bought(
             )?;
         }
     }
-    if !cuts.is_empty() {
-        let month = on.first_of_month();
-        let key = month.to_string();
-        let mut plan = snap
-            .budget_plans
-            .iter()
-            .find(|p| p.month == key && p.currency == bought.currency)
-            .cloned()
-            .unwrap_or_else(|| default_budget(month, &bought.currency));
-        for cut in cuts {
-            if let Some(group) = plan.groups.iter_mut().find(|g| g.id == cut.group_id) {
-                group.amount = cut.to;
+    write_cuts(w, snap, on.first_of_month(), &bought.currency, cuts)?;
+    Ok(bought)
+}
+
+/// Trim `month`'s budget groups to the cuts' amounts (unknown groups ignored).
+fn write_cuts(
+    w: &Writer<'_>,
+    snap: &Snapshot,
+    month: Date,
+    currency: &Currency,
+    cuts: &[Cut],
+) -> Result<()> {
+    if cuts.is_empty() {
+        return Ok(());
+    }
+    let key = month.to_string();
+    let mut plan = snap
+        .budget_plans
+        .iter()
+        .find(|p| p.month == key && &p.currency == currency)
+        .cloned()
+        .unwrap_or_else(|| default_budget(month, currency));
+    for cut in cuts {
+        if let Some(group) = plan.groups.iter_mut().find(|g| g.id == cut.group_id) {
+            group.amount = cut.to;
+        }
+    }
+    save_budget_plan(w, snap, plan)?;
+    Ok(())
+}
+
+/// Start a planned recurring wish (it becomes a bill in `match_category`)
+/// or bill change (the bill takes the new amount, or is archived at 0);
+/// `cuts` trim this budget month.
+pub fn mark_started(
+    w: &Writer<'_>,
+    snap: &Snapshot,
+    wish_id: &str,
+    match_category: Option<String>,
+    cuts: &[Cut],
+) -> Result<Wish> {
+    let wish = planned(find(&load_wishes(&w.tx)?, wish_id)?)?;
+    match &wish.kind {
+        WishKind::OneOff => {
+            return Err(invalid("only recurring wishes and bill changes can start"));
+        }
+        WishKind::Recurring { every, .. } => {
+            let Some(category) = match_category
+                .map(|c| c.trim().to_owned())
+                .filter(|c| !c.is_empty())
+            else {
+                return Err(invalid("choose the bill's category"));
+            };
+            let (repeat_freq, skip) = match every {
+                Repeat::Weekly => ("weekly", 0),
+                Repeat::Biweekly => ("weekly", 1),
+                Repeat::Monthly => ("monthly", 0),
+                Repeat::Yearly => ("yearly", 0),
+            };
+            let checks = Checks::new(snap, &w.now)?;
+            create_bill(
+                w,
+                &checks,
+                BillCreateRequest {
+                    name: wish.name.clone(),
+                    match_category: category,
+                    amount_min: wish.amount,
+                    amount_max: wish.amount,
+                    currency_code: wish.currency.code.clone(),
+                    date: wish.due_on.clone(),
+                    repeat_freq: repeat_freq.to_owned(),
+                    skip,
+                },
+            )?;
+        }
+        WishKind::BillChange { bill_id, .. } => {
+            if wish.amount.is_zero() {
+                archive_bill(
+                    w,
+                    BillRef {
+                        bill_id: bill_id.clone(),
+                    },
+                )?;
+            } else {
+                let bill = snap
+                    .bills
+                    .iter()
+                    .find(|b| &b.id == bill_id && b.active)
+                    .ok_or_else(|| invalid("bill is unknown"))?;
+                let checks = Checks::new(snap, &w.now)?;
+                edit_bill(
+                    w,
+                    &checks,
+                    BillEditRequest {
+                        bill_id: bill_id.clone(),
+                        name: bill.name.clone(),
+                        amount_min: wish.amount,
+                        amount_max: wish.amount,
+                        repeat_freq: bill.repeat_freq.clone(),
+                        date: None,
+                    },
+                )?;
             }
         }
-        save_budget_plan(w, snap, plan)?;
     }
-    Ok(bought)
+    let started = Wish {
+        status: WishStatus::Started,
+        ..wish
+    };
+    store(w, &started)?;
+    let month = Ctx::new(snap, &w.now).current_month();
+    write_cuts(w, snap, month, &started.currency, cuts)?;
+    Ok(started)
 }
 
 /// Store the card limit and its usage.
@@ -229,8 +382,8 @@ pub fn save_wish_settings(w: &Writer<'_>, settings: WishSettings) -> Result<Wish
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::writes::fixture::db;
-    use finance_types::gateway::{BudgetGroup, BudgetPlan};
+    use crate::writes::fixture::{Db, db};
+    use finance_types::gateway::{BudgetGroup, BudgetPlan, Repeat, WishKind};
     use finance_types::report::Currency;
 
     fn draft(name: &str) -> WishDraft {
@@ -533,6 +686,286 @@ mod tests {
             .filter(|w| w.status == WishStatus::Planned)
             .count();
         assert_eq!(planned, 1);
+    }
+
+    fn add_gym(db: &Db) {
+        db.store
+            .connection()
+            .execute_batch(
+                "INSERT INTO bills (id, name, currency, amount_min, amount_max, start_date, repeat_freq) \
+                 VALUES (7, 'Gym', 'EUR', '30.000000000000', '30.000000000000', '2026-09-03', 'monthly'), \
+                 (8, 'Insurance', 'EUR', '90.000000000000', '90.000000000000', '2026-09-03', 'quarterly'); \
+                 INSERT INTO import_runs (source, finished_at, stats) \
+                 VALUES ('test', '2026-10-26T19:00:00Z', '{}');",
+            )
+            .unwrap();
+    }
+
+    fn recurring(name: &str, every: Repeat) -> WishDraft {
+        WishDraft {
+            amount: Decimal::from(60),
+            due_on: "2026-11-04".into(),
+            kind: WishKind::Recurring {
+                every,
+                ends_on: None,
+            },
+            ..draft(name)
+        }
+    }
+
+    fn bill_change(amount: i64) -> WishDraft {
+        WishDraft {
+            amount: Decimal::from(amount),
+            due_on: "2026-11-01".into(),
+            kind: WishKind::BillChange {
+                bill_id: "7".into(),
+                ends_on: None,
+            },
+            ..draft("Gym")
+        }
+    }
+
+    fn bill(db: &Db, id: i64) -> (String, String, String, String, i64, i64) {
+        db.store
+            .connection()
+            .query_row(
+                "SELECT name, amount_min, amount_max, repeat_freq, skip, active FROM bills WHERE id = ?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn start_biweekly_creates_weekly_bill_skip_1() {
+        let mut db = db();
+        let wish = db
+            .write(|w, s| save_wish(w, s, recurring("Psychologist", Repeat::Biweekly)))
+            .unwrap();
+        assert_eq!(
+            message(db.write(|w, s| mark_started(w, s, &wish.wish_id, None, &[]))),
+            "choose the bill's category"
+        );
+        let started = db
+            .write(|w, s| mark_started(w, s, &wish.wish_id, Some("Groceries".into()), &[]))
+            .unwrap();
+        assert_eq!(started.status, WishStatus::Started);
+        let id: i64 = db.one("SELECT id FROM bills WHERE name = 'Psychologist'");
+        assert_eq!(
+            bill(&db, id),
+            (
+                "Psychologist".into(),
+                "60.000000000000".into(),
+                "60.000000000000".into(),
+                "weekly".into(),
+                1,
+                1
+            )
+        );
+        let start: String = db.one("SELECT start_date FROM bills WHERE name = 'Psychologist'");
+        assert_eq!(start, "2026-11-04");
+        let snap = db.snap();
+        let stored = snap.bills.iter().find(|b| b.id == id.to_string()).unwrap();
+        assert_eq!(stored.skip, 1);
+        assert_eq!(
+            load_wishes(db.store.connection()).unwrap()[0].status,
+            WishStatus::Started
+        );
+        assert_eq!(
+            message(db.write(|w, s| mark_started(
+                w,
+                s,
+                &wish.wish_id,
+                Some("Groceries".into()),
+                &[]
+            ))),
+            "wish is not planned"
+        );
+    }
+
+    #[test]
+    fn start_rejects_one_off_and_unknown_category() {
+        let mut db = db();
+        let one_off = db.write(|w, s| save_wish(w, s, draft("Bike"))).unwrap();
+        assert_eq!(
+            message(db.write(|w, s| mark_started(w, s, &one_off.wish_id, None, &[]))),
+            "only recurring wishes and bill changes can start"
+        );
+        let wish = db
+            .write(|w, s| save_wish(w, s, recurring("Netflix", Repeat::Monthly)))
+            .unwrap();
+        assert!(
+            db.write(|w, s| mark_started(w, s, &wish.wish_id, Some("Nope".into()), &[]))
+                .is_err()
+        );
+        assert_eq!(
+            load_wishes(db.store.connection())
+                .unwrap()
+                .iter()
+                .find(|x| x.wish_id == wish.wish_id)
+                .unwrap()
+                .status,
+            WishStatus::Planned
+        );
+    }
+
+    #[test]
+    fn start_bill_change_edits_amount() {
+        let mut db = db();
+        add_gym(&db);
+        let wish = db.write(|w, s| save_wish(w, s, bill_change(45))).unwrap();
+        let going_out = BudgetGroup {
+            id: "going-out".into(),
+            name: "Going out".into(),
+            amount: Decimal::from(120),
+            source_groups: Vec::new(),
+            categories: Vec::new(),
+            transaction_ids: Vec::new(),
+            account_id: None,
+            importance: Some(2),
+            floor: None,
+        };
+        let plan = BudgetPlan {
+            month: "2026-10-01".into(),
+            currency: Currency::new("EUR"),
+            revision: 0,
+            groups: vec![going_out],
+        };
+        db.write(|w, s| save_budget_plan(w, s, plan)).unwrap();
+        let cuts = [Cut {
+            group_id: "going-out".into(),
+            name: "Going out".into(),
+            from: Decimal::from(120),
+            to: Decimal::from(105),
+        }];
+        let started = db
+            .write(|w, s| mark_started(w, s, &wish.wish_id, None, &cuts))
+            .unwrap();
+        assert_eq!(started.status, WishStatus::Started);
+        assert_eq!(
+            bill(&db, 7),
+            (
+                "Gym".into(),
+                "45.000000000000".into(),
+                "45.000000000000".into(),
+                "monthly".into(),
+                0,
+                1
+            )
+        );
+        let start: String = db.one("SELECT start_date FROM bills WHERE id = 7");
+        assert_eq!(start, "2026-09-03");
+        let stored: BudgetPlan = serde_json::from_str(&db.one::<String>(
+            "SELECT payload_json FROM monthly_budget_plans WHERE month = '2026-10-01'",
+        ))
+        .unwrap();
+        assert_eq!(stored.groups[0].amount, Decimal::from(105));
+    }
+
+    #[test]
+    fn start_cancel_archives_bill() {
+        let mut db = db();
+        add_gym(&db);
+        let wish = db.write(|w, s| save_wish(w, s, bill_change(0))).unwrap();
+        db.write(|w, s| mark_started(w, s, &wish.wish_id, None, &[]))
+            .unwrap();
+        assert_eq!(bill(&db, 7).5, 0);
+        assert_eq!(
+            load_wishes(db.store.connection()).unwrap()[0].status,
+            WishStatus::Started
+        );
+    }
+
+    #[test]
+    fn recurring_cannot_have_children() {
+        let mut db = db();
+        let monthly = db
+            .write(|w, s| save_wish(w, s, recurring("Netflix", Repeat::Monthly)))
+            .unwrap();
+        let mut child = draft("Popcorn");
+        child.parent_id = Some(monthly.wish_id.clone());
+        assert_eq!(
+            message(db.write(|w, s| save_wish(w, s, child))),
+            "recurring wishes cannot have parts"
+        );
+        let parent = db.write(|w, s| save_wish(w, s, draft("Trip"))).unwrap();
+        let mut sub = recurring("Hotel", Repeat::Weekly);
+        sub.parent_id = Some(parent.wish_id.clone());
+        assert_eq!(
+            message(db.write(|w, s| save_wish(w, s, sub))),
+            "recurring wishes cannot be part of another wish"
+        );
+        // A parent with parts cannot turn recurring.
+        let mut part = draft("Flights");
+        part.parent_id = Some(parent.wish_id.clone());
+        db.write(|w, s| save_wish(w, s, part)).unwrap();
+        let mut turn = recurring("Trip", Repeat::Monthly);
+        turn.wish_id = Some(parent.wish_id.clone());
+        assert_eq!(
+            message(db.write(|w, s| save_wish(w, s, turn))),
+            "recurring wishes cannot have parts"
+        );
+    }
+
+    #[test]
+    fn recurring_dates_and_bills_are_validated() {
+        let mut db = db();
+        add_gym(&db);
+        let mut bad_end = recurring("Netflix", Repeat::Monthly);
+        bad_end.kind = WishKind::Recurring {
+            every: Repeat::Monthly,
+            ends_on: Some("later".into()),
+        };
+        assert_eq!(
+            message(db.write(|w, s| save_wish(w, s, bad_end))),
+            "end date is invalid"
+        );
+        let mut early_end = recurring("Netflix", Repeat::Monthly);
+        early_end.kind = WishKind::Recurring {
+            every: Repeat::Monthly,
+            ends_on: Some("2026-11-03".into()),
+        };
+        assert_eq!(
+            message(db.write(|w, s| save_wish(w, s, early_end))),
+            "end date is before the start"
+        );
+        let mut same_day = recurring("Netflix", Repeat::Monthly);
+        same_day.kind = WishKind::Recurring {
+            every: Repeat::Monthly,
+            ends_on: Some("2026-11-04".into()),
+        };
+        db.write(|w, s| save_wish(w, s, same_day)).unwrap();
+        let mut unknown = bill_change(40);
+        unknown.kind = WishKind::BillChange {
+            bill_id: "99".into(),
+            ends_on: None,
+        };
+        assert_eq!(
+            message(db.write(|w, s| save_wish(w, s, unknown))),
+            "bill is unknown"
+        );
+        let mut quarterly = bill_change(40);
+        quarterly.kind = WishKind::BillChange {
+            bill_id: "8".into(),
+            ends_on: None,
+        };
+        assert_eq!(
+            message(db.write(|w, s| save_wish(w, s, quarterly))),
+            "only weekly, monthly or yearly bills can be changed here"
+        );
+        let mut free = recurring("Free", Repeat::Monthly);
+        free.amount = Decimal::ZERO;
+        assert_eq!(
+            message(db.write(|w, s| save_wish(w, s, free))),
+            "wish amount must be positive"
+        );
+        let mut negative = bill_change(0);
+        negative.amount = Decimal::from(-1);
+        assert_eq!(
+            message(db.write(|w, s| save_wish(w, s, negative))),
+            "the new amount cannot be negative"
+        );
+        db.write(|w, s| save_wish(w, s, bill_change(0))).unwrap();
     }
 
     #[test]
