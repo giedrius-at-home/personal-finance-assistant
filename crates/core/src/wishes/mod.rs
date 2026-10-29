@@ -271,6 +271,7 @@ impl Inputs<'_> {
             created_at: wish.created_at.clone(),
             per_month: None,
             saved_this_month: false,
+            must: wish.must,
         });
         let (judged, _, _) = self.judge(alloc, month0, &items, wishes, settings);
         judged

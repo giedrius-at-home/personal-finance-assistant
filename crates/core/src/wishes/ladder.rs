@@ -46,7 +46,7 @@ pub struct CardRoom {
 }
 
 /// Something to pay for in a month.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Demand {
     pub wish_id: Option<String>,
     pub label: String,
@@ -54,6 +54,8 @@ pub struct Demand {
     pub on_card: bool,
     /// A monthly saving set-aside rather than the purchase itself.
     pub set_aside: bool,
+    /// For a wish that must be bought.
+    pub must: bool,
 }
 
 pub const ALREADY_SHORT: &str = "Already short";
@@ -205,6 +207,7 @@ pub fn judge(
                     amount: -base.free,
                     on_card: false,
                     set_aside: false,
+                    must: false,
                 },
                 true,
             ));
@@ -217,6 +220,7 @@ pub fn judge(
                     amount: card_charge_in,
                     on_card: false,
                     set_aside: false,
+                    must: false,
                 },
                 false,
             );
@@ -282,6 +286,7 @@ mod tests {
             amount: d(amount),
             on_card,
             set_aside: false,
+            must: false,
         }
     }
 
