@@ -4,7 +4,7 @@
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
-use crate::gateway::{Wish, WishSettings};
+use crate::gateway::{Repeat, Wish, WishSettings};
 use crate::report::Currency;
 
 /// A budget group trimmed to afford a wish.
@@ -71,6 +71,13 @@ pub struct WishRow {
     pub not_judged: Option<String>,
 }
 
+/// A bill whose schedule the judging knows, so a change to it can be judged.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChangeableBill {
+    pub bill_id: String,
+    pub every: Repeat,
+}
+
 /// Everything the wishes screen shows.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WishesView {
@@ -80,4 +87,7 @@ pub struct WishesView {
     pub months: Vec<WishMonth>,
     /// Top-level only, newest due last.
     pub wishes: Vec<WishRow>,
+    /// The bills a bill change can be made to.
+    #[serde(default)]
+    pub changeable_bills: Vec<ChangeableBill>,
 }

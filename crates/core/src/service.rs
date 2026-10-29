@@ -379,7 +379,12 @@ impl Service {
             let dash = dashboard::dashboard(store, snap, now, model)?;
             let wishes = crate::wishes::store::load_wishes(store.connection())?;
             let settings = crate::wishes::store::load_wish_settings(store.connection())?;
-            Ok(crate::wishes::wishes_view(&dash, &wishes, &settings))
+            Ok(crate::wishes::wishes_view(
+                &dash,
+                &snap.bills,
+                &wishes,
+                &settings,
+            ))
         })
     }
 
@@ -404,7 +409,12 @@ impl Service {
             let wishes = crate::wishes::store::load_wishes(store.connection())?;
             let settings = crate::wishes::store::load_wish_settings(store.connection())?;
             Ok(crate::wishes::purchase_cuts(
-                &dash, &wishes, &settings, wish_id, &purchase,
+                &dash,
+                &snap.bills,
+                &wishes,
+                &settings,
+                wish_id,
+                &purchase,
             ))
         })?;
         self.write(|w, snap| crate::writes::wishes::mark_bought(w, snap, wish_id, purchase, &cuts))

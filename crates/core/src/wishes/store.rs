@@ -13,7 +13,8 @@ fn table_exists(conn: &Connection, name: &str) -> Result<bool> {
     )?)
 }
 
-/// Every stored wish, oldest id first; empty before the table exists.
+/// Every stored wish, oldest id first; empty before the table exists. A row
+/// that no longer parses is skipped, so one bad row cannot hide the page.
 pub fn load_wishes(conn: &Connection) -> Result<Vec<Wish>> {
     if !table_exists(conn, "wishes")? {
         return Ok(Vec::new());
@@ -22,10 +23,10 @@ pub fn load_wishes(conn: &Connection) -> Result<Vec<Wish>> {
     let payloads = stmt
         .query_map([], |r| r.get::<_, String>(0))?
         .collect::<std::result::Result<Vec<_>, _>>()?;
-    payloads
+    Ok(payloads
         .iter()
-        .map(|p| serde_json::from_str(p).map_err(|e| Error::Invalid(format!("wish: {e}"))))
-        .collect()
+        .filter_map(|p| serde_json::from_str(p).ok())
+        .collect())
 }
 
 /// The stored settings, or the defaults.
@@ -63,6 +64,21 @@ mod tests {
             load_wish_settings(&conn).unwrap().card_limit,
             Decimal::from(2500)
         );
+    }
+
+    #[test]
+    fn corrupt_row_is_skipped() {
+        let store = Store::open(Path::new(":memory:")).unwrap();
+        let conn = store.connection();
+        let good = r#"{"wish_id":"w2","name":"Bike","amount":"900","currency":{"code":"EUR","minor_unit":2},"due_on":"2026-12-01","source":{"kind":"card"},"created_at":"x"}"#;
+        conn.execute(
+            "INSERT INTO wishes (wish_id, payload_json) VALUES ('w1', '{not json'), ('w2', ?1)",
+            [good],
+        )
+        .unwrap();
+        let wishes = load_wishes(conn).unwrap();
+        assert_eq!(wishes.len(), 1);
+        assert_eq!(wishes[0].wish_id, "w2");
     }
 
     #[test]

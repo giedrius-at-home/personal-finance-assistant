@@ -53,12 +53,10 @@ fn check_kind(snap: &Snapshot, kind: &WishKind, due_on: Date) -> Result<()> {
                 .iter()
                 .find(|b| &b.id == bill_id && b.active)
                 .ok_or_else(|| invalid("bill is unknown"))?;
-            // The judging knows these schedules only (no skips).
-            if !matches!(bill.repeat_freq.as_str(), "weekly" | "monthly" | "yearly")
-                || bill.skip != 0
-            {
+            // The judging knows these schedules only.
+            if crate::wishes::repeat_of(&bill.repeat_freq, bill.skip).is_none() {
                 return Err(invalid(
-                    "only weekly, monthly or yearly bills can be changed here",
+                    "only weekly, two-weekly, monthly or yearly bills can be changed here",
                 ));
             }
             ends_on
@@ -934,6 +932,9 @@ mod tests {
                 "INSERT INTO bills (id, name, currency, amount_min, amount_max, start_date, repeat_freq) \
                  VALUES (7, 'Gym', 'EUR', '30.000000000000', '30.000000000000', '2026-09-03', 'monthly'), \
                  (8, 'Insurance', 'EUR', '90.000000000000', '90.000000000000', '2026-09-03', 'quarterly'); \
+                 INSERT INTO bills (id, name, currency, amount_min, amount_max, start_date, repeat_freq, skip) \
+                 VALUES (9, 'Therapy', 'EUR', '80.000000000000', '80.000000000000', '2026-09-03', 'weekly', 1), \
+                 (10, 'Haircut', 'EUR', '25.000000000000', '25.000000000000', '2026-09-03', 'monthly', 1); \
                  INSERT INTO import_runs (source, finished_at, stats) \
                  VALUES ('test', '2026-10-26T19:00:00Z', '{}');",
             )
@@ -1208,7 +1209,22 @@ mod tests {
         };
         assert_eq!(
             message(db.write(|w, s| save_wish(w, s, quarterly))),
-            "only weekly, monthly or yearly bills can be changed here"
+            "only weekly, two-weekly, monthly or yearly bills can be changed here"
+        );
+        let mut biweekly = bill_change(40);
+        biweekly.kind = WishKind::BillChange {
+            bill_id: "9".into(),
+            ends_on: None,
+        };
+        db.write(|w, s| save_wish(w, s, biweekly)).unwrap();
+        let mut bimonthly = bill_change(40);
+        bimonthly.kind = WishKind::BillChange {
+            bill_id: "10".into(),
+            ends_on: None,
+        };
+        assert_eq!(
+            message(db.write(|w, s| save_wish(w, s, bimonthly))),
+            "only weekly, two-weekly, monthly or yearly bills can be changed here"
         );
         let mut free = recurring("Free", Repeat::Monthly);
         free.amount = Decimal::ZERO;

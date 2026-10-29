@@ -8,7 +8,7 @@ use finance_types::gateway::{
 };
 use finance_types::report::Currency;
 use finance_types::report::Dashboard;
-use finance_types::report::wishes::{Cut, Verdict, WishMonth, WishRow, WishesView};
+use finance_types::report::wishes::{ChangeableBill, Cut, Verdict, WishMonth, WishRow, WishesView};
 use leptos::ev::SubmitEvent;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -374,23 +374,28 @@ struct BillOption {
     id: String,
     name: String,
     amount: Decimal,
-    /// Firefly's name: weekly, monthly, …
-    frequency: String,
 }
 
-impl BillOption {
-    /// The schedules a bill change can be judged on.
-    fn changeable(&self) -> bool {
-        matches!(self.frequency.as_str(), "weekly" | "monthly" | "yearly")
-    }
-
-    fn per(&self) -> &'static str {
-        match self.frequency.as_str() {
-            "weekly" => "week",
-            "yearly" => "year",
-            _ => "month",
-        }
-    }
+/// The bills a change can be judged on (the view lists them, with their
+/// schedule), labelled `Gym · €30 per month`.
+fn changeable_bills(
+    bills: &[BillOption],
+    changeable: &[ChangeableBill],
+    code: &str,
+) -> Vec<(BillOption, String)> {
+    bills
+        .iter()
+        .filter_map(|b| {
+            let every = changeable.iter().find(|c| c.bill_id == b.id)?.every;
+            let label = format!(
+                "{} · {} per {}",
+                b.name,
+                amount(b.amount, code),
+                period(every)
+            );
+            Some((b.clone(), label))
+        })
+        .collect()
 }
 
 /// What the page reads from the dashboard.
@@ -435,7 +440,6 @@ impl Context {
                     id: row.bill_id.clone(),
                     name: row.name.clone(),
                     amount: row.amount_max,
-                    frequency: row.frequency.to_lowercase(),
                 });
             }
         }
@@ -681,7 +685,13 @@ fn page(ui: Ui, view: &WishesView, ctx: &Context) -> impl IntoView + use<> {
         .collect_view();
     let has_months = !view.months.is_empty();
     let strip = card_strip(ui, view, &ctx.get_value(), current_month);
-    let form = add_form(ui, &ctx.get_value(), parents, currency);
+    let form = add_form(
+        ui,
+        &ctx.get_value(),
+        &view.changeable_bills,
+        parents,
+        currency,
+    );
     view! {
         <div class="grid gap-4">
             {strip}
@@ -839,6 +849,7 @@ fn date_input(id: &'static str, value: RwSignal<String>, required: bool) -> impl
 fn add_form(
     ui: Ui,
     ctx: &Context,
+    changeable: &[ChangeableBill],
     parents: Vec<(String, String)>,
     currency: Currency,
 ) -> impl IntoView + use<> {
@@ -848,22 +859,13 @@ fn add_form(
             .chain(parents)
             .collect(),
     );
-    let bills: Vec<BillOption> = ctx
-        .bills
-        .iter()
-        .filter(|b| b.changeable())
-        .cloned()
-        .collect();
-    let code = currency.code.clone();
+    let bills = changeable_bills(&ctx.bills, changeable, &currency.code);
     let bill_options: StoredValue<Vec<(String, String)>> = StoredValue::new(
         std::iter::once((String::new(), "Choose a bill".to_owned()))
-            .chain(bills.iter().map(|b| {
-                let label = format!("{} · {} per {}", b.name, amount(b.amount, &code), b.per());
-                (b.id.clone(), label)
-            }))
+            .chain(bills.iter().map(|(b, label)| (b.id.clone(), label.clone())))
             .collect(),
     );
-    let bill_names = StoredValue::new(bills);
+    let bill_names = StoredValue::new(bills.into_iter().map(|(b, _)| b).collect::<Vec<_>>());
     let kinds = vec![
         ("one_off".to_owned(), "One-off".to_owned()),
         ("repeats".to_owned(), "Repeats".to_owned()),
@@ -1893,6 +1895,23 @@ mod tests {
         let mut r = row("w");
         r.not_judged = Some("too far ahead".into());
         assert_eq!(verdict_line(&r, &[]), "Not judged yet: too far ahead.");
+    }
+
+    #[test]
+    fn bill_picker_lists_judgeable_bills_with_their_schedule() {
+        let bill = |id: &str, name: &str| BillOption {
+            id: id.into(),
+            name: name.into(),
+            amount: d(80, 0),
+        };
+        let bills = [bill("9", "Therapy"), bill("8", "Insurance")];
+        let changeable = [ChangeableBill {
+            bill_id: "9".into(),
+            every: Repeat::Biweekly,
+        }];
+        let options = changeable_bills(&bills, &changeable, "EUR");
+        assert_eq!(options.len(), 1);
+        assert_eq!(options[0].1, "Therapy · €80 per 2 weeks");
     }
 
     #[test]

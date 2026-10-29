@@ -9,7 +9,7 @@ use finance_types::gateway::{
     BudgetPlan, Repeat, Wish, WishKind, WishPurchase, WishSettings, WishSource, WishStatus,
 };
 use finance_types::report::allocation::CurrencyAllocation;
-use finance_types::report::wishes::{Cut, Verdict, WishMonth, WishRow, WishesView};
+use finance_types::report::wishes::{ChangeableBill, Cut, Verdict, WishMonth, WishRow, WishesView};
 use finance_types::report::{Currency, Dashboard};
 use jiff::civil::Date;
 use ladder::Demand;
@@ -17,9 +17,17 @@ use rust_decimal::Decimal;
 use schedule::{BillNow, Family, Planned};
 use std::collections::HashMap;
 
-/// The wishes screen, judged against the dashboard's allocation.
-pub fn wishes_view(dashboard: &Dashboard, wishes: &[Wish], settings: &WishSettings) -> WishesView {
-    let (plans, card_bill, bills) = dashboard_parts(dashboard, settings);
+use crate::load::Bill;
+
+/// The wishes screen, judged against the dashboard's allocation. `bills`
+/// are the snapshot's, for the schedules the dashboard rows leave out.
+pub fn wishes_view(
+    dashboard: &Dashboard,
+    bills: &[Bill],
+    wishes: &[Wish],
+    settings: &WishSettings,
+) -> WishesView {
+    let (plans, card_bill, bills) = dashboard_parts(dashboard, bills, settings);
     Inputs {
         alloc: allocation(dashboard),
         plans,
@@ -33,12 +41,13 @@ pub fn wishes_view(dashboard: &Dashboard, wishes: &[Wish], settings: &WishSettin
 /// gap judged as a purchase of its own, after everything else planned.
 pub fn purchase_cuts(
     dashboard: &Dashboard,
+    bills: &[Bill],
     wishes: &[Wish],
     settings: &WishSettings,
     wish_id: &str,
     purchase: &WishPurchase,
 ) -> Vec<Cut> {
-    let (plans, card_bill, bills) = dashboard_parts(dashboard, settings);
+    let (plans, card_bill, bills) = dashboard_parts(dashboard, bills, settings);
     Inputs {
         alloc: allocation(dashboard),
         plans,
@@ -60,6 +69,7 @@ fn allocation(dashboard: &Dashboard) -> Option<&CurrencyAllocation> {
 /// The budget plans, the card bill's amount and the bills as they stand.
 fn dashboard_parts(
     dashboard: &Dashboard,
+    bills: &[Bill],
     settings: &WishSettings,
 ) -> (Vec<BudgetPlan>, Decimal, HashMap<String, BillNow>) {
     let plans: Vec<BudgetPlan> = dashboard
@@ -81,11 +91,23 @@ fn dashboard_parts(
                 .find(|row| row.bill_id == bill_id)
         })
         .map_or(Decimal::ZERO, |row| row.amount_max);
-    (plans, card_bill, bills_now(dashboard))
+    (plans, card_bill, bills_now(dashboard, bills))
 }
 
-/// Every bill that repeats weekly, monthly or yearly, at its highest amount.
-fn bills_now(dashboard: &Dashboard) -> HashMap<String, BillNow> {
+/// The schedule the judging knows a bill by (Firefly's frequency and skip);
+/// `None` when it cannot judge it.
+pub fn repeat_of(frequency: &str, skip: u32) -> Option<Repeat> {
+    match (frequency.to_lowercase().as_str(), skip) {
+        ("weekly", 0) => Some(Repeat::Weekly),
+        ("weekly", 1) => Some(Repeat::Biweekly),
+        ("monthly", 0) => Some(Repeat::Monthly),
+        ("yearly", 0) => Some(Repeat::Yearly),
+        _ => None,
+    }
+}
+
+/// Every bill the judging knows the schedule of, at its highest amount.
+fn bills_now(dashboard: &Dashboard, bills: &[Bill]) -> HashMap<String, BillNow> {
     dashboard
         .next_month_subscriptions
         .as_ref()
@@ -93,12 +115,11 @@ fn bills_now(dashboard: &Dashboard) -> HashMap<String, BillNow> {
         .rows
         .iter()
         .filter_map(|row| {
-            let every = match row.frequency.to_lowercase().as_str() {
-                "weekly" => Repeat::Weekly,
-                "monthly" => Repeat::Monthly,
-                "yearly" => Repeat::Yearly,
-                _ => return None,
-            };
+            let skip = bills
+                .iter()
+                .find(|b| b.id == row.bill_id)
+                .map_or(0, |b| b.skip);
+            let every = repeat_of(&row.frequency, skip)?;
             let bill = BillNow {
                 amount: row.amount_max,
                 every,
@@ -167,12 +188,22 @@ impl Inputs<'_> {
         };
         let mut tops: Vec<&Wish> = wishes.iter().filter(|w| w.parent_id.is_none()).collect();
         sort_by_due(&mut tops);
+        let mut changeable_bills: Vec<ChangeableBill> = self
+            .bills
+            .iter()
+            .map(|(id, bill)| ChangeableBill {
+                bill_id: id.clone(),
+                every: bill.every,
+            })
+            .collect();
+        changeable_bills.sort_by(|a, b| a.bill_id.cmp(&b.bill_id));
         WishesView {
             currency,
             settings: settings.clone(),
             card_stale,
             wishes: tops.into_iter().map(|w| ctx.row(w)).collect(),
             months,
+            changeable_bills,
         }
     }
 
@@ -425,6 +456,17 @@ mod tests {
     }
 
     #[test]
+    fn bill_schedules_the_judging_knows() {
+        assert_eq!(repeat_of("Weekly", 0), Some(Repeat::Weekly));
+        assert_eq!(repeat_of("weekly", 1), Some(Repeat::Biweekly));
+        assert_eq!(repeat_of("weekly", 2), None);
+        assert_eq!(repeat_of("monthly", 0), Some(Repeat::Monthly));
+        assert_eq!(repeat_of("monthly", 1), None);
+        assert_eq!(repeat_of("yearly", 0), Some(Repeat::Yearly));
+        assert_eq!(repeat_of("quarterly", 0), None);
+    }
+
+    #[test]
     fn view_end_to_end() {
         let a = alloc(
             "100",
@@ -670,6 +712,7 @@ mod tests {
             currency: Currency::eur(),
             settings: WishSettings::default(),
             card_stale: false,
+            changeable_bills: Vec::new(),
             months: vec![
                 month(vec![
                     verdict(
