@@ -140,15 +140,17 @@ fn one_off_line(by_month: &[(&WishMonth, Vec<&Verdict>)], code: &str) -> String 
     let rest = one_off_verdict(by_month, code);
     match skipped_note(by_month, code) {
         None => rest,
-        Some(note) if rest == "Affordable." => note,
-        Some(note) => format!("{note} {rest}"),
+        // The catch-up rate already says it fits; a skipped month followed
+        // straight by the due month still needs the verdict.
+        Some((note, true)) if rest == "Affordable." => note,
+        Some((note, _)) => format!("{note} {rest}"),
     }
 }
 
 /// `Nothing set aside in November; €300/month from December.` for the
 /// first month whose set-aside was skipped, with the next month that
-/// sets money aside again.
-fn skipped_note(by_month: &[(&WishMonth, Vec<&Verdict>)], code: &str) -> Option<String> {
+/// sets money aside again (the flag says whether there is one).
+fn skipped_note(by_month: &[(&WishMonth, Vec<&Verdict>)], code: &str) -> Option<(String, bool)> {
     let at = by_month
         .iter()
         .position(|(_, v)| v.iter().any(|v| v.skipped))?;
@@ -162,12 +164,15 @@ fn skipped_note(by_month: &[(&WishMonth, Vec<&Verdict>)], code: &str) -> Option<
         (sum > Decimal::ZERO).then_some((m, sum))
     });
     Some(match next {
-        Some((month, n)) => format!(
-            "{skipped}; {}/month from {}.",
-            amount(n, code),
-            month_name(&month.month)
+        Some((month, n)) => (
+            format!(
+                "{skipped}; {}/month from {}.",
+                amount(n, code),
+                month_name(&month.month)
+            ),
+            true,
         ),
-        None => format!("{skipped}."),
+        None => (format!("{skipped}."), false),
     })
 }
 
@@ -356,13 +361,13 @@ fn payback_line(month: &WishMonth, code: &str) -> Option<String> {
         return None;
     }
     let next = month_name(&format::add_months(&month.month, 1));
-    let each = if month.cards.len() > 1 {
-        let parts: Vec<String> = month
-            .cards
-            .iter()
-            .filter(|c| c.used > Decimal::ZERO)
-            .map(|c| format!("{} {}", c.name, amount(c.used, code)))
-            .collect();
+    let parts: Vec<String> = month
+        .cards
+        .iter()
+        .filter(|c| c.used > Decimal::ZERO)
+        .map(|c| format!("{} {}", c.name, amount(c.used, code)))
+        .collect();
+    let each = if parts.len() > 1 {
         format!(" ({})", parts.join(", "))
     } else {
         String::new()
@@ -1293,6 +1298,7 @@ fn wish_row(
 ) -> impl IntoView + use<> {
     let code = row.wish.currency.code.clone();
     let parent = !row.children.is_empty();
+    let parent_must = row.wish.must;
     let family = parent.then(|| {
         let over = row.over_cap.then(|| view! {
             <p role="status" class="text-sm text-warning-fg">"The parts add up to more than the cap."</p>
@@ -1316,7 +1322,7 @@ fn wish_row(
             if child.wish.status == WishStatus::Planned {
                 view! {
                     <div class="border-t border-line pl-4 sm:pl-6">
-                        {wish_body(ui, child, months, ctx, true)}
+                        {wish_body(ui, child, months, ctx, Some(parent_must))}
                     </div>
                 }
                 .into_any()
@@ -1326,7 +1332,7 @@ fn wish_row(
             }
         })
         .collect_view();
-    let body = wish_body(ui, &row, months, ctx, false);
+    let body = wish_body(ui, &row, months, ctx, None);
     view! {
         <div class="border-t border-line first:border-t-0">
             {body}
@@ -1340,13 +1346,17 @@ fn wish_row(
 }
 
 /// Name, amount, date, source, verdict and actions of one planned wish.
+/// `parent_must` is the parent's must flag for a sub-wish, `None` for a
+/// top-level wish: a sub-wish of a must wish is a must too, and only the
+/// parent's flag can be toggled.
 fn wish_body(
     ui: Ui,
     row: &WishRow,
     months: StoredValue<Vec<WishMonth>>,
     ctx: StoredValue<Context>,
-    sub: bool,
+    parent_must: Option<bool>,
 ) -> impl IntoView + use<> {
+    let sub = parent_must.is_some();
     let wish = row.wish.clone();
     let code = wish.currency.code.clone();
     let line = months.with_value(|m| verdict_line(row, m));
@@ -1589,7 +1599,7 @@ fn wish_body(
             <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
                 <h3 class=cn(["flex items-center gap-2 font-semibold", if sub { "text-sm" } else { "text-base" }])>
                     {wish.name.clone()}
-                    {must.then(|| view! { <Badge tone=Tone::Accent>"Must"</Badge> })}
+                    {(must || parent_must == Some(true)).then(|| view! { <Badge tone=Tone::Accent>"Must"</Badge> })}
                 </h3>
                 <span class="text-sm tabular-nums text-fg-muted">{detail}</span>
             </div>
@@ -1639,6 +1649,7 @@ fn wish_body(
                 >
                     "Drop"
                 </Button>
+                {(!sub).then(move || view! {
                 <Button
                     size=Size::Sm
                     variant=Variant::Ghost
@@ -1647,6 +1658,7 @@ fn wish_body(
                 >
                     {if must { "Not a must" } else { "Mark must" }}
                 </Button>
+                })}
             </div>
             <Show when=buying>
                 <form class="grid items-end gap-2 sm:grid-cols-4" on:submit=buy_submit.clone()>
@@ -1981,8 +1993,17 @@ mod tests {
             payback_line(&m, "EUR").unwrap(),
             "Pay back €150 on 1 December (Visa €60, Mastercard €90)."
         );
-        m.cards.truncate(1);
+        // Two cards, one used: no breakdown.
+        m.cards = vec![
+            card_used("visa", "Visa", d(6000, 2)),
+            card_used("mc", "Mastercard", Decimal::ZERO),
+        ];
         m.card_used = d(6000, 2);
+        assert_eq!(
+            payback_line(&m, "EUR").unwrap(),
+            "Pay back €60 on 1 December."
+        );
+        m.cards.truncate(1);
         assert_eq!(
             payback_line(&m, "EUR").unwrap(),
             "Pay back €60 on 1 December."
@@ -2444,6 +2465,22 @@ mod tests {
         assert_eq!(
             verdict_line(&row("w"), &months),
             "Nothing set aside in November; €300/month from December."
+        );
+    }
+
+    #[test]
+    fn skipped_month_then_due_month_keeps_the_verdict() {
+        let paid = Verdict {
+            from_free: d(300, 0),
+            ..verdict("w", d(300, 0))
+        };
+        let months = vec![
+            month_at("2026-11-01", vec![verdict_skipped("w")]),
+            month_at("2026-12-01", vec![paid]),
+        ];
+        assert_eq!(
+            verdict_line(&row("w"), &months),
+            "Nothing set aside in November. Affordable."
         );
     }
 
