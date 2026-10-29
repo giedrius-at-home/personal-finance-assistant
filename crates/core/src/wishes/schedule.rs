@@ -394,13 +394,13 @@ impl Saver {
             .collect()
     }
 
-    /// Purchases due in `month` (or overdue and still unpaid): each item's
-    /// whole unsaved rest, by due date then creation.
+    /// Purchases due in `month`: each item's whole unsaved rest, by due date
+    /// then creation. Overdue items are already due in month 0.
     pub fn purchases(&self, month: usize) -> Vec<Demand> {
         let mut due: Vec<&Saving> = self
             .savings
             .iter()
-            .filter(|s| s.due_idx <= month && s.left > Decimal::ZERO)
+            .filter(|s| s.due_idx == month && s.left > Decimal::ZERO)
             .collect();
         due.sort_by(|a, b| (a.item.due, &a.item.created_at).cmp(&(b.item.due, &b.item.created_at)));
         due.into_iter()
@@ -428,7 +428,7 @@ impl Saver {
         let Some(lowest) = later_free.get(..after).and_then(|f| f.iter().min()) else {
             return false;
         };
-        (s.left / Decimal::from(after)).round_dp(2) <= *lowest
+        s.left / Decimal::from(after) <= *lowest
     }
 
     /// Record that `amount` of `wish_id` was paid (set-aside or purchase).
@@ -580,10 +580,9 @@ mod tests {
             &HashMap::new(),
         );
         assert!(fams.is_empty());
-        let mut s = Saver::new(&items, month("2026-11-01"), 2);
+        let s = Saver::new(&items, month("2026-11-01"), 2);
         assert!(s.set_asides(0).is_empty());
         assert_eq!(amounts(&s.purchases(0)), vec![d("150")]);
-        s.paid("w", d("150"));
         assert!(s.set_asides(1).is_empty() && s.purchases(1).is_empty());
     }
 
@@ -618,7 +617,7 @@ mod tests {
     }
 
     #[test]
-    fn due_month_takes_rounding_remainder() {
+    fn due_month_takes_whatever_is_left() {
         let (items, _) = plan_items(
             &[wish("w", None, "100", "2026-12-20", false)],
             oct(),
@@ -727,8 +726,7 @@ mod tests {
         );
         let s = Saver::new(&items, cur, 2);
         assert_eq!(amounts(&s.purchases(0)), vec![d("50")]);
-        // Still unpaid a month later: still due.
-        assert_eq!(amounts(&s.purchases(1)), vec![d("50")]);
+        assert!(s.purchases(1).is_empty());
         assert_eq!(horizon(&items, cur), 2);
     }
 
@@ -870,6 +868,16 @@ mod tests {
         assert!(s.may_skip_must("w", 0, &[d("450"), d("500")]));
         assert!(!s.may_skip_must("w", 0, &[d("449"), d("500")]));
         assert!(!s.may_skip_must("w", 2, &[])); // nothing after the due month
+        // From month 1 only month 2 is left to carry all 900.
+        assert!(s.may_skip_must("w", 1, &[d("900")]));
+        assert!(!s.may_skip_must("w", 1, &[d("899.99")]));
+        // Fewer free months known than the window needs: cannot skip.
+        assert!(!s.may_skip_must("w", 0, &[d("1000")]));
+        // Unrounded share: 100 over 3 months is 33.333..., more than 33.33.
+        let items = vec![planned_must("x", "100", "2027-01-15")];
+        let s = Saver::new(&items, oct(), 4);
+        assert!(!s.may_skip_must("x", 0, &[d("33.33"); 3]));
+        assert!(s.may_skip_must("x", 0, &[d("33.34"); 3]));
     }
 
     #[test]
