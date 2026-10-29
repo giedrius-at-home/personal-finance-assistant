@@ -14,6 +14,7 @@
     "allow-save-wish",
     "allow-record-wish-saved",
     "allow-drop-wish",
+    "allow-set-wish-must",
     "allow-mark-wish-bought",
     "allow-start-wish",
     "allow-save-wish-settings",
