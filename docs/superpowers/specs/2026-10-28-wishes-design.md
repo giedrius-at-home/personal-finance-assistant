@@ -290,6 +290,30 @@ whatever is left as savings that can be taken back when needed.
 - Wording: "€X on the cards, so December starts €X short." and, at the top
   of each month, "Pay back €Y on 1 December (Visa €a, Mastercard €b)."
 
+### Settled after the builder check (Claude's calls unless marked)
+
+- **Ladder step 1 is the free money pool.** "Savings drop to €X" means
+  free money as defined above shrinks. Goal contributions are neither
+  subtracted nor cut; they are simply outside the wishes arithmetic.
+- **Plans are stateless.** Every view recomputes each wish's set-aside from
+  (amount − saved) and the months left. Months are judged in order; a skip
+  in month i spreads the gap evenly over months i+1 … due. No forward
+  simulation beyond what the ladder already does month by month.
+- **"Too few months to catch up"** for a must set-aside: the month skips
+  only if (gap ÷ months left after it) is no more than the smallest
+  baseline free money among those later months. Otherwise the set-aside is
+  paid now, on the cards if it must be. A must set-aside never shows "Not
+  affordable" while pooled card room covers it.
+- **Linked bills**: each card's predicted charge replaces only its own
+  linked bill in the outlook; a card with no linked bill replaces nothing.
+- **Card room and payback**: room = limit − used; next month's payback per
+  card = used + what the ladder put on it, i.e. the whole usage.
+- **Bought on several cards**: the form lists the cards with an amount
+  field each, prefilled by list order, and refuses a save whose amounts do
+  not sum to the bought amount.
+- **Must on families**: the implicit "rest" sub-wish inherits the parent's
+  flag. Un-flagging a must parent un-flags its sub-wishes (cascade).
+
 ### Not changing
 
 - The cutting ladder's steps and group floors.
