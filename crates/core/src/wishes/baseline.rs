@@ -254,7 +254,7 @@ pub(crate) mod tests {
             cards: vec![CardSettings {
                 used: d(card_used),
                 used_month: month.into(),
-                ..WishSettings::default().first()
+                ..WishSettings::default().cards[0].clone()
             }],
         }
     }

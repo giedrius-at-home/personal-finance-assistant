@@ -606,7 +606,7 @@ mod tests {
             name: id.into(),
             used: d(used),
             used_month: used_month.into(),
-            ..WishSettings::default().first()
+            ..WishSettings::default().cards[0].clone()
         }
     }
 
@@ -635,7 +635,7 @@ mod tests {
         WishSettings {
             cards: vec![CardSettings {
                 limit: Decimal::ZERO,
-                ..WishSettings::default().first()
+                ..WishSettings::default().cards[0].clone()
             }],
         }
     }

@@ -61,7 +61,7 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         assert!(load_wishes(&conn).unwrap().is_empty());
         assert_eq!(
-            load_wish_settings(&conn).unwrap().first().limit,
+            load_wish_settings(&conn).unwrap().cards[0].limit,
             Decimal::from(2500)
         );
     }
@@ -110,7 +110,7 @@ mod tests {
                     used: Decimal::from(120),
                     used_month: "2026-10-01".into(),
                     bill_id: Some("b1".into()),
-                    ..WishSettings::default().first()
+                    ..WishSettings::default().cards[0].clone()
                 },
                 CardSettings {
                     card_id: "card-2".into(),

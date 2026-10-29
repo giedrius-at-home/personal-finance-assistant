@@ -590,16 +590,6 @@ impl Default for WishSettings {
     }
 }
 
-impl WishSettings {
-    /// The first card. Temporary: callers still judge with a single card.
-    pub fn first(&self) -> CardSettings {
-        self.cards
-            .first()
-            .cloned()
-            .unwrap_or_else(CardSettings::default_card)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
