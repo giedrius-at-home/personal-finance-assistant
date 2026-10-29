@@ -2,6 +2,8 @@
 //!
 //! Pure arithmetic, no I/O. Month 0 is the allocation's current month, month 1
 //! the funded month, and later months repeat month 1 with nothing spent yet.
+//! Month 0's card usage is what the owner typed; each later month starts with
+//! the card bill's amount as its regular card spending.
 
 use super::ladder::{GroupRoom, MonthBaseline};
 use crate::period::shift_month;
@@ -81,6 +83,9 @@ pub fn baselines(
         (Decimal::ZERO, !unset)
     };
     // `next_wiggle_room` is clamped at zero; the deficit is `next_shortfall`.
+    // The card bill is a fixed cost there; every later month pays the card
+    // through the ladder instead (last month's usage), so it is added back
+    // and the month's own regular card spending is seeded as its usage.
     let next_free = alloc.next_wiggle_room - alloc.next_shortfall + card_bill;
     let out = (0..months)
         .map(|i| {
@@ -97,7 +102,7 @@ pub fn baselines(
                     month,
                     free: next_free,
                     groups: rooms(&alloc.next_group_rows, plan, i == 1),
-                    card_used: Decimal::ZERO,
+                    card_used: card_bill,
                 },
             }
         })
@@ -320,6 +325,31 @@ pub(crate) mod tests {
         let (months, _) = baselines(&a, &[], d("9.98"), &settings("0", ""), Decimal::ZERO, 3);
         assert_eq!(months[1].free, d("-40.02"));
         assert_eq!(months[2].free, d("-40.02"));
+    }
+
+    #[test]
+    fn regular_card_spending_carries_into_every_later_month() {
+        let a = alloc("0", "200", vec![], vec![]);
+        let (months, _) = baselines(
+            &a,
+            &[],
+            d("100"),
+            &settings("40", "2026-10-01"),
+            Decimal::ZERO,
+            4,
+        );
+        assert_eq!(months[0].card_used, d("40"));
+        for m in &months[1..] {
+            assert_eq!(m.free, d("300"));
+            assert_eq!(m.card_used, d("100"));
+        }
+        // Each later month pays the month before's regular card spending.
+        let judged =
+            super::super::ladder::judge(&months, &[vec![], vec![], vec![], vec![]], d("2500"));
+        assert_eq!(judged[1].card_charge_in, d("40"));
+        assert_eq!(judged[2].card_charge_in, d("100"));
+        assert_eq!(judged[3].card_charge_in, d("100"));
+        assert_eq!(judged[3].free_left, d("200"));
     }
 
     #[test]

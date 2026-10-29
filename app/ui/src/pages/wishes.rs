@@ -47,9 +47,9 @@ fn row_ids(row: &WishRow) -> Vec<&str> {
 }
 
 /// One group per cut, in first-cut order, at its lowest amount.
-fn merged_cuts<'a>(verdicts: impl Iterator<Item = &'a Verdict>) -> Vec<Cut> {
+fn merged_cuts<'a>(cuts: impl Iterator<Item = &'a Cut>) -> Vec<Cut> {
     let mut out: Vec<Cut> = Vec::new();
-    for cut in verdicts.flat_map(|v| &v.cuts) {
+    for cut in cuts {
         match out.iter_mut().find(|c| c.group_id == cut.group_id) {
             Some(seen) => seen.to = seen.to.min(cut.to),
             None => out.push(cut.clone()),
@@ -103,7 +103,7 @@ fn total(verdicts: &[&Verdict], part: impl Fn(&Verdict) -> Decimal) -> Decimal {
 fn first_cuts(by_month: &[(&WishMonth, Vec<&Verdict>)]) -> Vec<Cut> {
     by_month
         .iter()
-        .map(|(_, mine)| merged_cuts(mine.iter().copied()))
+        .map(|(_, mine)| merged_cuts(mine.iter().flat_map(|v| &v.cuts)))
         .find(|cuts| !cuts.is_empty())
         .unwrap_or_default()
 }
@@ -132,12 +132,40 @@ fn one_off_line(by_month: &[(&WishMonth, Vec<&Verdict>)], code: &str) -> String 
     if let (Some((month, _)), true) = (first_card, on_card > Decimal::ZERO) {
         let next = month_name(&format::add_months(&month.month, 1));
         let n = amount(on_card, code);
+        let next_short: Decimal = by_month
+            .iter()
+            .map(|(_, v)| total(v, |v| v.next_short))
+            .sum();
+        let next_cuts = merged_cuts(
+            by_month
+                .iter()
+                .flat_map(|(_, v)| v.iter())
+                .flat_map(|v| &v.next_cuts),
+        );
+        if next_short > Decimal::ZERO {
+            let even = if next_cuts.is_empty() {
+                String::new()
+            } else {
+                format!(" even after {}", cuts_phrase(&next_cuts, code))
+            };
+            return format!(
+                "Not affordable — {n} on the card, so {next} starts {} short{even}.",
+                amount(next_short, code)
+            );
+        }
+        let there = if next_cuts.is_empty() {
+            String::new()
+        } else {
+            format!(", so {} in {next}", cuts_phrase(&next_cuts, code))
+        };
         let after = if cuts.is_empty() {
             String::new()
         } else {
             format!(" — after {}", cuts_phrase(&cuts, code))
         };
-        return format!("Affordable with {n} on the card — {next} starts {n} lighter{after}.");
+        return format!(
+            "Affordable with {n} on the card — {next} starts {n} lighter{there}{after}."
+        );
     }
     if !cuts.is_empty() {
         return format!("Affordable if {}.", cuts_phrase(&cuts, code));
@@ -154,20 +182,39 @@ fn one_off_line(by_month: &[(&WishMonth, Vec<&Verdict>)], code: &str) -> String 
     "Affordable.".to_owned()
 }
 
+/// Each month's short (`YYYY-MM`), in month order, with a card charge's
+/// short counted in the month that pays the charge.
+fn shorts_by_month(by_month: &[(&WishMonth, Vec<&Verdict>)]) -> Vec<(String, Decimal)> {
+    let mut out: Vec<(String, Decimal)> = by_month
+        .iter()
+        .map(|(m, v)| (m.month[..7].to_owned(), total(v, |v| v.short)))
+        .collect();
+    for (m, v) in by_month {
+        let next_short = total(v, |v| v.next_short);
+        if next_short > Decimal::ZERO {
+            let next = format::add_months(&m.month, 1);
+            match out.iter_mut().find(|(k, _)| *k == next) {
+                Some((_, n)) => *n += next_short,
+                None => out.push((next, next_short)),
+            }
+        }
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
 /// A recurring wish or bill change, judged over every month it touches.
 fn repeating_line(by_month: &[(&WishMonth, Vec<&Verdict>)], code: &str) -> String {
-    let first_short = by_month
-        .iter()
-        .position(|(_, v)| total(v, |v| v.short) > Decimal::ZERO);
-    if let Some(i) = first_short {
-        let (month, mine) = &by_month[i];
-        let n = amount(total(mine, |v| v.short), code);
-        let from = month_name(&month.month);
-        return match i.checked_sub(1).map(|j| by_month[j].0) {
+    let shorts = shorts_by_month(by_month);
+    if let Some(i) = shorts.iter().position(|(_, n)| *n > Decimal::ZERO) {
+        let (month, n) = &shorts[i];
+        let n = amount(*n, code);
+        let from = month_name(month);
+        return match i.checked_sub(1) {
             None => format!("Not affordable — short by {n} from {from}."),
-            Some(last) => format!(
+            Some(j) => format!(
                 "Fits until {}. From {from}, short by {n}.",
-                month_name(&last.month)
+                month_name(&shorts[j].0)
             ),
         };
     }
@@ -182,7 +229,14 @@ fn repeating_line(by_month: &[(&WishMonth, Vec<&Verdict>)], code: &str) -> Strin
             month_name(&month.month)
         );
     }
-    let cuts = first_cuts(by_month);
+    let mut cuts = first_cuts(by_month);
+    if cuts.is_empty() {
+        cuts = by_month
+            .iter()
+            .map(|(_, mine)| merged_cuts(mine.iter().flat_map(|v| &v.next_cuts)))
+            .find(|c| !c.is_empty())
+            .unwrap_or_default();
+    }
     let card = by_month
         .iter()
         .map(|(_, v)| total(v, |v| v.on_card))
@@ -202,6 +256,11 @@ fn repeating_line(by_month: &[(&WishMonth, Vec<&Verdict>)], code: &str) -> Strin
         return format!("Affordable if {} each month.", cuts_phrase(&cuts, code));
     }
     "Affordable every month.".to_owned()
+}
+
+/// What a month could not pay, across all its verdicts.
+fn month_short(month: &WishMonth) -> Decimal {
+    month.verdicts.iter().map(|v| v.short).sum()
 }
 
 /// `YYYY-MM-DD` of today, local time.
@@ -1341,6 +1400,14 @@ fn month_card(month: &WishMonth, code: &str) -> impl IntoView + use<> {
         money(month.card_charge_in),
         money(month.card_used),
     );
+    let short = month_short(month);
+    let short = (short > Decimal::ZERO).then(|| {
+        view! {
+            <p role="status" class="text-sm font-medium text-negative-fg">
+                {format!("Short by {}", amount(short, code))}
+            </p>
+        }
+    });
     view! {
         <Card tone=CardTone::Muted class="grid gap-3 p-4 sm:p-5">
             <h3 class="text-sm font-semibold">{title}</h3>
@@ -1350,6 +1417,7 @@ fn month_card(month: &WishMonth, code: &str) -> impl IntoView + use<> {
                 <Stat label="Card charge in">{charge}</Stat>
                 <Stat label="Card used">{used}</Stat>
             </div>
+            {short}
         </Card>
     }
 }
@@ -1397,6 +1465,9 @@ mod tests {
             cuts: Vec::new(),
             on_card: Decimal::ZERO,
             short: Decimal::ZERO,
+            set_aside: false,
+            next_short: Decimal::ZERO,
+            next_cuts: Vec::new(),
         }
     }
 
@@ -1673,6 +1744,84 @@ mod tests {
         };
         let months = [month(d(100, 0), d(20, 0), vec![other])];
         assert_eq!(verdict_line(&row("w"), &months), "Affordable.");
+    }
+
+    #[test]
+    fn card_charge_next_month_cannot_pay_names_the_short() {
+        let v = Verdict {
+            on_card: d(500, 0),
+            next_short: d(500, 0),
+            ..verdict("w", d(500, 0))
+        };
+        let months = [month(Decimal::ZERO, Decimal::ZERO, vec![v])];
+        assert_eq!(
+            verdict_line(&row("w"), &months),
+            "Not affordable — €500 on the card, so November starts €500 short."
+        );
+    }
+
+    #[test]
+    fn card_charge_short_also_names_its_cuts() {
+        let v = Verdict {
+            on_card: d(500, 0),
+            next_short: d(380, 0),
+            next_cuts: vec![cut("g1", "Going out", 120, 0)],
+            ..verdict("w", d(500, 0))
+        };
+        let months = [month(Decimal::ZERO, Decimal::ZERO, vec![v])];
+        assert_eq!(
+            verdict_line(&row("w"), &months),
+            "Not affordable — €500 on the card, so November starts €380 short even after going out drops to €0."
+        );
+    }
+
+    #[test]
+    fn card_charge_paid_by_cuts_names_them() {
+        let v = Verdict {
+            on_card: d(100, 0),
+            next_cuts: vec![cut("g1", "Going out", 120, 20)],
+            ..verdict("w", d(100, 0))
+        };
+        let months = [month(Decimal::ZERO, Decimal::ZERO, vec![v])];
+        assert_eq!(
+            verdict_line(&row("w"), &months),
+            "Affordable with €100 on the card — November starts €100 lighter, so going out drops to €20 in November."
+        );
+    }
+
+    #[test]
+    fn recurring_card_charge_short_shows_the_month_after() {
+        let card = |n, next_short| Verdict {
+            on_card: d(n, 0),
+            next_short: d(next_short, 0),
+            ..verdict("w", d(n, 0))
+        };
+        let months = [
+            month_at("2026-10-01", vec![card(60, 0)]),
+            month_at("2026-11-01", vec![card(60, 20)]),
+            month_at("2026-12-01", vec![card(60, 60)]),
+        ];
+        assert_eq!(
+            verdict_line(&repeating("w", Repeat::Monthly), &months),
+            "Fits until November. From December, short by €20."
+        );
+    }
+
+    #[test]
+    fn month_short_sums_every_verdict() {
+        let charge = Verdict {
+            wish_id: None,
+            short: d(30, 0),
+            ..verdict("x", d(30, 0))
+        };
+        let tv = Verdict {
+            short: d(12, 0),
+            ..verdict("w", d(12, 0))
+        };
+        assert_eq!(
+            month_short(&month(Decimal::ZERO, Decimal::ZERO, vec![charge, tv])),
+            d(42, 0)
+        );
     }
 
     #[test]

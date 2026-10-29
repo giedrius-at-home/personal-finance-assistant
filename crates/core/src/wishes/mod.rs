@@ -161,7 +161,7 @@ impl RowContext<'_> {
         let one_off = wish.kind == WishKind::OneOff;
         if wish.status == WishStatus::Planned {
             for v in self.verdicts(&wish.wish_id) {
-                short += v.short;
+                short += v.short + v.next_short;
                 tradeoffs |= !v.cuts.is_empty() || v.on_card > Decimal::ZERO;
             }
             if one_off {
@@ -270,6 +270,26 @@ mod tests {
     }
 
     #[test]
+    fn card_wish_next_month_cannot_pay_is_short() {
+        let a = alloc("0", "0", vec![], vec![]);
+        let mut tv = wish("tv", None, "500", "2026-10-20");
+        tv.source = WishSource::Card;
+        let view = view_from(
+            Some(&a),
+            &[],
+            Decimal::ZERO,
+            &[tv],
+            &WishSettings::default(),
+            &HashMap::new(),
+        );
+        let charge = &view.months[1].verdicts[0];
+        assert_eq!(charge.label, "Credit card");
+        assert_eq!(charge.short, d("500"));
+        assert_eq!(view.wishes[0].short, d("500"));
+        assert!(view.wishes[0].tradeoffs);
+    }
+
+    #[test]
     fn parent_row_aggregates_children_and_rest() {
         let a = alloc("0", "0", vec![], vec![]);
         let mut gone = wish("gone", None, "10", "2026-09-01");
@@ -340,6 +360,9 @@ mod tests {
             cuts,
             on_card: Decimal::ZERO,
             short: Decimal::ZERO,
+            set_aside: false,
+            next_short: Decimal::ZERO,
+            next_cuts: Vec::new(),
         };
         let month = |verdicts| WishMonth {
             month: "2026-10-01".into(),

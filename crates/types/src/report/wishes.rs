@@ -19,7 +19,8 @@ pub struct Cut {
 /// How one purchase (or the previous month's card charge) is paid for.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Verdict {
-    /// `None` is the previous month's card charge.
+    /// `None` is the previous month's card charge ("Credit card") or a month
+    /// that starts short ("Already short").
     pub wish_id: Option<String>,
     pub label: String,
     pub amount: Decimal,
@@ -27,6 +28,15 @@ pub struct Verdict {
     pub cuts: Vec<Cut>,
     pub on_card: Decimal,
     pub short: Decimal,
+    /// A monthly saving set-aside rather than the purchase itself.
+    #[serde(default)]
+    pub set_aside: bool,
+    /// This verdict's share of the next month's card charge that the next
+    /// month could not pay: its short, and the cuts it forced.
+    #[serde(default)]
+    pub next_short: Decimal,
+    #[serde(default)]
+    pub next_cuts: Vec<Cut>,
 }
 
 /// One month of the schedule.
@@ -51,7 +61,7 @@ pub struct WishRow {
     pub rest: Decimal,
     pub over_cap: bool,
     pub monthly_set_aside: Decimal,
-    /// The sum of its verdicts' `short`.
+    /// The sum of its verdicts' `short` and `next_short`.
     pub short: Decimal,
     /// Any verdict with cuts or card use.
     pub tradeoffs: bool,

@@ -218,6 +218,7 @@ pub fn demands(items: &[Planned], current_month: Date, months: usize) -> Vec<Vec
                         label: item.label.clone(),
                         amount,
                         on_card: false,
+                        set_aside: false,
                     });
                 }
             }
@@ -236,6 +237,7 @@ pub fn demands(items: &[Planned], current_month: Date, months: usize) -> Vec<Vec
                     label: format!("Saving for {}", item.label),
                     amount: portion,
                     on_card: false,
+                    set_aside: true,
                 });
             }
         }
@@ -249,6 +251,7 @@ pub fn demands(items: &[Planned], current_month: Date, months: usize) -> Vec<Vec
                     label: item.label.clone(),
                     amount: last,
                     on_card: item.on_card,
+                    set_aside: false,
                 },
             ));
         }
