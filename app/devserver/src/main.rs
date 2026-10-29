@@ -60,6 +60,12 @@ struct WishIdArgs {
 }
 
 #[derive(Deserialize)]
+struct WishMustArgs {
+    wish_id: String,
+    must: bool,
+}
+
+#[derive(Deserialize)]
 struct WishBoughtArgs {
     wish_id: String,
     purchase: finance_types::gateway::WishPurchase,
@@ -241,6 +247,10 @@ fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
         "drop_wish" => {
             let a: WishIdArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
             ok(service.drop_wish(&a.wish_id))
+        }
+        "set_wish_must" => {
+            let a: WishMustArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
+            ok(service.set_wish_must(&a.wish_id, a.must))
         }
         "mark_wish_bought" => {
             let a: WishBoughtArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;

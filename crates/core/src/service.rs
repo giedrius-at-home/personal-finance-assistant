@@ -397,6 +397,10 @@ impl Service {
         self.write(|w, snap| crate::writes::wishes::record_saved(w, snap, wish_id, saved))
     }
 
+    pub fn set_wish_must(&self, wish_id: &str, must: bool) -> Result<Wish, String> {
+        self.write(|w, _| crate::writes::wishes::set_must(w, wish_id, must))
+    }
+
     pub fn drop_wish(&self, wish_id: &str) -> Result<(), String> {
         self.write(|w, _| crate::writes::wishes::drop_wish(w, wish_id))
     }

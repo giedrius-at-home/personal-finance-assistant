@@ -457,6 +457,16 @@ pub struct WishPurchase {
     /// `YYYY-MM-DD`.
     pub on: String,
     pub source: WishSource,
+    /// What went on each credit card.
+    #[serde(default)]
+    pub cards: Vec<CardCharge>,
+}
+
+/// An amount charged to one credit card.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CardCharge {
+    pub card_id: String,
+    pub amount: Decimal,
 }
 
 /// `wishes.payload_json`: a planned purchase. A parent wish is a cap over
@@ -484,6 +494,9 @@ pub struct Wish {
     pub bought: Option<WishPurchase>,
     #[serde(default)]
     pub kind: WishKind,
+    /// A must-have: it is paid for before anything else is.
+    #[serde(default)]
+    pub must: bool,
     pub created_at: String,
 }
 
@@ -502,26 +515,77 @@ pub struct WishDraft {
     pub source: WishSource,
     #[serde(default)]
     pub kind: WishKind,
+    #[serde(default)]
+    pub must: bool,
 }
 
-/// `wish_settings.payload_json`: the credit card the wishes may lean on.
+/// One credit card the wishes may lean on.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
+pub struct CardSettings {
+    pub card_id: String,
+    pub name: String,
+    pub limit: Decimal,
+    pub used: Decimal,
+    /// `YYYY-MM-01` the usage was entered for.
+    pub used_month: String,
+    pub bill_id: Option<String>,
+}
+
+impl CardSettings {
+    fn default_card() -> Self {
+        Self {
+            card_id: "card-1".into(),
+            name: "Credit card".into(),
+            limit: Decimal::from(2500),
+            used: Decimal::ZERO,
+            used_month: String::new(),
+            bill_id: None,
+        }
+    }
+}
+
+/// `wish_settings.payload_json`: the credit cards the wishes may lean on.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "WishSettingsJson")]
 pub struct WishSettings {
-    pub card_limit: Decimal,
-    pub card_used: Decimal,
-    /// The month `card_used` was recorded for (`YYYY-MM-01`).
-    pub card_used_month: String,
-    pub card_bill_id: Option<String>,
+    pub cards: Vec<CardSettings>,
+}
+
+/// The stored shape: `cards`, or the single-card fields older rows have.
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct WishSettingsJson {
+    cards: Vec<CardSettings>,
+    card_limit: Option<Decimal>,
+    card_used: Option<Decimal>,
+    card_used_month: Option<String>,
+    card_bill_id: Option<String>,
+}
+
+impl From<WishSettingsJson> for WishSettings {
+    fn from(json: WishSettingsJson) -> Self {
+        if !json.cards.is_empty() {
+            return Self { cards: json.cards };
+        }
+        match json.card_limit {
+            Some(limit) => Self {
+                cards: vec![CardSettings {
+                    limit,
+                    used: json.card_used.unwrap_or_default(),
+                    used_month: json.card_used_month.unwrap_or_default(),
+                    bill_id: json.card_bill_id,
+                    ..CardSettings::default_card()
+                }],
+            },
+            None => Self::default(),
+        }
+    }
 }
 
 impl Default for WishSettings {
     fn default() -> Self {
         Self {
-            card_limit: Decimal::from(2500),
-            card_used: Decimal::ZERO,
-            card_used_month: String::new(),
-            card_bill_id: None,
+            cards: vec![CardSettings::default_card()],
         }
     }
 }
@@ -554,5 +618,30 @@ mod tests {
                 ends_on: None
             }
         );
+    }
+
+    #[test]
+    fn old_settings_json_becomes_one_card() {
+        let json = r#"{"card_limit":"3000","card_used":"120","card_used_month":"2026-10-01","card_bill_id":"b1"}"#;
+        let s: WishSettings = serde_json::from_str(json).unwrap();
+        assert_eq!(s.cards.len(), 1);
+        assert_eq!(s.cards[0].name, "Credit card");
+        assert_eq!(s.cards[0].limit, Decimal::from(3000));
+        assert_eq!(s.cards[0].used, Decimal::from(120));
+        assert_eq!(s.cards[0].bill_id.as_deref(), Some("b1"));
+        let back = serde_json::to_string(&s).unwrap();
+        assert!(back.contains("\"cards\"") && !back.contains("card_limit"));
+    }
+
+    #[test]
+    fn old_wish_json_is_not_must_and_purchase_has_no_cards() {
+        let json = r#"{"wish_id":"w","name":"Bike","amount":"900","currency":{"code":"EUR","minor_unit":2},"due_on":"2026-12-01","source":{"kind":"card"},"created_at":"x"}"#;
+        let wish: Wish = serde_json::from_str(json).unwrap();
+        assert!(!wish.must);
+        let p: WishPurchase =
+            serde_json::from_str(r#"{"amount":"10","on":"2026-10-01","source":{"kind":"card"}}"#)
+                .unwrap();
+        assert!(p.cards.is_empty());
+        assert_eq!(WishSettings::default().cards[0].limit, Decimal::from(2500));
     }
 }

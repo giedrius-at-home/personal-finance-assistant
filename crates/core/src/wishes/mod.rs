@@ -12,9 +12,8 @@ use finance_types::report::allocation::CurrencyAllocation;
 use finance_types::report::wishes::{ChangeableBill, Cut, Verdict, WishMonth, WishRow, WishesView};
 use finance_types::report::{Currency, Dashboard};
 use jiff::civil::Date;
-use ladder::Demand;
 use rust_decimal::Decimal;
-use schedule::{BillNow, Family, Planned};
+use schedule::{BillNow, Family, Planned, Saver};
 use std::collections::HashMap;
 
 use crate::load::Bill;
@@ -28,11 +27,11 @@ pub fn wishes_view(
     wishes: &[Wish],
     settings: &WishSettings,
 ) -> WishesView {
-    let (plans, card_bill, bills) = dashboard_parts(dashboard, stored_plans, bills, settings);
+    let (plans, card_bills, bills) = dashboard_parts(dashboard, stored_plans, bills, settings);
     Inputs {
         alloc: allocation(dashboard),
         plans,
-        card_bill,
+        card_bills,
         bills: &bills,
     }
     .view(wishes, settings)
@@ -49,11 +48,11 @@ pub fn purchase_cuts(
     wish_id: &str,
     purchase: &WishPurchase,
 ) -> Vec<Cut> {
-    let (plans, card_bill, bills) = dashboard_parts(dashboard, stored_plans, bills, settings);
+    let (plans, card_bills, bills) = dashboard_parts(dashboard, stored_plans, bills, settings);
     Inputs {
         alloc: allocation(dashboard),
         plans,
-        card_bill,
+        card_bills,
         bills: &bills,
     }
     .purchase_cuts(wishes, settings, wish_id, purchase)
@@ -84,13 +83,20 @@ fn allocation(dashboard: &Dashboard) -> Option<&CurrencyAllocation> {
     })
 }
 
-/// The budget plans, the card bill's amount and the bills as they stand.
+/// Plans, each card's linked bill amount, and the bills the judging knows.
+type DashboardParts = (
+    Vec<BudgetPlan>,
+    Vec<(String, Decimal)>,
+    HashMap<String, BillNow>,
+);
+
+/// The budget plans, each card's bill amount and the bills as they stand.
 fn dashboard_parts(
     dashboard: &Dashboard,
     stored_plans: &[BudgetPlan],
     bills: &[Bill],
     settings: &WishSettings,
-) -> (Vec<BudgetPlan>, Decimal, HashMap<String, BillNow>) {
+) -> DashboardParts {
     let plans = view_plans(
         dashboard
             .monthly_budgets
@@ -99,21 +105,22 @@ fn dashboard_parts(
             .collect(),
         stored_plans,
     );
-    // The card bill is already counted in next month's fixed costs.
-    let card_bill = settings
-        .card_bill_id
-        .as_deref()
-        .and_then(|bill_id| {
-            dashboard
-                .next_month_subscriptions
-                .as_ref()
-                .unwrap_or(&dashboard.subscriptions)
-                .rows
-                .iter()
-                .find(|row| row.bill_id == bill_id)
+    // Each card's bill is already counted in next month's fixed costs.
+    let rows = &dashboard
+        .next_month_subscriptions
+        .as_ref()
+        .unwrap_or(&dashboard.subscriptions)
+        .rows;
+    let card_bills = settings
+        .cards
+        .iter()
+        .filter_map(|card| {
+            let bill_id = card.bill_id.as_deref()?;
+            let row = rows.iter().find(|row| row.bill_id == bill_id)?;
+            Some((card.card_id.clone(), row.amount_max))
         })
-        .map_or(Decimal::ZERO, |row| row.amount_max);
-    (plans, card_bill, bills_now(dashboard, bills))
+        .collect();
+    (plans, card_bills, bills_now(dashboard, bills))
 }
 
 /// The schedule the judging knows a bill by (Firefly's frequency and skip);
@@ -156,7 +163,7 @@ fn bills_now(dashboard: &Dashboard, bills: &[Bill]) -> HashMap<String, BillNow> 
 pub struct Inputs<'a> {
     pub alloc: Option<&'a CurrencyAllocation>,
     pub plans: Vec<BudgetPlan>,
-    pub card_bill: Decimal,
+    pub card_bills: Vec<(String, Decimal)>,
     pub bills: &'a HashMap<String, BillNow>,
 }
 
@@ -169,19 +176,19 @@ impl Inputs<'_> {
         items: &[Planned],
         wishes: &[Wish],
         settings: &WishSettings,
-    ) -> (Vec<WishMonth>, Vec<Vec<Demand>>, bool) {
+    ) -> (Vec<WishMonth>, Vec<String>) {
         let months = schedule::horizon(items, month0);
-        let demands = schedule::demands(items, month0, months);
-        let (bases, card_stale) = baseline::baselines(
+        let (bases, stale_cards) = baseline::baselines(
             alloc,
             &self.plans,
-            self.card_bill,
+            &self.card_bills,
             settings,
             schedule::earmarked(wishes),
             months,
         );
-        let judged = ladder::judge(&bases, &demands, settings.card_limit);
-        (judged, demands, card_stale)
+        let mut saver = Saver::new(items, month0, months);
+        let repeats = schedule::repeat_demands(items, month0, months);
+        (ladder::judge(&bases, &repeats, &mut saver), stale_cards)
     }
 
     /// The wishes screen.
@@ -189,8 +196,8 @@ impl Inputs<'_> {
         let judged = self.alloc.and_then(|a| {
             let month0 = baseline::current_month(a)?;
             let (items, families) = schedule::plan_items(wishes, month0, self.bills);
-            let (judged, demands, card_stale) = self.judge(a, month0, &items, wishes, settings);
-            Some((judged, families, demands, card_stale))
+            let (judged, stale) = self.judge(a, month0, &items, wishes, settings);
+            Some((judged, families, stale))
         });
         let currency = self.alloc.map_or_else(
             || {
@@ -200,12 +207,11 @@ impl Inputs<'_> {
             },
             |a| a.currency.clone(),
         );
-        let (months, families, demands, card_stale) = judged.unwrap_or_default();
+        let (months, families, stale_cards) = judged.unwrap_or_default();
         let ctx = RowContext {
             wishes,
             months: &months,
             families: &families,
-            month0: demands.first().map_or(&[], Vec::as_slice),
             bills: self.bills,
         };
         let mut tops: Vec<&Wish> = wishes.iter().filter(|w| w.parent_id.is_none()).collect();
@@ -222,7 +228,8 @@ impl Inputs<'_> {
         WishesView {
             currency,
             settings: settings.clone(),
-            card_stale,
+            card_stale: !stale_cards.is_empty(),
+            stale_cards,
             wishes: tops.into_iter().map(|w| ctx.row(w)).collect(),
             months,
             changeable_bills,
@@ -262,8 +269,13 @@ impl Inputs<'_> {
             created_at: wish.created_at.clone(),
             per_month: None,
             saved_this_month: false,
+            // A sub-wish of a must wish is a must too, as the view judges it.
+            must: wish.must
+                || wishes
+                    .iter()
+                    .any(|p| Some(&p.wish_id) == wish.parent_id.as_ref() && p.must),
         });
-        let (judged, _, _) = self.judge(alloc, month0, &items, wishes, settings);
+        let (judged, _) = self.judge(alloc, month0, &items, wishes, settings);
         judged
             .first()
             .map(|m| {
@@ -281,7 +293,7 @@ impl Inputs<'_> {
 pub fn view_from(
     alloc: Option<&CurrencyAllocation>,
     plans: &[BudgetPlan],
-    card_bill: Decimal,
+    card_bills: Vec<(String, Decimal)>,
     wishes: &[Wish],
     settings: &WishSettings,
     bills: &HashMap<String, BillNow>,
@@ -289,7 +301,7 @@ pub fn view_from(
     Inputs {
         alloc,
         plans: plans.to_vec(),
-        card_bill,
+        card_bills,
         bills,
     }
     .view(wishes, settings)
@@ -303,7 +315,6 @@ struct RowContext<'a> {
     wishes: &'a [Wish],
     months: &'a [WishMonth],
     families: &'a [Family],
-    month0: &'a [Demand],
     bills: &'a HashMap<String, BillNow>,
 }
 
@@ -315,11 +326,14 @@ impl RowContext<'_> {
             .filter(move |v| v.wish_id.as_deref() == Some(wish_id))
     }
 
+    /// What month 0 sets aside for `wish_id` (a skipped month sets nothing).
     fn set_aside(&self, wish_id: &str) -> Decimal {
-        self.month0
-            .iter()
-            .filter(|d| d.wish_id.as_deref() == Some(wish_id) && d.set_aside)
-            .map(|d| d.amount)
+        self.months
+            .first()
+            .into_iter()
+            .flat_map(|m| &m.verdicts)
+            .filter(|v| v.wish_id.as_deref() == Some(wish_id) && v.set_aside && !v.skipped)
+            .map(|v| v.amount)
             .sum()
     }
 
@@ -387,7 +401,9 @@ impl RowContext<'_> {
         if wish.status == WishStatus::Planned {
             for v in self.verdicts(&wish.wish_id) {
                 short += v.short + v.next_short;
-                tradeoffs |= !v.cuts.is_empty() || v.on_card > Decimal::ZERO;
+                tradeoffs |= !v.cuts.is_empty()
+                    || v.on_card > Decimal::ZERO
+                    || v.from_savings > Decimal::ZERO;
             }
             if one_off {
                 monthly_set_aside = self.set_aside(&wish.wish_id);
@@ -447,7 +463,7 @@ pub fn month_zero_cuts(view: &WishesView, wish_id: &str) -> Vec<Cut> {
 mod tests {
     use super::baseline::tests::{alloc, d, plan, plan_group, row};
     use super::*;
-    use finance_types::gateway::{WishPurchase, WishSource, WishStatus};
+    use finance_types::gateway::{CardSettings, WishPurchase, WishSource, WishStatus};
     use finance_types::report::Currency;
 
     fn wish(id: &str, parent: Option<&str>, amount: &str, due: &str) -> Wish {
@@ -466,6 +482,7 @@ mod tests {
             status: WishStatus::Planned,
             bought: None,
             kind: WishKind::OneOff,
+            must: false,
             created_at: format!("2026-01-01T00:00:{id}"),
         }
     }
@@ -511,22 +528,12 @@ mod tests {
                 plan_group("g-groc", "Groceries", Some(1), Some("300")),
             ],
         )];
-        let s = WishSettings {
-            card_limit: Decimal::ZERO,
-            ..WishSettings::default()
-        };
+        let s = no_card_room();
         let ws = [wish("tv", None, "200", "2026-10-20")];
-        let alone = view_from(
-            Some(&a),
-            &dashboard,
-            Decimal::ZERO,
-            &ws,
-            &s,
-            &HashMap::new(),
-        );
+        let alone = view_from(Some(&a), &dashboard, Vec::new(), &ws, &s, &HashMap::new());
         assert!(alone.months[0].verdicts[0].cuts.is_empty());
         let plans = view_plans(dashboard.to_vec(), &stored);
-        let view = view_from(Some(&a), &plans, Decimal::ZERO, &ws, &s, &HashMap::new());
+        let view = view_from(Some(&a), &plans, Vec::new(), &ws, &s, &HashMap::new());
         let cuts = &view.months[0].verdicts[0].cuts;
         assert_eq!(cuts[0].group_id, "going-out");
         assert_eq!((cuts[0].from, cuts[0].to), (d("120"), d("0")));
@@ -558,7 +565,7 @@ mod tests {
         let view = view_from(
             Some(&a),
             &going_out_plan(),
-            Decimal::ZERO,
+            Vec::new(),
             &[wish("tv", None, "150", "2026-10-20")],
             &WishSettings::default(),
             &HashMap::new(),
@@ -585,7 +592,7 @@ mod tests {
         let view = view_from(
             Some(&a),
             &[],
-            Decimal::ZERO,
+            Vec::new(),
             &[tv],
             &WishSettings::default(),
             &HashMap::new(),
@@ -597,11 +604,52 @@ mod tests {
         assert!(view.wishes[0].tradeoffs);
     }
 
+    fn named_card(id: &str, used: &str, used_month: &str) -> CardSettings {
+        CardSettings {
+            card_id: id.into(),
+            name: id.into(),
+            used: d(used),
+            used_month: used_month.into(),
+            ..WishSettings::default().cards[0].clone()
+        }
+    }
+
+    #[test]
+    fn view_reports_stale_cards_and_per_card_payback() {
+        let a = alloc("0", "0", vec![], vec![]);
+        let mut tv = wish("w", None, "120", "2026-10-20");
+        tv.source = WishSource::Card;
+        let settings = WishSettings {
+            cards: vec![
+                named_card("visa", "50", "2026-10-01"),
+                named_card("mc", "10", "2026-09-01"),
+            ],
+        };
+        let view = view_from(Some(&a), &[], Vec::new(), &[tv], &settings, &HashMap::new());
+        assert_eq!(view.stale_cards, vec!["mc".to_string()]);
+        assert!(view.card_stale);
+        assert_eq!(
+            view.months[0].cards.iter().map(|c| c.used).sum::<Decimal>(),
+            d("170")
+        );
+        assert_eq!(view.months[1].card_charge_in, d("170"));
+    }
+
+    fn no_card_room() -> WishSettings {
+        WishSettings {
+            cards: vec![CardSettings {
+                limit: Decimal::ZERO,
+                ..WishSettings::default().cards[0].clone()
+            }],
+        }
+    }
+
     fn buy(amount: &str, on: &str, source: WishSource) -> WishPurchase {
         WishPurchase {
             amount: d(amount),
             on: on.into(),
             source,
+            cards: Vec::new(),
         }
     }
 
@@ -622,16 +670,13 @@ mod tests {
         );
         let mut tv = wish("tv", None, "900", "2026-12-20");
         tv.saved = d("100");
-        let s = WishSettings {
-            card_limit: Decimal::ZERO,
-            ..WishSettings::default()
-        };
+        let s = no_card_room();
         let wishes = [tv];
         let bills = HashMap::new();
         let inputs = Inputs {
             alloc: Some(&a),
             plans: going_out_plan(),
-            card_bill: Decimal::ZERO,
+            card_bills: Vec::new(),
             bills: &bills,
         };
         // While planned, month 0 only sets aside a third of the gap, and a
@@ -667,6 +712,45 @@ mod tests {
     }
 
     #[test]
+    fn buying_a_sub_of_a_must_wish_is_judged_as_must() {
+        let a = alloc(
+            "250",
+            "0",
+            vec![row("Going out", "1000", "0")],
+            vec![row("Going out", "1000", "0")],
+        );
+        // An optional wish setting aside 200 in month 0 (600 over 3 months).
+        let tv = wish("tv", None, "600", "2026-12-20");
+        let mut trip = wish("trip", None, "100", "2026-12-31");
+        trip.must = true;
+        let hotel = wish("hotel", Some("trip"), "100", "2026-12-31");
+        let wishes = [tv, trip, hotel];
+        let bills = HashMap::new();
+        let inputs = Inputs {
+            alloc: Some(&a),
+            plans: going_out_plan(),
+            card_bills: Vec::new(),
+            bills: &bills,
+        };
+        let view = inputs.view(&wishes, &no_card_room());
+        assert!(
+            view.months[0]
+                .verdicts
+                .iter()
+                .any(|v| v.wish_id.as_deref() == Some("tv") && v.set_aside && v.amount == d("200"))
+        );
+        // The must purchase is judged before the optional set-aside, so the
+        // 250 free covers it and nothing is cut.
+        let cuts = inputs.purchase_cuts(
+            &wishes,
+            &no_card_room(),
+            "hotel",
+            &buy("100", "2026-10-15", account()),
+        );
+        assert!(cuts.is_empty(), "{cuts:?}");
+    }
+
+    #[test]
     fn unjudged_rows_say_why() {
         let a = alloc("1000", "1000", vec![], vec![]);
         let mut saved = wish("saved", None, "40", "2026-10-20");
@@ -685,7 +769,7 @@ mod tests {
         let view = view_from(
             Some(&a),
             &[],
-            Decimal::ZERO,
+            Vec::new(),
             &ws,
             &WishSettings::default(),
             &HashMap::new(),
@@ -716,11 +800,8 @@ mod tests {
             wish("later", None, "60", "2026-12-01"),
             gone,
         ];
-        let s = WishSettings {
-            card_limit: Decimal::ZERO,
-            ..WishSettings::default()
-        };
-        let view = view_from(Some(&a), &[], Decimal::ZERO, &ws, &s, &HashMap::new());
+        let s = no_card_room();
+        let view = view_from(Some(&a), &[], Vec::new(), &ws, &s, &HashMap::new());
         let ids: Vec<_> = view
             .wishes
             .iter()
@@ -737,10 +818,46 @@ mod tests {
         // Nothing is affordable: trip's short is its rest plus its hotel.
         assert_eq!(trip.children[0].short, d("400"));
         assert_eq!(trip.short, d("1000"));
+        // Must-wishes addendum: an optional set-aside that does not fit
+        // without the cards is skipped, so a month with nothing free sets
+        // nothing aside (it would be hotel 400/2, rest 600/3).
+        assert_eq!(trip.children[0].monthly_set_aside, Decimal::ZERO);
+        assert_eq!(trip.monthly_set_aside, Decimal::ZERO);
+        assert_eq!(view.wishes[1].monthly_set_aside, Decimal::ZERO);
+    }
+
+    #[test]
+    fn wish_paid_from_savings_is_a_tradeoff() {
+        let mut a = alloc("0", "0", vec![], vec![]);
+        a.savings_balance = d("500");
+        let ws = [wish("tv", None, "150", "2026-10-20")];
+        let s = no_card_room();
+        let view = view_from(Some(&a), &[], Vec::new(), &ws, &s, &HashMap::new());
+        let v = &view.months[0].verdicts[0];
+        assert_eq!(v.from_savings, d("150"));
+        assert!(view.wishes[0].tradeoffs);
+        assert_eq!(view.wishes[0].short, Decimal::ZERO);
+    }
+
+    #[test]
+    fn parent_row_sums_month_zero_set_asides_that_fit() {
+        let a = alloc("1000", "1000", vec![], vec![]);
+        let ws = [
+            wish("trip", None, "1000", "2026-12-31"),
+            wish("hotel", Some("trip"), "400", "2026-11-10"),
+            wish("later", None, "60", "2026-12-01"),
+        ];
+        let s = no_card_room();
+        let view = view_from(Some(&a), &[], Vec::new(), &ws, &s, &HashMap::new());
+        let trip = view
+            .wishes
+            .iter()
+            .find(|r| r.wish.wish_id == "trip")
+            .unwrap();
         // Month 0 set-asides: hotel 400/2, rest 600/3.
         assert_eq!(trip.children[0].monthly_set_aside, d("200"));
         assert_eq!(trip.monthly_set_aside, d("400"));
-        assert_eq!(view.wishes[1].monthly_set_aside, d("20"));
+        assert_eq!(trip.short, Decimal::ZERO);
     }
 
     #[test]
@@ -748,7 +865,7 @@ mod tests {
         let view = view_from(
             None,
             &[],
-            Decimal::ZERO,
+            Vec::new(),
             &[wish("tv", None, "150", "2026-10-20")],
             &WishSettings::default(),
             &HashMap::new(),
@@ -774,25 +891,32 @@ mod tests {
             label: String::new(),
             amount: Decimal::ZERO,
             from_free: Decimal::ZERO,
+            from_savings: Decimal::ZERO,
             cuts,
             on_card: Decimal::ZERO,
             short: Decimal::ZERO,
             set_aside: false,
             next_short: Decimal::ZERO,
             next_cuts: Vec::new(),
+            must: false,
+            skipped: false,
         };
         let month = |verdicts| WishMonth {
             month: "2026-10-01".into(),
             free_before: Decimal::ZERO,
             free_left: Decimal::ZERO,
+            savings_before: Decimal::ZERO,
+            savings_left: Decimal::ZERO,
             card_charge_in: Decimal::ZERO,
             card_used: Decimal::ZERO,
+            cards: Vec::new(),
             verdicts,
         };
         let view = WishesView {
             currency: Currency::eur(),
             settings: WishSettings::default(),
             card_stale: false,
+            stale_cards: Vec::new(),
             changeable_bills: Vec::new(),
             months: vec![
                 month(vec![

@@ -1,8 +1,8 @@
 //! Wishes: planned purchases the owner saves toward, drops or buys.
 
 use finance_types::gateway::{
-    BillCreateRequest, BillEditRequest, BillRef, BudgetPlan, Repeat, Wish, WishDraft, WishKind,
-    WishPurchase, WishSettings, WishSource, WishStatus,
+    BillCreateRequest, BillEditRequest, BillRef, BudgetPlan, CardCharge, Repeat, Wish, WishDraft,
+    WishKind, WishPurchase, WishSettings, WishSource, WishStatus,
 };
 use finance_types::report::Currency;
 use finance_types::report::wishes::Cut;
@@ -120,6 +120,9 @@ pub fn save_wish(w: &Writer<'_>, snap: &Snapshot, draft: WishDraft) -> Result<Wi
         if draft.wish_id.as_deref() == Some(parent_id.as_str()) {
             return Err(invalid("a wish cannot be its own parent"));
         }
+        if draft.must && !parent.must {
+            return Err(invalid(MUST_PARENT));
+        }
         if let Some(id) = &draft.wish_id
             && wishes.iter().any(|x| x.parent_id.as_deref() == Some(id))
         {
@@ -130,6 +133,7 @@ pub fn save_wish(w: &Writer<'_>, snap: &Snapshot, draft: WishDraft) -> Result<Wi
         Some(id) => {
             let old = planned(find(&wishes, id)?)?;
             Wish {
+                must: draft.must,
                 parent_id: draft.parent_id,
                 name: name.to_owned(),
                 amount: draft.amount,
@@ -157,11 +161,52 @@ pub fn save_wish(w: &Writer<'_>, snap: &Snapshot, draft: WishDraft) -> Result<Wi
                 status: WishStatus::Planned,
                 bought: None,
                 kind: draft.kind,
+                must: draft.must,
                 created_at: w.stamp(),
             }
         }
     };
     store(w, &wish)?;
+    if !wish.must {
+        unmust_children(w, &wishes, &wish.wish_id)?;
+    }
+    Ok(wish)
+}
+
+const MUST_PARENT: &str = "only parts of a must wish can be must";
+
+/// Clear the must flag on every planned sub-wish of `parent_id`.
+fn unmust_children(w: &Writer<'_>, wishes: &[Wish], parent_id: &str) -> Result<()> {
+    for child in wishes.iter().filter(|x| {
+        x.parent_id.as_deref() == Some(parent_id) && x.status == WishStatus::Planned && x.must
+    }) {
+        store(
+            w,
+            &Wish {
+                must: false,
+                ..child.clone()
+            },
+        )?;
+    }
+    Ok(())
+}
+
+/// Flag a planned wish as must (or not). A sub-wish can be must only under
+/// a must parent; clearing a parent clears its planned sub-wishes.
+pub fn set_must(w: &Writer<'_>, wish_id: &str, must: bool) -> Result<Wish> {
+    let wishes = load_wishes(&w.tx)?;
+    let wish = planned(find(&wishes, wish_id)?)?;
+    if must && let Some(parent_id) = &wish.parent_id {
+        let parent_must = wishes.iter().any(|x| &x.wish_id == parent_id && x.must);
+        if !parent_must {
+            return Err(invalid(MUST_PARENT));
+        }
+    }
+    let wish = Wish { must, ..wish };
+    store(w, &wish)?;
+    if !must {
+        unmust_children(w, &wishes, wish_id)?;
+    }
     Ok(wish)
 }
 
@@ -220,6 +265,59 @@ fn put_settings(w: &Writer<'_>, settings: &WishSettings) -> Result<()> {
     )
 }
 
+/// What each card takes of a card purchase: the owner's split, checked, or
+/// (none given) the cards filled in list order up to their free limit for
+/// `month`, the last card taking any overflow.
+fn card_charges(
+    settings: &WishSettings,
+    purchase: &WishPurchase,
+    month: Date,
+) -> Result<Vec<CardCharge>> {
+    if !purchase.cards.is_empty() {
+        // A card that takes nothing is no charge: it must not touch the
+        // card's recorded usage.
+        let given: Vec<CardCharge> = purchase
+            .cards
+            .iter()
+            .filter(|c| !c.amount.is_zero())
+            .cloned()
+            .collect();
+        let known = given
+            .iter()
+            .all(|c| settings.cards.iter().any(|s| s.card_id == c.card_id));
+        if !known {
+            return Err(invalid("unknown card"));
+        }
+        let total: Decimal = given.iter().map(|c| c.amount).sum();
+        if total != purchase.amount || given.iter().any(|c| c.amount < Decimal::ZERO) {
+            return Err(invalid("card amounts must add up to the purchase"));
+        }
+        return Ok(given);
+    }
+    let mut left = purchase.amount;
+    let mut charges = Vec::new();
+    let last = settings.cards.len().saturating_sub(1);
+    for (i, card) in settings.cards.iter().enumerate() {
+        let used = match card.used_month.parse::<Date>() {
+            Ok(d) if d.first_of_month() == month => card.used,
+            _ => Decimal::ZERO,
+        };
+        let take = if i == last {
+            left
+        } else {
+            left.min((card.limit - used).max(Decimal::ZERO))
+        };
+        if take > Decimal::ZERO {
+            charges.push(CardCharge {
+                card_id: card.card_id.clone(),
+                amount: take,
+            });
+            left -= take;
+        }
+    }
+    Ok(charges)
+}
+
 /// Buy a planned wish (on or before today). A card purchase raises the card
 /// usage of its budget month, rolling an older recorded month forward, and
 /// `cuts` trim the running budget month (the month the view calls month 0).
@@ -247,6 +345,14 @@ pub fn mark_bought(
         return Err(invalid("wish account is unknown"));
     }
     let wish = planned(find(&load_wishes(&w.tx)?, wish_id)?)?;
+    let month = ctx.resolver.period_for(on, None);
+    let mut settings = load_wish_settings(&w.tx)?;
+    let mut purchase = purchase;
+    if purchase.source == WishSource::Card {
+        purchase.cards = card_charges(&settings, &purchase, month)?;
+    } else {
+        purchase.cards.clear();
+    }
     let bought = Wish {
         status: WishStatus::Bought,
         bought: Some(purchase.clone()),
@@ -254,29 +360,37 @@ pub fn mark_bought(
     };
     store(w, &bought)?;
     if purchase.source == WishSource::Card {
-        let month = ctx.resolver.period_for(on, None);
-        let settings = load_wish_settings(&w.tx)?;
-        let recorded = settings
-            .card_used_month
-            .parse::<Date>()
-            .ok()
-            .map(|d| d.first_of_month());
-        let settings = match recorded {
-            // Bought before this budget month: already charged.
-            _ if month < ctx.current_month() => None,
-            Some(m) if m == month => Some(WishSettings {
-                card_used: settings.card_used + purchase.amount,
-                ..settings
-            }),
-            // The recorded month is later: this purchase was charged already.
-            Some(m) if m > month => None,
-            _ => Some(WishSettings {
-                card_used: purchase.amount,
-                card_used_month: month.to_string(),
-                ..settings
-            }),
-        };
-        if let Some(settings) = settings {
+        let mut changed = false;
+        for charge in &purchase.cards {
+            let Some(card) = settings
+                .cards
+                .iter_mut()
+                .find(|c| c.card_id == charge.card_id)
+            else {
+                continue;
+            };
+            let recorded = card
+                .used_month
+                .parse::<Date>()
+                .ok()
+                .map(|d| d.first_of_month());
+            match recorded {
+                // Bought before this budget month: already charged.
+                _ if month < ctx.current_month() => {}
+                Some(m) if m == month => {
+                    card.used += charge.amount;
+                    changed = true;
+                }
+                // The recorded month is later: this purchase was charged already.
+                Some(m) if m > month => {}
+                _ => {
+                    card.used = charge.amount;
+                    card.used_month = month.to_string();
+                    changed = true;
+                }
+            }
+        }
+        if changed {
             put_settings(w, &settings)?;
         }
     }
@@ -418,14 +532,33 @@ pub fn mark_started(
     Ok(started)
 }
 
-/// Store the card limit and its usage.
-pub fn save_wish_settings(w: &Writer<'_>, settings: WishSettings) -> Result<WishSettings> {
-    if settings.card_limit <= Decimal::ZERO
-        || settings.card_used < Decimal::ZERO
-        || !settings.card_used_month.ends_with("-01")
-        || settings.card_used_month.parse::<Date>().is_err()
-    {
-        return Err(invalid("invalid card settings"));
+/// Store the cards and their usage. Cards without an id get a fresh one.
+pub fn save_wish_settings(w: &Writer<'_>, mut settings: WishSettings) -> Result<WishSettings> {
+    if settings.cards.is_empty() {
+        return Err(invalid("at least one card is needed"));
+    }
+    for card in &mut settings.cards {
+        let name = card.name.trim();
+        if name.is_empty()
+            || name.chars().count() > 64
+            || card.limit <= Decimal::ZERO
+            || card.used < Decimal::ZERO
+            || !card.used_month.ends_with("-01")
+            || card.used_month.parse::<Date>().is_err()
+        {
+            return Err(invalid("invalid card settings"));
+        }
+        card.name = name.to_owned();
+        if card.card_id.trim().is_empty() {
+            let id: String =
+                w.tx.query_row("SELECT lower(hex(randomblob(16)))", [], |r| r.get(0))?;
+            card.card_id = format!("card-{id}");
+        }
+    }
+    let mut ids: Vec<&str> = settings.cards.iter().map(|c| c.card_id.as_str()).collect();
+    ids.sort_unstable();
+    if ids.windows(2).any(|pair| pair[0] == pair[1]) {
+        return Err(invalid("card ids must be unique"));
     }
     put_settings(w, &settings)?;
     Ok(settings)
@@ -435,7 +568,7 @@ pub fn save_wish_settings(w: &Writer<'_>, settings: WishSettings) -> Result<Wish
 mod tests {
     use super::*;
     use crate::writes::fixture::{Db, db};
-    use finance_types::gateway::{BudgetGroup, BudgetPlan, Repeat, WishKind};
+    use finance_types::gateway::{BudgetGroup, BudgetPlan, CardSettings, Repeat, WishKind};
     use finance_types::report::Currency;
 
     fn draft(name: &str) -> WishDraft {
@@ -448,11 +581,181 @@ mod tests {
             due_on: "2026-12-01".into(),
             source: WishSource::Card,
             kind: Default::default(),
+            must: false,
         }
     }
 
     fn message<T>(result: Result<T>) -> String {
         result.err().expect("rejected").to_string()
+    }
+
+    fn card(id: &str, name: &str, limit: &str, used: &str, month: &str) -> CardSettings {
+        CardSettings {
+            card_id: id.into(),
+            name: name.into(),
+            limit: limit.parse().unwrap(),
+            used: used.parse().unwrap(),
+            used_month: month.into(),
+            bill_id: None,
+        }
+    }
+
+    #[test]
+    fn must_cascades_and_is_bounded_by_parent() {
+        let mut db = db();
+        let parent = db.write(|w, s| save_wish(w, s, draft("Trip"))).unwrap();
+        let sub_draft = WishDraft {
+            parent_id: Some(parent.wish_id.clone()),
+            ..draft("Flights")
+        };
+        let sub = db.write(|w, s| save_wish(w, s, sub_draft)).unwrap();
+        let err = db.write(|w, _| set_must(w, &sub.wish_id, true));
+        assert_eq!(message(err), "only parts of a must wish can be must");
+        let must_sub = WishDraft {
+            parent_id: Some(parent.wish_id.clone()),
+            must: true,
+            ..draft("Hotel")
+        };
+        assert_eq!(
+            message(db.write(|w, s| save_wish(w, s, must_sub))),
+            "only parts of a must wish can be must"
+        );
+        db.write(|w, _| set_must(w, &parent.wish_id, true)).unwrap();
+        db.write(|w, _| set_must(w, &sub.wish_id, true)).unwrap();
+        db.write(|w, _| set_must(w, &parent.wish_id, false))
+            .unwrap();
+        let wishes = load_wishes(db.store.connection()).unwrap();
+        assert!(wishes.iter().all(|w| !w.must));
+    }
+
+    #[test]
+    fn edit_unflagging_parent_cascades() {
+        let mut db = db();
+        let parent = db
+            .write(|w, s| {
+                save_wish(
+                    w,
+                    s,
+                    WishDraft {
+                        must: true,
+                        ..draft("Trip")
+                    },
+                )
+            })
+            .unwrap();
+        let sub = WishDraft {
+            parent_id: Some(parent.wish_id.clone()),
+            must: true,
+            ..draft("Flights")
+        };
+        db.write(|w, s| save_wish(w, s, sub)).unwrap();
+        let edit = WishDraft {
+            wish_id: Some(parent.wish_id.clone()),
+            must: false,
+            ..draft("Trip")
+        };
+        db.write(|w, s| save_wish(w, s, edit)).unwrap();
+        let wishes = load_wishes(db.store.connection()).unwrap();
+        assert_eq!(wishes.len(), 2);
+        assert!(wishes.iter().all(|w| !w.must));
+    }
+
+    #[test]
+    fn edit_sub_must_under_optional_parent_is_refused() {
+        let mut db = db();
+        let parent = db.write(|w, s| save_wish(w, s, draft("Trip"))).unwrap();
+        let sub_draft = WishDraft {
+            parent_id: Some(parent.wish_id.clone()),
+            ..draft("Flights")
+        };
+        let sub = db.write(|w, s| save_wish(w, s, sub_draft)).unwrap();
+        let edit = WishDraft {
+            wish_id: Some(sub.wish_id.clone()),
+            parent_id: Some(parent.wish_id.clone()),
+            must: true,
+            ..draft("Flights")
+        };
+        assert_eq!(
+            message(db.write(|w, s| save_wish(w, s, edit))),
+            "only parts of a must wish can be must"
+        );
+        let wishes = load_wishes(db.store.connection()).unwrap();
+        assert!(wishes.iter().all(|w| !w.must));
+    }
+
+    #[test]
+    fn set_must_on_non_planned_wish_is_refused() {
+        let mut db = db();
+        let bought = db.write(|w, s| save_wish(w, s, draft("Bike"))).unwrap();
+        db.write(|w, s| {
+            mark_bought(
+                w,
+                s,
+                &bought.wish_id,
+                purchase(100, "2026-10-26", WishSource::Card),
+                &[],
+            )
+        })
+        .unwrap();
+        let dropped = db.write(|w, s| save_wish(w, s, draft("Lamp"))).unwrap();
+        db.write(|w, _| drop_wish(w, &dropped.wish_id)).unwrap();
+        for id in [&bought.wish_id, &dropped.wish_id] {
+            assert_eq!(
+                message(db.write(|w, _| set_must(w, id, true))),
+                "wish is not planned"
+            );
+        }
+    }
+
+    #[test]
+    fn save_wish_honours_must_on_create() {
+        let mut db = db();
+        let wish = db
+            .write(|w, s| {
+                save_wish(
+                    w,
+                    s,
+                    WishDraft {
+                        must: true,
+                        ..draft("Rent deposit")
+                    },
+                )
+            })
+            .unwrap();
+        assert!(wish.must);
+    }
+
+    #[test]
+    fn settings_need_valid_cards_and_mint_ids() {
+        let mut db = db();
+        let bad = WishSettings { cards: vec![] };
+        assert!(db.write(|w, _| save_wish_settings(w, bad)).is_err());
+        let two = WishSettings {
+            cards: vec![
+                card("", "Visa", "1000", "0", "2026-10-01"),
+                card("mc", "MC", "500", "20", "2026-10-01"),
+            ],
+        };
+        let saved = db.write(|w, _| save_wish_settings(w, two)).unwrap();
+        assert!(saved.cards[0].card_id.starts_with("card-") && saved.cards[0].card_id.len() > 5);
+        assert_eq!(saved.cards[1].card_id, "mc");
+        for bad in [
+            card("x", "", "1000", "0", "2026-10-01"),
+            card("x", &"n".repeat(65), "1000", "0", "2026-10-01"),
+            card("x", "A", "0", "0", "2026-10-01"),
+            card("x", "A", "10", "-1", "2026-10-01"),
+            card("x", "A", "10", "0", "2026-10-15"),
+        ] {
+            let s = WishSettings { cards: vec![bad] };
+            assert!(db.write(|w, _| save_wish_settings(w, s)).is_err());
+        }
+        let dup = WishSettings {
+            cards: vec![
+                card("a", "A", "10", "0", "2026-10-01"),
+                card("a", "B", "10", "0", "2026-10-01"),
+            ],
+        };
+        assert!(db.write(|w, _| save_wish_settings(w, dup)).is_err());
     }
 
     #[test]
@@ -587,16 +890,131 @@ mod tests {
             amount: Decimal::from(amount),
             on: on.into(),
             source,
+            cards: Vec::new(),
         }
     }
 
     fn settings(used: &str, month: &str) -> WishSettings {
         WishSettings {
-            card_limit: Decimal::from(2500),
-            card_used: used.parse().unwrap(),
-            card_used_month: month.into(),
-            card_bill_id: None,
+            cards: vec![CardSettings {
+                card_id: "card-1".into(),
+                name: "Credit card".into(),
+                limit: Decimal::from(2500),
+                used: used.parse().unwrap(),
+                used_month: month.into(),
+                bill_id: None,
+            }],
         }
+    }
+
+    fn db_with_cards(cards: &[(&str, &str, &str)]) -> Db {
+        let mut db = db();
+        let cards = cards
+            .iter()
+            .map(|(id, limit, used)| CardSettings {
+                card_id: (*id).into(),
+                name: (*id).into(),
+                limit: limit.parse().unwrap(),
+                used: used.parse().unwrap(),
+                used_month: "2026-10-01".into(),
+                bill_id: None,
+            })
+            .collect();
+        db.write(|w, _| save_wish_settings(w, WishSettings { cards }))
+            .unwrap();
+        db
+    }
+
+    fn charge(id: &str, amount: &str) -> CardCharge {
+        CardCharge {
+            card_id: id.into(),
+            amount: amount.parse().unwrap(),
+        }
+    }
+
+    #[test]
+    fn bought_card_amounts_must_sum() {
+        let mut db = db_with_cards(&[("visa", "100", "30"), ("mc", "200", "0")]);
+        let wish = db.write(|w, s| save_wish(w, s, draft("Bike"))).unwrap();
+        let mut bad = purchase(150, "2026-10-26", WishSource::Card);
+        bad.cards = vec![charge("visa", "100")];
+        assert_eq!(
+            message(db.write(|w, s| mark_bought(w, s, &wish.wish_id, bad, &[]))),
+            "card amounts must add up to the purchase"
+        );
+        let mut unknown = purchase(150, "2026-10-26", WishSource::Card);
+        unknown.cards = vec![charge("amex", "150")];
+        assert_eq!(
+            message(db.write(|w, s| mark_bought(w, s, &wish.wish_id, unknown, &[]))),
+            "unknown card"
+        );
+        let auto = purchase(150, "2026-10-26", WishSource::Card);
+        let bought = db
+            .write(|w, s| mark_bought(w, s, &wish.wish_id, auto, &[]))
+            .unwrap();
+        assert_eq!(
+            bought.bought.unwrap().cards,
+            vec![charge("visa", "70"), charge("mc", "80")]
+        );
+        let s = load_wish_settings(db.store.connection()).unwrap();
+        assert_eq!(s.cards[0].used, Decimal::from(100));
+        assert_eq!(s.cards[1].used, Decimal::from(80));
+    }
+
+    #[test]
+    fn bought_with_explicit_split_raises_each_card() {
+        let mut db = db_with_cards(&[("visa", "100", "30"), ("mc", "200", "0")]);
+        let wish = db.write(|w, s| save_wish(w, s, draft("Bike"))).unwrap();
+        let mut p = purchase(150, "2026-10-26", WishSource::Card);
+        p.cards = vec![charge("visa", "10"), charge("mc", "140")];
+        db.write(|w, s| mark_bought(w, s, &wish.wish_id, p, &[]))
+            .unwrap();
+        let s = load_wish_settings(db.store.connection()).unwrap();
+        assert_eq!(s.cards[0].used, Decimal::from(40));
+        assert_eq!(s.cards[1].used, Decimal::from(140));
+    }
+
+    #[test]
+    fn zero_card_charge_leaves_a_stale_card_alone() {
+        let mut db = db();
+        let cards = vec![
+            card("visa", "visa", "1000", "30", "2026-10-01"),
+            card("mc", "mc", "1000", "70", "2026-09-01"),
+        ];
+        db.write(|w, _| save_wish_settings(w, WishSettings { cards }))
+            .unwrap();
+        let wish = db.write(|w, s| save_wish(w, s, draft("Bike"))).unwrap();
+        let mut p = purchase(150, "2026-10-26", WishSource::Card);
+        p.cards = vec![charge("visa", "150"), charge("mc", "0")];
+        let bought = db
+            .write(|w, s| mark_bought(w, s, &wish.wish_id, p, &[]))
+            .unwrap();
+        assert_eq!(bought.bought.unwrap().cards, vec![charge("visa", "150")]);
+        let s = load_wish_settings(db.store.connection()).unwrap();
+        assert_eq!(s.cards[0].used, Decimal::from(180));
+        assert_eq!(s.cards[1].used, Decimal::from(70));
+        assert_eq!(s.cards[1].used_month, "2026-09-01");
+    }
+
+    #[test]
+    fn auto_split_overflow_goes_to_last_card() {
+        let mut db = db_with_cards(&[("visa", "100", "30"), ("mc", "50", "0")]);
+        let wish = db.write(|w, s| save_wish(w, s, draft("Bike"))).unwrap();
+        let bought = db
+            .write(|w, s| {
+                mark_bought(
+                    w,
+                    s,
+                    &wish.wish_id,
+                    purchase(200, "2026-10-26", WishSource::Card),
+                    &[],
+                )
+            })
+            .unwrap();
+        assert_eq!(
+            bought.bought.unwrap().cards,
+            vec![charge("visa", "70"), charge("mc", "130")]
+        );
     }
 
     #[test]
@@ -619,7 +1037,7 @@ mod tests {
         assert_eq!(bought.status, WishStatus::Bought);
         assert_eq!(bought.bought.unwrap().amount, Decimal::from(100));
         assert_eq!(
-            load_wish_settings(db.store.connection()).unwrap().card_used,
+            load_wish_settings(db.store.connection()).unwrap().cards[0].used,
             "109.98".parse::<Decimal>().unwrap()
         );
         assert_eq!(
@@ -651,7 +1069,7 @@ mod tests {
         })
         .unwrap();
         assert_eq!(
-            load_wish_settings(db.store.connection()).unwrap().card_used,
+            load_wish_settings(db.store.connection()).unwrap().cards[0].used,
             "9.98".parse::<Decimal>().unwrap()
         );
     }
@@ -713,8 +1131,8 @@ mod tests {
             })
             .unwrap();
             let now = load_wish_settings(db.store.connection()).unwrap();
-            assert_eq!(now.card_used, Decimal::from(100));
-            assert_eq!(now.card_used_month, "2026-10-01");
+            assert_eq!(now.cards[0].used, Decimal::from(100));
+            assert_eq!(now.cards[0].used_month, "2026-10-01");
         }
     }
 
@@ -783,7 +1201,7 @@ mod tests {
         })
         .unwrap();
         assert_eq!(
-            load_wish_settings(db.store.connection()).unwrap().card_used,
+            load_wish_settings(db.store.connection()).unwrap().cards[0].used,
             "109.98".parse::<Decimal>().unwrap()
         );
         assert_eq!(
@@ -1262,7 +1680,7 @@ mod tests {
     fn settings_are_validated() {
         let mut db = db();
         let mut bad = settings("0", "2026-10-01");
-        bad.card_limit = Decimal::ZERO;
+        bad.cards[0].limit = Decimal::ZERO;
         assert!(db.write(|w, _| save_wish_settings(w, bad)).is_err());
         assert!(
             db.write(|w, _| save_wish_settings(w, settings("-1", "2026-10-01")))
