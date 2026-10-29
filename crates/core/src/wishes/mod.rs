@@ -12,9 +12,8 @@ use finance_types::report::allocation::CurrencyAllocation;
 use finance_types::report::wishes::{ChangeableBill, Cut, Verdict, WishMonth, WishRow, WishesView};
 use finance_types::report::{Currency, Dashboard};
 use jiff::civil::Date;
-use ladder::Demand;
 use rust_decimal::Decimal;
-use schedule::{BillNow, Family, Planned};
+use schedule::{BillNow, Family, Planned, Saver};
 use std::collections::HashMap;
 
 use crate::load::Bill;
@@ -177,9 +176,8 @@ impl Inputs<'_> {
         items: &[Planned],
         wishes: &[Wish],
         settings: &WishSettings,
-    ) -> (Vec<WishMonth>, Vec<Vec<Demand>>, bool) {
+    ) -> (Vec<WishMonth>, Vec<String>) {
         let months = schedule::horizon(items, month0);
-        let demands = schedule::demands(items, month0, months);
         let (bases, stale_cards) = baseline::baselines(
             alloc,
             &self.plans,
@@ -188,8 +186,9 @@ impl Inputs<'_> {
             schedule::earmarked(wishes),
             months,
         );
-        let judged = ladder::judge(&bases, &demands, settings.first().limit);
-        (judged, demands, !stale_cards.is_empty())
+        let mut saver = Saver::new(items, month0, months);
+        let repeats = schedule::repeat_demands(items, month0, months);
+        (ladder::judge(&bases, &repeats, &mut saver), stale_cards)
     }
 
     /// The wishes screen.
@@ -197,8 +196,8 @@ impl Inputs<'_> {
         let judged = self.alloc.and_then(|a| {
             let month0 = baseline::current_month(a)?;
             let (items, families) = schedule::plan_items(wishes, month0, self.bills);
-            let (judged, demands, card_stale) = self.judge(a, month0, &items, wishes, settings);
-            Some((judged, families, demands, card_stale))
+            let (judged, stale) = self.judge(a, month0, &items, wishes, settings);
+            Some((judged, families, stale))
         });
         let currency = self.alloc.map_or_else(
             || {
@@ -208,12 +207,11 @@ impl Inputs<'_> {
             },
             |a| a.currency.clone(),
         );
-        let (months, families, demands, card_stale) = judged.unwrap_or_default();
+        let (months, families, stale_cards) = judged.unwrap_or_default();
         let ctx = RowContext {
             wishes,
             months: &months,
             families: &families,
-            month0: demands.first().map_or(&[], Vec::as_slice),
             bills: self.bills,
         };
         let mut tops: Vec<&Wish> = wishes.iter().filter(|w| w.parent_id.is_none()).collect();
@@ -230,8 +228,8 @@ impl Inputs<'_> {
         WishesView {
             currency,
             settings: settings.clone(),
-            card_stale,
-            stale_cards: Vec::new(),
+            card_stale: !stale_cards.is_empty(),
+            stale_cards,
             wishes: tops.into_iter().map(|w| ctx.row(w)).collect(),
             months,
             changeable_bills,
@@ -273,7 +271,7 @@ impl Inputs<'_> {
             saved_this_month: false,
             must: wish.must,
         });
-        let (judged, _, _) = self.judge(alloc, month0, &items, wishes, settings);
+        let (judged, _) = self.judge(alloc, month0, &items, wishes, settings);
         judged
             .first()
             .map(|m| {
@@ -313,7 +311,6 @@ struct RowContext<'a> {
     wishes: &'a [Wish],
     months: &'a [WishMonth],
     families: &'a [Family],
-    month0: &'a [Demand],
     bills: &'a HashMap<String, BillNow>,
 }
 
@@ -325,11 +322,14 @@ impl RowContext<'_> {
             .filter(move |v| v.wish_id.as_deref() == Some(wish_id))
     }
 
+    /// What month 0 sets aside for `wish_id` (a skipped month sets nothing).
     fn set_aside(&self, wish_id: &str) -> Decimal {
-        self.month0
-            .iter()
-            .filter(|d| d.wish_id.as_deref() == Some(wish_id) && d.set_aside)
-            .map(|d| d.amount)
+        self.months
+            .first()
+            .into_iter()
+            .flat_map(|m| &m.verdicts)
+            .filter(|v| v.wish_id.as_deref() == Some(wish_id) && v.set_aside && !v.skipped)
+            .map(|v| v.amount)
             .sum()
     }
 
@@ -742,10 +742,33 @@ mod tests {
         // Nothing is affordable: trip's short is its rest plus its hotel.
         assert_eq!(trip.children[0].short, d("400"));
         assert_eq!(trip.short, d("1000"));
+        // Must-wishes addendum: an optional set-aside that does not fit
+        // without the cards is skipped, so a month with nothing free sets
+        // nothing aside (it would be hotel 400/2, rest 600/3).
+        assert_eq!(trip.children[0].monthly_set_aside, Decimal::ZERO);
+        assert_eq!(trip.monthly_set_aside, Decimal::ZERO);
+        assert_eq!(view.wishes[1].monthly_set_aside, Decimal::ZERO);
+    }
+
+    #[test]
+    fn parent_row_sums_month_zero_set_asides_that_fit() {
+        let a = alloc("1000", "1000", vec![], vec![]);
+        let ws = [
+            wish("trip", None, "1000", "2026-12-31"),
+            wish("hotel", Some("trip"), "400", "2026-11-10"),
+            wish("later", None, "60", "2026-12-01"),
+        ];
+        let s = no_card_room();
+        let view = view_from(Some(&a), &[], Vec::new(), &ws, &s, &HashMap::new());
+        let trip = view
+            .wishes
+            .iter()
+            .find(|r| r.wish.wish_id == "trip")
+            .unwrap();
         // Month 0 set-asides: hotel 400/2, rest 600/3.
         assert_eq!(trip.children[0].monthly_set_aside, d("200"));
         assert_eq!(trip.monthly_set_aside, d("400"));
-        assert_eq!(view.wishes[1].monthly_set_aside, d("20"));
+        assert_eq!(trip.short, Decimal::ZERO);
     }
 
     #[test]
@@ -779,6 +802,7 @@ mod tests {
             label: String::new(),
             amount: Decimal::ZERO,
             from_free: Decimal::ZERO,
+            from_savings: Decimal::ZERO,
             cuts,
             on_card: Decimal::ZERO,
             short: Decimal::ZERO,
@@ -792,6 +816,8 @@ mod tests {
             month: "2026-10-01".into(),
             free_before: Decimal::ZERO,
             free_left: Decimal::ZERO,
+            savings_before: Decimal::ZERO,
+            savings_left: Decimal::ZERO,
             card_charge_in: Decimal::ZERO,
             card_used: Decimal::ZERO,
             cards: Vec::new(),

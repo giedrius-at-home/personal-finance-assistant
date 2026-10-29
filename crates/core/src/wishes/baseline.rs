@@ -134,6 +134,8 @@ pub fn baselines(
     } else {
         (&alloc.next_group_rows, true)
     };
+    // The savings pot wishes may draw on once free money runs out.
+    let savings = alloc.savings_balance + alloc.protected_savings;
     let out = (0..months)
         .map(|i| {
             let month = shift_month(month0, i32::try_from(i).unwrap_or(i32::MAX));
@@ -144,12 +146,14 @@ pub fn baselines(
                     free: alloc.current_wiggle_room - earmarked,
                     groups: rooms(&alloc.groups, &plans, true),
                     cards: month0_cards.clone(),
+                    savings,
                 },
                 _ => MonthBaseline {
                     month,
                     free: next_free,
                     groups: rooms(next_rows, &plans, i == 1 && next_spent),
                     cards: next_cards.clone(),
+                    savings,
                 },
             }
         })
@@ -439,8 +443,9 @@ pub(crate) mod tests {
             assert_eq!(m.cards[0].used, d("100"));
         }
         // Each later month pays the month before's regular card spending.
+        let mut saver = super::super::schedule::Saver::new(&[], months[0].month, 4);
         let judged =
-            super::super::ladder::judge(&months, &[vec![], vec![], vec![], vec![]], d("2500"));
+            super::super::ladder::judge(&months, &[vec![], vec![], vec![], vec![]], &mut saver);
         assert_eq!(judged[1].card_charge_in, d("40"));
         assert_eq!(judged[2].card_charge_in, d("100"));
         assert_eq!(judged[3].card_charge_in, d("100"));

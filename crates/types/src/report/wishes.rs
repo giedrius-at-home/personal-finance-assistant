@@ -25,6 +25,9 @@ pub struct Verdict {
     pub label: String,
     pub amount: Decimal,
     pub from_free: Decimal,
+    /// Drawn from the savings pot, after free money and before any cut.
+    #[serde(default)]
+    pub from_savings: Decimal,
     pub cuts: Vec<Cut>,
     pub on_card: Decimal,
     pub short: Decimal,
@@ -60,6 +63,11 @@ pub struct WishMonth {
     pub month: String,
     pub free_before: Decimal,
     pub free_left: Decimal,
+    /// The savings pot at the start and end of the month.
+    #[serde(default)]
+    pub savings_before: Decimal,
+    #[serde(default)]
+    pub savings_left: Decimal,
     pub card_charge_in: Decimal,
     pub card_used: Decimal,
     /// End-of-month usage per card: next month's payback.

@@ -1,17 +1,25 @@
 //! The cutting ladder: how each planned purchase is paid for, month by month.
 //!
-//! Pure arithmetic, no I/O. For every demand the order is: the card first when
-//! the wish asked for it, then free money, then cuts to budget groups (the
-//! highest importance number first, never below their floor), then the card,
-//! and what is left is `short`.
+//! Pure arithmetic, no I/O. For every demand the order is: the cards first
+//! when the wish asked for them, then free money, then the savings pot, then
+//! cuts to budget groups (the highest importance number first, never below
+//! their floor), then the cards, and what is left is `short`. The cards are
+//! one pool, filled in list order, each up to its limit.
 //!
 //! Each month first pays what it already lacks ("Already short", when its
 //! free money is negative), then last month's card charge ("Credit card"),
-//! which may not go back on the card: what free money and cuts cannot pay is
-//! short, and that short and those cuts are traced back to the verdicts that
-//! put money on the card the month before.
+//! which may not go back on the card: what free money, savings and cuts
+//! cannot pay is short, and that short and those cuts are traced back to the
+//! verdicts that put money on the card the month before. Then money a cheaper
+//! bill frees, then the must wishes, then the rest: within each, set-asides,
+//! purchases, then repeating costs.
+//!
+//! A set-aside that does not fit without the cards is skipped, and the saver
+//! spreads it over the months left; a must set-aside skips only when those
+//! months can carry it, else it goes on the cards.
 
-use finance_types::report::wishes::{Cut, Verdict, WishMonth};
+use super::schedule::Saver;
+use finance_types::report::wishes::{CardUsed, Cut, Verdict, WishMonth};
 use jiff::civil::Date;
 use rust_decimal::Decimal;
 
@@ -34,6 +42,9 @@ pub struct MonthBaseline {
     pub groups: Vec<GroupRoom>,
     /// What is already on each card this month before any wish.
     pub cards: Vec<CardRoom>,
+    /// The savings pot; only month 0's is read, later months carry what the
+    /// month before left.
+    pub savings: Decimal,
 }
 
 /// One card's limit and what is already on it.
@@ -61,56 +72,76 @@ pub struct Demand {
 pub const ALREADY_SHORT: &str = "Already short";
 pub const CARD_CHARGE: &str = "Credit card";
 
-/// What a month pays with while its demands are judged.
-struct Purse<'g> {
+/// What a month pays with while its demands are judged. Owned, so a
+/// set-aside can be tried on a copy.
+#[derive(Clone, Debug)]
+struct Purse {
     free: Decimal,
-    card_used: Decimal,
-    card_limit: Decimal,
+    savings: Decimal,
+    /// In list order; `used` grows as wishes go on them.
+    cards: Vec<CardRoom>,
     /// Groups in the order they are cut; limits carry earlier cuts.
-    groups: Vec<(&'g GroupRoom, Decimal)>,
+    groups: Vec<(GroupRoom, Decimal)>,
 }
 
-impl Purse<'_> {
-    fn card_room(&self) -> Decimal {
-        (self.card_limit - self.card_used).max(Decimal::ZERO)
+/// A verdict for `demand` before any money is found.
+fn verdict(demand: Demand) -> Verdict {
+    Verdict {
+        wish_id: demand.wish_id,
+        label: demand.label,
+        amount: demand.amount,
+        from_free: Decimal::ZERO,
+        from_savings: Decimal::ZERO,
+        cuts: Vec::new(),
+        on_card: Decimal::ZERO,
+        short: Decimal::ZERO,
+        set_aside: demand.set_aside,
+        next_short: Decimal::ZERO,
+        next_cuts: Vec::new(),
+        must: demand.must,
+        skipped: false,
+    }
+}
+
+impl Purse {
+    fn card_used(&self) -> Decimal {
+        self.cards.iter().map(|c| c.used).sum()
     }
 
-    /// Run one demand down the ladder; `card_allowed` false skips the card.
+    /// Put up to `amount` on the cards, in list order; returns what went on.
+    fn take_card(&mut self, amount: Decimal) -> Decimal {
+        let mut rem = amount;
+        for card in &mut self.cards {
+            let take = rem.min((card.limit - card.used).max(Decimal::ZERO));
+            card.used += take;
+            rem -= take;
+        }
+        amount - rem
+    }
+
+    /// Run one demand down the ladder; `card_allowed` false skips the cards.
     fn pay(&mut self, demand: Demand, card_allowed: bool) -> Verdict {
-        let verdict = |demand: Demand| Verdict {
-            wish_id: demand.wish_id,
-            label: demand.label,
-            amount: demand.amount,
-            from_free: Decimal::ZERO,
-            cuts: Vec::new(),
-            on_card: Decimal::ZERO,
-            short: Decimal::ZERO,
-            set_aside: demand.set_aside,
-            next_short: Decimal::ZERO,
-            next_cuts: Vec::new(),
-            must: false,
-            skipped: false,
-        };
         if demand.amount < Decimal::ZERO {
             // A cheaper bill: money comes back.
             self.free -= demand.amount;
-            let from_free = demand.amount;
             return Verdict {
-                from_free,
+                from_free: demand.amount,
                 ..verdict(demand)
             };
         }
         let mut rem = demand.amount;
         let mut on_card = Decimal::ZERO;
         if demand.on_card && card_allowed {
-            let take = rem.min(self.card_room());
+            let take = self.take_card(rem);
             on_card += take;
-            self.card_used += take;
             rem -= take;
         }
         let from_free = rem.min(self.free.max(Decimal::ZERO));
         self.free -= from_free;
         rem -= from_free;
+        let from_savings = rem.min(self.savings.max(Decimal::ZERO));
+        self.savings -= from_savings;
+        rem -= from_savings;
 
         let mut cuts = Vec::new();
         for (group, current) in &mut self.groups {
@@ -132,13 +163,13 @@ impl Purse<'_> {
         }
 
         if !demand.on_card && card_allowed {
-            let take = rem.min(self.card_room());
+            let take = self.take_card(rem);
             on_card += take;
-            self.card_used += take;
             rem -= take;
         }
         Verdict {
             from_free,
+            from_savings,
             cuts,
             on_card,
             short: rem,
@@ -175,17 +206,51 @@ fn trace_charge(prev: &mut WishMonth, charge: &Verdict) {
     }
 }
 
-/// Judge every demand of every month. `demands[i]` belongs to `months[i]`.
+/// A demand the ladder raises itself, not a wish's.
+fn own(label: &str, amount: Decimal) -> Demand {
+    Demand {
+        wish_id: None,
+        label: label.to_string(),
+        amount,
+        on_card: false,
+        set_aside: false,
+        must: false,
+    }
+}
+
+/// Pay a set-aside if it fits without the cards; else skip it (a must one
+/// only when `may_skip`) or, a must one that may not skip, pay it with them.
+fn set_aside(purse: &mut Purse, demand: Demand, may_skip: impl FnOnce() -> bool) -> Verdict {
+    let mut trial = purse.clone();
+    let tried = trial.pay(demand.clone(), false);
+    if tried.short.is_zero() {
+        *purse = trial;
+        return tried;
+    }
+    if !demand.must || may_skip() {
+        return Verdict {
+            amount: Decimal::ZERO,
+            skipped: true,
+            ..verdict(demand)
+        };
+    }
+    purse.pay(demand, true)
+}
+
+/// Judge every month. `repeats[i]` are month `i`'s recurring wishes and bill
+/// changes (money freed first); `saver` hands out the one-off wishes'
+/// set-asides and purchases and learns what was paid.
 pub fn judge(
     months: &[MonthBaseline],
-    demands: &[Vec<Demand>],
-    card_limit: Decimal,
+    repeats: &[Vec<Demand>],
+    saver: &mut Saver,
 ) -> Vec<WishMonth> {
     let mut out: Vec<WishMonth> = Vec::with_capacity(months.len());
     for (i, base) in months.iter().enumerate() {
         let card_charge_in = out.last().map_or(Decimal::ZERO, |prev| prev.card_used);
-        let mut groups: Vec<(&GroupRoom, Decimal)> =
-            base.groups.iter().map(|g| (g, g.limit)).collect();
+        let savings_before = out.last().map_or(base.savings, |prev| prev.savings_left);
+        let mut groups: Vec<(GroupRoom, Decimal)> =
+            base.groups.iter().map(|g| (g.clone(), g.limit)).collect();
         groups.sort_by(|a, b| {
             b.0.importance
                 .cmp(&a.0.importance)
@@ -193,53 +258,74 @@ pub fn judge(
         });
         let mut purse = Purse {
             free: base.free.max(Decimal::ZERO),
-            card_used: base.cards.iter().map(|c| c.used).sum(),
-            card_limit,
+            savings: savings_before,
+            cards: base.cards.clone(),
             groups,
         };
 
         let mut verdicts = Vec::new();
         if base.free < Decimal::ZERO {
-            verdicts.push(purse.pay(
-                Demand {
-                    wish_id: None,
-                    label: ALREADY_SHORT.to_string(),
-                    amount: -base.free,
-                    on_card: false,
-                    set_aside: false,
-                    must: false,
-                },
-                true,
-            ));
+            verdicts.push(purse.pay(own(ALREADY_SHORT, -base.free), true));
         }
         if card_charge_in > Decimal::ZERO {
-            let charge = purse.pay(
-                Demand {
-                    wish_id: None,
-                    label: CARD_CHARGE.to_string(),
-                    amount: card_charge_in,
-                    on_card: false,
-                    set_aside: false,
-                    must: false,
-                },
-                false,
-            );
+            let charge = purse.pay(own(CARD_CHARGE, card_charge_in), false);
             if let Some(prev) = out.last_mut() {
                 trace_charge(prev, &charge);
             }
             verdicts.push(charge);
         }
-        for demand in demands.get(i).cloned().unwrap_or_default() {
+
+        let (freed, costs): (Vec<Demand>, Vec<Demand>) = repeats
+            .get(i)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .partition(|d| d.amount < Decimal::ZERO);
+        for demand in freed {
             verdicts.push(purse.pay(demand, true));
+        }
+        let later_free: Vec<Decimal> = months.iter().skip(i + 1).map(|m| m.free).collect();
+        let set_asides = saver.set_asides(i);
+        for must in [true, false] {
+            for demand in set_asides.iter().filter(|d| d.must == must).cloned() {
+                let id = demand.wish_id.clone().unwrap_or_default();
+                let amount = demand.amount;
+                let v = set_aside(&mut purse, demand, || {
+                    saver.may_skip_must(&id, i, &later_free)
+                });
+                if !v.skipped {
+                    saver.paid(&id, amount);
+                }
+                verdicts.push(v);
+            }
+            for demand in saver.purchases(i).into_iter().filter(|d| d.must == must) {
+                if let Some(id) = &demand.wish_id {
+                    saver.paid(id, demand.amount);
+                }
+                verdicts.push(purse.pay(demand, true));
+            }
+            for demand in costs.iter().filter(|d| d.must == must).cloned() {
+                verdicts.push(purse.pay(demand, true));
+            }
         }
 
         out.push(WishMonth {
             month: format!("{:04}-{:02}-01", base.month.year(), base.month.month()),
             free_before: base.free,
             free_left: purse.free,
+            savings_before,
+            savings_left: purse.savings,
             card_charge_in,
-            card_used: purse.card_used,
-            cards: Vec::new(),
+            card_used: purse.card_used(),
+            cards: purse
+                .cards
+                .iter()
+                .map(|c| CardUsed {
+                    card_id: c.card_id.clone(),
+                    name: c.name.clone(),
+                    used: c.used,
+                })
+                .collect(),
             verdicts,
         });
     }
@@ -249,6 +335,7 @@ pub fn judge(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::wishes::schedule::{Planned, Saver};
     use std::str::FromStr;
 
     fn d(s: &str) -> Decimal {
@@ -265,7 +352,7 @@ mod tests {
         }
     }
 
-    fn base(free: &str, groups: Vec<GroupRoom>, card_used: &str) -> MonthBaseline {
+    fn with_card(free: &str, groups: Vec<GroupRoom>, card_used: &str) -> MonthBaseline {
         MonthBaseline {
             month: Date::new(2026, 11, 1).unwrap(),
             free: d(free),
@@ -276,6 +363,7 @@ mod tests {
                 limit: d("2500"),
                 used: d(card_used),
             }],
+            savings: Decimal::ZERO,
         }
     }
 
@@ -293,7 +381,7 @@ mod tests {
     fn base_at(month: u8, free: &str, groups: Vec<GroupRoom>, card_used: &str) -> MonthBaseline {
         MonthBaseline {
             month: Date::new(2026, i8::try_from(month).unwrap(), 1).unwrap(),
-            ..base(free, groups, card_used)
+            ..with_card(free, groups, card_used)
         }
     }
 
@@ -307,9 +395,9 @@ mod tests {
     #[test]
     fn fits_in_free_money() {
         let out = judge(
-            &[base("500", vec![], "0")],
+            &[with_card("500", vec![], "0")],
             &[vec![demand("tv", "150", false)]],
-            d("2500"),
+            &mut no_saver(),
         );
         let v = &out[0].verdicts[0];
         assert_eq!(v.from_free, d("150"));
@@ -322,9 +410,9 @@ mod tests {
     #[test]
     fn cuts_going_out_before_groceries() {
         let out = judge(
-            &[base("0", two_groups(), "0")],
+            &[with_card("0", two_groups(), "0")],
             &[vec![demand("tv", "200", false)]],
-            d("2500"),
+            &mut no_saver(),
         );
         let v = &out[0].verdicts[0];
         assert_eq!(
@@ -350,9 +438,12 @@ mod tests {
     #[test]
     fn groceries_never_below_300_then_card() {
         let out = judge(
-            &[base("0", two_groups(), "9.98"), base("0", vec![], "0")],
+            &[
+                with_card("0", two_groups(), "9.98"),
+                with_card("0", vec![], "0"),
+            ],
             &[vec![demand("tv", "400", false)], vec![]],
-            d("2500"),
+            &mut no_saver(),
         );
         let v = &out[0].verdicts[0];
         assert_eq!(v.cuts[0].to, d("0"));
@@ -367,9 +458,12 @@ mod tests {
     #[test]
     fn card_wish_goes_on_card_first() {
         let out = judge(
-            &[base("500", vec![], "9.98"), base("2000", vec![], "0")],
+            &[
+                with_card("500", vec![], "9.98"),
+                with_card("2000", vec![], "0"),
+            ],
             &[vec![demand("trip", "900", true)], vec![]],
-            d("2500"),
+            &mut no_saver(),
         );
         let v = &out[0].verdicts[0];
         assert_eq!(v.on_card, d("900"));
@@ -381,9 +475,9 @@ mod tests {
     #[test]
     fn card_full_leaves_short() {
         let out = judge(
-            &[base("0", vec![], "2500")],
+            &[with_card("0", vec![], "2500")],
             &[vec![demand("tv", "50", false)]],
-            d("2500"),
+            &mut no_saver(),
         );
         assert_eq!(out[0].verdicts[0].short, d("50"));
     }
@@ -391,9 +485,9 @@ mod tests {
     #[test]
     fn wishes_stack_in_order() {
         let out = judge(
-            &[base("100", vec![], "0")],
+            &[with_card("100", vec![], "0")],
             &[vec![demand("a", "80", false), demand("b", "80", false)]],
-            d("2500"),
+            &mut no_saver(),
         );
         assert_eq!(out[0].verdicts[0].from_free, d("80"));
         assert_eq!(out[0].verdicts[1].from_free, d("20"));
@@ -403,9 +497,9 @@ mod tests {
     #[test]
     fn overspent_group_gives_no_room() {
         let out = judge(
-            &[base("0", vec![group("fun", 1, "100", "140")], "0")],
+            &[with_card("0", vec![group("fun", 1, "100", "140")], "0")],
             &[vec![demand("tv", "50", false)]],
-            d("2500"),
+            &mut no_saver(),
         );
         let v = &out[0].verdicts[0];
         assert!(v.cuts.is_empty());
@@ -416,12 +510,12 @@ mod tests {
     fn unpaid_card_charge_is_short_not_rolled() {
         let out = judge(
             &[
-                base("0", vec![], "0"),
-                base("0", vec![], "0"),
-                base("0", vec![], "0"),
+                with_card("0", vec![], "0"),
+                with_card("0", vec![], "0"),
+                with_card("0", vec![], "0"),
             ],
             &[vec![demand("tv", "300", false)], vec![], vec![]],
-            d("2500"),
+            &mut no_saver(),
         );
         let charge = &out[1].verdicts[0];
         assert_eq!(charge.label, "Credit card");
@@ -436,7 +530,7 @@ mod tests {
         let out = judge(
             &[base_at(10, "0", vec![], "0"), base_at(11, "0", vec![], "0")],
             &[vec![demand("tv", "500", true)], vec![]],
-            d("2500"),
+            &mut no_saver(),
         );
         let charge = &out[1].verdicts[0];
         assert_eq!(
@@ -450,19 +544,443 @@ mod tests {
     }
 
     #[test]
-    fn card_charge_shortfall_split_by_on_card() {
-        // October: 100 typed usage, a 300 and a 100 wish on the card.
-        // November pays the 500 charge: going out 200 → 0, short 300.
+    fn card_charge_paid_from_free_then_cuts() {
         let out = judge(
             &[
-                base_at(10, "0", vec![], "100"),
-                base_at(11, "0", vec![group("going out", 2, "200", "0")], "0"),
+                base_at(10, "0", vec![], "0"),
+                base_at(11, "50", vec![group("going out", 2, "120", "0")], "0"),
             ],
+            &[vec![demand("tv", "100", true)], vec![]],
+            &mut no_saver(),
+        );
+        let charge = &out[1].verdicts[0];
+        assert_eq!(charge.from_free, d("50"));
+        assert_eq!(charge.cuts[0].to, d("70"));
+        assert_eq!(charge.short, Decimal::ZERO);
+        assert_eq!(out[0].verdicts[0].next_short, Decimal::ZERO);
+        assert_eq!(out[0].verdicts[0].next_cuts[0].to, d("70"));
+    }
+
+    #[test]
+    fn month_already_short_is_paid_first() {
+        let out = judge(
+            &[with_card(
+                "-50",
+                vec![group("going out", 2, "120", "0")],
+                "0",
+            )],
+            &[vec![demand("tv", "30", false)]],
+            &mut no_saver(),
+        );
+        let first = &out[0].verdicts[0];
+        assert_eq!(
+            (first.wish_id.as_deref(), first.label.as_str()),
+            (None, "Already short")
+        );
+        assert_eq!(first.amount, d("50"));
+        assert_eq!(first.cuts[0].to, d("70"));
+        let tv = &out[0].verdicts[1];
+        assert_eq!(tv.from_free, Decimal::ZERO);
+        assert_eq!(tv.cuts[0].from, d("70"));
+        assert_eq!(tv.cuts[0].to, d("40"));
+        assert_eq!(out[0].free_before, d("-50"));
+        assert_eq!(out[0].free_left, Decimal::ZERO);
+    }
+
+    #[test]
+    fn already_short_without_room_is_short() {
+        let out = judge(
+            &[with_card("-50", vec![], "2500")],
+            &[vec![]],
+            &mut no_saver(),
+        );
+        assert_eq!(out[0].verdicts[0].short, d("50"));
+    }
+
+    #[test]
+    fn cuts_carry_across_demands_in_a_month() {
+        let out = judge(
+            &[with_card("0", two_groups(), "2500")],
+            &[vec![demand("a", "100", false), demand("b", "100", false)]],
+            &mut no_saver(),
+        );
+        let (a, b) = (&out[0].verdicts[0], &out[0].verdicts[1]);
+        assert_eq!(a.cuts.len(), 1);
+        assert_eq!((a.cuts[0].from, a.cuts[0].to), (d("120"), d("20")));
+        assert_eq!((b.cuts[0].from, b.cuts[0].to), (d("20"), d("0")));
+        assert_eq!((b.cuts[1].from, b.cuts[1].to), (d("450"), d("370")));
+    }
+
+    #[test]
+    fn card_wish_over_card_room_falls_back_to_free_then_cuts() {
+        let out = judge(
+            &[with_card("30", two_groups(), "2400")],
+            &[vec![demand("tv", "200", true)]],
+            &mut no_saver(),
+        );
+        let tv = &out[0].verdicts[0];
+        assert_eq!(tv.on_card, d("100"));
+        assert_eq!(tv.from_free, d("30"));
+        assert_eq!(tv.cuts[0].to, d("50"));
+        assert_eq!(tv.short, Decimal::ZERO);
+    }
+
+    #[test]
+    fn equal_importance_cut_by_name() {
+        let out = judge(
+            &[with_card(
+                "0",
+                vec![group("b", 2, "10", "0"), group("a", 2, "10", "0")],
+                "2500",
+            )],
+            &[vec![demand("tv", "15", false)]],
+            &mut no_saver(),
+        );
+        let names: Vec<_> = out[0].verdicts[0]
+            .cuts
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect();
+        assert_eq!(names, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn bill_change_down_frees_money() {
+        let out = judge(
+            &[with_card("100", vec![], "0")],
+            &[vec![demand("rent", "-50", false)]],
+            &mut no_saver(),
+        );
+        assert_eq!(out[0].free_left, d("150"));
+        let v = &out[0].verdicts[0];
+        assert_eq!(v.from_free, d("-50"));
+        assert!(v.cuts.is_empty());
+        assert_eq!(v.on_card, Decimal::ZERO);
+        assert_eq!(v.short, Decimal::ZERO);
+    }
+
+    fn no_saver() -> Saver {
+        Saver::new(&[], oct(), 0)
+    }
+
+    fn oct() -> Date {
+        Date::new(2026, 10, 1).unwrap()
+    }
+
+    fn card(id: &str, limit: &str, used: &str) -> CardRoom {
+        CardRoom {
+            card_id: id.into(),
+            name: id.into(),
+            limit: d(limit),
+            used: d(used),
+        }
+    }
+
+    /// Visa (limit 100) and Mastercard (limit 200), both unused.
+    fn two_cards() -> Vec<CardRoom> {
+        vec![card("visa", "100", "0"), card("mc", "200", "0")]
+    }
+
+    fn base(free: &str, cards: Vec<CardRoom>) -> MonthBaseline {
+        MonthBaseline {
+            month: oct(),
+            free: d(free),
+            groups: Vec::new(),
+            cards,
+            savings: Decimal::ZERO,
+        }
+    }
+
+    fn base_cards(free: &str, cards: Vec<(&str, &str, &str)>) -> MonthBaseline {
+        base(
+            free,
+            cards
+                .into_iter()
+                .map(|(id, limit, used)| card(id, limit, used))
+                .collect(),
+        )
+    }
+
+    /// Consecutive months from October with these free amounts.
+    fn months_of<const N: usize>(free: [&str; N], cards: &[CardRoom]) -> Vec<MonthBaseline> {
+        free.iter()
+            .enumerate()
+            .map(|(i, f)| MonthBaseline {
+                month: Date::new(2026, 10, 1)
+                    .unwrap()
+                    .checked_add(jiff::Span::new().months(i64::try_from(i).unwrap()))
+                    .unwrap(),
+                ..base(f, cards.to_vec())
+            })
+            .collect()
+    }
+
+    fn bases<const N: usize>(free: [&str; N]) -> Vec<MonthBaseline> {
+        months_of(free, &[])
+    }
+
+    fn bases_with_cards<const N: usize>(free: [&str; N]) -> Vec<MonthBaseline> {
+        months_of(free, &two_cards())
+    }
+
+    /// No cards; "going out" 100 (floor 0); `savings` in the pot.
+    fn bases_savings<const N: usize>(free: [&str; N], savings: &str) -> Vec<MonthBaseline> {
+        months_of(free, &[])
+            .into_iter()
+            .map(|m| MonthBaseline {
+                groups: vec![group("going out", 2, "100", "0")],
+                savings: d(savings),
+                ..m
+            })
+            .collect()
+    }
+
+    fn saver(items: Vec<Planned>) -> Saver {
+        Saver::new(&items, oct(), 12)
+    }
+
+    /// A one-off due `month` months from October; all share one creation
+    /// time, so their order in the list is the order they were created.
+    fn due_in(id: &str, amount: &str, month: usize) -> Planned {
+        Planned {
+            wish_id: id.into(),
+            label: id.into(),
+            due: oct()
+                .checked_add(jiff::Span::new().months(i64::try_from(month).unwrap()))
+                .unwrap(),
+            remaining: d(amount),
+            on_card: false,
+            created_at: "2026-01-01T00:00:00".into(),
+            per_month: None,
+            saved_this_month: false,
+            must: false,
+        }
+    }
+
+    fn due_in_must(id: &str, amount: &str, month: usize) -> Planned {
+        Planned {
+            must: true,
+            ..due_in(id, amount, month)
+        }
+    }
+
+    /// Bought outright in `month`: saving was recorded this month, so no
+    /// set-asides come before it.
+    fn purchase_in(id: &str, amount: &str, month: usize) -> Planned {
+        Planned {
+            saved_this_month: true,
+            ..due_in(id, amount, month)
+        }
+    }
+
+    fn purchase(id: &str, amount: &str) -> Planned {
+        purchase_in(id, amount, 0)
+    }
+
+    fn purchase_must(id: &str, amount: &str) -> Planned {
+        Planned {
+            must: true,
+            ..purchase(id, amount)
+        }
+    }
+
+    fn card_purchase(id: &str, amount: &str) -> Planned {
+        Planned {
+            on_card: true,
+            ..purchase(id, amount)
+        }
+    }
+
+    #[test]
+    fn savings_are_drawn_before_groups_and_carry_down() {
+        // free 0, savings 150, going out 100 (floor 0); purchase 120 in month 0, purchase 100 in month 1.
+        let out = judge(
+            &bases_savings(["0", "0"], "150"),
+            &[vec![], vec![]],
+            &mut saver(vec![purchase_in("a", "120", 0), purchase_in("b", "100", 1)]),
+        );
+        assert_eq!(out[0].verdicts[0].from_savings, d("120"));
+        assert!(out[0].verdicts[0].cuts.is_empty());
+        assert_eq!(out[0].savings_before, d("150"));
+        assert_eq!(out[0].savings_left, d("30"));
+        assert_eq!(out[1].savings_before, d("30"));
+        assert_eq!(out[1].verdicts[0].from_savings, d("30"));
+        // going out 100 → 30 for the remaining 70
+        assert_eq!(out[1].verdicts[0].cuts[0].to, d("30"));
+        assert_eq!(out[1].savings_left, Decimal::ZERO);
+    }
+
+    #[test]
+    fn must_wish_is_paid_before_an_optional_one() {
+        // free 100; optional purchase 80 created first, must purchase 80 due same month, no cards, no groups.
+        let out = judge(
+            &[base("100", vec![])],
+            &[vec![]],
+            &mut saver(vec![purchase("opt", "80"), purchase_must("must", "80")]),
+        );
+        let v = &out[0].verdicts;
+        assert_eq!(v[0].wish_id.as_deref(), Some("must"));
+        assert_eq!(v[0].short, Decimal::ZERO);
+        assert!(v[0].must);
+        assert_eq!(v[1].wish_id.as_deref(), Some("opt"));
+        assert_eq!(v[1].short, d("60"));
+    }
+
+    #[test]
+    fn optional_set_aside_skips_a_tight_month_and_catches_up() {
+        // free 100 / 400 / 400; wish 600 due month 2 → 200 each; month 0 cannot pay 200 without cards.
+        let out = judge(
+            &bases(["100", "400", "400"]),
+            &[vec![], vec![], vec![]],
+            &mut saver(vec![due_in("w", "600", 2)]),
+        );
+        assert!(out[0].verdicts[0].skipped && out[0].verdicts[0].amount.is_zero());
+        assert!(out[0].verdicts[0].set_aside);
+        assert_eq!(out[0].free_left, d("100"));
+        // 600 over the 2 months left
+        assert_eq!(out[1].verdicts[0].amount, d("300"));
+        assert_eq!(out[2].verdicts[0].amount, d("300"));
+        assert!(out.iter().all(|m| {
+            m.verdicts
+                .iter()
+                .all(|v| v.short.is_zero() && v.on_card.is_zero())
+        }));
+    }
+
+    #[test]
+    fn optional_set_aside_skips_rather_than_use_the_cards() {
+        // Same as above but with cards: the trial never touches them.
+        let out = judge(
+            &bases_with_cards(["100", "400", "400"]),
+            &[vec![], vec![], vec![]],
+            &mut saver(vec![due_in("w", "600", 2)]),
+        );
+        assert!(out[0].verdicts[0].skipped);
+        assert_eq!(out[0].card_used, Decimal::ZERO);
+    }
+
+    #[test]
+    fn must_set_aside_pays_on_the_cards_when_later_months_cannot_carry_it() {
+        // free 100 / 250 / 250; must 600 due month 2 → 200 each; skipping would need 300 > 250, so month 0 pays 200: 100 free + 100 card.
+        let out = judge(
+            &bases_with_cards(["100", "250", "250"]),
+            &[vec![], vec![], vec![]],
+            &mut saver(vec![due_in_must("w", "600", 2)]),
+        );
+        assert_eq!(out[0].verdicts[0].on_card, d("100"));
+        assert_eq!(out[0].verdicts[0].from_free, d("100"));
+        assert!(!out[0].verdicts[0].skipped);
+    }
+
+    #[test]
+    fn must_set_aside_skips_when_later_months_can_carry_it() {
+        // free 100 / 400 / 400; must 600 due month 2: 300 a month fits later.
+        let out = judge(
+            &bases_with_cards(["100", "400", "400"]),
+            &[vec![], vec![], vec![]],
+            &mut saver(vec![due_in_must("w", "600", 2)]),
+        );
+        assert!(out[0].verdicts[0].skipped);
+        assert_eq!(out[1].verdicts[0].amount, d("300"));
+    }
+
+    #[test]
+    fn must_set_aside_never_skips_past_due() {
+        // free 0 then 0; must 100 due month 1 → 50 set aside in month 0.
+        // Month 0 cannot skip (later free 0): pays on the cards. Month 1
+        // buys the 50 left, after the card charge.
+        let out = judge(
+            &bases_with_cards(["0", "0"]),
+            &[vec![], vec![]],
+            &mut saver(vec![due_in_must("w", "100", 1)]),
+        );
+        assert_eq!(
+            out[0].verdicts.iter().map(|v| v.on_card).sum::<Decimal>(),
+            d("50")
+        );
+        assert!(out.iter().all(|m| m.verdicts.iter().all(|v| !v.skipped)));
+        let bought = &out[1].verdicts[1];
+        assert_eq!((bought.amount, bought.set_aside), (d("50"), false));
+    }
+
+    #[test]
+    fn card_fill_never_exceeds_limit() {
+        // visa limit 100 used 30, mc limit 200 used 0; card purchase 250 → visa 70, mc 180; then 400 more → mc 20 then free/cuts/short.
+        let out = judge(
+            &[base_cards(
+                "0",
+                vec![("visa", "100", "30"), ("mc", "200", "0")],
+            )],
+            &[vec![]],
+            &mut saver(vec![card_purchase("a", "250"), card_purchase("b", "400")]),
+        );
+        let m = &out[0];
+        assert_eq!(m.cards[0].used, d("100"));
+        assert_eq!(m.cards[1].used, d("200"));
+        assert_eq!(m.verdicts[0].on_card, d("250"));
+        assert_eq!(m.verdicts[1].on_card, d("20"));
+        assert_eq!(m.verdicts[1].short, d("380"));
+        assert_eq!(m.card_used, d("300"));
+    }
+
+    #[test]
+    fn next_month_charge_is_the_sum_of_every_card() {
+        // month 0 ends visa 60 / mc 90 → month 1 "Credit card" verdict amount 150, paid from free.
+        let mut months = months_of(
+            ["0", "200"],
+            &[card("visa", "100", "60"), card("mc", "200", "90")],
+        );
+        months[1].cards = two_cards();
+        let out = judge(&months, &[vec![], vec![]], &mut no_saver());
+        assert_eq!(
+            out[0]
+                .cards
+                .iter()
+                .map(|c| (c.card_id.as_str(), c.used))
+                .collect::<Vec<_>>(),
+            vec![("visa", d("60")), ("mc", d("90"))]
+        );
+        assert_eq!(out[1].card_charge_in, d("150"));
+        let charge = &out[1].verdicts[0];
+        assert_eq!(charge.label, CARD_CHARGE);
+        assert_eq!(charge.amount, d("150"));
+        assert_eq!(charge.from_free, d("150"));
+        assert_eq!(out[1].free_left, d("50"));
+    }
+
+    #[test]
+    fn later_months_start_from_their_card_usage() {
+        // Month 1's cards hold 2400 of 2500 between them.
+        let mut months = vec![base_at(10, "0", vec![], "0"), base_at(11, "0", vec![], "0")];
+        months[1].cards = vec![card("visa", "2000", "2000"), card("mc", "500", "400")];
+        let out = judge(
+            &months,
+            &[vec![], vec![demand("tv", "200", true)]],
+            &mut no_saver(),
+        );
+        let tv = &out[1].verdicts[0];
+        assert_eq!(tv.on_card, d("100"));
+        assert_eq!(tv.short, d("100"));
+        assert_eq!(out[1].card_used, d("2500"));
+        assert_eq!(out[1].cards[1].used, d("500"));
+    }
+
+    #[test]
+    fn card_charge_shortfall_split_by_on_card() {
+        // October: 100 typed usage on the visa, a 300 and a 100 wish on the
+        // cards. November pays the 500 charge: going out 200 → 0, short 300.
+        let mut months = vec![
+            base_at(10, "0", vec![], "0"),
+            base_at(11, "0", vec![group("going out", 2, "200", "0")], "0"),
+        ];
+        months[0].cards = vec![card("visa", "100", "100"), card("mc", "2400", "0")];
+        let out = judge(
+            &months,
             &[
                 vec![demand("a", "300", true), demand("b", "100", true)],
                 vec![],
             ],
-            d("2500"),
+            &mut no_saver(),
         );
         let charge = &out[1].verdicts[0];
         assert_eq!(charge.amount, d("500"));
@@ -483,126 +1001,27 @@ mod tests {
     }
 
     #[test]
-    fn card_charge_paid_from_free_then_cuts() {
+    fn repeats_go_by_tier_after_wishes() {
+        // free 100: a freed 20 first, then the must repeat 50 before the
+        // optional purchase 70, and the optional repeat 30 last.
+        let mut must_cost = demand("gym", "50", false);
+        must_cost.must = true;
         let out = judge(
-            &[
-                base_at(10, "0", vec![], "0"),
-                base_at(11, "50", vec![group("going out", 2, "120", "0")], "0"),
-            ],
-            &[vec![demand("tv", "100", true)], vec![]],
-            d("2500"),
+            &[base("100", vec![])],
+            &[vec![
+                demand("rent", "-20", false),
+                must_cost,
+                demand("bus", "30", false),
+            ]],
+            &mut saver(vec![purchase("tv", "70")]),
         );
-        let charge = &out[1].verdicts[0];
-        assert_eq!(charge.from_free, d("50"));
-        assert_eq!(charge.cuts[0].to, d("70"));
-        assert_eq!(charge.short, Decimal::ZERO);
-        assert_eq!(out[0].verdicts[0].next_short, Decimal::ZERO);
-        assert_eq!(out[0].verdicts[0].next_cuts[0].to, d("70"));
-    }
-
-    #[test]
-    fn month_already_short_is_paid_first() {
-        let out = judge(
-            &[base("-50", vec![group("going out", 2, "120", "0")], "0")],
-            &[vec![demand("tv", "30", false)]],
-            d("2500"),
-        );
-        let first = &out[0].verdicts[0];
-        assert_eq!(
-            (first.wish_id.as_deref(), first.label.as_str()),
-            (None, "Already short")
-        );
-        assert_eq!(first.amount, d("50"));
-        assert_eq!(first.cuts[0].to, d("70"));
-        let tv = &out[0].verdicts[1];
-        assert_eq!(tv.from_free, Decimal::ZERO);
-        assert_eq!(tv.cuts[0].from, d("70"));
-        assert_eq!(tv.cuts[0].to, d("40"));
-        assert_eq!(out[0].free_before, d("-50"));
-        assert_eq!(out[0].free_left, Decimal::ZERO);
-    }
-
-    #[test]
-    fn already_short_without_room_is_short() {
-        let out = judge(&[base("-50", vec![], "2500")], &[vec![]], d("2500"));
-        assert_eq!(out[0].verdicts[0].short, d("50"));
-    }
-
-    #[test]
-    fn later_months_start_from_their_card_usage() {
-        let out = judge(
-            &[
-                base_at(10, "0", vec![], "0"),
-                base_at(11, "0", vec![], "2400"),
-            ],
-            &[vec![], vec![demand("tv", "200", true)]],
-            d("2500"),
-        );
-        let tv = &out[1].verdicts[0];
-        assert_eq!(tv.on_card, d("100"));
-        assert_eq!(tv.short, d("100"));
-        assert_eq!(out[1].card_used, d("2500"));
-    }
-
-    #[test]
-    fn cuts_carry_across_demands_in_a_month() {
-        let out = judge(
-            &[base("0", two_groups(), "2500")],
-            &[vec![demand("a", "100", false), demand("b", "100", false)]],
-            d("2500"),
-        );
-        let (a, b) = (&out[0].verdicts[0], &out[0].verdicts[1]);
-        assert_eq!(a.cuts.len(), 1);
-        assert_eq!((a.cuts[0].from, a.cuts[0].to), (d("120"), d("20")));
-        assert_eq!((b.cuts[0].from, b.cuts[0].to), (d("20"), d("0")));
-        assert_eq!((b.cuts[1].from, b.cuts[1].to), (d("450"), d("370")));
-    }
-
-    #[test]
-    fn card_wish_over_card_room_falls_back_to_free_then_cuts() {
-        let out = judge(
-            &[base("30", two_groups(), "2400")],
-            &[vec![demand("tv", "200", true)]],
-            d("2500"),
-        );
-        let tv = &out[0].verdicts[0];
-        assert_eq!(tv.on_card, d("100"));
-        assert_eq!(tv.from_free, d("30"));
-        assert_eq!(tv.cuts[0].to, d("50"));
-        assert_eq!(tv.short, Decimal::ZERO);
-    }
-
-    #[test]
-    fn equal_importance_cut_by_name() {
-        let out = judge(
-            &[base(
-                "0",
-                vec![group("b", 2, "10", "0"), group("a", 2, "10", "0")],
-                "2500",
-            )],
-            &[vec![demand("tv", "15", false)]],
-            d("2500"),
-        );
-        let names: Vec<_> = out[0].verdicts[0]
-            .cuts
+        let ids: Vec<_> = out[0]
+            .verdicts
             .iter()
-            .map(|c| c.name.as_str())
+            .map(|v| v.wish_id.as_deref().unwrap())
             .collect();
-        assert_eq!(names, vec!["a", "b"]);
-    }
-
-    #[test]
-    fn bill_change_down_frees_money() {
-        let out = judge(
-            &[base("100", vec![], "0")],
-            &[vec![demand("rent", "-50", false)]],
-            d("2500"),
-        );
-        assert_eq!(out[0].free_left, d("150"));
-        let v = &out[0].verdicts[0];
-        assert_eq!(v.from_free, d("-50"));
-        assert!(v.cuts.is_empty());
-        assert_eq!(v.on_card, Decimal::ZERO);
-        assert_eq!(v.short, Decimal::ZERO);
+        assert_eq!(ids, vec!["rent", "gym", "tv", "bus"]);
+        assert_eq!(out[0].verdicts[2].short, Decimal::ZERO);
+        assert_eq!(out[0].verdicts[3].short, d("30"));
     }
 }
