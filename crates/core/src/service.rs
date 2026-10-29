@@ -381,6 +381,7 @@ impl Service {
             let settings = crate::wishes::store::load_wish_settings(store.connection())?;
             Ok(crate::wishes::wishes_view(
                 &dash,
+                &snap.budget_plans,
                 &snap.bills,
                 &wishes,
                 &settings,
@@ -410,6 +411,7 @@ impl Service {
             let settings = crate::wishes::store::load_wish_settings(store.connection())?;
             Ok(crate::wishes::purchase_cuts(
                 &dash,
+                &snap.budget_plans,
                 &snap.bills,
                 &wishes,
                 &settings,

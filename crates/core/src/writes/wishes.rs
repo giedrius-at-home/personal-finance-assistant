@@ -13,7 +13,7 @@ use super::bills::{Checks, archive_bill, create_bill, edit_bill};
 use super::budget::save_budget_plan;
 use super::{Writer, invalid};
 use crate::budget::default_budget;
-use crate::text::casefold;
+use crate::wishes::baseline::ranking;
 use crate::wishes::store::{load_wish_settings, load_wishes};
 use crate::{Ctx, Result, Snapshot};
 
@@ -262,6 +262,8 @@ pub fn mark_bought(
             .ok()
             .map(|d| d.first_of_month());
         let settings = match recorded {
+            // Bought before this budget month: already charged.
+            _ if month < ctx.current_month() => None,
             Some(m) if m == month => Some(WishSettings {
                 card_used: settings.card_used + purchase.amount,
                 ..settings
@@ -323,12 +325,7 @@ fn ranked_default(snap: &Snapshot, month: Date, currency: &Currency) -> BudgetPl
         .collect();
     earlier.sort_by(|a, b| b.month.cmp(&a.month));
     for group in &mut plan.groups {
-        let name = casefold(&group.name);
-        if let Some(ranked) = earlier
-            .iter()
-            .filter_map(|p| p.groups.iter().find(|g| casefold(&g.name) == name))
-            .find(|g| g.importance.is_some())
-        {
+        if let Some(ranked) = ranking(earlier.iter().copied(), &group.name) {
             group.importance = ranked.importance;
             group.floor = ranked.floor;
         }
@@ -656,6 +653,26 @@ mod tests {
         assert_eq!(
             load_wish_settings(db.store.connection()).unwrap().card_used,
             "9.98".parse::<Decimal>().unwrap()
+        );
+    }
+
+    #[test]
+    fn card_purchase_before_this_month_leaves_unset_usage() {
+        let mut db = db();
+        let wish = db.write(|w, s| save_wish(w, s, draft("Bike"))).unwrap();
+        db.write(|w, s| {
+            mark_bought(
+                w,
+                s,
+                &wish.wish_id,
+                purchase(100, "2026-09-28", WishSource::Card),
+                &[],
+            )
+        })
+        .unwrap();
+        assert_eq!(
+            load_wish_settings(db.store.connection()).unwrap(),
+            WishSettings::default()
         );
     }
 

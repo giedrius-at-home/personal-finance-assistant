@@ -23,11 +23,12 @@ use crate::load::Bill;
 /// are the snapshot's, for the schedules the dashboard rows leave out.
 pub fn wishes_view(
     dashboard: &Dashboard,
+    stored_plans: &[BudgetPlan],
     bills: &[Bill],
     wishes: &[Wish],
     settings: &WishSettings,
 ) -> WishesView {
-    let (plans, card_bill, bills) = dashboard_parts(dashboard, bills, settings);
+    let (plans, card_bill, bills) = dashboard_parts(dashboard, stored_plans, bills, settings);
     Inputs {
         alloc: allocation(dashboard),
         plans,
@@ -41,13 +42,14 @@ pub fn wishes_view(
 /// gap judged as a purchase of its own, after everything else planned.
 pub fn purchase_cuts(
     dashboard: &Dashboard,
+    stored_plans: &[BudgetPlan],
     bills: &[Bill],
     wishes: &[Wish],
     settings: &WishSettings,
     wish_id: &str,
     purchase: &WishPurchase,
 ) -> Vec<Cut> {
-    let (plans, card_bill, bills) = dashboard_parts(dashboard, bills, settings);
+    let (plans, card_bill, bills) = dashboard_parts(dashboard, stored_plans, bills, settings);
     Inputs {
         alloc: allocation(dashboard),
         plans,
@@ -55,6 +57,22 @@ pub fn purchase_cuts(
         bills: &bills,
     }
     .purchase_cuts(wishes, settings, wish_id, purchase)
+}
+
+/// The plans the judging reads: the dashboard's months (stored or default)
+/// plus every other stored plan, so a default month inherits the ranking
+/// of the latest stored plan that ranks a group.
+pub fn view_plans(dashboard: Vec<BudgetPlan>, stored: &[BudgetPlan]) -> Vec<BudgetPlan> {
+    let mut plans = dashboard;
+    for plan in stored {
+        if !plans
+            .iter()
+            .any(|p| p.month == plan.month && p.currency == plan.currency)
+        {
+            plans.push(plan.clone());
+        }
+    }
+    plans
 }
 
 fn allocation(dashboard: &Dashboard) -> Option<&CurrencyAllocation> {
@@ -69,14 +87,18 @@ fn allocation(dashboard: &Dashboard) -> Option<&CurrencyAllocation> {
 /// The budget plans, the card bill's amount and the bills as they stand.
 fn dashboard_parts(
     dashboard: &Dashboard,
+    stored_plans: &[BudgetPlan],
     bills: &[Bill],
     settings: &WishSettings,
 ) -> (Vec<BudgetPlan>, Decimal, HashMap<String, BillNow>) {
-    let plans: Vec<BudgetPlan> = dashboard
-        .monthly_budgets
-        .iter()
-        .map(|b| b.plan.clone())
-        .collect();
+    let plans = view_plans(
+        dashboard
+            .monthly_budgets
+            .iter()
+            .map(|b| b.plan.clone())
+            .collect(),
+        stored_plans,
+    );
     // The card bill is already counted in next month's fixed costs.
     let card_bill = settings
         .card_bill_id
@@ -464,6 +486,65 @@ mod tests {
         assert_eq!(repeat_of("monthly", 1), None);
         assert_eq!(repeat_of("yearly", 0), Some(Repeat::Yearly));
         assert_eq!(repeat_of("quarterly", 0), None);
+    }
+
+    #[test]
+    fn default_month_inherits_ranking_from_stored_plans() {
+        let a = alloc(
+            "0",
+            "0",
+            vec![row("Going out", "120", "0"), row("Groceries", "450", "0")],
+            vec![row("Going out", "120", "0"), row("Groceries", "450", "0")],
+        );
+        // The dashboard only carries October's unsaved default plan.
+        let dashboard = [plan(
+            "2026-10-01",
+            vec![
+                plan_group("going-out", "Going out", None, None),
+                plan_group("groceries", "Groceries", None, None),
+            ],
+        )];
+        let stored = [plan(
+            "2026-09-01",
+            vec![
+                plan_group("g-out", "Going out", Some(2), None),
+                plan_group("g-groc", "Groceries", Some(1), Some("300")),
+            ],
+        )];
+        let s = WishSettings {
+            card_limit: Decimal::ZERO,
+            ..WishSettings::default()
+        };
+        let ws = [wish("tv", None, "200", "2026-10-20")];
+        let alone = view_from(
+            Some(&a),
+            &dashboard,
+            Decimal::ZERO,
+            &ws,
+            &s,
+            &HashMap::new(),
+        );
+        assert!(alone.months[0].verdicts[0].cuts.is_empty());
+        let plans = view_plans(dashboard.to_vec(), &stored);
+        let view = view_from(Some(&a), &plans, Decimal::ZERO, &ws, &s, &HashMap::new());
+        let cuts = &view.months[0].verdicts[0].cuts;
+        assert_eq!(cuts[0].group_id, "going-out");
+        assert_eq!((cuts[0].from, cuts[0].to), (d("120"), d("0")));
+        assert_eq!(cuts[1].group_id, "groceries");
+        assert_eq!(cuts[1].to, d("370"));
+    }
+
+    #[test]
+    fn view_plans_prefer_the_dashboards_month() {
+        let dash = plan("2026-10-01", vec![plan_group("a", "A", None, None)]);
+        let stored = [
+            plan("2026-10-01", vec![plan_group("old", "A", Some(1), None)]),
+            plan("2026-09-01", vec![]),
+        ];
+        let plans = view_plans(vec![dash.clone()], &stored);
+        assert_eq!(plans.len(), 2);
+        assert!(plans.contains(&dash));
+        assert!(plans.iter().any(|p| p.month == "2026-09-01"));
     }
 
     #[test]

@@ -8,7 +8,7 @@
 use super::ladder::{GroupRoom, MonthBaseline};
 use crate::period::shift_month;
 use crate::text::casefold;
-use finance_types::gateway::{BudgetPlan, WishSettings};
+use finance_types::gateway::{BudgetGroup, BudgetPlan, WishSettings};
 use finance_types::report::allocation::{CurrencyAllocation, GroupAllocation};
 use jiff::civil::Date;
 use rust_decimal::Decimal;
@@ -42,6 +42,19 @@ fn plans_upto<'a>(
     upto.into_iter().map(|(_, p)| p).collect()
 }
 
+/// The group named `name` in the latest plan that ranks it (`plans` latest
+/// first): its importance and floor are the ones that hold.
+pub fn ranking<'a>(
+    plans: impl IntoIterator<Item = &'a BudgetPlan>,
+    name: &str,
+) -> Option<&'a BudgetGroup> {
+    let key = casefold(name);
+    plans
+        .into_iter()
+        .filter_map(|p| p.groups.iter().find(|g| casefold(&g.name) == key))
+        .find(|g| g.importance.is_some())
+}
+
 /// The ranked groups among `rows`; `keep_spent` false treats nothing as spent.
 /// A group's id is the latest plan's; its importance and floor come from the
 /// latest plan that ranks it, so a default plan keeps last month's ranking.
@@ -49,11 +62,10 @@ fn rooms(rows: &[GroupAllocation], plans: &[&BudgetPlan], keep_spent: bool) -> V
     rows.iter()
         .filter_map(|row| {
             let key = casefold(&row.group);
-            let mut named = plans
+            let latest = plans
                 .iter()
-                .filter_map(|p| p.groups.iter().find(|g| casefold(&g.name) == key));
-            let latest = named.clone().next()?;
-            let ranked = named.find(|g| g.importance.is_some())?;
+                .find_map(|p| p.groups.iter().find(|g| casefold(&g.name) == key))?;
+            let ranked = ranking(plans.iter().copied(), &row.group)?;
             let importance = ranked.importance?;
             let spent = if keep_spent { row.spent } else { Decimal::ZERO };
             Some(GroupRoom {
