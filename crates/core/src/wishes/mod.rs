@@ -269,7 +269,11 @@ impl Inputs<'_> {
             created_at: wish.created_at.clone(),
             per_month: None,
             saved_this_month: false,
-            must: wish.must,
+            // A sub-wish of a must wish is a must too, as the view judges it.
+            must: wish.must
+                || wishes
+                    .iter()
+                    .any(|p| Some(&p.wish_id) == wish.parent_id.as_ref() && p.must),
         });
         let (judged, _) = self.judge(alloc, month0, &items, wishes, settings);
         judged
@@ -705,6 +709,45 @@ mod tests {
                 .purchase_cuts(&wishes, &s, "tv", &buy("100", "2026-10-15", account()))
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn buying_a_sub_of_a_must_wish_is_judged_as_must() {
+        let a = alloc(
+            "250",
+            "0",
+            vec![row("Going out", "1000", "0")],
+            vec![row("Going out", "1000", "0")],
+        );
+        // An optional wish setting aside 200 in month 0 (600 over 3 months).
+        let tv = wish("tv", None, "600", "2026-12-20");
+        let mut trip = wish("trip", None, "100", "2026-12-31");
+        trip.must = true;
+        let hotel = wish("hotel", Some("trip"), "100", "2026-12-31");
+        let wishes = [tv, trip, hotel];
+        let bills = HashMap::new();
+        let inputs = Inputs {
+            alloc: Some(&a),
+            plans: going_out_plan(),
+            card_bills: Vec::new(),
+            bills: &bills,
+        };
+        let view = inputs.view(&wishes, &no_card_room());
+        assert!(
+            view.months[0]
+                .verdicts
+                .iter()
+                .any(|v| v.wish_id.as_deref() == Some("tv") && v.set_aside && v.amount == d("200"))
+        );
+        // The must purchase is judged before the optional set-aside, so the
+        // 250 free covers it and nothing is cut.
+        let cuts = inputs.purchase_cuts(
+            &wishes,
+            &no_card_room(),
+            "hotel",
+            &buy("100", "2026-10-15", account()),
+        );
+        assert!(cuts.is_empty(), "{cuts:?}");
     }
 
     #[test]

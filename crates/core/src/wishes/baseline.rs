@@ -136,7 +136,11 @@ pub fn baselines(
     };
     // The savings pot wishes may draw on once free money runs out, less
     // what is already saved for wishes (each wish's remaining excludes it).
-    let savings = (alloc.savings_balance + alloc.protected_savings - earmarked).max(Decimal::ZERO);
+    // Money saved for wishes is deducted once: from the pot first, and only
+    // what the pot cannot cover comes out of this month's free money.
+    let pot_raw = alloc.savings_balance + alloc.protected_savings;
+    let savings = (pot_raw - earmarked).max(Decimal::ZERO);
+    let free0 = alloc.current_wiggle_room - (earmarked - pot_raw).max(Decimal::ZERO);
     let out = (0..months)
         .map(|i| {
             let month = shift_month(month0, i32::try_from(i).unwrap_or(i32::MAX));
@@ -144,7 +148,7 @@ pub fn baselines(
             match i {
                 0 => MonthBaseline {
                     month,
-                    free: alloc.current_wiggle_room - earmarked,
+                    free: free0,
                     groups: rooms(&alloc.groups, &plans, true),
                     cards: month0_cards.clone(),
                     savings,
@@ -469,6 +473,19 @@ pub(crate) mod tests {
         let (months, _) = baselines(&a, &[], &[], &WishSettings::default(), d("150"), 3);
         assert!(months.iter().all(|m| m.savings == d("450")));
         let (months, _) = baselines(&a, &[], &[], &WishSettings::default(), d("700"), 3);
+        assert!(months.iter().all(|m| m.savings.is_zero()));
+    }
+
+    #[test]
+    fn earmarked_is_deducted_once() {
+        let mut a = alloc("100", "0", vec![], vec![]);
+        a.savings_balance = d("1000");
+        let (months, _) = baselines(&a, &[], &[], &WishSettings::default(), d("500"), 2);
+        assert_eq!(months[0].free, d("100"));
+        assert!(months.iter().all(|m| m.savings == d("500")));
+        a.savings_balance = d("200");
+        let (months, _) = baselines(&a, &[], &[], &WishSettings::default(), d("500"), 2);
+        assert_eq!(months[0].free, d("-200"));
         assert!(months.iter().all(|m| m.savings.is_zero()));
     }
 
