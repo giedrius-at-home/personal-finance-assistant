@@ -190,7 +190,10 @@ fn one_off_line(by_month: &[(&WishMonth, Vec<&Verdict>)], code: &str) -> String 
 fn shorts_by_month(by_month: &[(&WishMonth, Vec<&Verdict>)]) -> Vec<(String, Decimal)> {
     let mut out: Vec<(String, Decimal)> = by_month
         .iter()
-        .map(|(m, v)| (m.month[..7].to_owned(), total(v, |v| v.short)))
+        .map(|(m, v)| {
+            let key = m.month.get(..7).unwrap_or(&m.month).to_owned();
+            (key, total(v, |v| v.short))
+        })
         .collect();
     for (m, v) in by_month {
         let next_short = total(v, |v| v.next_short);
