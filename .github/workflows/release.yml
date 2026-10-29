@@ -1,20 +1,32 @@
 name: Release
 
-# Pushing a tag vX.Y.Z builds, signs and publishes Finance.app. The installed
-# app finds the release through latest.json and verifies the update signature.
+# Every merge to main builds, signs and publishes Finance.app as a new
+# release. The installed app finds it through latest.json and verifies the
+# update signature.
+#
+# The version is the one in tauri.conf.json when a PR raised it past the
+# latest release (minor and major bumps); otherwise the latest release's
+# patch plus one. main only takes PRs, so the version is stamped into this
+# build and the tag, not committed back.
 on:
   push:
-    tags: ["v*.*.*"]
+    branches: [main]
+    paths-ignore: ["**.md", "docs/**", "design/**"]
+  workflow_dispatch:
 
 permissions:
   contents: write
+
+# One release at a time, in merge order.
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   macos:
     runs-on: macos-latest
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      TAG: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Toolchain from rust-toolchain.toml
@@ -26,10 +38,21 @@ jobs:
       - name: Install the Tauri CLI
         run: cargo binstall -y --locked tauri-cli@2.12.4
 
-      - name: Tag must match the app version
+      - name: Pick the version
         run: |
-          version=$(python3 -c 'import json; print(json.load(open("app/src-tauri/tauri.conf.json"))["version"])')
-          test "v$version" = "$TAG" || { echo "tag $TAG does not match app version $version"; exit 1; }
+          latest=$(gh release view --json tagName --jq .tagName 2>/dev/null || echo v0.0.0)
+          LATEST="$latest" python3 - <<'PY'
+          import json, os
+          path = "app/src-tauri/tauri.conf.json"
+          conf = json.load(open(path))
+          parse = lambda v: tuple(int(p) for p in v.removeprefix("v").split("."))
+          file, latest = parse(conf["version"]), parse(os.environ["LATEST"])
+          version = file if file > latest else (latest[0], latest[1], latest[2] + 1)
+          conf["version"] = ".".join(map(str, version))
+          json.dump(conf, open(path, "w"), indent=2)
+          open(os.environ["GITHUB_ENV"], "a").write(f"TAG=v{conf['version']}\n")
+          print(f"latest {os.environ['LATEST']}, releasing v{conf['version']}")
+          PY
 
       - name: Test
         run: cargo test --locked -p finance-storage -p finance-core
@@ -44,7 +67,7 @@ jobs:
       - name: Publish release
         run: |
           bundle=target/release/bundle
-          gh release create "$TAG" --title "Finance $TAG" --generate-notes \
+          gh release create "$TAG" --target "$GITHUB_SHA" --title "Finance $TAG" --generate-notes \
             "$bundle/macos/Finance.app.tar.gz" \
             "$bundle/macos/Finance.app.tar.gz.sig"
 
