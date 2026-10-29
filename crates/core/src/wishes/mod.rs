@@ -397,7 +397,9 @@ impl RowContext<'_> {
         if wish.status == WishStatus::Planned {
             for v in self.verdicts(&wish.wish_id) {
                 short += v.short + v.next_short;
-                tradeoffs |= !v.cuts.is_empty() || v.on_card > Decimal::ZERO;
+                tradeoffs |= !v.cuts.is_empty()
+                    || v.on_card > Decimal::ZERO
+                    || v.from_savings > Decimal::ZERO;
             }
             if one_off {
                 monthly_set_aside = self.set_aside(&wish.wish_id);
@@ -748,6 +750,19 @@ mod tests {
         assert_eq!(trip.children[0].monthly_set_aside, Decimal::ZERO);
         assert_eq!(trip.monthly_set_aside, Decimal::ZERO);
         assert_eq!(view.wishes[1].monthly_set_aside, Decimal::ZERO);
+    }
+
+    #[test]
+    fn wish_paid_from_savings_is_a_tradeoff() {
+        let mut a = alloc("0", "0", vec![], vec![]);
+        a.savings_balance = d("500");
+        let ws = [wish("tv", None, "150", "2026-10-20")];
+        let s = no_card_room();
+        let view = view_from(Some(&a), &[], Vec::new(), &ws, &s, &HashMap::new());
+        let v = &view.months[0].verdicts[0];
+        assert_eq!(v.from_savings, d("150"));
+        assert!(view.wishes[0].tradeoffs);
+        assert_eq!(view.wishes[0].short, Decimal::ZERO);
     }
 
     #[test]

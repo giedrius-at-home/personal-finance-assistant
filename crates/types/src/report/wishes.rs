@@ -88,7 +88,7 @@ pub struct WishRow {
     pub monthly_set_aside: Decimal,
     /// The sum of its verdicts' `short` and `next_short`.
     pub short: Decimal,
-    /// Any verdict with cuts or card use.
+    /// Any verdict with cuts, card use or money from savings.
     pub tradeoffs: bool,
     /// Why a planned wish with money still to find has no verdicts: "no
     /// budget data", "too far ahead" or "bill can't be judged".

@@ -827,6 +827,25 @@ mod tests {
     }
 
     #[test]
+    fn kept_set_aside_lowers_what_later_months_save() {
+        // free 300 / 300 / 300; wish 600 due month 2 → 200 kept in month 0,
+        // so month 1 sets aside 400 / 2 = 200 and month 2 buys the last 200.
+        let out = judge(
+            &bases(["300", "300", "300"]),
+            &[vec![], vec![], vec![]],
+            &mut saver(vec![due_in("w", "600", 2)]),
+        );
+        let v0 = &out[0].verdicts[0];
+        assert!(v0.set_aside && !v0.skipped);
+        assert_eq!(v0.amount, d("200"));
+        assert_eq!(out[0].free_left, d("100"));
+        assert_eq!(out[1].verdicts[0].amount, d("200"));
+        assert!(out[1].verdicts[0].set_aside);
+        let bought = &out[2].verdicts[0];
+        assert_eq!((bought.amount, bought.set_aside), (d("200"), false));
+    }
+
+    #[test]
     fn optional_set_aside_skips_a_tight_month_and_catches_up() {
         // free 100 / 400 / 400; wish 600 due month 2 → 200 each; month 0 cannot pay 200 without cards.
         let out = judge(

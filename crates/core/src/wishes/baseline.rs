@@ -134,8 +134,9 @@ pub fn baselines(
     } else {
         (&alloc.next_group_rows, true)
     };
-    // The savings pot wishes may draw on once free money runs out.
-    let savings = alloc.savings_balance + alloc.protected_savings;
+    // The savings pot wishes may draw on once free money runs out, less
+    // what is already saved for wishes (each wish's remaining excludes it).
+    let savings = (alloc.savings_balance + alloc.protected_savings - earmarked).max(Decimal::ZERO);
     let out = (0..months)
         .map(|i| {
             let month = shift_month(month0, i32::try_from(i).unwrap_or(i32::MAX));
@@ -458,6 +459,17 @@ pub(crate) mod tests {
         let (months, _) = baselines(&a, &[], &bill("9.98"), &settings("0", ""), Decimal::ZERO, 2);
         assert_eq!(months[1].free, d("209.98"));
         assert_eq!(months[0].free, Decimal::ZERO);
+    }
+
+    #[test]
+    fn savings_pot_excludes_money_saved_for_wishes() {
+        let mut a = alloc("0", "100", vec![], vec![]);
+        a.savings_balance = d("500");
+        a.protected_savings = d("100");
+        let (months, _) = baselines(&a, &[], &[], &WishSettings::default(), d("150"), 3);
+        assert!(months.iter().all(|m| m.savings == d("450")));
+        let (months, _) = baselines(&a, &[], &[], &WishSettings::default(), d("700"), 3);
+        assert!(months.iter().all(|m| m.savings.is_zero()));
     }
 
     #[test]
