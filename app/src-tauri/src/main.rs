@@ -159,6 +159,11 @@ fn record_wish_saved(
 }
 
 #[tauri::command(async, rename_all = "snake_case")]
+fn set_wish_must(service: State<'_, Service>, wish_id: String, must: bool) -> Result<Wish, String> {
+    traced("set_wish_must", service.set_wish_must(&wish_id, must))
+}
+
+#[tauri::command(async, rename_all = "snake_case")]
 fn drop_wish(service: State<'_, Service>, wish_id: String) -> Result<(), String> {
     traced("drop_wish", service.drop_wish(&wish_id))
 }
@@ -510,6 +515,7 @@ fn main() {
             wishes,
             save_wish,
             record_wish_saved,
+            set_wish_must,
             drop_wish,
             mark_wish_bought,
             start_wish,
