@@ -128,11 +128,59 @@ pub fn verdict_line(row: &WishRow, months: &[WishMonth]) -> String {
     }
     let by_month = row_months(row, months);
     let code = row.wish.currency.code.as_str();
-    if row.wish.kind == WishKind::OneOff {
+    let line = if row.wish.kind == WishKind::OneOff {
         one_off_line(&by_month, code)
     } else {
         repeating_line(&by_month, code)
+    };
+    if line == "Affordable." || line == "Affordable every month." {
+        return line;
     }
+    match earlier_saves_note(row, &by_month, code) {
+        Some(note) => format!("{line} {note}"),
+        None => line,
+    }
+}
+
+/// `€300 saved for Bike first.`: what the month set aside for wishes due
+/// earlier before this row got its turn, in the first judged month that
+/// did so. Money saved for an earlier wish is why a later one comes up
+/// short or costs something, so the verdict says where it went.
+fn earlier_saves_note(
+    row: &WishRow,
+    by_month: &[(&WishMonth, Vec<&Verdict>)],
+    code: &str,
+) -> Option<String> {
+    let ids = row_ids(row);
+    by_month.iter().find_map(|(month, _)| {
+        let mine = month
+            .verdicts
+            .iter()
+            .position(|v| v.wish_id.as_deref().is_some_and(|id| ids.contains(&id)))?;
+        let mut taken: Vec<(String, Decimal)> = Vec::new();
+        for v in &month.verdicts[..mine] {
+            if !v.set_aside || v.skipped || v.wish_id.is_none() || v.amount <= Decimal::ZERO {
+                continue;
+            }
+            let name = v.label.strip_prefix("Saving for ").unwrap_or(&v.label);
+            match taken.iter_mut().find(|(seen, _)| seen == name) {
+                Some((_, sum)) => *sum += v.amount,
+                None => taken.push((name.to_owned(), v.amount)),
+            }
+        }
+        let parts = taken
+            .iter()
+            .enumerate()
+            .map(|(i, (name, n))| {
+                if i == 0 {
+                    format!("{} saved for {name}", amount(*n, code))
+                } else {
+                    format!("{} for {name}", amount(*n, code))
+                }
+            })
+            .collect::<Vec<_>>();
+        (!parts.is_empty()).then(|| format!("{} first.", parts.join(" and ")))
+    })
 }
 
 /// A one-off's verdict, after a word on any month its set-aside skipped.
@@ -344,6 +392,53 @@ fn repeating_line(by_month: &[(&WishMonth, Vec<&Verdict>)], code: &str) -> Strin
     "Affordable every month.".to_owned()
 }
 
+/// How a one-off wish gets saved up, for the row's data fields.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Saving {
+    /// What this month puts aside.
+    pub this_month: Decimal,
+    /// `YYYY-MM-01` of the last month that sets money aside.
+    pub saved_by: String,
+    /// What is still unsaved when the due month comes, and that month,
+    /// when the set-asides do not cover the wish in time.
+    pub unsaved: Option<(Decimal, String)>,
+}
+
+/// The row's saving facts; `None` when nothing is set aside for it.
+pub fn saving(row: &WishRow, months: &[WishMonth]) -> Option<Saving> {
+    if row.wish.kind != WishKind::OneOff || row.not_judged.is_some() {
+        return None;
+    }
+    let by_month = row_months(row, months);
+    let saved_by = by_month
+        .iter()
+        .rev()
+        .find(|(_, v)| {
+            v.iter()
+                .any(|v| v.set_aside && !v.skipped && v.amount > Decimal::ZERO)
+        })
+        .map(|(m, _)| m.month.clone())?;
+    let bought = |v: &Verdict| !v.set_aside && v.amount > Decimal::ZERO;
+    let unsaved: Decimal = by_month
+        .iter()
+        .flat_map(|(_, v)| v.iter())
+        .filter(|v| bought(v))
+        .map(|v| v.amount)
+        .sum();
+    let unsaved = (unsaved > Decimal::ZERO).then(|| {
+        let due = by_month
+            .iter()
+            .find(|(_, v)| v.iter().any(|v| bought(v)))
+            .map_or(saved_by.clone(), |(m, _)| m.month.clone());
+        (unsaved, due)
+    });
+    Some(Saving {
+        this_month: row.monthly_set_aside,
+        saved_by,
+        unsaved,
+    })
+}
+
 /// What "free money" means on this page, with the savings pot the months
 /// start from.
 fn free_money_note(months: &[WishMonth], code: &str) -> String {
@@ -354,27 +449,34 @@ fn free_money_note(months: &[WishMonth], code: &str) -> String {
     }
 }
 
-/// What the month's card use is paid back with on the 1st of the next
-/// month, per card when there are several; `None` when nothing is owed.
+/// What the wishes put on the cards this month, paid back on the 1st of
+/// the next month, per card when there are several; `None` when the
+/// wishes owe nothing. A card's regular spending (its bill) is left out:
+/// that is paid for outside the wishes.
 fn payback_line(month: &WishMonth, code: &str) -> Option<String> {
-    if month.card_used <= Decimal::ZERO {
+    let owed: Vec<(&str, Decimal)> = month
+        .cards
+        .iter()
+        .map(|c| (c.name.as_str(), c.used - c.regular))
+        .filter(|(_, n)| *n > Decimal::ZERO)
+        .collect();
+    let total: Decimal = owed.iter().map(|(_, n)| *n).sum();
+    if total <= Decimal::ZERO {
         return None;
     }
     let next = month_name(&format::add_months(&month.month, 1));
-    let parts: Vec<String> = month
-        .cards
-        .iter()
-        .filter(|c| c.used > Decimal::ZERO)
-        .map(|c| format!("{} {}", c.name, amount(c.used, code)))
-        .collect();
-    let each = if parts.len() > 1 {
+    let each = if owed.len() > 1 {
+        let parts: Vec<String> = owed
+            .iter()
+            .map(|(name, n)| format!("{name} {}", amount(*n, code)))
+            .collect();
         format!(" ({})", parts.join(", "))
     } else {
         String::new()
     };
     Some(format!(
         "Pay back {} on 1 {next}{each}.",
-        amount(month.card_used, code)
+        amount(total, code)
     ))
 }
 
@@ -1310,9 +1412,23 @@ fn wish_row(
             {over}
         }
     });
-    let set_aside = (row.monthly_set_aside > Decimal::ZERO).then(|| {
+    let set_aside = months.with_value(|m| saving(&row, m)).map(|s| {
+        let unit = Currency::new(&code);
+        let this_month = crate::ds::money(s.this_month, &unit);
+        let (label, when) = match &s.unsaved {
+            Some((_, due)) => ("Still unsaved in", format::month_long(due)),
+            None => ("Saved up by", format::month_long(&s.saved_by)),
+        };
+        let gap = s.unsaved.as_ref().map(|(n, _)| {
+            let n = crate::ds::money(*n, &unit);
+            view! { <Stat label="Unsaved">{n}</Stat> }
+        });
         view! {
-            <p class="text-sm">{format!("Put aside {}/month", amount(row.monthly_set_aside, &code))}</p>
+            <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                <Stat label="Put aside this month">{this_month}</Stat>
+                <Stat label=label>{when}</Stat>
+                {gap}
+            </div>
         }
     });
     let children = row
@@ -1974,10 +2090,28 @@ mod tests {
 
     fn card_used(id: &str, name: &str, used: Decimal) -> CardUsed {
         CardUsed {
+            regular: Decimal::ZERO,
             card_id: id.into(),
             name: name.into(),
             used,
         }
+    }
+
+    #[test]
+    fn payback_line_leaves_out_the_cards_regular_spending() {
+        let mut m = month_at("2027-01-01", vec![]);
+        m.cards = vec![CardUsed {
+            regular: d(835, 2),
+            ..card_used("visa", "Visa", d(835, 2))
+        }];
+        m.card_used = d(835, 2);
+        assert_eq!(payback_line(&m, "EUR"), None);
+        m.cards[0].used = d(5835, 2);
+        m.card_used = d(5835, 2);
+        assert_eq!(
+            payback_line(&m, "EUR").unwrap(),
+            "Pay back €50 on 1 February."
+        );
     }
 
     #[test]
@@ -2296,6 +2430,181 @@ mod tests {
             verdict_line(&row("w"), &months),
             "Not affordable — short by €50."
         );
+    }
+
+    fn saving_for(id: &str, name: &str, amount: Decimal) -> Verdict {
+        Verdict {
+            label: format!("Saving for {name}"),
+            set_aside: true,
+            from_free: amount,
+            ..verdict(id, amount)
+        }
+    }
+
+    #[test]
+    fn money_saved_for_an_earlier_wish_is_named() {
+        let v = Verdict {
+            short: d(50, 0),
+            ..verdict("w", d(50, 0))
+        };
+        let months = [month(
+            d(300, 0),
+            Decimal::ZERO,
+            vec![saving_for("bike", "Bike", d(300, 0)), v],
+        )];
+        assert_eq!(
+            verdict_line(&row("w"), &months),
+            "Not affordable — short by €50. €300 saved for Bike first."
+        );
+    }
+
+    #[test]
+    fn several_earlier_saves_are_listed_in_order() {
+        let v = Verdict {
+            cuts: vec![cut("g1", "Going out", 120, 40)],
+            ..verdict("w", d(80, 0))
+        };
+        let months = [month(
+            d(400, 0),
+            Decimal::ZERO,
+            vec![
+                saving_for("bike", "Bike", d(300, 0)),
+                saving_for("laptop", "Laptop", d(100, 0)),
+                v,
+            ],
+        )];
+        assert_eq!(
+            verdict_line(&row("w"), &months),
+            "Affordable if going out drops to €40. €300 saved for Bike and €100 for Laptop first."
+        );
+    }
+
+    #[test]
+    fn own_skipped_month_names_the_earlier_save() {
+        let months = vec![
+            month_at(
+                "2026-11-01",
+                vec![saving_for("bike", "Bike", d(300, 0)), verdict_skipped("w")],
+            ),
+            month_at("2026-12-01", vec![verdict_set_aside("w", d(30000, 2))]),
+        ];
+        assert_eq!(
+            verdict_line(&row("w"), &months),
+            "Nothing set aside in November; €300/month from December. €300 saved for Bike first."
+        );
+    }
+
+    #[test]
+    fn earlier_saves_stay_quiet_when_affordable_or_after_this_wish() {
+        let v = Verdict {
+            from_free: d(50, 0),
+            ..verdict("w", d(50, 0))
+        };
+        let months = [month(
+            d(400, 0),
+            d(400, 0),
+            vec![saving_for("bike", "Bike", d(300, 0)), v.clone()],
+        )];
+        assert_eq!(verdict_line(&row("w"), &months), "Affordable.");
+        let later = Verdict {
+            short: d(50, 0),
+            ..v
+        };
+        let months = [month(
+            d(400, 0),
+            Decimal::ZERO,
+            vec![later, saving_for("bike", "Bike", d(300, 0))],
+        )];
+        assert_eq!(
+            verdict_line(&row("w"), &months),
+            "Not affordable — short by €50."
+        );
+    }
+
+    #[test]
+    fn skipped_earlier_save_took_nothing() {
+        let v = Verdict {
+            short: d(50, 0),
+            ..verdict("w", d(50, 0))
+        };
+        let months = [month(
+            Decimal::ZERO,
+            Decimal::ZERO,
+            vec![verdict_skipped("bike"), v],
+        )];
+        assert_eq!(
+            verdict_line(&row("w"), &months),
+            "Not affordable — short by €50."
+        );
+    }
+
+    #[test]
+    fn saving_names_the_month_it_is_saved_by() {
+        let mut r = row("w");
+        r.monthly_set_aside = d(300, 0);
+        let months = vec![
+            month_at("2026-10-01", vec![verdict_set_aside("w", d(300, 0))]),
+            month_at("2026-11-01", vec![verdict_set_aside("w", d(300, 0))]),
+            month_at("2026-12-01", vec![verdict_set_aside("w", d(100, 0))]),
+        ];
+        assert_eq!(
+            saving(&r, &months),
+            Some(Saving {
+                this_month: d(300, 0),
+                saved_by: "2026-12-01".into(),
+                unsaved: None,
+            })
+        );
+    }
+
+    #[test]
+    fn saving_says_what_stays_unsaved_at_the_due_month() {
+        let mut r = row("w");
+        r.monthly_set_aside = d(300, 0);
+        let bought = Verdict {
+            from_free: d(200, 0),
+            ..verdict("w", d(200, 0))
+        };
+        let months = vec![
+            month_at("2026-10-01", vec![verdict_set_aside("w", d(300, 0))]),
+            month_at("2026-11-01", vec![verdict_skipped("w")]),
+            month_at("2026-12-01", vec![bought]),
+        ];
+        assert_eq!(
+            saving(&r, &months),
+            Some(Saving {
+                this_month: d(300, 0),
+                saved_by: "2026-10-01".into(),
+                unsaved: Some((d(200, 0), "2026-12-01".into())),
+            })
+        );
+    }
+
+    #[test]
+    fn saving_after_a_skipped_month_still_names_the_date() {
+        let months = vec![
+            month_at("2026-10-01", vec![verdict_skipped("w")]),
+            month_at("2026-11-01", vec![verdict_set_aside("w", d(150, 0))]),
+        ];
+        assert_eq!(
+            saving(&row("w"), &months),
+            Some(Saving {
+                this_month: Decimal::ZERO,
+                saved_by: "2026-11-01".into(),
+                unsaved: None,
+            })
+        );
+    }
+
+    #[test]
+    fn saving_is_absent_without_set_asides() {
+        let months = [month(
+            Decimal::ZERO,
+            Decimal::ZERO,
+            vec![verdict("w", d(150, 0))],
+        )];
+        assert_eq!(saving(&row("w"), &months), None);
+        assert_eq!(saving(&repeating("w", Repeat::Monthly), &months), None);
     }
 
     #[test]
