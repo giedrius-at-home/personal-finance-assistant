@@ -322,6 +322,11 @@ pub fn judge(
                     card_id: c.card_id.clone(),
                     name: c.name.clone(),
                     used: c.used,
+                    regular: base
+                        .cards
+                        .iter()
+                        .find(|b| b.card_id == c.card_id)
+                        .map_or(Decimal::ZERO, |b| b.used),
                 })
                 .collect(),
             verdicts,

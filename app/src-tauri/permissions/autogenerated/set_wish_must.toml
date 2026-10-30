@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-wish-must"
+description = "Enables the set_wish_must command without any pre-configured scope."
+commands.allow = ["set_wish_must"]
+
+[[permission]]
+identifier = "deny-set-wish-must"
+description = "Denies the set_wish_must command without any pre-configured scope."
+commands.deny = ["set_wish_must"]

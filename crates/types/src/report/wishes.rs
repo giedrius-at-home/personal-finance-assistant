@@ -54,6 +54,10 @@ pub struct CardUsed {
     pub card_id: String,
     pub name: String,
     pub used: Decimal,
+    /// The card's regular spending the month started with (typed usage or
+    /// its linked bill), already paid for outside the wishes.
+    #[serde(default)]
+    pub regular: Decimal,
 }
 
 /// One month of the schedule.
