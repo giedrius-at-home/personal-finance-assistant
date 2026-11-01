@@ -493,9 +493,17 @@ pub fn wish_caps(wishes: &[Wish], previous: &[AllocationLine]) -> WishCaps {
             children.entry(p).or_default().push(w);
         }
     }
+    // As `earmarked`: a part of a parent that is no longer planned (or gone)
+    // takes no line.
+    let parent_planned = |id: &str| {
+        wishes
+            .iter()
+            .any(|p| p.wish_id == id && p.status == WishStatus::Planned)
+    };
     wishes
         .iter()
         .filter(|w| w.status == WishStatus::Planned && one_off(w))
+        .filter(|w| w.parent_id.as_deref().is_none_or(parent_planned))
         .map(|w| {
             let subs: Vec<&Wish> = children
                 .get(w.wish_id.as_str())

@@ -467,6 +467,25 @@ fn parent_cap_is_its_rest_and_earlier_lines_count_back() {
 }
 
 #[test]
+fn a_sub_wish_needs_a_planned_parent() {
+    let planned = [
+        wish("trip", "500", "0", None),
+        wish("flight", "200", "0", Some("trip")),
+    ];
+    assert!(wish_caps(&planned, &[]).contains_key("flight"));
+    let mut bought_parent = wish("trip", "500", "0", None);
+    bought_parent.status = WishStatus::Bought;
+    let wishes = [bought_parent, wish("flight", "200", "0", Some("trip"))];
+    assert!(!wish_caps(&wishes, &[]).contains_key("flight"));
+    // A parent that is gone leaves the sub-wish without a cap too.
+    let orphan = [wish("flight", "200", "0", Some("missing"))];
+    assert!(wish_caps(&orphan, &[]).is_empty());
+    let options = wish_options(&wishes, &[]);
+    let names: HashMap<String, String> = wish_labels(&wishes, &options).into_iter().collect();
+    assert_eq!(names["flight"], "Wish (no longer planned): flight");
+}
+
+#[test]
 fn wish_options_list_parents_then_sub_wishes_by_due_date() {
     let mut later = wish("bike", "1200", "300", None);
     later.due_on = "2027-06-01".into();
