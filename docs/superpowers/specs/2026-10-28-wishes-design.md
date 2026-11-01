@@ -376,3 +376,40 @@ card, not that every month I put something and then pay the money back."
   fit even with the cards.
 - A month that already starts short (money committed before any wish) still
   covers its hole on the cards, as before (owner: "that is fine").
+
+## Addendum (2026-11-01): the card's statement period
+
+The owner's card statement runs from the 26th of one month to the 25th of
+the next, and the whole statement is charged on the 1st or 2nd of the month
+after it ends. The owner decided:
+
+1. **Statement month of a date** is its calendar month, except that a day
+   of 26 or later belongs to the next month's statement. 27 Oct is on the
+   November statement (26 Oct – 25 Nov), charged on 1/2 Dec; 10 Nov is on
+   it too.
+2. **A card wish** lands in the card room of its due date's statement
+   month and is charged one month after that statement month. A wish paid
+   from a bank account is unchanged (the calendar month it is due in). The
+   same holds for repeating card wishes and sub-wishes.
+3. **"Used so far" is per statement**: `used_month` names the statement
+   month (the one ending on the 25th), and the usage is stale once today
+   is past that 25th, not at calendar month end. Month 0's card room uses
+   the statement ending on the 25th of the current budget month; month 0's
+   card is still charged in month 1.
+
+- *(Controller's ruling)* Between the 26th and month end month 0's
+  statement is **closed**: it is still charged in month 1, but nothing more
+  goes on it (its room is full). What it charges is the usage typed for
+  month 0's statement, else the card bill. Month 1 is the open statement:
+  it starts at the usage typed for it, or the card bill if that is more.
+  The app keeps one usage figure per card, so typing November's figure
+  before 1 Nov replaces October's, and October's statement then falls
+  back to the card bill.
+- *(Claude's call)* A card wish due before today goes on the statement
+  open today, and card repeats that fell on a closed statement are taken
+  as already in its usage. A card purchase dated 26th–31st records the
+  cuts of month 1, the month that pays for it.
+- *(Claude's call)* The look-ahead reaches the month a card wish's
+  statement is charged, so its payback shows.
+- The card field reads "Used this statement", its hint the period
+  (e.g. "26 Oct – 25 Nov.").

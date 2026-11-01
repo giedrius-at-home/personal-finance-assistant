@@ -30,6 +30,7 @@ pub fn wishes_view(
     let (plans, card_bills, bills) = dashboard_parts(dashboard, stored_plans, bills, settings);
     Inputs {
         alloc: allocation(dashboard),
+        today: today(dashboard),
         plans,
         card_bills,
         bills: &bills,
@@ -51,6 +52,7 @@ pub fn purchase_cuts(
     let (plans, card_bills, bills) = dashboard_parts(dashboard, stored_plans, bills, settings);
     Inputs {
         alloc: allocation(dashboard),
+        today: today(dashboard),
         plans,
         card_bills,
         bills: &bills,
@@ -72,6 +74,11 @@ pub fn view_plans(dashboard: Vec<BudgetPlan>, stored: &[BudgetPlan]) -> Vec<Budg
         }
     }
     plans
+}
+
+/// The owner's day the dashboard was built on.
+fn today(dashboard: &Dashboard) -> Option<Date> {
+    dashboard.generated_at.get(..10)?.parse().ok()
 }
 
 fn allocation(dashboard: &Dashboard) -> Option<&CurrencyAllocation> {
@@ -162,6 +169,10 @@ fn bills_now(dashboard: &Dashboard, bills: &[Bill]) -> HashMap<String, BillNow> 
 #[derive(Debug)]
 pub struct Inputs<'a> {
     pub alloc: Option<&'a CurrencyAllocation>,
+    /// The day judged on, for which card statement is open; `None` reads
+    /// the first of month 0, so month 0's statement is open and usage typed
+    /// for the next statement counts as stale.
+    pub today: Option<Date>,
     pub plans: Vec<BudgetPlan>,
     pub card_bills: Vec<(String, Decimal)>,
     pub bills: &'a HashMap<String, BillNow>,
@@ -177,9 +188,11 @@ impl Inputs<'_> {
         wishes: &[Wish],
         settings: &WishSettings,
     ) -> (Vec<WishMonth>, Vec<String>) {
+        let today = self.today.unwrap_or(month0);
         let months = schedule::horizon(items, month0);
         let (bases, stale_cards) = baseline::baselines(
             alloc,
+            today,
             &self.plans,
             &self.card_bills,
             settings,
@@ -187,15 +200,35 @@ impl Inputs<'_> {
             months,
         );
         let mut saver = Saver::new(items, month0, months);
-        let repeats = schedule::repeat_demands(items, month0, months);
+        let mut repeats = schedule::repeat_demands(items, month0, months);
+        // A closed statement takes no more card costs: the repeats that fell
+        // on it are already in its usage (or the bill).
+        if schedule::statement_month(today) > month0
+            && let Some(first) = repeats.first_mut()
+        {
+            first.retain(|d| !d.on_card);
+        }
         (ladder::judge(&bases, &repeats, &mut saver), stale_cards)
+    }
+
+    /// Card one-offs due before today go on the statement open today: a
+    /// closed statement takes nothing more.
+    fn open_statement(&self, items: &mut [Planned], month0: Date) {
+        let today = self.today.unwrap_or(month0);
+        for item in items
+            .iter_mut()
+            .filter(|i| i.on_card && i.per_month.is_none())
+        {
+            item.due = item.due.max(today);
+        }
     }
 
     /// The wishes screen.
     pub fn view(&self, wishes: &[Wish], settings: &WishSettings) -> WishesView {
         let judged = self.alloc.and_then(|a| {
             let month0 = baseline::current_month(a)?;
-            let (items, families) = schedule::plan_items(wishes, month0, self.bills);
+            let (mut items, families) = schedule::plan_items(wishes, month0, self.bills);
+            self.open_statement(&mut items, month0);
             let (judged, stale) = self.judge(a, month0, &items, wishes, settings);
             Some((judged, families, stale))
         });
@@ -268,16 +301,23 @@ impl Inputs<'_> {
             on_card: purchase.source == WishSource::Card,
             created_at: wish.created_at.clone(),
             per_month: None,
-            saved_this_month: false,
+            // Already bought: month 0 sets nothing aside for it, even when
+            // the card statement makes month 1 pay.
+            saved_this_month: true,
             // A sub-wish of a must wish is a must too, as the view judges it.
             must: wish.must
                 || wishes
                     .iter()
                     .any(|p| Some(&p.wish_id) == wish.parent_id.as_ref() && p.must),
         });
+        self.open_statement(&mut items, month0);
+        let landed = items
+            .iter()
+            .find(|i| i.wish_id == wish_id)
+            .map_or(0, |i| i.months_from(month0));
         let (judged, _) = self.judge(alloc, month0, &items, wishes, settings);
         judged
-            .first()
+            .get(landed)
             .map(|m| {
                 merge_cuts(
                     m.verdicts
@@ -300,6 +340,7 @@ pub fn view_from(
 ) -> WishesView {
     Inputs {
         alloc,
+        today: None,
         plans: plans.to_vec(),
         card_bills,
         bills,
@@ -604,6 +645,40 @@ mod tests {
         assert!(view.wishes[0].tradeoffs);
     }
 
+    #[test]
+    fn card_wish_after_the_25th_is_next_statement() {
+        let a = alloc("0", "1000", vec![], vec![]);
+        let mut tv = wish("tv", None, "500", "2026-10-27");
+        tv.source = WishSource::Card;
+        let judge = |w: &Wish| {
+            view_from(
+                Some(&a),
+                &[],
+                Vec::new(),
+                std::slice::from_ref(w),
+                &WishSettings::default(),
+                &HashMap::new(),
+            )
+        };
+        let bought = |m: &WishMonth| {
+            m.verdicts
+                .iter()
+                .find(|v| v.wish_id.as_deref() == Some("tv") && !v.set_aside)
+                .cloned()
+        };
+        // 27 Oct is November's statement, charged in December.
+        let view = judge(&tv);
+        assert!(bought(&view.months[0]).is_none());
+        assert_eq!(bought(&view.months[1]).unwrap().on_card, d("500"));
+        assert_eq!(view.months[1].card_used, d("500"));
+        assert_eq!(view.months[2].card_charge_in, d("500"));
+        // From a bank account it is still October's.
+        tv.source = account();
+        let view = judge(&tv);
+        assert_eq!(bought(&view.months[0]).unwrap().amount, d("500"));
+        assert!(bought(&view.months[1]).is_none());
+    }
+
     fn named_card(id: &str, used: &str, used_month: &str) -> CardSettings {
         CardSettings {
             card_id: id.into(),
@@ -675,6 +750,7 @@ mod tests {
         let bills = HashMap::new();
         let inputs = Inputs {
             alloc: Some(&a),
+            today: None,
             plans: going_out_plan(),
             card_bills: Vec::new(),
             bills: &bills,
@@ -712,6 +788,76 @@ mod tests {
     }
 
     #[test]
+    fn closed_statement_takes_no_card_wishes() {
+        // On 27 Oct October's statement is closed: an overdue card wish
+        // goes on November's, and a card repeat that fell on October's is
+        // already in its usage.
+        let a = alloc("0", "1000", vec![], vec![]);
+        let mut late = wish("late", None, "200", "2026-10-20");
+        late.source = WishSource::Card;
+        let mut gym = wish("gym", None, "30", "2026-10-10");
+        gym.source = WishSource::Card;
+        gym.kind = WishKind::Recurring {
+            every: Repeat::Monthly,
+            ends_on: None,
+        };
+        let bills = HashMap::new();
+        let inputs = Inputs {
+            alloc: Some(&a),
+            today: Some("2026-10-27".parse().unwrap()),
+            plans: Vec::new(),
+            card_bills: Vec::new(),
+            bills: &bills,
+        };
+        let view = inputs.view(&[late, gym], &WishSettings::default());
+        let paid = |m: usize, id: &str| {
+            view.months[m]
+                .verdicts
+                .iter()
+                .any(|v| v.wish_id.as_deref() == Some(id) && !v.set_aside)
+        };
+        assert!(!paid(0, "late") && !paid(0, "gym"));
+        assert!(paid(1, "late") && paid(1, "gym"));
+        assert_eq!(view.months[1].card_used, d("230"));
+    }
+
+    #[test]
+    fn card_buy_after_the_25th_records_next_months_cuts() {
+        // Bought on the card on 28 Oct: November's statement, so November
+        // (month 1) pays for it, and with no card room it cuts going out.
+        let a = alloc(
+            "0",
+            "0",
+            vec![row("Going out", "1000", "0")],
+            vec![row("Going out", "1000", "0")],
+        );
+        let wishes = [wish("tv", None, "900", "2026-12-20")];
+        let bills = HashMap::new();
+        let inputs = Inputs {
+            alloc: Some(&a),
+            today: Some("2026-10-28".parse().unwrap()),
+            plans: going_out_plan(),
+            card_bills: Vec::new(),
+            bills: &bills,
+        };
+        let cuts = inputs.purchase_cuts(
+            &wishes,
+            &no_card_room(),
+            "tv",
+            &buy("900", "2026-10-28", WishSource::Card),
+        );
+        assert_eq!(
+            cuts,
+            vec![Cut {
+                group_id: "g-out".into(),
+                name: "Going out".into(),
+                from: d("1000"),
+                to: d("100"),
+            }]
+        );
+    }
+
+    #[test]
     fn buying_a_sub_of_a_must_wish_is_judged_as_must() {
         let a = alloc(
             "250",
@@ -730,6 +876,7 @@ mod tests {
         let bills = HashMap::new();
         let inputs = Inputs {
             alloc: Some(&a),
+            today: None,
             plans: going_out_plan(),
             card_bills: Vec::new(),
             bills: &bills,

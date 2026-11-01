@@ -2,10 +2,14 @@
 //!
 //! Pure arithmetic, no I/O. Month 0 is the allocation's current month, month 1
 //! the funded month, and later months repeat month 1 with nothing spent yet.
-//! Month 0's card usage is what the owner typed; each later month starts with
-//! the card bill's amount as its regular card spending.
+//! Month 0's card usage is what the owner typed for the statement ending on
+//! the 25th of month 0; each later month starts with the card bill's amount
+//! as its regular card spending. After the 25th month 0's statement is
+//! closed (charged in month 1, nothing more goes on it) and the owner types
+//! the next statement's usage, which month 1 holds.
 
 use super::ladder::{CardRoom, GroupRoom, MonthBaseline};
+use super::schedule::statement_month;
 use crate::period::shift_month;
 use crate::text::casefold;
 use finance_types::gateway::{BudgetGroup, BudgetPlan, WishSettings};
@@ -80,10 +84,15 @@ fn rooms(rows: &[GroupAllocation], plans: &[&BudgetPlan], keep_spent: bool) -> V
 }
 
 /// One baseline per month for `months` months, and the ids of the cards whose
-/// recorded usage is from an earlier month. `card_bills` is each card's linked
-/// bill amount (a card without a linked bill has no entry).
+/// recorded usage is for a statement that closed before `today`. `card_bills`
+/// is each card's linked bill amount (a card without a linked bill has no
+/// entry).
+///
+/// The statement open on `today` is month 0's or month 1's. Any other
+/// (`today` far from the budget month) marks every card with usage stale.
 pub fn baselines(
     alloc: &CurrencyAllocation,
+    today: Date,
     plans: &[BudgetPlan],
     card_bills: &[(String, Decimal)],
     settings: &WishSettings,
@@ -95,29 +104,53 @@ pub fn baselines(
     };
     let mut stale = Vec::new();
     let mut month0_cards = Vec::new();
+    let mut month1_cards = Vec::new();
     let mut next_cards = Vec::new();
+    let month1 = shift_month(month0, 1);
     for card in &settings.cards {
-        let used = if parse_month(&card.used_month) == Some(month0) {
-            card.used
-        } else {
-            let unset = card.used_month.is_empty() && card.used.is_zero();
-            if !unset {
-                stale.push(card.card_id.clone());
-            }
-            Decimal::ZERO
-        };
         let bill = card_bills
             .iter()
             .find(|(id, _)| *id == card.card_id)
             .map_or(Decimal::ZERO, |(_, amount)| *amount);
-        let room = |used| CardRoom {
+        // Usage is for the statement it names, and goes stale once that
+        // statement closes (after its 25th).
+        let typed = parse_month(&card.used_month);
+        let open = statement_month(today);
+        let unset = card.used_month.is_empty() && card.used.is_zero();
+        if typed != Some(open) && !unset {
+            stale.push(card.card_id.clone());
+        }
+        let room = |used, limit| CardRoom {
             card_id: card.card_id.clone(),
             name: card.name.clone(),
-            limit: card.limit,
+            limit,
             used,
         };
-        month0_cards.push(room(used));
-        next_cards.push(room(bill));
+        if open == month1 {
+            // Month 0's statement is closed: still charged in month 1 (what
+            // was typed for it, else the bill), with no room left on it.
+            let closed = if typed == Some(month0) {
+                card.used
+            } else {
+                bill
+            };
+            let open_used = if typed == Some(month1) {
+                bill.max(card.used)
+            } else {
+                bill
+            };
+            month0_cards.push(room(closed, closed));
+            month1_cards.push(room(open_used, card.limit));
+        } else {
+            let used = if typed == Some(open) && open == month0 {
+                card.used
+            } else {
+                Decimal::ZERO
+            };
+            month0_cards.push(room(used, card.limit));
+            month1_cards.push(room(bill, card.limit));
+        }
+        next_cards.push(room(bill, card.limit));
     }
     let bills_total: Decimal = card_bills.iter().map(|(_, amount)| *amount).sum();
     // `next_wiggle_room` is clamped at zero; the deficit is `next_shortfall`.
@@ -157,7 +190,11 @@ pub fn baselines(
                     month,
                     free: next_free,
                     groups: rooms(next_rows, &plans, i == 1 && next_spent),
-                    cards: next_cards.clone(),
+                    cards: if i == 1 {
+                        month1_cards.clone()
+                    } else {
+                        next_cards.clone()
+                    },
                     savings,
                 },
             }
@@ -169,9 +206,14 @@ pub fn baselines(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::wishes::ladder::Demand;
     use finance_types::gateway::{BudgetGroup, CardSettings};
     use finance_types::report::Currency;
     use std::str::FromStr;
+
+    fn oct20() -> Date {
+        Date::new(2026, 10, 20).unwrap()
+    }
 
     pub(crate) fn d(s: &str) -> Decimal {
         Decimal::from_str(s).unwrap()
@@ -282,7 +324,7 @@ pub(crate) mod tests {
     #[test]
     fn month_zero_uses_wiggle_room_minus_earmark() {
         let a = alloc("400", "0", vec![], vec![]);
-        let (months, _) = baselines(&a, &[], &[], &settings("0", ""), d("300"), 2);
+        let (months, _) = baselines(&a, oct20(), &[], &[], &settings("0", ""), d("300"), 2);
         assert_eq!(months.len(), 2);
         assert_eq!(months[0].free, d("100"));
         assert_eq!(months[0].month, Date::new(2026, 10, 1).unwrap());
@@ -310,7 +352,15 @@ pub(crate) mod tests {
                 plan_group("g-coffee", "Coffee", None, None),
             ],
         )];
-        let (months, _) = baselines(&a, &plans, &[], &settings("0", ""), Decimal::ZERO, 3);
+        let (months, _) = baselines(
+            &a,
+            oct20(),
+            &plans,
+            &[],
+            &settings("0", ""),
+            Decimal::ZERO,
+            3,
+        );
         let g = &months[0].groups;
         assert_eq!(g.len(), 2);
         assert_eq!(g[0].id, "g-out");
@@ -350,7 +400,15 @@ pub(crate) mod tests {
                 vec![plan_group("groceries", "Groceries", None, None)],
             ),
         ];
-        let (months, _) = baselines(&a, &plans, &[], &settings("0", ""), Decimal::ZERO, 3);
+        let (months, _) = baselines(
+            &a,
+            oct20(),
+            &plans,
+            &[],
+            &settings("0", ""),
+            Decimal::ZERO,
+            3,
+        );
         for m in &months[1..] {
             assert_eq!(m.groups.len(), 1);
             assert_eq!(m.groups[0].id, "groceries");
@@ -367,7 +425,15 @@ pub(crate) mod tests {
             "2026-10-01",
             vec![plan_group("g", "Going out", Some(2), None)],
         )];
-        let (months, _) = baselines(&a, &plans, &[], &settings("0", ""), Decimal::ZERO, 3);
+        let (months, _) = baselines(
+            &a,
+            oct20(),
+            &plans,
+            &[],
+            &settings("0", ""),
+            Decimal::ZERO,
+            3,
+        );
         assert_eq!(months[0].groups[0].min, d("90"));
         for m in &months[1..] {
             assert_eq!(m.groups[0].limit, d("120"));
@@ -382,7 +448,15 @@ pub(crate) mod tests {
             "2026-10-01",
             vec![plan_group("g", "Going Out", Some(2), None)],
         )];
-        let (months, _) = baselines(&a, &plans, &[], &settings("0", ""), Decimal::ZERO, 3);
+        let (months, _) = baselines(
+            &a,
+            oct20(),
+            &plans,
+            &[],
+            &settings("0", ""),
+            Decimal::ZERO,
+            3,
+        );
         assert_eq!(months[1].groups[0].min, d("30"));
         assert_eq!(months[2].groups[0].min, Decimal::ZERO);
         assert_eq!(months[2].free, d("50"));
@@ -395,6 +469,7 @@ pub(crate) mod tests {
         let a = alloc("0", "0", vec![], vec![]);
         let (months, stale) = baselines(
             &a,
+            oct20(),
             &[],
             &[],
             &settings("800", "2026-09-01"),
@@ -410,6 +485,7 @@ pub(crate) mod tests {
         let a = alloc("0", "0", vec![], vec![]);
         let (months, stale) = baselines(
             &a,
+            oct20(),
             &[],
             &[],
             &settings("800", "2026-10-01"),
@@ -418,7 +494,7 @@ pub(crate) mod tests {
         );
         assert_eq!(months[0].cards[0].used, d("800"));
         assert!(stale.is_empty());
-        let (_, stale) = baselines(&a, &[], &[], &settings("0", ""), Decimal::ZERO, 2);
+        let (_, stale) = baselines(&a, oct20(), &[], &[], &settings("0", ""), Decimal::ZERO, 2);
         assert!(stale.is_empty());
     }
 
@@ -426,7 +502,15 @@ pub(crate) mod tests {
     fn next_month_shortfall_makes_free_negative() {
         let mut a = alloc("0", "0", vec![], vec![]);
         a.next_shortfall = d("50");
-        let (months, _) = baselines(&a, &[], &bill("9.98"), &settings("0", ""), Decimal::ZERO, 3);
+        let (months, _) = baselines(
+            &a,
+            oct20(),
+            &[],
+            &bill("9.98"),
+            &settings("0", ""),
+            Decimal::ZERO,
+            3,
+        );
         assert_eq!(months[1].free, d("-40.02"));
         assert_eq!(months[2].free, d("-40.02"));
     }
@@ -436,6 +520,7 @@ pub(crate) mod tests {
         let a = alloc("0", "200", vec![], vec![]);
         let (months, _) = baselines(
             &a,
+            oct20(),
             &[],
             &bill("100"),
             &settings("40", "2026-10-01"),
@@ -460,7 +545,15 @@ pub(crate) mod tests {
     #[test]
     fn card_bill_added_back_next_month() {
         let a = alloc("0", "200", vec![], vec![]);
-        let (months, _) = baselines(&a, &[], &bill("9.98"), &settings("0", ""), Decimal::ZERO, 2);
+        let (months, _) = baselines(
+            &a,
+            oct20(),
+            &[],
+            &bill("9.98"),
+            &settings("0", ""),
+            Decimal::ZERO,
+            2,
+        );
         assert_eq!(months[1].free, d("209.98"));
         assert_eq!(months[0].free, Decimal::ZERO);
     }
@@ -470,9 +563,9 @@ pub(crate) mod tests {
         let mut a = alloc("0", "100", vec![], vec![]);
         a.savings_balance = d("500");
         a.protected_savings = d("100");
-        let (months, _) = baselines(&a, &[], &[], &WishSettings::default(), d("150"), 3);
+        let (months, _) = baselines(&a, oct20(), &[], &[], &WishSettings::default(), d("150"), 3);
         assert!(months.iter().all(|m| m.savings == d("450")));
-        let (months, _) = baselines(&a, &[], &[], &WishSettings::default(), d("700"), 3);
+        let (months, _) = baselines(&a, oct20(), &[], &[], &WishSettings::default(), d("700"), 3);
         assert!(months.iter().all(|m| m.savings.is_zero()));
     }
 
@@ -480,11 +573,11 @@ pub(crate) mod tests {
     fn earmarked_is_deducted_once() {
         let mut a = alloc("100", "0", vec![], vec![]);
         a.savings_balance = d("1000");
-        let (months, _) = baselines(&a, &[], &[], &WishSettings::default(), d("500"), 2);
+        let (months, _) = baselines(&a, oct20(), &[], &[], &WishSettings::default(), d("500"), 2);
         assert_eq!(months[0].free, d("100"));
         assert!(months.iter().all(|m| m.savings == d("500")));
         a.savings_balance = d("200");
-        let (months, _) = baselines(&a, &[], &[], &WishSettings::default(), d("500"), 2);
+        let (months, _) = baselines(&a, oct20(), &[], &[], &WishSettings::default(), d("500"), 2);
         assert_eq!(months[0].free, d("-200"));
         assert!(months.iter().all(|m| m.savings.is_zero()));
     }
@@ -494,7 +587,15 @@ pub(crate) mod tests {
         let mut a = alloc("0", "100", vec![], vec![]);
         a.next_shortfall = Decimal::ZERO;
         a.next_goals = d("250");
-        let (months, _) = baselines(&a, &[], &[], &WishSettings::default(), Decimal::ZERO, 3);
+        let (months, _) = baselines(
+            &a,
+            oct20(),
+            &[],
+            &[],
+            &WishSettings::default(),
+            Decimal::ZERO,
+            3,
+        );
         assert_eq!(months[1].free, d("350"));
         assert_eq!(months[2].free, d("350"));
     }
@@ -510,6 +611,7 @@ pub(crate) mod tests {
         let a = alloc("0", "200", vec![], vec![]);
         let (months, stale) = baselines(
             &a,
+            oct20(),
             &[],
             &[("visa".into(), d("500"))],
             &settings,
@@ -522,5 +624,80 @@ pub(crate) mod tests {
         assert_eq!(months[1].cards[0].used, d("500"));
         assert_eq!(months[1].cards[1].used, Decimal::ZERO);
         assert_eq!(months[1].free, a.next_wiggle_room + a.next_goals + d("500"));
+    }
+
+    #[test]
+    fn card_usage_goes_stale_after_the_25th() {
+        let mut a = alloc("0", "0", vec![], vec![]);
+        a.current_month = "2026-11-01".into();
+        let s = settings("800", "2026-11-01");
+        let on = |day| Date::new(2026, 11, day).unwrap();
+        let (months, stale) = baselines(&a, on(20), &[], &[], &s, Decimal::ZERO, 2);
+        assert_eq!(months[0].cards[0].used, d("800"));
+        assert!(stale.is_empty());
+        // On 26 Nov November's statement is closed: it is still charged in
+        // December, but nothing more goes on it.
+        let (months, stale) = baselines(&a, on(26), &[], &[], &s, Decimal::ZERO, 2);
+        assert_eq!(months[0].cards[0].used, d("800"));
+        assert_eq!(months[0].cards[0].limit, d("800"));
+        assert_eq!(stale, vec!["card-1".to_string()]);
+    }
+
+    #[test]
+    fn next_statement_usage_counts_in_month_one() {
+        // On 27 Oct the owner types November's statement so far: October's
+        // statement is closed, so month 1 (November) holds it, and October's
+        // falls back to the card bill with no room left.
+        let a = alloc("0", "0", vec![], vec![]);
+        let today = Date::new(2026, 10, 27).unwrap();
+        let s = settings("120", "2026-11-01");
+        let (months, stale) = baselines(&a, today, &[], &bill("100"), &s, Decimal::ZERO, 3);
+        assert!(stale.is_empty());
+        assert_eq!(months[0].cards[0].used, d("100"));
+        assert_eq!(months[0].cards[0].limit, d("100"));
+        assert_eq!(months[1].cards[0].used, d("120"));
+        assert_eq!(months[2].cards[0].used, d("100"));
+        // Below the card's regular spending, the bill still seeds month 1.
+        let s = settings("40", "2026-11-01");
+        let (months, _) = baselines(&a, today, &[], &bill("100"), &s, Decimal::ZERO, 3);
+        assert_eq!(months[1].cards[0].used, d("100"));
+        // October's usage is stale once its statement closed, but it is
+        // still what October's statement charges in November.
+        let s = settings("40", "2026-10-01");
+        let (months, stale) = baselines(&a, today, &[], &bill("100"), &s, Decimal::ZERO, 3);
+        assert_eq!(stale, vec!["card-1".to_string()]);
+        assert_eq!(months[0].cards[0].used, d("40"));
+        assert_eq!(months[0].cards[0].limit, d("40"));
+        assert_eq!(months[1].cards[0].used, d("100"));
+    }
+
+    #[test]
+    fn closed_statement_is_charged_next_month_and_takes_nothing() {
+        let a = alloc("1000", "1000", vec![], vec![]);
+        let today = Date::new(2026, 10, 27).unwrap();
+        let s = settings("120", "2026-11-01");
+        let (months, _) = baselines(&a, today, &[], &bill("100"), &s, Decimal::ZERO, 3);
+        let card = |label: &str| Demand {
+            wish_id: Some(label.into()),
+            label: label.into(),
+            amount: d("50"),
+            on_card: true,
+            set_aside: false,
+            must: false,
+        };
+        let mut saver = super::super::schedule::Saver::new(&[], months[0].month, 3);
+        let judged = super::super::ladder::judge(
+            &months,
+            &[vec![card("oct")], vec![card("nov")], vec![]],
+            &mut saver,
+        );
+        // October's statement (the bill) is charged in November.
+        assert_eq!(judged[1].card_charge_in, d("100"));
+        // Month 0 cannot put anything on the card.
+        assert_eq!(judged[0].verdicts[0].on_card, Decimal::ZERO);
+        assert_eq!(judged[0].verdicts[0].from_free, d("50"));
+        // November starts at the 120 typed and takes the 50.
+        assert_eq!(judged[1].card_used, d("170"));
+        assert_eq!(judged[2].card_charge_in, d("170"));
     }
 }

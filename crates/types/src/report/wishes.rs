@@ -113,7 +113,7 @@ pub struct WishesView {
     pub currency: Currency,
     pub settings: WishSettings,
     pub card_stale: bool,
-    /// Card ids whose usage was entered in an earlier month.
+    /// Card ids whose usage was entered for a statement that has closed.
     #[serde(default)]
     pub stale_cards: Vec<String>,
     pub months: Vec<WishMonth>,
