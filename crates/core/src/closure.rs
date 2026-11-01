@@ -938,7 +938,9 @@ pub fn balance_statuses(
             let adjusted_by = match booked {
                 Some(id) => conn
                     .query_row(
-                        "SELECT amount FROM postings WHERE transaction_id = ?1 AND account_id = ?2",
+                        "SELECT p.amount FROM postings p JOIN transactions t ON t.id = p.transaction_id
+                         WHERE p.transaction_id = ?1 AND p.account_id = ?2
+                           AND t.kind = 'reconciliation'",
                         rusqlite::params![id, account.ledger_id],
                         |r| r.get::<_, String>(0),
                     )

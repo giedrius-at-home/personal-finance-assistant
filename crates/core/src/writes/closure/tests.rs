@@ -741,3 +741,37 @@ fn banks_screen_reconciliation_makes_the_check_stale() {
     assert_eq!(ledger(&db), base + d("50"));
     assert_eq!(reconciliations(db.store.connection()), 2);
 }
+
+#[test]
+fn confirm_never_deletes_a_stored_id_that_is_not_its_reconciliation() {
+    let mut db = confirm_db(ClosureStatus::Settling);
+    let mut stale = stored(db.store.connection(), "2026-10-01");
+    stale.balance_checks.insert(
+        "firefly:1".into(),
+        BalanceCheck {
+            balance: d("1"),
+            ledger_balance: d("1"),
+            confirmed_at: "2026-10-28T09:00:00Z".into(),
+            transaction_id: Some("firefly:10".into()),
+        },
+    );
+    put(db.store.connection(), &stale);
+    assert_eq!(statuses(&db)[0].adjusted_by, None);
+
+    let withdrawal = |db: &crate::writes::fixture::Db| -> i64 {
+        db.store
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM transactions WHERE id = 10 AND kind = 'withdrawal'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+    };
+    let base = ledger(&db);
+    db.write(|w, snap| confirm_balance(w, snap, october(), 1, "firefly:1", base + d("5")))
+        .unwrap();
+    assert_eq!(withdrawal(&db), 1);
+    assert_eq!(ledger(&db), base + d("5"));
+    assert_eq!(reconciliations(db.store.connection()), 1);
+}

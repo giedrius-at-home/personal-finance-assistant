@@ -18,7 +18,7 @@ use finance_types::report::closure::{
 use jiff::Timestamp;
 use jiff::civil::Date;
 use regex::Regex;
-use rusqlite::params;
+use rusqlite::{OptionalExtension, params};
 use rust_decimal::Decimal;
 use std::sync::LazyLock;
 
@@ -842,7 +842,18 @@ pub fn confirm_balance(
         .and_then(|id| id.strip_prefix("firefly:"))
         .and_then(|id| id.parse::<i64>().ok())
     {
-        finance_storage::delete_transaction(&w.tx, earlier)?;
+        // Only ever delete our own reconciliation entry; a stored id that now
+        // points at anything else counts as having no entry.
+        let kind: Option<String> =
+            w.tx.query_row(
+                "SELECT kind FROM transactions WHERE id = ?1",
+                [earlier],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if kind.as_deref() == Some("reconciliation") {
+            finance_storage::delete_transaction(&w.tx, earlier)?;
+        }
     }
     let description = format!(
         "Balance confirmed at {balance} {} for {} closure",
