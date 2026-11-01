@@ -552,7 +552,7 @@ pub fn settle(
         &w.tx, snap, &period, &roles,
     )?);
     if !missing.is_empty() {
-        return Err(invalid(&format!(
+        return Err(invalid(format!(
             "confirm every account balance first: {}",
             missing.join(", ")
         )));
