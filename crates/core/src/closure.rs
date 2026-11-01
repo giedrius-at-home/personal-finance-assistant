@@ -575,7 +575,8 @@ fn short_money(value: Decimal, currency: &Currency) -> String {
 
 /// The wishes a split line can save toward, as the Wishes page orders them:
 /// top-level wishes by due date, each followed by its sub-wishes. A parent
-/// with sub-wishes takes money toward its rest.
+/// with sub-wishes takes money toward its rest. A wish with no room left is
+/// not offered.
 pub fn wish_options(wishes: &[Wish], previous: &[AllocationLine]) -> Vec<WishOption> {
     let caps = wish_caps(wishes, previous);
     let by_due = |list: &mut Vec<&Wish>| {
@@ -596,7 +597,9 @@ pub fn wish_options(wishes: &[Wish], previous: &[AllocationLine]) -> Vec<WishOpt
         by_due(&mut subs);
         let parent = subs.iter().any(|s| s.kind == WishKind::OneOff);
         for wish in std::iter::once(top).chain(subs) {
-            let Some(cap) = caps.get(&wish.wish_id) else {
+            // A fully saved wish stays in the caps (a stored line to it still
+            // validates and labels) but is not offered.
+            let Some(cap) = caps.get(&wish.wish_id).filter(|c| c.room > Decimal::ZERO) else {
                 continue;
             };
             let label = if parent && wish.wish_id == top.wish_id {

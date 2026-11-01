@@ -525,6 +525,20 @@ fn wish_options_list_parents_then_sub_wishes_by_due_date() {
 }
 
 #[test]
+fn a_fully_saved_wish_is_not_offered_but_still_has_a_cap() {
+    let wishes = [wish("bike", "100", "100", None), wish("tv", "50", "0", None)];
+    let ids: Vec<String> = wish_options(&wishes, &[])
+        .into_iter()
+        .map(|o| o.wish_id)
+        .collect();
+    assert_eq!(ids, ["tv"]);
+    assert_eq!(wish_caps(&wishes, &[])["bike"].room, Decimal::ZERO);
+    // An earlier line to it gives room back, so it is offered again.
+    let earlier = [line("x", "wish:bike", "30")];
+    assert_eq!(wish_options(&wishes, &earlier).len(), 2);
+}
+
+#[test]
 fn a_resettle_does_not_count_earlier_wish_lines_back() {
     let wishes = [wish("bike", "100", "40", None)];
     let mut settled = period("2026-10-01", ClosureStatus::Settled);
