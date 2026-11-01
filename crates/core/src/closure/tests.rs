@@ -629,6 +629,35 @@ fn a_move_is_the_targets_carry_in_only_when_it_spends() {
 }
 
 #[test]
+fn a_buffer_stays_on_its_source_and_a_move_goes_to_its_target() {
+    let periods = [MonthPeriod {
+        allocations: vec![
+            line("a", "account:pocket", "300"),
+            line("b", "buffer", "50"),
+        ],
+        ..period("2026-09-01", ClosureStatus::Closed)
+    }];
+    let carried = carry_in_for(date(2026, 10, 1), &periods, &move_roles());
+    assert_eq!(
+        carried,
+        HashMap::from([("pocket".to_owned(), d("300")), ("abn".to_owned(), d("50"))])
+    );
+}
+
+#[test]
+fn two_moves_into_one_account_add_up() {
+    let periods = [MonthPeriod {
+        allocations: vec![
+            line("a", "account:pocket", "300"),
+            line("b", "account:pocket", "120"),
+        ],
+        ..period("2026-09-01", ClosureStatus::Closed)
+    }];
+    let carried = carry_in_for(date(2026, 10, 1), &periods, &move_roles());
+    assert_eq!(carried, HashMap::from([("pocket".to_owned(), d("420"))]));
+}
+
+#[test]
 fn a_move_to_savings_is_not_carried_in() {
     let carried = carry_in_for(date(2026, 10, 1), &moves_in_september(), &move_roles());
     assert!(!carried.contains_key("vault"));

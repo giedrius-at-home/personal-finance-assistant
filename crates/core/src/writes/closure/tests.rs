@@ -1146,6 +1146,66 @@ fn a_move_to_an_inactive_account_is_refused() {
 }
 
 #[test]
+fn next_month_carries_a_move_in_on_its_target() {
+    let mut db = move_db();
+    settle_move(&mut db, "300").unwrap();
+    // November spends the moved money from Pocket.
+    db.store
+        .connection()
+        .execute_batch(
+            "INSERT INTO transactions (id, kind, date, booked_at, description, \
+                 source_account_id, destination_account_id, category_id, tags) \
+             VALUES (22, 'withdrawal', '2026-11-05', '2026-11-05T12:00:00', 'Lidl Utrecht', 5, 2, NULL, '[]');
+             INSERT INTO postings (transaction_id, account_id, amount, currency) \
+             VALUES (22, 5, '-300.00', 'EUR'), (22, 2, '300.00', 'EUR');",
+        )
+        .unwrap();
+    let periods = load_periods(db.store.connection()).unwrap();
+    let november = review_month(
+        &db.snap(),
+        &periods,
+        date(2026, 11, 1),
+        &crate::writes::fixture::now(),
+    );
+    let pocket = november
+        .accounts
+        .iter()
+        .find(|a| a.account_id == "firefly:5")
+        .unwrap();
+    assert_eq!(pocket.carry_in, d("300"));
+    assert_eq!(pocket.leftover, Decimal::ZERO);
+}
+
+#[test]
+fn a_zero_move_does_not_feed_next_month() {
+    assert!(!feeds_next_month(&checking("m", "account:firefly:5", "0")));
+    assert!(feeds_next_month(&checking("m", "account:firefly:5", "1")));
+    let mut db = move_db();
+    settle_move(&mut db, "100").unwrap();
+    finalize_october(&mut db);
+    let conn = db.store.connection();
+    let mut october_period = stored(conn, "2026-10-01");
+    for l in &mut october_period.allocations {
+        if l.line_id == "m" {
+            l.amount = Decimal::ZERO;
+        }
+    }
+    put(conn, &october_period);
+    put(
+        conn,
+        &MonthPeriod {
+            settled_at: Some("2026-11-28T10:00:00Z".into()),
+            ..period("2026-11-01", ClosureStatus::Settled)
+        },
+    );
+    let revision = stored(db.store.connection(), "2026-10-01").revision;
+    // November settled on its own: reopening still waits for it, but the
+    // zero move is not what blocks it.
+    let refused = db.write(|w, snap| reopen(w, snap, october(), revision));
+    assert_eq!(error(refused), "next month is already settled");
+}
+
+#[test]
 fn settling_a_move_stores_a_pending_transfer() {
     let mut db = move_db();
     settle_move(&mut db, "100").unwrap();
