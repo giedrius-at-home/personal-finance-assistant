@@ -464,12 +464,28 @@ impl RowContext<'_> {
             .then(|| self.why_unjudged(wish, &children, family))
             .flatten()
             .map(str::to_owned);
+        // A parent's set-aside is its sub-wishes'; they carry the suggestion.
+        let own_set_aside = if one_off && children.is_empty() {
+            monthly_set_aside
+        } else {
+            Decimal::ZERO
+        };
+        let recorded_this_month = self
+            .months
+            .first()
+            .is_some_and(|m| wish.saved_month.as_deref() == Some(m.month.as_str()));
+        let suggested_saved = if recorded_this_month {
+            wish.saved
+        } else {
+            wish.saved + own_set_aside
+        };
         WishRow {
             wish: wish.clone(),
             children,
             rest: family.map_or(Decimal::ZERO, |f| f.rest),
             over_cap: family.is_some_and(|f| f.over_cap),
             monthly_set_aside,
+            suggested_saved,
             short,
             tradeoffs,
             not_judged,

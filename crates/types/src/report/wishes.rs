@@ -90,6 +90,11 @@ pub struct WishRow {
     pub rest: Decimal,
     pub over_cap: bool,
     pub monthly_set_aside: Decimal,
+    /// What "saved so far" should read once this month's set-aside is put
+    /// away: `saved + monthly_set_aside` until it is recorded for this
+    /// month, then `saved`.
+    #[serde(default)]
+    pub suggested_saved: Decimal,
     /// The sum of its verdicts' `short` and `next_short`.
     pub short: Decimal,
     /// Any verdict with cuts, card use or money from savings.
