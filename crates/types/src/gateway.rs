@@ -525,8 +525,11 @@ pub struct CardSettings {
     pub card_id: String,
     pub name: String,
     pub limit: Decimal,
+    /// Used so far on the statement `used_month` names.
     pub used: Decimal,
-    /// `YYYY-MM-01` the usage was entered for.
+    /// `YYYY-MM-01` of the statement the usage was entered for: the one
+    /// ending on the 25th of that month (it starts on the 26th of the month
+    /// before). Stale once that 25th has passed.
     pub used_month: String,
     pub bill_id: Option<String>,
 }

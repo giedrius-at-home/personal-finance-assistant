@@ -30,6 +30,7 @@ pub fn wishes_view(
     let (plans, card_bills, bills) = dashboard_parts(dashboard, stored_plans, bills, settings);
     Inputs {
         alloc: allocation(dashboard),
+        today: today(dashboard),
         plans,
         card_bills,
         bills: &bills,
@@ -51,6 +52,7 @@ pub fn purchase_cuts(
     let (plans, card_bills, bills) = dashboard_parts(dashboard, stored_plans, bills, settings);
     Inputs {
         alloc: allocation(dashboard),
+        today: today(dashboard),
         plans,
         card_bills,
         bills: &bills,
@@ -72,6 +74,11 @@ pub fn view_plans(dashboard: Vec<BudgetPlan>, stored: &[BudgetPlan]) -> Vec<Budg
         }
     }
     plans
+}
+
+/// The owner's day the dashboard was built on.
+fn today(dashboard: &Dashboard) -> Option<Date> {
+    dashboard.generated_at.get(..10)?.parse().ok()
 }
 
 fn allocation(dashboard: &Dashboard) -> Option<&CurrencyAllocation> {
@@ -162,6 +169,9 @@ fn bills_now(dashboard: &Dashboard, bills: &[Bill]) -> HashMap<String, BillNow> 
 #[derive(Debug)]
 pub struct Inputs<'a> {
     pub alloc: Option<&'a CurrencyAllocation>,
+    /// The day judged on, for which card statement is open; `None` reads
+    /// the first of month 0.
+    pub today: Option<Date>,
     pub plans: Vec<BudgetPlan>,
     pub card_bills: Vec<(String, Decimal)>,
     pub bills: &'a HashMap<String, BillNow>,
@@ -180,6 +190,7 @@ impl Inputs<'_> {
         let months = schedule::horizon(items, month0);
         let (bases, stale_cards) = baseline::baselines(
             alloc,
+            self.today.unwrap_or(month0),
             &self.plans,
             &self.card_bills,
             settings,
@@ -300,6 +311,7 @@ pub fn view_from(
 ) -> WishesView {
     Inputs {
         alloc,
+        today: None,
         plans: plans.to_vec(),
         card_bills,
         bills,
@@ -604,6 +616,40 @@ mod tests {
         assert!(view.wishes[0].tradeoffs);
     }
 
+    #[test]
+    fn card_wish_after_the_25th_is_next_statement() {
+        let a = alloc("0", "1000", vec![], vec![]);
+        let mut tv = wish("tv", None, "500", "2026-10-27");
+        tv.source = WishSource::Card;
+        let judge = |w: &Wish| {
+            view_from(
+                Some(&a),
+                &[],
+                Vec::new(),
+                std::slice::from_ref(w),
+                &WishSettings::default(),
+                &HashMap::new(),
+            )
+        };
+        let bought = |m: &WishMonth| {
+            m.verdicts
+                .iter()
+                .find(|v| v.wish_id.as_deref() == Some("tv") && !v.set_aside)
+                .cloned()
+        };
+        // 27 Oct is November's statement, charged in December.
+        let view = judge(&tv);
+        assert!(bought(&view.months[0]).is_none());
+        assert_eq!(bought(&view.months[1]).unwrap().on_card, d("500"));
+        assert_eq!(view.months[1].card_used, d("500"));
+        assert_eq!(view.months[2].card_charge_in, d("500"));
+        // From a bank account it is still October's.
+        tv.source = account();
+        let view = judge(&tv);
+        assert_eq!(bought(&view.months[0]).unwrap().amount, d("500"));
+        assert!(bought(&view.months[1]).is_none());
+    }
+
     fn named_card(id: &str, used: &str, used_month: &str) -> CardSettings {
         CardSettings {
             card_id: id.into(),
@@ -675,6 +721,7 @@ mod tests {
         let bills = HashMap::new();
         let inputs = Inputs {
             alloc: Some(&a),
+            today: None,
             plans: going_out_plan(),
             card_bills: Vec::new(),
             bills: &bills,
@@ -730,6 +777,7 @@ mod tests {
         let bills = HashMap::new();
         let inputs = Inputs {
             alloc: Some(&a),
+            today: None,
             plans: going_out_plan(),
             card_bills: Vec::new(),
             bills: &bills,
