@@ -79,6 +79,20 @@ pub fn balances_locked(statuses: &[BalanceStatus]) -> bool {
     statuses.iter().any(|b| b.state != BalanceState::Confirmed)
 }
 
+/// The bank column: the bank's figure and the day it reported it
+/// ("€ 12.50 (27 Oct 2026)"), or a dash when no bank reported one.
+pub fn bank_figure(status: &BalanceStatus) -> String {
+    match (status.bank, status.bank_reported_on.as_deref()) {
+        (None, _) => "—".to_owned(),
+        (Some(bank), None) => money(bank, &status.currency),
+        (Some(bank), Some(on)) => format!(
+            "{} ({})",
+            money(bank, &status.currency),
+            crate::format::date(on)
+        ),
+    }
+}
+
 /// The status cell: its text and whether it warns.
 pub fn status_text(status: &BalanceStatus) -> (String, bool) {
     match status.state {
@@ -126,7 +140,7 @@ pub fn BalancesPanel(balances: Vec<BalanceStatus>, disabled: Signal<bool>) -> im
                     <td class=TCELL>{status.name.clone()}</td>
                     <td class=cn([TCELL_NUM, "whitespace-nowrap"])>{money(status.ledger, &currency)}</td>
                     <td class=cn([TCELL_NUM, "whitespace-nowrap"])>
-                        {status.bank.map_or_else(|| "—".to_owned(), |b| money(b, &currency))}
+                        {bank_figure(&status)}
                     </td>
                     <td class=cn([TCELL, "min-w-32"])>
                         <Input
@@ -289,6 +303,17 @@ mod tests {
         assert!(shows_balances(ClosureStatus::Settled));
         assert!(!shows_balances(ClosureStatus::Closed));
         assert!(!shows_balances(ClosureStatus::ChangedAfterClose));
+    }
+
+    #[test]
+    fn bank_figure_carries_its_date() {
+        let mut s = status("a", d(1000, 2), None, BalanceState::Unconfirmed);
+        assert_eq!(bank_figure(&s), "—");
+        s.bank = Some(d(1250, 2));
+        let figure = money(d(1250, 2), &Currency::eur());
+        assert_eq!(bank_figure(&s), figure);
+        s.bank_reported_on = Some("2026-10-27".into());
+        assert_eq!(bank_figure(&s), format!("{figure} (27 Oct 2026)"));
     }
 
     #[test]

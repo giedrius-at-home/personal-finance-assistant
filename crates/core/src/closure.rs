@@ -920,10 +920,13 @@ pub fn balance_statuses(
         .map(|account| {
             let currency = account.currency().clone();
             let ledger = account.balance.amount;
+            // The newest bank figure across every bank's last run (no date
+            // sorts oldest).
             let reported = runs
                 .values()
                 .flat_map(|run| &run.balances)
-                .find(|b| b.account_id == account.ledger_id && b.currency == currency.code);
+                .filter(|b| b.account_id == account.ledger_id && b.currency == currency.code)
+                .max_by(|a, b| a.reference_date.cmp(&b.reference_date));
             let check = period.balance_checks.get(&account.account_id).cloned();
             let state = match &check {
                 None => BalanceState::Unconfirmed,

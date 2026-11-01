@@ -775,3 +775,54 @@ fn confirm_never_deletes_a_stored_id_that_is_not_its_reconciliation() {
     assert_eq!(ledger(&db), base + d("5"));
     assert_eq!(reconciliations(db.store.connection()), 1);
 }
+
+#[test]
+fn the_newest_bank_figure_and_its_date_reach_the_status() {
+    use finance_types::bank::{AccountBalance, BankRun};
+    let mut db = confirm_db(ClosureStatus::Settling);
+    let balance = |currency: &str, bank: &str, on: Option<&str>| AccountBalance {
+        account_id: 1,
+        account: "Checking".into(),
+        currency: currency.into(),
+        bank: bank.into(),
+        ledger: "0".into(),
+        balance_type: "CLBD".into(),
+        reference_date: on.map(Into::into),
+    };
+    let run = |balances| BankRun {
+        balances,
+        ..BankRun::default()
+    };
+    db.write(|w, _| {
+        crate::bank_sync::save_run(
+            w,
+            "rabobank",
+            &run(vec![
+                balance("EUR", "100.00", Some("2026-10-27")),
+                balance("EUR", "150.00", None),
+            ]),
+        )?;
+        crate::bank_sync::save_run(
+            w,
+            "revolut",
+            &run(vec![balance("EUR", "120.00", Some("2026-10-29"))]),
+        )
+    })
+    .unwrap();
+    let status = &statuses(&db)[0];
+    assert_eq!(status.bank, Some(d("120.00")));
+    assert_eq!(status.bank_reported_on.as_deref(), Some("2026-10-29"));
+
+    db.write(|w, _| {
+        crate::bank_sync::save_run(
+            w,
+            "rabobank",
+            &run(vec![balance("USD", "100.00", Some("2026-10-30"))]),
+        )?;
+        crate::bank_sync::save_run(w, "revolut", &run(Vec::new()))
+    })
+    .unwrap();
+    let status = &statuses(&db)[0];
+    assert_eq!(status.bank, None);
+    assert_eq!(status.bank_reported_on, None);
+}
