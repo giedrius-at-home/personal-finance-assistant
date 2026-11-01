@@ -1082,7 +1082,7 @@ fn stale_notice(view: &WishesView) -> Option<String> {
         })
         .collect();
     Some(format!(
-        "Usage for {} was entered for an earlier statement; until re-entered it counts as €0.",
+        "Usage for {} was entered for a statement that has closed; enter this statement's usage.",
         names.join(", ")
     ))
 }

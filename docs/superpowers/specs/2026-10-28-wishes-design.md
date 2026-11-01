@@ -397,9 +397,18 @@ after it ends. The owner decided:
    the statement ending on the 25th of the current budget month; month 0's
    card is still charged in month 1.
 
-- *(Claude's call)* Between the 26th and month end the owner types the
-  next statement's usage; month 1's card room holds it (at least the card
-  bill's regular spending), and it is not stale.
+- *(Controller's ruling)* Between the 26th and month end month 0's
+  statement is **closed**: it is still charged in month 1, but nothing more
+  goes on it (its room is full). What it charges is the usage typed for
+  month 0's statement, else the card bill. Month 1 is the open statement:
+  it starts at the usage typed for it, or the card bill if that is more.
+  The app keeps one usage figure per card, so typing November's figure
+  before 1 Nov replaces October's, and October's statement then falls
+  back to the card bill.
+- *(Claude's call)* A card wish due before today goes on the statement
+  open today, and card repeats that fell on a closed statement are taken
+  as already in its usage. A card purchase dated 26th–31st records the
+  cuts of month 1, the month that pays for it.
 - *(Claude's call)* The look-ahead reaches the month a card wish's
   statement is charged, so its payback shows.
 - The card field reads "Used this statement", its hint the period

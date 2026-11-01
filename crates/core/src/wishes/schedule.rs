@@ -57,8 +57,15 @@ pub fn statement_month(date: Date) -> Date {
 }
 
 impl Planned {
+    /// Whole months from `current_month` to the month the item is paid in.
+    pub fn months_from(&self, current_month: Date) -> usize {
+        months_ahead(self.month(), current_month)
+    }
+
     /// The month the item is paid in: a card item's statement month, else
-    /// the calendar month it is due in.
+    /// the calendar month it is due in. A card item due before today is
+    /// moved to today first (see `Inputs`), so it never lands on a closed
+    /// statement.
     fn month(&self) -> Date {
         if self.on_card {
             statement_month(self.due)
@@ -158,15 +165,18 @@ pub fn occurrences(first: Date, every: Repeat, ends_on: Option<Date>, month: Dat
 /// on the card statement named `month` (26th of the month before to the 25th).
 fn statement_occurrences(first: Date, every: Repeat, ends_on: Option<Date>, month: Date) -> u32 {
     let month = month.first_of_month();
+    // Every month has a 25th and a 26th; only a month before year -9999 has
+    // no month before it, and the look-ahead never goes back.
     let from = month
         .checked_sub(Span::new().months(1))
-        .ok()
-        .and_then(|m| m.with().day(26).build().ok());
-    let to = month.with().day(25).build().ok();
-    match (from, to) {
-        (Some(from), Some(to)) => occurrences_between(first, every, ends_on, from, to),
-        _ => 0,
-    }
+        .and_then(|m| m.with().day(26).build())
+        .expect("the month before a statement has a 26th");
+    let to = month
+        .with()
+        .day(25)
+        .build()
+        .expect("every month has a 25th");
+    occurrences_between(first, every, ends_on, from, to)
 }
 
 /// How many times something starting on `first` and repeating `every` falls
