@@ -249,6 +249,44 @@ pub struct MonthPeriod {
     pub reviewed_through: Option<String>,
     #[serde(default)]
     pub reopened_at: Option<String>,
+    /// The owner's confirmed bank balance per account (`account_id` → check).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub balance_checks: BTreeMap<String, BalanceCheck>,
+}
+
+/// The owner's confirmed bank balance for one account at the close.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BalanceCheck {
+    pub balance: Decimal,
+    pub ledger_balance: Decimal,
+    pub confirmed_at: String,
+    /// The bank-side transaction the check was matched to, if any.
+    #[serde(default)]
+    pub transaction_id: Option<String>,
+}
+
+/// Whether an account's balance has been confirmed for the month.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BalanceState {
+    Unconfirmed,
+    Confirmed,
+    Stale,
+}
+
+/// One account's balance check as the closure screen shows it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BalanceStatus {
+    pub account_id: String,
+    pub name: String,
+    pub currency: Currency,
+    pub ledger: Decimal,
+    pub bank: Option<Decimal>,
+    pub bank_reported_on: Option<String>,
+    pub check: Option<BalanceCheck>,
+    pub state: BalanceState,
+    pub adjusted_by: Option<Decimal>,
 }
 
 /// One known account and its closure role, ignored ones included.
@@ -372,6 +410,9 @@ pub struct ClosureView {
     pub accounts: Vec<AccountRoleView>,
     /// Own-account transfers since the split, for marking a transfer by hand.
     pub transfer_candidates: Vec<TransferCandidate>,
+    /// Each account's balance check for the month.
+    #[serde(default)]
+    pub balances: Vec<BalanceStatus>,
 }
 
 /// An account with no role yet.
@@ -464,6 +505,13 @@ pub enum ClosureAction {
         #[serde(default, deserialize_with = "hop")]
         hop: Option<u32>,
     },
+    /// Confirm an account's bank balance for the month.
+    ConfirmBalance {
+        month: String,
+        revision: u32,
+        account_id: String,
+        balance: Decimal,
+    },
 }
 
 impl ClosureAction {
@@ -476,7 +524,8 @@ impl ClosureAction {
             | Self::Resettle { month, .. }
             | Self::Reopen { month, .. }
             | Self::Mark { month, .. }
-            | Self::Unmark { month, .. } => month,
+            | Self::Unmark { month, .. }
+            | Self::ConfirmBalance { month, .. } => month,
         }
     }
 }
@@ -547,5 +596,36 @@ mod tests {
         let period: MonthPeriod = serde_json::from_str(json).unwrap();
         assert_eq!(period.status, ClosureStatus::Settled);
         assert_eq!(serde_json::to_string(&period).unwrap(), json);
+    }
+
+    #[test]
+    fn balance_checks_round_trip_and_stay_out_of_an_empty_payload() {
+        let json = r#"{"month":"2026-10-01","starts_at":"2026-10-01T00:00:00+02:00","cutoff_at":null,"status":"settling","settled_at":null,"settled_snapshot":null,"missing_banks":[],"allocations":[],"revision":2,"reviewed_through":null,"reopened_at":null,"balance_checks":{"firefly:1":{"balance":"1234.56","ledger_balance":"1234.56","confirmed_at":"2026-11-01T10:00:00Z","transaction_id":"firefly:77"}}}"#;
+        let period: MonthPeriod = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            period.balance_checks["firefly:1"].transaction_id.as_deref(),
+            Some("firefly:77")
+        );
+        assert_eq!(serde_json::to_string(&period).unwrap(), json);
+        let empty = MonthPeriod {
+            balance_checks: BTreeMap::new(),
+            ..period
+        };
+        assert!(
+            !serde_json::to_string(&empty)
+                .unwrap()
+                .contains("balance_checks")
+        );
+    }
+
+    #[test]
+    fn confirm_balance_action_parses() {
+        let action: ClosureAction = serde_json::from_str(
+            r#"{"action":"confirm_balance","month":"2026-10-01","revision":2,"account_id":"firefly:1","balance":"270.00"}"#,
+        ).unwrap();
+        assert!(
+            matches!(action, ClosureAction::ConfirmBalance { ref account_id, .. } if account_id == "firefly:1")
+        );
+        assert_eq!(action.month(), "2026-10-01");
     }
 }
