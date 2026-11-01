@@ -375,6 +375,68 @@ pub struct SavingsSuggestion {
     pub safety_buffer: Decimal,
 }
 
+/// One account in the money plan: what it holds, what must stay and what
+/// it should receive or can give.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlanAccount {
+    pub account_id: String,
+    pub name: String,
+    pub role: AccountRoleKind,
+    /// The ledger balance now.
+    pub balance: Decimal,
+    /// What must stay on the account this month.
+    pub keep: Decimal,
+    /// `keep` by reason, e.g. `("Bills still to pay", 1018.90)`.
+    pub keep_parts: Vec<(String, Decimal)>,
+    /// The top-up it should receive (never on the salary account).
+    pub needs: Decimal,
+    /// `balance − keep`, floored at zero.
+    pub spare: Decimal,
+    /// `keep − balance`, floored at zero.
+    pub short: Decimal,
+}
+
+/// One transfer the plan asks for.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlanMove {
+    pub from_account_id: String,
+    pub to_account_id: String,
+    /// The hub the money goes through, e.g. main Revolut for a pocket.
+    pub via_account_id: Option<String>,
+    pub amount: Decimal,
+    pub reason: String,
+}
+
+/// The savings account: what sits there, what the wishes already saved
+/// claim, and the room above that.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavingsStanding {
+    pub account_id: String,
+    pub name: String,
+    pub balance: Decimal,
+    /// The plan's rest-to-savings move.
+    pub incoming: Decimal,
+    /// Σ saved of planned one-off wishes.
+    pub must_keep: Decimal,
+    /// `(name, saved)` of every wish with money saved.
+    pub wishes: Vec<(String, Decimal)>,
+    /// `balance + incoming − must_keep`; negative when the wishes need more.
+    pub wiggle_room: Decimal,
+}
+
+/// Where the money should go now, from the current balances (EUR only).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MoneyPlan {
+    /// `YYYY-MM-DD`.
+    pub as_of: String,
+    /// The month being funded now (`YYYY-MM-01`).
+    pub month: String,
+    pub currency: Currency,
+    pub accounts: Vec<PlanAccount>,
+    pub moves: Vec<PlanMove>,
+    pub savings: Option<SavingsStanding>,
+}
+
 /// One own-account bank transfer since the split (paired legs as one).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TransferCandidate {
@@ -413,6 +475,9 @@ pub struct ClosureView {
     /// Each account's balance check for the month.
     #[serde(default)]
     pub balances: Vec<BalanceStatus>,
+    /// Where the money should go now, from the current balances.
+    #[serde(default)]
+    pub plan: Option<MoneyPlan>,
 }
 
 /// An account with no role yet.

@@ -213,7 +213,7 @@ pub fn SuggestionPanel(
                         eur(figures.known_future),
                     )}
                     {known}
-                    {row("− Safety buffer".into(), eur(figures.safety_buffer))}
+                    {(figures.safety_buffer > Decimal::ZERO).then(|| row("− Safety buffer".into(), eur(figures.safety_buffer)))}
                     {row("− Already assigned in this split".into(), eur(figures.assigned))}
                     <li class=TOTAL_ROW><span>"= Suggested"</span><strong>{eur(suggested)}</strong></li>
                 </ul>

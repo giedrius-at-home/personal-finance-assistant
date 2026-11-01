@@ -5,9 +5,11 @@
 //! Entries are deduplicated on the bank's reference per account.
 
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
-use finance_storage::{NewTransaction, counterparty_account, insert_transaction};
+use finance_storage::{NewTransaction, counterparty_account, insert_transaction, search_text};
 use jiff::civil::Date;
+use regex::Regex;
 use rusqlite::{Connection, OptionalExtension, params};
 use rust_decimal::Decimal;
 
@@ -87,6 +89,159 @@ fn sibling(connection: &Consent, uid: &str, account: i64, entry: &Entry) -> Opti
         .next()
 }
 
+/// A description that names a savings pocket.
+static SAVINGS_HINT: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\b(savings?|vault|pocket|spaar\w*)\b").expect("savings hint pattern")
+});
+
+/// Savings routes from the owner's account roles: (via own account, savings
+/// account), for savings accounts that are active assets of the ledger.
+/// `account_roles` is a gateway table; without it there are no routes.
+fn savings_routes(conn: &Connection, own: &HashMap<i64, OwnAccount>) -> Result<Vec<(i64, i64)>> {
+    let present: bool = conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'account_roles')",
+        [],
+        |r| r.get(0),
+    )?;
+    if !present {
+        return Ok(Vec::new());
+    }
+    let mut stmt = conn.prepare("SELECT payload_json FROM account_roles")?;
+    let payloads = stmt.query_map([], |r| r.get::<_, String>(0))?;
+    let firefly_id = |value: Option<&str>| {
+        value?
+            .strip_prefix("firefly:")
+            .and_then(|id| id.parse::<i64>().ok())
+    };
+    let mut routes = Vec::new();
+    for payload in payloads {
+        let role: serde_json::Value = match serde_json::from_str(&payload?) {
+            Ok(role) => role,
+            Err(_) => continue,
+        };
+        if role.get("role").and_then(|r| r.as_str()) != Some("savings") {
+            continue;
+        }
+        let via = firefly_id(role.get("via_account_id").and_then(|v| v.as_str()));
+        let target = firefly_id(role.get("account_id").and_then(|v| v.as_str()));
+        if let (Some(via), Some(target)) = (via, target)
+            && own
+                .get(&target)
+                .is_some_and(|a| a.kind == "asset" && a.active)
+        {
+            routes.push((via, target));
+        }
+    }
+    Ok(routes)
+}
+
+/// A pocket the consent does not share (Revolut's Instant Access Savings):
+/// "To <savings>" / "From <savings>" moves money to or from the one savings
+/// account routed via `account`. Zero or several candidates: no match.
+fn savings_pocket(routes: &[(i64, i64)], account: i64, entry: &Entry) -> Option<i64> {
+    let description = entry.description().to_lowercase();
+    let lead = if entry.amount.is_sign_negative() {
+        "to "
+    } else {
+        "from "
+    };
+    if !description.starts_with(lead) || !SAVINGS_HINT.is_match(&description) {
+        return None;
+    }
+    let mut candidates = routes
+        .iter()
+        .filter(|(via, target)| *via == account && *target != account)
+        .map(|(_, target)| *target);
+    let first = candidates.next()?;
+    candidates.next().is_none().then_some(first)
+}
+
+/// The other leg of a transfer inside one consent, imported before this
+/// account was known: the same bank reference on another account of the
+/// consent, the opposite way, same amount and day, booked against a bare
+/// expense or revenue counterparty. It becomes the transfer; Ok(true) when
+/// one was adopted.
+#[allow(clippy::too_many_arguments)]
+fn adopt_first_leg(
+    conn: &Connection,
+    connection: &Consent,
+    account: i64,
+    entry_id: &str,
+    outgoing: bool,
+    amount: Decimal,
+    date: Date,
+    own: &HashMap<i64, OwnAccount>,
+) -> Result<bool> {
+    // This entry pays out: the first leg is a deposit into the other account.
+    let (kind, own_side, counter_side) = if outgoing {
+        ("deposit", "destination_account_id", "source_account_id")
+    } else {
+        ("withdrawal", "source_account_id", "destination_account_id")
+    };
+    let sql = format!(
+        "SELECT t.id, t.{own_side}, t.{counter_side}, t.description, t.notes, t.tags, p.amount \
+         FROM transactions t \
+         JOIN postings p ON p.transaction_id = t.id AND p.account_id = t.{own_side} \
+         JOIN accounts c ON c.id = t.{counter_side} AND c.kind IN ('expense', 'revenue') \
+         WHERE t.external_id = ?1 AND t.kind = '{kind}' AND t.date = ?2 AND t.{own_side} = ?3"
+    );
+    let mut stmt = conn.prepare_cached(&sql)?;
+    for &other in connection.accounts.values() {
+        if other == account {
+            continue;
+        }
+        let found = stmt
+            .query_row(params![entry_id, date.to_string(), other], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, i64>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, Option<String>>(4)?,
+                    r.get::<_, String>(5)?,
+                    r.get::<_, String>(6)?,
+                ))
+            })
+            .optional()?;
+        let Some((id, counterparty, description, notes, tags, posted)) = found else {
+            continue;
+        };
+        if posted.parse::<Decimal>().ok().map(|d| d.abs()) != Some(amount) {
+            continue;
+        }
+        let (source, destination) = if outgoing {
+            (account, other)
+        } else {
+            (other, account)
+        };
+        conn.execute(
+            "UPDATE postings SET account_id = ?1 WHERE transaction_id = ?2 AND account_id = ?3",
+            params![account, id, counterparty],
+        )?;
+        conn.execute(
+            "UPDATE transactions SET kind = 'transfer', source_account_id = ?1, \
+             destination_account_id = ?2, category_id = NULL WHERE id = ?3",
+            params![source, destination, id],
+        )?;
+        let tags: Vec<String> = serde_json::from_str(&tags).unwrap_or_default();
+        let name = |account: i64| own.get(&account).map(|a| a.name.as_str());
+        let text = search_text(
+            &description,
+            name(source),
+            name(destination),
+            None,
+            notes.as_deref(),
+            &tags,
+        );
+        conn.execute("DELETE FROM transactions_search WHERE rowid = ?1", [id])?;
+        conn.execute(
+            "INSERT INTO transactions_search (rowid, text) VALUES (?1, ?2)",
+            params![id, text],
+        )?;
+        return Ok(true);
+    }
+    Ok(false)
+}
+
 /// What one sync wrote.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Imported {
@@ -160,6 +315,7 @@ pub fn import(
     let today = w.now.date();
     let run_tag = format!("Data Import on {} @ {}", today, w.now.strftime("%H:%M"));
     let mut imported = Imported::default();
+    let routes = savings_routes(conn, own)?;
     for (uid, entries) in downloads {
         let Some(&account) = connection.accounts.get(uid) else {
             continue;
@@ -189,6 +345,16 @@ pub fn import(
                         .map(|a| a.id)
                 })
                 .or_else(|| sibling(connection, uid, account, entry));
+            // The other leg of a pocket transfer may already be in the ledger
+            // as a purchase or a gift; it becomes the transfer.
+            if other.is_none()
+                && adopt_first_leg(
+                    conn, connection, account, &entry.id, outgoing, amount, date, own,
+                )?
+            {
+                continue;
+            }
+            let other = other.or_else(|| savings_pocket(&routes, account, entry));
             let (kind, source, destination) = match other {
                 Some(other) => {
                     let (s, d) = if outgoing {
@@ -276,7 +442,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::writes::fixture::db;
+    use crate::writes::fixture::{Db, db};
 
     fn entry(value: serde_json::Value) -> Entry {
         Entry::parse(&value, "booked")
@@ -462,5 +628,267 @@ mod tests {
             "SELECT kind || ':' || source_account_id || '>' || destination_account_id FROM transactions WHERE external_id = 'f1'",
         );
         assert_eq!(kind, "transfer:60>61");
+    }
+
+    fn window() -> Window {
+        Window {
+            from: jiff::civil::date(2026, 10, 1),
+            to: jiff::civil::date(2026, 11, 1),
+        }
+    }
+
+    fn pocket_db() -> Db {
+        let db = db();
+        db.store
+            .connection()
+            .execute_batch(
+                "INSERT INTO accounts (id, name, kind) VALUES (70, 'Revolut', 'asset'),
+                 (71, 'Revolut Groceries', 'asset');",
+            )
+            .unwrap();
+        db
+    }
+
+    type Downloads = Vec<(String, Vec<Entry>)>;
+
+    fn pocket_legs() -> (Downloads, Downloads) {
+        let main = vec![(
+            "main".to_owned(),
+            vec![entry(
+                json!({"entry_reference": "X", "booking_date": "2026-11-01",
+                "transaction_amount": {"amount": "300.00", "currency": "EUR"},
+                "credit_debit_indicator": "DBIT",
+                "remittance_information": ["To EUR MB:a4ba"]}),
+            )],
+        )];
+        let pocket = vec![(
+            "pocket".to_owned(),
+            vec![entry(
+                json!({"entry_reference": "X", "booking_date": "2026-11-01",
+                "transaction_amount": {"amount": "300.00", "currency": "EUR"},
+                "credit_debit_indicator": "CRDT",
+                "remittance_information": ["To EUR MB:a4ba"]}),
+            )],
+        )];
+        (main, pocket)
+    }
+
+    fn run(db: &mut Db, consent: &Consent, downloads: &[(String, Vec<Entry>)]) -> Imported {
+        db.write(|w, _| {
+            let own = own_accounts(&w.tx)?;
+            import(w, "revolut", consent, downloads, window(), &own)
+        })
+        .unwrap()
+    }
+
+    fn assert_paired(db: &Db) {
+        let rows: i64 = db.one("SELECT count(*) FROM transactions WHERE external_id = 'X'");
+        assert_eq!(rows, 1);
+        let shape: String = db.one(
+            "SELECT kind || ':' || source_account_id || '>' || destination_account_id \
+             || ':' || coalesce(category_id, 'none') FROM transactions WHERE external_id = 'X'",
+        );
+        assert_eq!(shape, "transfer:70>71:none");
+        let postings: String = db.one(
+            "SELECT group_concat(p.account_id || '=' || p.amount, ',') FROM \
+             (SELECT p.account_id, p.amount FROM postings p JOIN transactions t ON t.id = p.transaction_id \
+              WHERE t.external_id = 'X' ORDER BY p.account_id) p",
+        );
+        assert_eq!(postings, "70=-300.00,71=300.00");
+        let text: i64 = db.one(
+            "SELECT count(*) FROM transactions_search WHERE transactions_search MATCH '\"Revolut Groceries\"' \
+             AND rowid = (SELECT id FROM transactions WHERE external_id = 'X')",
+        );
+        assert_eq!(text, 1);
+        let stale: i64 = db.one(
+            "SELECT count(*) FROM transactions_search WHERE transactions_search MATCH '\"unknown\"'",
+        );
+        assert_eq!(stale, 0);
+    }
+
+    #[test]
+    fn second_leg_adopts_the_first_main_account_first() {
+        let mut db = pocket_db();
+        // No names in the saved consent: the sibling lookup cannot match.
+        let revolut = consent(&[("main", 70), ("pocket", 71)], &[]);
+        let (main, pocket) = pocket_legs();
+        let first = run(&mut db, &revolut, &main);
+        assert_eq!(
+            first,
+            Imported {
+                created: 1,
+                checked: 1
+            }
+        );
+        let shape: String = db.one(
+            "SELECT t.kind || ':' || a.name FROM transactions t JOIN accounts a ON a.id = t.destination_account_id \
+             WHERE external_id = 'X'",
+        );
+        assert_eq!(shape, "withdrawal:(unknown destination)");
+
+        let second = run(&mut db, &revolut, &pocket);
+        assert_eq!(
+            second,
+            Imported {
+                created: 0,
+                checked: 1
+            }
+        );
+        assert_paired(&db);
+        // Nothing was recorded for the adopted leg.
+        let observed: i64 =
+            db.one("SELECT count(*) FROM source_versions WHERE source_system = 'enable_banking'");
+        assert_eq!(observed, 1);
+
+        // Both again: already imported on both accounts.
+        let again = run(&mut db, &revolut, &[main[0].clone(), pocket[0].clone()]);
+        assert_eq!(
+            again,
+            Imported {
+                created: 0,
+                checked: 2
+            }
+        );
+        assert_paired(&db);
+    }
+
+    #[test]
+    fn second_leg_adopts_the_first_pocket_first() {
+        let mut db = pocket_db();
+        let revolut = consent(&[("main", 70), ("pocket", 71)], &[]);
+        let (main, pocket) = pocket_legs();
+        run(&mut db, &revolut, &pocket);
+        let shape: String = db.one(
+            "SELECT t.kind || ':' || a.name FROM transactions t JOIN accounts a ON a.id = t.source_account_id \
+             WHERE external_id = 'X'",
+        );
+        assert_eq!(shape, "deposit:(unknown source)");
+        let second = run(&mut db, &revolut, &main);
+        assert_eq!(
+            second,
+            Imported {
+                created: 0,
+                checked: 1
+            }
+        );
+        assert_paired(&db);
+    }
+
+    #[test]
+    fn first_leg_is_not_adopted_when_amount_or_day_differ() {
+        let mut db = pocket_db();
+        let revolut = consent(&[("main", 70), ("pocket", 71)], &[]);
+        let (main, _) = pocket_legs();
+        run(&mut db, &revolut, &main);
+        let other_amount = vec![(
+            "pocket".to_owned(),
+            vec![entry(
+                json!({"entry_reference": "X", "booking_date": "2026-11-01",
+                "transaction_amount": {"amount": "299.00", "currency": "EUR"},
+                "credit_debit_indicator": "CRDT",
+                "remittance_information": ["To EUR MB:a4ba"]}),
+            )],
+        )];
+        let done = run(&mut db, &revolut, &other_amount);
+        assert_eq!(
+            done,
+            Imported {
+                created: 1,
+                checked: 1
+            }
+        );
+        let kinds: String = db.one(
+            "SELECT group_concat(kind, ',') FROM (SELECT kind FROM transactions WHERE external_id = 'X' ORDER BY id)",
+        );
+        assert_eq!(kinds, "withdrawal,deposit");
+    }
+
+    fn savings_role(db: &Db, account: i64, via: i64) {
+        db.store
+            .connection()
+            .execute(
+                "INSERT INTO account_roles (account_id, payload_json) VALUES (?1, ?2)",
+                params![
+                    format!("firefly:{account}"),
+                    json!({"account_id": format!("firefly:{account}"), "role": "savings",
+                        "goal_id": null, "via_account_id": format!("firefly:{via}"),
+                        "confirmed_at": "2026-10-01T00:00:00Z"})
+                    .to_string()
+                ],
+            )
+            .unwrap();
+    }
+
+    fn savings_entries() -> Downloads {
+        vec![(
+            "main".to_owned(),
+            vec![
+                entry(json!({"entry_reference": "S", "booking_date": "2026-11-01",
+                    "transaction_amount": {"amount": "913.82", "currency": "EUR"},
+                    "credit_debit_indicator": "DBIT",
+                    "remittance_information": ["To Instant Access Savings"]})),
+                entry(json!({"entry_reference": "B", "booking_date": "2026-11-01",
+                    "transaction_amount": {"amount": "50", "currency": "EUR"},
+                    "credit_debit_indicator": "CRDT",
+                    "remittance_information": ["From Instant Access Savings"]})),
+                // Looks like a transfer but names no savings pocket.
+                entry(json!({"entry_reference": "P", "booking_date": "2026-11-01",
+                    "transaction_amount": {"amount": "12", "currency": "EUR"},
+                    "credit_debit_indicator": "DBIT",
+                    "remittance_information": ["To Bakery"]})),
+            ],
+        )]
+    }
+
+    #[test]
+    fn savings_pocket_routes_to_the_savings_account_via_role() {
+        let mut db = pocket_db();
+        db.store
+            .connection()
+            .execute_batch(
+                "INSERT INTO accounts (id, name, kind) VALUES (73, 'Revolut Savings', 'asset');",
+            )
+            .unwrap();
+        savings_role(&db, 73, 70);
+        let revolut = consent(&[("main", 70)], &[]);
+        let done = run(&mut db, &revolut, &savings_entries());
+        assert_eq!(
+            done,
+            Imported {
+                created: 3,
+                checked: 3
+            }
+        );
+        let shapes: String = db.one(
+            "SELECT group_concat(shape, ',') FROM \
+             (SELECT t.external_id || '=' || t.kind || ':' || s.name || '>' || d.name AS shape FROM transactions t \
+              JOIN accounts s ON s.id = t.source_account_id JOIN accounts d ON d.id = t.destination_account_id \
+              WHERE t.external_id IN ('S', 'B', 'P') ORDER BY t.external_id)",
+        );
+        assert_eq!(
+            shapes,
+            "B=transfer:Revolut Savings>Revolut,P=withdrawal:Revolut>(unknown destination),S=transfer:Revolut>Revolut Savings"
+        );
+    }
+
+    #[test]
+    fn savings_pocket_needs_exactly_one_route() {
+        let mut db = pocket_db();
+        db.store
+            .connection()
+            .execute_batch(
+                "INSERT INTO accounts (id, name, kind) VALUES (73, 'Revolut Savings', 'asset'),
+                 (74, 'Revolut Vault', 'asset');",
+            )
+            .unwrap();
+        savings_role(&db, 73, 70);
+        savings_role(&db, 74, 70);
+        let revolut = consent(&[("main", 70)], &[]);
+        run(&mut db, &revolut, &savings_entries());
+        let shapes: String = db.one(
+            "SELECT group_concat(external_id || '=' || kind, ',') FROM \
+             (SELECT * FROM transactions WHERE external_id IN ('S', 'B') ORDER BY external_id)",
+        );
+        assert_eq!(shapes, "B=deposit,S=withdrawal");
     }
 }

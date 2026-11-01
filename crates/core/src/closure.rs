@@ -4,6 +4,7 @@
 //! Transfer routing and matching live in [`transfers`]; the actions that
 //! change a closure live in `writes::closure`.
 
+pub mod plan;
 pub mod transfers;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -18,7 +19,7 @@ use finance_types::report::Currency;
 use finance_types::report::allocation::CurrencyAllocation;
 use finance_types::report::closure::{
     AccountReview, AccountRoleKind, AccountRoleView, AllocationLine, BalanceState, BalanceStatus,
-    ClosureReview, ClosureStatus, ClosureView, GroupReview, KnownPayment, MonthPeriod,
+    ClosureReview, ClosureStatus, ClosureView, GroupReview, KnownPayment, MoneyPlan, MonthPeriod,
     NamedAccount, PotView, SavingsSuggestion, TransferStatus, UnclassifiedAccounts, WishOption,
 };
 use finance_types::report::outlook::{DailySpendingForecast, ForecastExclusions};
@@ -982,27 +983,46 @@ pub fn candidates(
 /// Computed as of now from the figures Overview shows, never from the
 /// closing month's leftover or its settled snapshot, so anything paid since
 /// (including after a reopen) has already left the bank balance.
-fn suggestion(
+fn suggestion_and_plan(
     store: &Store,
     snap: &Snapshot,
     now: &Zoned,
     forecaster: Option<&dyn crate::daily::SeriesForecaster>,
-) -> Result<Option<SavingsSuggestion>> {
+    roles: &[AccountRole],
+    wishes: &[Wish],
+) -> Result<(Option<SavingsSuggestion>, Option<MoneyPlan>)> {
     let overview = dashboard::dashboard(store, snap, now, forecaster)?;
     let Some(allocation) = overview
         .monthly_allocation
         .as_ref()
         .and_then(|a| a.currencies.iter().find(|c| c.currency.code == "EUR"))
     else {
-        return Ok(None);
+        return Ok((None, None));
     };
-    Ok(Some(savings_suggestion(
+    let as_of = now.with_time_zone(snap.zone.clone()).date();
+    let suggestion = savings_suggestion(
         allocation,
-        now.with_time_zone(snap.zone.clone()).date(),
+        as_of,
         &overview.planned_payments,
         snap.settings.safety_buffer_eur,
         everyday_forecast(&overview.daily_forecasts, &allocation.current_month),
-    )))
+    );
+    let budget = snap
+        .budget_plans
+        .iter()
+        .find(|p| p.month == allocation.current_month && p.currency.code == "EUR");
+    let accounts = crate::writes::closure::checked_accounts(snap, roles);
+    let plan = plan::money_plan(&plan::PlanInputs {
+        as_of,
+        allocation,
+        budget,
+        payments: &overview.planned_payments,
+        accounts: &accounts,
+        roles,
+        wishes,
+        salary_account_id: snap.settings.salary_account_id.as_deref(),
+    });
+    Ok((Some(suggestion), Some(plan)))
 }
 
 /// Everything the closure screen shows for `month` (Python `closure_view`).
@@ -1025,8 +1045,11 @@ pub fn closure_view(
     let roles = load_roles(conn)?;
     let all_wishes = crate::wishes::store::load_wishes(conn)?;
     let wishes = period_wish_options(&all_wishes, &period);
+    let (suggestion, plan) =
+        suggestion_and_plan(store, snap, now, forecaster, &roles, &all_wishes)?;
     Ok(ClosureView {
         balances: balance_statuses(conn, snap, &period, &roles)?,
+        plan,
         review: review_month(snap, periods, month, now),
         goals: snap
             .goals
@@ -1039,7 +1062,7 @@ pub fn closure_view(
             .collect(),
         wish_labels: wish_labels(&all_wishes, &wishes),
         wishes,
-        suggestion: suggestion(store, snap, now, forecaster)?,
+        suggestion,
         accounts: account_role_views(&accounts_by_id(&snap.accounts), &roles),
         transfer_candidates: candidates(snap, &period),
         period,
