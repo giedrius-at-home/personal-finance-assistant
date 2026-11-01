@@ -95,7 +95,7 @@ pub struct AllocationLine {
     /// `goal:<id>`, `wish:<wish_id>`, `pot:<pot_id>` (legacy, read-only), `plan` (a planned purchase), `buffer`
     /// (next month) or `stay`.
     pub destination: String,
-    /// Negative only for a take from a pot (split) or a delta line.
+    /// Negative only on a delta line (and on legacy pot takes).
     pub amount: Decimal,
     pub currency: Currency,
     #[serde(default)]
@@ -133,7 +133,7 @@ pub struct AllocationLine {
 }
 
 impl AllocationLine {
-    /// The pot a `pot:<id>` line moves money into (or takes it from).
+    /// The retired pot of a legacy `pot:<id>` line.
     pub fn pot_id(&self) -> Option<&str> {
         self.destination.strip_prefix("pot:")
     }
