@@ -12,8 +12,8 @@ use std::hash::{BuildHasher, Hasher};
 use finance_types::gateway::{AccountRole, Direction, PlannedPayment, PotRecord};
 use finance_types::report::UnitMoney;
 use finance_types::report::closure::{
-    AccountRoleDraft, AllocationLine, ClosureAction, ClosureReview, ClosureStatus, LineKind,
-    MonthPeriod, PotDraft, PotView, TransferStatus,
+    AccountRoleDraft, AllocationLine, BalanceCheck, ClosureAction, ClosureReview, ClosureStatus,
+    LineKind, MonthPeriod, PotDraft, PotView, TransferStatus,
 };
 use jiff::Timestamp;
 use jiff::civil::Date;
@@ -107,7 +107,12 @@ pub fn act(w: &Writer<'_>, snap: &Snapshot, action: ClosureAction) -> Result<Dat
             hop,
             ..
         } => unmark(w, month, revision, &line_id, hop),
-        ClosureAction::ConfirmBalance { .. } => Err(invalid("not available yet")),
+        ClosureAction::ConfirmBalance {
+            revision,
+            account_id,
+            balance,
+            ..
+        } => confirm_balance(w, snap, month, revision, &account_id, balance),
     }?;
     Ok(month)
 }
@@ -778,6 +783,80 @@ pub fn resettle(
             },
         )?;
     }
+    Ok(())
+}
+
+/// Accounts a month's balance check covers, in review order: active, role spending or savings.
+pub(crate) fn checked_accounts<'a>(
+    snap: &'a Snapshot,
+    roles: &[AccountRole],
+) -> Vec<&'a crate::model::Account> {
+    snap.accounts
+        .iter()
+        .filter(|a| a.active)
+        .filter(|a| {
+            roles.iter().any(|r| {
+                r.account_id == a.account_id && matches!(r.role.as_str(), "spending" | "savings")
+            })
+        })
+        .collect()
+}
+
+/// Confirm what the bank shows for one account: book the difference to the
+/// ledger as a reconciliation entry (replacing an earlier confirmation's)
+/// and store the check on the month.
+pub fn confirm_balance(
+    w: &Writer<'_>,
+    snap: &Snapshot,
+    month: Date,
+    revision: u32,
+    account_id: &str,
+    balance: Decimal,
+) -> Result<()> {
+    let (all, mut period) = period(w, snap, month)?;
+    require(&period, &[Open, Settling, Settled], revision)?;
+    require_no_later_closure(&all, month)?;
+    let roles = load_roles(&w.tx)?;
+    let account = checked_accounts(snap, &roles)
+        .into_iter()
+        .find(|a| a.account_id == account_id)
+        .ok_or_else(|| invalid("account cannot be confirmed"))?;
+    let currency = account.currency();
+    if balance.scale() > u32::from(currency.minor_unit) {
+        return Err(invalid("invalid balance"));
+    }
+    if let Some(earlier) = period
+        .balance_checks
+        .get(account_id)
+        .and_then(|c| c.transaction_id.as_deref())
+        .and_then(|id| id.strip_prefix("firefly:"))
+        .and_then(|id| id.parse::<i64>().ok())
+    {
+        finance_storage::delete_transaction(&w.tx, earlier)?;
+    }
+    let description = format!(
+        "Balance confirmed at {balance} {} for {} closure",
+        currency.code,
+        month.strftime("%Y-%m")
+    );
+    let id = crate::bank_sync::book_reconciliation(
+        w,
+        account.ledger_id,
+        &account.name,
+        &currency.code,
+        balance,
+        &description,
+    )?;
+    period.balance_checks.insert(
+        account_id.to_owned(),
+        BalanceCheck {
+            balance,
+            ledger_balance: balance,
+            confirmed_at: stamp(w),
+            transaction_id: id.map(|i| format!("firefly:{i}")),
+        },
+    );
+    save(w, period)?;
     Ok(())
 }
 

@@ -551,3 +551,116 @@ fn a_saved_period_keeps_its_stored_balance_checks() {
     .unwrap();
     assert_eq!(stored(&conn, "2026-09-01").balance_checks, checks);
 }
+
+fn confirm_db(status: ClosureStatus) -> crate::writes::fixture::Db {
+    let db = crate::writes::fixture::db();
+    put_role(
+        db.store.connection(),
+        &role("firefly:1", "spending", None, None),
+    );
+    put(
+        db.store.connection(),
+        &MonthPeriod {
+            revision: 1,
+            ..period("2026-10-01", status)
+        },
+    );
+    db
+}
+
+fn october() -> Date {
+    date(2026, 10, 1)
+}
+
+fn reconciliations(conn: &Connection) -> i64 {
+    conn.query_row(
+        "SELECT COUNT(*) FROM transactions WHERE kind = 'reconciliation'",
+        [],
+        |r| r.get(0),
+    )
+    .unwrap()
+}
+
+fn transaction_count(conn: &Connection) -> i64 {
+    conn.query_row("SELECT COUNT(*) FROM transactions", [], |r| r.get(0))
+        .unwrap()
+}
+
+fn ledger(db: &crate::writes::fixture::Db) -> Decimal {
+    crate::bank_sync::ledger_balance(db.store.connection(), 1, "EUR").unwrap()
+}
+
+#[test]
+fn confirm_books_the_difference_and_a_retype_replaces_it() {
+    let mut db = confirm_db(ClosureStatus::Settling);
+    let base = ledger(&db);
+    db.write(|w, snap| confirm_balance(w, snap, october(), 1, "firefly:1", base + d("40")))
+        .unwrap();
+    let check = stored(db.store.connection(), "2026-10-01").balance_checks["firefly:1"].clone();
+    assert!(check.transaction_id.is_some());
+    assert_eq!(check.balance, base + d("40"));
+    assert_eq!(check.ledger_balance, base + d("40"));
+    assert_eq!(reconciliations(db.store.connection()), 1);
+    assert_eq!(ledger(&db), base + d("40"));
+
+    db.write(|w, snap| confirm_balance(w, snap, october(), 2, "firefly:1", base - d("10")))
+        .unwrap();
+    let second = stored(db.store.connection(), "2026-10-01").balance_checks["firefly:1"].clone();
+    assert!(second.transaction_id.is_some());
+    assert_eq!(reconciliations(db.store.connection()), 1);
+    assert_eq!(ledger(&db), base - d("10"));
+
+    db.write(|w, snap| confirm_balance(w, snap, october(), 3, "firefly:1", base))
+        .unwrap();
+    let third = stored(db.store.connection(), "2026-10-01");
+    assert_eq!(third.balance_checks["firefly:1"].transaction_id, None);
+    assert_eq!(reconciliations(db.store.connection()), 0);
+    assert_eq!(ledger(&db), base);
+    assert_eq!(third.revision, 4);
+}
+
+#[test]
+fn confirm_refuses_more_decimals_than_the_currency() {
+    let mut db = confirm_db(ClosureStatus::Settling);
+    let rows = transaction_count(db.store.connection());
+    let result =
+        db.write(|w, snap| confirm_balance(w, snap, october(), 1, "firefly:1", d("12.345")));
+    assert_eq!(error(result), "invalid balance");
+    assert_eq!(transaction_count(db.store.connection()), rows);
+}
+
+#[test]
+fn confirm_books_a_negative_balance() {
+    let mut db = confirm_db(ClosureStatus::Open);
+    db.write(|w, snap| confirm_balance(w, snap, october(), 1, "firefly:1", d("-25.00")))
+        .unwrap();
+    assert_eq!(ledger(&db), d("-25"));
+}
+
+#[test]
+fn confirm_with_a_stale_revision_books_nothing() {
+    let mut db = confirm_db(ClosureStatus::Settling);
+    let rows = transaction_count(db.store.connection());
+    let result = db.write(|w, snap| confirm_balance(w, snap, october(), 0, "firefly:1", d("500")));
+    assert_eq!(error(result), "month closure changed; refresh");
+    assert_eq!(transaction_count(db.store.connection()), rows);
+}
+
+#[test]
+fn confirm_refuses_closed_months_and_unchecked_accounts() {
+    let mut db = confirm_db(ClosureStatus::Closed);
+    let result = db.write(|w, snap| confirm_balance(w, snap, october(), 1, "firefly:1", d("5")));
+    assert_eq!(error(result), "month is closed");
+
+    let mut db = confirm_db(ClosureStatus::Settling);
+    db.store
+        .connection()
+        .execute("DELETE FROM account_roles", [])
+        .unwrap();
+    put_role(
+        db.store.connection(),
+        &role("firefly:1", "ignored", None, None),
+    );
+    let result = db.write(|w, snap| confirm_balance(w, snap, october(), 1, "firefly:1", d("5")));
+    assert_eq!(error(result), "account cannot be confirmed");
+}
