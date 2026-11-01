@@ -448,6 +448,134 @@ fn wish_line_currency_must_match() {
     );
 }
 
+/// A review of `abn` (EUR, spending) plus the given other accounts.
+fn review_with(leftover: &str, others: &[(&str, Currency, AccountRoleKind)]) -> ClosureReview {
+    let mut review = review(leftover);
+    let base = review.accounts[0].clone();
+    review
+        .accounts
+        .extend(others.iter().map(|(id, currency, role)| AccountReview {
+            account_id: (*id).into(),
+            name: (*id).into(),
+            currency: currency.clone(),
+            role: *role,
+            leftover: Decimal::ZERO,
+            ..base.clone()
+        }));
+    review
+}
+
+fn move_review() -> ClosureReview {
+    review_with(
+        "10",
+        &[
+            ("pocket", eur(), AccountRoleKind::Spending),
+            ("vault", eur(), AccountRoleKind::Savings),
+            ("skip", eur(), AccountRoleKind::Ignored),
+            ("new", eur(), AccountRoleKind::Unclassified),
+            ("usd", usd(), AccountRoleKind::Spending),
+        ],
+    )
+}
+
+#[test]
+fn a_move_needs_a_known_target_in_the_same_currency() {
+    let goals = HashSet::new();
+    let wishes = WishCaps::new();
+    let review = move_review();
+    let check =
+        |lines: &[AllocationLine]| validate_allocations(&review, lines, &goals, None, &wishes);
+    for target in ["account:nope", "account:skip", "account:new"] {
+        assert_eq!(
+            check(&[line("m", target, "10")]).unwrap_err(),
+            "move to an unknown account"
+        );
+    }
+    assert_eq!(
+        check(&[line("m", "account:abn", "10")]).unwrap_err(),
+        "cannot move money to the same account"
+    );
+    assert_eq!(
+        check(&[line("m", "account:usd", "10")]).unwrap_err(),
+        "move currency does not match"
+    );
+    assert_eq!(
+        check(&[line("m", "account:pocket", "-10")]).unwrap_err(),
+        "a move must be positive"
+    );
+    assert_eq!(
+        check(&[line("m", "account:pocket", "0")]).unwrap_err(),
+        "a move must be positive"
+    );
+    let baseline = review_with("20", &[("pocket", eur(), AccountRoleKind::Spending)]);
+    assert_eq!(
+        validate_allocations(
+            &review,
+            &[line("m", "account:pocket", "-10")],
+            &goals,
+            Some(&baseline),
+            &wishes
+        )
+        .unwrap_err(),
+        "a move must be positive"
+    );
+    assert!(check(&[line("m", "account:pocket", "10")]).is_ok());
+    assert!(
+        check(&[
+            line("m", "account:pocket", "6"),
+            line("v", "account:vault", "4")
+        ])
+        .is_ok()
+    );
+}
+
+#[test]
+fn a_move_needs_the_same_currency() {
+    let review = review_with("10", &[("usd", usd(), AccountRoleKind::Spending)]);
+    assert_eq!(
+        validate_allocations(
+            &review,
+            &[line("m", "account:usd", "10")],
+            &HashSet::new(),
+            None,
+            &WishCaps::new()
+        )
+        .unwrap_err(),
+        "move currency does not match"
+    );
+}
+
+fn moves_in_september() -> [MonthPeriod; 1] {
+    [MonthPeriod {
+        allocations: vec![
+            line("a", "account:pocket", "300"),
+            line("b", "account:vault", "200"),
+        ],
+        ..period("2026-09-01", ClosureStatus::Closed)
+    }]
+}
+
+fn move_roles() -> [AccountRole; 3] {
+    [
+        role("abn", "spending", None, None),
+        role("pocket", "spending", None, None),
+        role("vault", "savings", None, None),
+    ]
+}
+
+#[test]
+fn a_move_is_the_targets_carry_in_only_when_it_spends() {
+    let carried = carry_in_for(date(2026, 10, 1), &moves_in_september(), &move_roles());
+    assert_eq!(carried, HashMap::from([("pocket".to_owned(), d("300"))]));
+}
+
+#[test]
+fn a_move_to_savings_is_not_carried_in() {
+    let carried = carry_in_for(date(2026, 10, 1), &moves_in_september(), &move_roles());
+    assert!(!carried.contains_key("vault"));
+    assert!(!carried.contains_key("abn"));
+}
+
 #[test]
 fn parent_cap_is_its_rest_and_earlier_lines_count_back() {
     let wishes = [
@@ -628,8 +756,8 @@ fn planned_purchase_money_carries_into_its_due_month() {
         ..period("2026-09-01", ClosureStatus::Closed)
     };
     let periods = [september];
-    assert!(carry_in_for(date(2026, 10, 1), &periods).is_empty());
-    let carried = carry_in_for(date(2026, 11, 1), &periods);
+    assert!(carry_in_for(date(2026, 10, 1), &periods, &[]).is_empty());
+    let carried = carry_in_for(date(2026, 11, 1), &periods, &[]);
     assert_eq!(carried, HashMap::from([("abn".to_owned(), d("300"))]));
     let accounts = [account("abn")];
     let refs: Vec<&Account> = accounts.iter().collect();
