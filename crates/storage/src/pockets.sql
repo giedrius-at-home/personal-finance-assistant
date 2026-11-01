@@ -17,8 +17,9 @@ DROP TABLE IF EXISTS temp.pocket_repaired;
 CREATE TEMP TABLE pocket_repaired (id INTEGER PRIMARY KEY);
 
 -- Rule 2: a transfer between two own accounts of one consent arrived as a
--- withdrawal to an expense account and a deposit from a revenue account,
--- both with the bank's reference, on the same day, for the same amount.
+-- withdrawal to the unknown-destination account and a deposit from the
+-- unknown-source account (the bank named no counterparty), both with the
+-- bank's reference, on the same day, for the same amount.
 CREATE TEMP TABLE pocket_pairs AS
 SELECT w.id AS withdrawal,
        d.id AS deposit,
@@ -33,8 +34,8 @@ JOIN postings pw ON pw.transaction_id = w.id AND pw.account_id = w.source_accoun
 JOIN postings pd ON pd.transaction_id = d.id AND pd.account_id = d.destination_account_id
 JOIN accounts ws ON ws.id = w.source_account_id AND ws.kind = 'asset'
 JOIN accounts dd ON dd.id = d.destination_account_id AND dd.kind = 'asset'
-JOIN accounts wd ON wd.id = w.destination_account_id AND wd.kind = 'expense'
-JOIN accounts ds ON ds.id = d.source_account_id AND ds.kind = 'revenue'
+JOIN accounts wd ON wd.id = w.destination_account_id AND wd.kind = 'expense' AND wd.name = '(unknown destination)'
+JOIN accounts ds ON ds.id = d.source_account_id AND ds.kind = 'revenue' AND ds.name = '(unknown source)'
 WHERE w.kind = 'withdrawal'
   AND w.date >= '2026-11-01'
   AND w.external_id IS NOT NULL

@@ -75,6 +75,9 @@ pub fn repair_pocket_transfers(conn: &Connection) -> Result<()> {
              SELECT CAST(substr(json_extract(payload_json, '$.via_account_id'), 9) AS INTEGER),
                     CAST(substr(json_extract(payload_json, '$.account_id'), 9) AS INTEGER)
              FROM account_roles
+             JOIN accounts a
+               ON a.id = CAST(substr(json_extract(payload_json, '$.account_id'), 9) AS INTEGER)
+              AND a.kind = 'asset' AND a.active = 1
              WHERE json_extract(payload_json, '$.role') = 'savings'
                AND json_extract(payload_json, '$.via_account_id') LIKE 'firefly:%'
                AND json_extract(payload_json, '$.account_id') LIKE 'firefly:%';",
@@ -130,11 +133,34 @@ impl Store {
         conn.pragma_update(None, "secure_delete", true)?;
         tune(&conn)?;
         let store = Self { conn };
-        store.migrate()?;
+        store.migrate(Some(path))?;
         Ok(store)
     }
 
-    fn migrate(&self) -> Result<()> {
+    /// Before a migration that rewrites ledger rows (`Migration::Run`), a
+    /// copy of the file: `<db>.before-migration-<n>`. Nothing for an
+    /// in-memory store or when the copy already exists.
+    fn backup_before(&self, path: Option<&Path>, version: i64) -> Result<()> {
+        let Some(path) = path.filter(|p| p.is_file()) else {
+            return Ok(());
+        };
+        let copy = path.with_file_name(format!(
+            "{}.before-migration-{version}",
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("finance.sqlite3")
+        ));
+        if copy.exists() {
+            return Ok(());
+        }
+        let Some(target) = copy.to_str() else {
+            return Ok(());
+        };
+        self.conn.execute("VACUUM INTO ?1", [target])?;
+        Ok(())
+    }
+
+    fn migrate(&self, path: Option<&Path>) -> Result<()> {
         self.conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS app_migrations (
                 version INTEGER PRIMARY KEY,
@@ -150,6 +176,9 @@ impl Store {
             let version = index as i64 + 1;
             if version <= current {
                 continue;
+            }
+            if matches!(migration, Migration::Run(_)) {
+                self.backup_before(path, version)?;
             }
             let tx = self.conn.unchecked_transaction()?;
             match migration {

@@ -158,9 +158,9 @@ fn savings_pocket(routes: &[(i64, i64)], account: i64, entry: &Entry) -> Option<
 
 /// The other leg of a transfer inside one consent, imported before this
 /// account was known: the same bank reference on another account of the
-/// consent, the opposite way, same amount and day, booked against a bare
-/// expense or revenue counterparty. It becomes the transfer; Ok(true) when
-/// one was adopted.
+/// consent, the opposite way, same amount and day, booked against the
+/// unknown-counterparty placeholder (the bank named nobody). It becomes the
+/// transfer; Ok(true) when one was adopted.
 #[allow(clippy::too_many_arguments)]
 fn adopt_first_leg(
     conn: &Connection,
@@ -173,16 +173,27 @@ fn adopt_first_leg(
     own: &HashMap<i64, OwnAccount>,
 ) -> Result<bool> {
     // This entry pays out: the first leg is a deposit into the other account.
-    let (kind, own_side, counter_side) = if outgoing {
-        ("deposit", "destination_account_id", "source_account_id")
+    let (kind, own_side, counter_side, placeholder) = if outgoing {
+        (
+            "deposit",
+            "destination_account_id",
+            "source_account_id",
+            "(unknown source)",
+        )
     } else {
-        ("withdrawal", "source_account_id", "destination_account_id")
+        (
+            "withdrawal",
+            "source_account_id",
+            "destination_account_id",
+            "(unknown destination)",
+        )
     };
     let sql = format!(
         "SELECT t.id, t.{own_side}, t.{counter_side}, t.description, t.notes, t.tags, p.amount \
          FROM transactions t \
          JOIN postings p ON p.transaction_id = t.id AND p.account_id = t.{own_side} \
          JOIN accounts c ON c.id = t.{counter_side} AND c.kind IN ('expense', 'revenue') \
+         AND c.name = ?4 \
          WHERE t.external_id = ?1 AND t.kind = '{kind}' AND t.date = ?2 AND t.{own_side} = ?3"
     );
     let mut stmt = conn.prepare_cached(&sql)?;
@@ -191,16 +202,19 @@ fn adopt_first_leg(
             continue;
         }
         let found = stmt
-            .query_row(params![entry_id, date.to_string(), other], |r| {
-                Ok((
-                    r.get::<_, i64>(0)?,
-                    r.get::<_, i64>(2)?,
-                    r.get::<_, String>(3)?,
-                    r.get::<_, Option<String>>(4)?,
-                    r.get::<_, String>(5)?,
-                    r.get::<_, String>(6)?,
-                ))
-            })
+            .query_row(
+                params![entry_id, date.to_string(), other, placeholder],
+                |r| {
+                    Ok((
+                        r.get::<_, i64>(0)?,
+                        r.get::<_, i64>(2)?,
+                        r.get::<_, String>(3)?,
+                        r.get::<_, Option<String>>(4)?,
+                        r.get::<_, String>(5)?,
+                        r.get::<_, String>(6)?,
+                    ))
+                },
+            )
             .optional()?;
         let Some((id, counterparty, description, notes, tags, posted)) = found else {
             continue;
@@ -347,11 +361,9 @@ pub fn import(
                 .or_else(|| sibling(connection, uid, account, entry));
             // The other leg of a pocket transfer may already be in the ledger
             // as a purchase or a gift; it becomes the transfer.
-            if other.is_none()
-                && adopt_first_leg(
-                    conn, connection, account, &entry.id, outgoing, amount, date, own,
-                )?
-            {
+            if adopt_first_leg(
+                conn, connection, account, &entry.id, outgoing, amount, date, own,
+            )? {
                 continue;
             }
             let other = other.or_else(|| savings_pocket(&routes, account, entry));
