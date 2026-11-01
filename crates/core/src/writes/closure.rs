@@ -599,6 +599,7 @@ pub fn settle(
         &goal_ids(snap),
         None,
         &wish_caps(&load_wishes(&w.tx)?, &period.allocations),
+        &inactive_ids(snap),
     )
     .map_err(invalid)?;
     let lines = with_plan_ids(month, lines, &HashSet::new())?;
@@ -774,6 +775,7 @@ pub fn resettle(
         Some(baseline),
         // Delta lines append: earlier contributions stay booked, so none is added back.
         &wish_caps(&load_wishes(&w.tx)?, &[]),
+        &inactive_ids(snap),
     )
     .map_err(invalid)?;
     let taken: HashSet<String> = period
@@ -822,6 +824,15 @@ pub fn resettle(
         )?;
     }
     Ok(())
+}
+
+/// Accounts closed in the ledger: a move cannot target them.
+fn inactive_ids(snap: &Snapshot) -> HashSet<&str> {
+    snap.accounts
+        .iter()
+        .filter(|a| !a.active)
+        .map(|a| a.account_id.as_str())
+        .collect()
 }
 
 /// Accounts a month's balance check covers, in review order: active, role spending or savings.

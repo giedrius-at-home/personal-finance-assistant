@@ -680,13 +680,15 @@ pub fn wish_labels(wishes: &[Wish], options: &[WishOption]) -> Vec<(String, Stri
 /// Split mode: every positive leftover fully assigned with positive lines.
 /// Delta mode (`baseline` given): lines sum to the leftover change; negatives
 /// allowed, except on a wish line. Pot lines are legacy and refused in both.
-/// `wishes` holds what each planned wish can still take.
+/// `wishes` holds what each planned wish can still take; `inactive` lists the
+/// accounts a move cannot target.
 pub fn validate_allocations(
     review: &ClosureReview,
     lines: &[AllocationLine],
     goal_ids: &HashSet<&str>,
     baseline: Option<&ClosureReview>,
     wishes: &WishCaps,
+    inactive: &HashSet<&str>,
 ) -> std::result::Result<(), String> {
     let before: HashMap<&str, Decimal> = baseline
         .map(|b| {
@@ -743,6 +745,7 @@ pub fn validate_allocations(
         } else if let Some(target) = item.target_account_id() {
             let Some(to) = review.accounts.iter().find(|a| {
                 a.account_id == target
+                    && !inactive.contains(target)
                     && matches!(a.role, AccountRoleKind::Spending | AccountRoleKind::Savings)
             }) else {
                 return Err("move to an unknown account".into());

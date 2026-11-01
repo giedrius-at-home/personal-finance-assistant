@@ -274,7 +274,14 @@ fn settle_requires_every_euro_assigned_to_known_destinations() {
     let goals: HashSet<&str> = HashSet::from(["emergency"]);
     let wishes = WishCaps::new();
     let check = |leftover: &str, lines: &[AllocationLine]| {
-        validate_allocations(&review(leftover), lines, &goals, None, &wishes)
+        validate_allocations(
+            &review(leftover),
+            lines,
+            &goals,
+            None,
+            &wishes,
+            &HashSet::new(),
+        )
     };
     assert!(
         check(
@@ -313,7 +320,14 @@ fn delta_mode_assigns_the_leftover_change() {
     let wishes = WishCaps::new();
     let baseline = review("100");
     let check = |lines: &[AllocationLine]| {
-        validate_allocations(&review("40"), lines, &goals, Some(&baseline), &wishes)
+        validate_allocations(
+            &review("40"),
+            lines,
+            &goals,
+            Some(&baseline),
+            &wishes,
+            &HashSet::new(),
+        )
     };
     assert!(check(&[line("d", "buffer", "-60")]).is_ok());
     assert!(check(&[line("d", "buffer", "-50")]).is_err());
@@ -347,7 +361,7 @@ fn pot_lines_and_takes_are_refused_on_a_new_split() {
     let goals = HashSet::new();
     let wishes = WishCaps::new();
     let check = |lines: &[AllocationLine]| {
-        validate_allocations(&review("10"), lines, &goals, None, &wishes)
+        validate_allocations(&review("10"), lines, &goals, None, &wishes, &HashSet::new())
     };
     assert_eq!(
         check(&[line("p", "pot:general", "10")]).unwrap_err(),
@@ -365,7 +379,8 @@ fn pot_lines_and_takes_are_refused_on_a_new_split() {
             &[line("p", "pot:general", "10")],
             &goals,
             Some(&baseline),
-            &wishes
+            &wishes,
+            &HashSet::new()
         )
         .unwrap_err(),
         "pots are no longer available"
@@ -394,7 +409,14 @@ fn wish_lines_need_a_planned_one_off_wish_with_room() {
     };
     let caps = wish_caps(&[wish("bike", "100", "90", None), bought, repeating], &[]);
     let check = |leftover: &str, lines: &[AllocationLine]| {
-        validate_allocations(&review(leftover), lines, &goals, None, &caps)
+        validate_allocations(
+            &review(leftover),
+            lines,
+            &goals,
+            None,
+            &caps,
+            &HashSet::new(),
+        )
     };
     assert_eq!(
         check("10", &[line("w", "wish:nope", "10")]).unwrap_err(),
@@ -419,7 +441,8 @@ fn wish_lines_need_a_planned_one_off_wish_with_room() {
             &[line("w", "wish:bike", "-5")],
             &goals,
             Some(&baseline),
-            &caps
+            &caps,
+            &HashSet::new()
         )
         .unwrap_err(),
         "a wish line must be positive"
@@ -443,7 +466,15 @@ fn wish_line_currency_must_match() {
         ..line("w", "wish:bike", "10")
     };
     assert_eq!(
-        validate_allocations(&review("10"), &[usd_line], &HashSet::new(), None, &caps).unwrap_err(),
+        validate_allocations(
+            &review("10"),
+            &[usd_line],
+            &HashSet::new(),
+            None,
+            &caps,
+            &HashSet::new()
+        )
+        .unwrap_err(),
         "wish currency does not match"
     );
 }
@@ -483,8 +514,9 @@ fn a_move_needs_a_known_target_in_the_same_currency() {
     let goals = HashSet::new();
     let wishes = WishCaps::new();
     let review = move_review();
-    let check =
-        |lines: &[AllocationLine]| validate_allocations(&review, lines, &goals, None, &wishes);
+    let check = |lines: &[AllocationLine]| {
+        validate_allocations(&review, lines, &goals, None, &wishes, &HashSet::new())
+    };
     for target in ["account:nope", "account:skip", "account:new"] {
         assert_eq!(
             check(&[line("m", target, "10")]).unwrap_err(),
@@ -514,12 +546,25 @@ fn a_move_needs_a_known_target_in_the_same_currency() {
             &[line("m", "account:pocket", "-10")],
             &goals,
             Some(&baseline),
-            &wishes
+            &wishes,
+            &HashSet::new()
         )
         .unwrap_err(),
         "a move must be positive"
     );
     assert!(check(&[line("m", "account:pocket", "10")]).is_ok());
+    assert_eq!(
+        validate_allocations(
+            &review,
+            &[line("m", "account:pocket", "10")],
+            &goals,
+            None,
+            &wishes,
+            &HashSet::from(["pocket"])
+        )
+        .unwrap_err(),
+        "move to an unknown account"
+    );
     assert!(
         check(&[
             line("m", "account:pocket", "6"),
@@ -538,7 +583,8 @@ fn a_move_needs_the_same_currency() {
             &[line("m", "account:usd", "10")],
             &HashSet::new(),
             None,
-            &WishCaps::new()
+            &WishCaps::new(),
+            &HashSet::new()
         )
         .unwrap_err(),
         "move currency does not match"

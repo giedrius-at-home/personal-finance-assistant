@@ -1,7 +1,7 @@
 //! The split editor and its lines (personal-site
 //! `components/month-closure/split-editor.tsx` and `split-line.tsx`).
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use finance_types::report::Currency;
 use finance_types::report::closure::{
@@ -58,11 +58,17 @@ pub struct SplitTarget {
 
 /// `(account_id, name)` of every account a line from `source` can move
 /// money to: the other spending and savings accounts of the review in the
-/// same currency, sorted by name.
-pub fn move_targets(source: &AccountReview, all: &[AccountReview]) -> Vec<(String, String)> {
+/// same currency that are in `eligible` (the balance check's accounts, so
+/// active ones), sorted by name.
+pub fn move_targets(
+    source: &AccountReview,
+    all: &[AccountReview],
+    eligible: &HashSet<&str>,
+) -> Vec<(String, String)> {
     let mut list: Vec<(String, String)> = all
         .iter()
         .filter(|a| a.account_id != source.account_id)
+        .filter(|a| eligible.contains(a.account_id.as_str()))
         .filter(|a| matches!(a.role, AccountRoleKind::Spending | AccountRoleKind::Savings))
         .filter(|a| a.currency == source.currency)
         .map(|a| (a.account_id.clone(), a.name.clone()))
@@ -1072,12 +1078,22 @@ mod tests {
             review("usd", "Revolut USD", "USD", AccountRoleKind::Spending),
             review("rg", "Revolut Groceries", "EUR", AccountRoleKind::Spending),
         ];
+        let mut eligible: HashSet<&str> = all.iter().map(|a| a.account_id.as_str()).collect();
         assert_eq!(
-            move_targets(&all[0], &all),
+            move_targets(&all[0], &all, &eligible),
             [
                 pair("rg", "Revolut Groceries"),
                 pair("rs", "Revolut Savings"),
                 pair("sw", "Swedbank"),
+            ]
+        );
+        // An inactive account is not in the balance check, so takes no move.
+        eligible.remove("sw");
+        assert_eq!(
+            move_targets(&all[0], &all, &eligible),
+            [
+                pair("rg", "Revolut Groceries"),
+                pair("rs", "Revolut Savings")
             ]
         );
     }

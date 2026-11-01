@@ -1130,6 +1130,19 @@ fn a_move_is_guarded_like_a_buffer_line() {
 }
 
 #[test]
+fn a_move_to_an_inactive_account_is_refused() {
+    let mut db = move_db();
+    db.store
+        .connection()
+        .execute_batch("UPDATE accounts SET active = 0 WHERE id = 5;")
+        .unwrap();
+    assert_eq!(
+        error(settle_move(&mut db, "100")),
+        "move to an unknown account"
+    );
+}
+
+#[test]
 fn settling_a_move_stores_a_pending_transfer() {
     let mut db = move_db();
     settle_move(&mut db, "100").unwrap();
