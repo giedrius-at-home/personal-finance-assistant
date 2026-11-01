@@ -1084,9 +1084,8 @@ mod tests {
         let bank = wish("bank", None, "100", "2026-10-27", false);
         let (items, _) = plan_items(&[card, bank], oct(), &HashMap::new());
         let s = Saver::new(&items, oct(), 3);
-        let ids = |v: Vec<Demand>| -> Vec<String> {
-            v.into_iter().filter_map(|x| x.wish_id).collect()
-        };
+        let ids =
+            |v: Vec<Demand>| -> Vec<String> { v.into_iter().filter_map(|x| x.wish_id).collect() };
         assert_eq!(ids(s.purchases(0)), vec!["bank".to_string()]);
         assert_eq!(ids(s.purchases(1)), vec!["card".to_string()]);
         // Through December, when November's statement is charged.

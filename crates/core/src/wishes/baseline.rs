@@ -303,7 +303,7 @@ pub(crate) mod tests {
     #[test]
     fn month_zero_uses_wiggle_room_minus_earmark() {
         let a = alloc("400", "0", vec![], vec![]);
-        let (months, _) = baselines(&a,oct20(), &[], &[], &settings("0", ""), d("300"), 2);
+        let (months, _) = baselines(&a, oct20(), &[], &[], &settings("0", ""), d("300"), 2);
         assert_eq!(months.len(), 2);
         assert_eq!(months[0].free, d("100"));
         assert_eq!(months[0].month, Date::new(2026, 10, 1).unwrap());
@@ -331,7 +331,15 @@ pub(crate) mod tests {
                 plan_group("g-coffee", "Coffee", None, None),
             ],
         )];
-        let (months, _) = baselines(&a,oct20(), &plans, &[], &settings("0", ""), Decimal::ZERO, 3);
+        let (months, _) = baselines(
+            &a,
+            oct20(),
+            &plans,
+            &[],
+            &settings("0", ""),
+            Decimal::ZERO,
+            3,
+        );
         let g = &months[0].groups;
         assert_eq!(g.len(), 2);
         assert_eq!(g[0].id, "g-out");
@@ -371,7 +379,15 @@ pub(crate) mod tests {
                 vec![plan_group("groceries", "Groceries", None, None)],
             ),
         ];
-        let (months, _) = baselines(&a,oct20(), &plans, &[], &settings("0", ""), Decimal::ZERO, 3);
+        let (months, _) = baselines(
+            &a,
+            oct20(),
+            &plans,
+            &[],
+            &settings("0", ""),
+            Decimal::ZERO,
+            3,
+        );
         for m in &months[1..] {
             assert_eq!(m.groups.len(), 1);
             assert_eq!(m.groups[0].id, "groceries");
@@ -388,7 +404,15 @@ pub(crate) mod tests {
             "2026-10-01",
             vec![plan_group("g", "Going out", Some(2), None)],
         )];
-        let (months, _) = baselines(&a,oct20(), &plans, &[], &settings("0", ""), Decimal::ZERO, 3);
+        let (months, _) = baselines(
+            &a,
+            oct20(),
+            &plans,
+            &[],
+            &settings("0", ""),
+            Decimal::ZERO,
+            3,
+        );
         assert_eq!(months[0].groups[0].min, d("90"));
         for m in &months[1..] {
             assert_eq!(m.groups[0].limit, d("120"));
@@ -403,7 +427,15 @@ pub(crate) mod tests {
             "2026-10-01",
             vec![plan_group("g", "Going Out", Some(2), None)],
         )];
-        let (months, _) = baselines(&a,oct20(), &plans, &[], &settings("0", ""), Decimal::ZERO, 3);
+        let (months, _) = baselines(
+            &a,
+            oct20(),
+            &plans,
+            &[],
+            &settings("0", ""),
+            Decimal::ZERO,
+            3,
+        );
         assert_eq!(months[1].groups[0].min, d("30"));
         assert_eq!(months[2].groups[0].min, Decimal::ZERO);
         assert_eq!(months[2].free, d("50"));
@@ -441,7 +473,7 @@ pub(crate) mod tests {
         );
         assert_eq!(months[0].cards[0].used, d("800"));
         assert!(stale.is_empty());
-        let (_, stale) = baselines(&a,oct20(), &[], &[], &settings("0", ""), Decimal::ZERO, 2);
+        let (_, stale) = baselines(&a, oct20(), &[], &[], &settings("0", ""), Decimal::ZERO, 2);
         assert!(stale.is_empty());
     }
 
@@ -449,7 +481,15 @@ pub(crate) mod tests {
     fn next_month_shortfall_makes_free_negative() {
         let mut a = alloc("0", "0", vec![], vec![]);
         a.next_shortfall = d("50");
-        let (months, _) = baselines(&a,oct20(), &[], &bill("9.98"), &settings("0", ""), Decimal::ZERO, 3);
+        let (months, _) = baselines(
+            &a,
+            oct20(),
+            &[],
+            &bill("9.98"),
+            &settings("0", ""),
+            Decimal::ZERO,
+            3,
+        );
         assert_eq!(months[1].free, d("-40.02"));
         assert_eq!(months[2].free, d("-40.02"));
     }
@@ -484,7 +524,15 @@ pub(crate) mod tests {
     #[test]
     fn card_bill_added_back_next_month() {
         let a = alloc("0", "200", vec![], vec![]);
-        let (months, _) = baselines(&a,oct20(), &[], &bill("9.98"), &settings("0", ""), Decimal::ZERO, 2);
+        let (months, _) = baselines(
+            &a,
+            oct20(),
+            &[],
+            &bill("9.98"),
+            &settings("0", ""),
+            Decimal::ZERO,
+            2,
+        );
         assert_eq!(months[1].free, d("209.98"));
         assert_eq!(months[0].free, Decimal::ZERO);
     }
@@ -494,9 +542,9 @@ pub(crate) mod tests {
         let mut a = alloc("0", "100", vec![], vec![]);
         a.savings_balance = d("500");
         a.protected_savings = d("100");
-        let (months, _) = baselines(&a,oct20(), &[], &[], &WishSettings::default(), d("150"), 3);
+        let (months, _) = baselines(&a, oct20(), &[], &[], &WishSettings::default(), d("150"), 3);
         assert!(months.iter().all(|m| m.savings == d("450")));
-        let (months, _) = baselines(&a,oct20(), &[], &[], &WishSettings::default(), d("700"), 3);
+        let (months, _) = baselines(&a, oct20(), &[], &[], &WishSettings::default(), d("700"), 3);
         assert!(months.iter().all(|m| m.savings.is_zero()));
     }
 
@@ -504,11 +552,11 @@ pub(crate) mod tests {
     fn earmarked_is_deducted_once() {
         let mut a = alloc("100", "0", vec![], vec![]);
         a.savings_balance = d("1000");
-        let (months, _) = baselines(&a,oct20(), &[], &[], &WishSettings::default(), d("500"), 2);
+        let (months, _) = baselines(&a, oct20(), &[], &[], &WishSettings::default(), d("500"), 2);
         assert_eq!(months[0].free, d("100"));
         assert!(months.iter().all(|m| m.savings == d("500")));
         a.savings_balance = d("200");
-        let (months, _) = baselines(&a,oct20(), &[], &[], &WishSettings::default(), d("500"), 2);
+        let (months, _) = baselines(&a, oct20(), &[], &[], &WishSettings::default(), d("500"), 2);
         assert_eq!(months[0].free, d("-200"));
         assert!(months.iter().all(|m| m.savings.is_zero()));
     }
@@ -518,7 +566,15 @@ pub(crate) mod tests {
         let mut a = alloc("0", "100", vec![], vec![]);
         a.next_shortfall = Decimal::ZERO;
         a.next_goals = d("250");
-        let (months, _) = baselines(&a,oct20(), &[], &[], &WishSettings::default(), Decimal::ZERO, 3);
+        let (months, _) = baselines(
+            &a,
+            oct20(),
+            &[],
+            &[],
+            &WishSettings::default(),
+            Decimal::ZERO,
+            3,
+        );
         assert_eq!(months[1].free, d("350"));
         assert_eq!(months[2].free, d("350"));
     }
