@@ -258,6 +258,10 @@ impl Inputs<'_> {
             })
             .collect();
         changeable_bills.sort_by(|a, b| a.bill_id.cmp(&b.bill_id));
+        let must_keep = crate::closure::plan::wishes_must_keep(wishes, &currency.code)
+            .iter()
+            .map(|(_, v)| *v)
+            .sum();
         WishesView {
             currency,
             settings: settings.clone(),
@@ -266,6 +270,7 @@ impl Inputs<'_> {
             wishes: tops.into_iter().map(|w| ctx.row(w)).collect(),
             months,
             changeable_bills,
+            savings_must_keep: must_keep,
         }
     }
 
@@ -1069,6 +1074,7 @@ mod tests {
             card_stale: false,
             stale_cards: Vec::new(),
             changeable_bills: Vec::new(),
+            savings_must_keep: Decimal::ZERO,
             months: vec![
                 month(vec![
                     verdict(

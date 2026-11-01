@@ -9,7 +9,7 @@ mod entry;
 mod import;
 pub mod link;
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use finance_storage::{NewTransaction, counterparty_account, insert_transaction};
 use finance_types::bank::{
@@ -112,13 +112,18 @@ pub fn window(today: Date, not_before: Option<Date>) -> Result<Option<Window>, S
     Ok((from != today).then_some(Window { from, to: today }))
 }
 
-/// The bank account uids the consent's sessions grant, and when the
-/// earliest of them expires.
-fn granted(
-    api: &mut dyn Api,
-    connection: &Connection,
-) -> Result<(BTreeSet<String>, Option<String>), SyncStatus> {
+/// What the consent's sessions grant: the bank account uids, when the
+/// earliest session expires, and the bank's name for each account.
+struct Granted {
+    sources: BTreeSet<String>,
+    expires: Option<String>,
+    /// uid → the bank's account name, for accounts the session names.
+    names: BTreeMap<String, String>,
+}
+
+fn granted(api: &mut dyn Api, connection: &Connection) -> Result<Granted, SyncStatus> {
     let mut sources = BTreeSet::new();
+    let mut names = BTreeMap::new();
     let mut expires: Option<Timestamp> = None;
     for session in &connection.sessions {
         let data = api.get(&format!("sessions/{}", encode(session)))?;
@@ -144,9 +149,21 @@ fn granted(
                 .or_else(|| account.get("uid").and_then(Value::as_str))
                 .unwrap_or("");
             sources.insert(uid.to_owned());
+            if let Some(name) = account
+                .get("name")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|n| !n.is_empty())
+            {
+                names.insert(uid.to_owned(), name.to_owned());
+            }
         }
     }
-    Ok((sources, expires.map(utc_stamp)))
+    Ok(Granted {
+        sources,
+        expires: expires.map(utc_stamp),
+        names,
+    })
 }
 
 fn details_iban(api: &mut dyn Api, uid: &str) -> Result<String, SyncStatus> {
@@ -163,14 +180,19 @@ fn details_iban(api: &mut dyn Api, uid: &str) -> Result<String, SyncStatus> {
 /// The consent still holds and every bank account still fills the same
 /// ledger account: the worker's `bankImportPreflight`, or with `full` its
 /// `bankPreflight` (always reads details and pages through the window), used
-/// before a renewed consent is stored.
+/// before a renewed consent is stored. Returns when the consent expires and
+/// the bank's names for the accounts (uid → name).
 pub fn preflight(
     api: &mut dyn Api,
     connection: &Connection,
     own: &HashMap<i64, OwnAccount>,
     full: Option<Window>,
-) -> Result<Option<String>, SyncStatus> {
-    let (sources, expires) = granted(api, connection)?;
+) -> Result<(Option<String>, BTreeMap<String, String>), SyncStatus> {
+    let Granted {
+        sources,
+        expires,
+        names,
+    } = granted(api, connection)?;
     for (uid, &target) in &connection.accounts {
         if !sources.contains(uid) {
             return Err(SyncStatus::MappingMismatch);
@@ -195,7 +217,7 @@ pub fn preflight(
             download(api, uid, window)?;
         }
     }
-    Ok(expires)
+    Ok((expires, names))
 }
 
 /// Every entry of `uid` in `window`, page by page.
@@ -546,9 +568,22 @@ impl Service {
         let Ok(own) = self.read_store(own_accounts) else {
             return failed(SyncStatus::Failed);
         };
-        let expires = match preflight(api, connection, &own, None) {
-            Ok(expires) => expires,
+        let (expires, session_names) = match preflight(api, connection, &own, None) {
+            Ok(checked) => checked,
             Err(status) => return failed(status),
+        };
+        // A consent saved without the bank's account names imports with the
+        // names the session reports, so pocket transfers still pair up.
+        // Nothing is persisted.
+        let named;
+        let connection = if connection.names.is_empty() && !session_names.is_empty() {
+            named = Connection {
+                names: session_names,
+                ..connection.clone()
+            };
+            &named
+        } else {
+            connection
         };
         let mut downloads = Vec::new();
         let mut failure = None;
@@ -903,7 +938,10 @@ mod tests {
             ("sessions/s1", Ok(session.clone())),
             ("accounts/uid-1/details", Ok(details)),
         ]);
-        assert_eq!(preflight(&mut ok, &connection(), &own(), None), Ok(None));
+        assert_eq!(
+            preflight(&mut ok, &connection(), &own(), None),
+            Ok((None, BTreeMap::new()))
+        );
 
         let mut expired = Script::new(vec![("sessions/s1", Ok(json!({"status": "EXPIRED"})))]);
         assert_eq!(
@@ -967,7 +1005,42 @@ mod tests {
                 no_iban: true,
             },
         );
-        assert_eq!(preflight(&mut script(), &c, &own, None), Ok(None));
+        assert_eq!(
+            preflight(&mut script(), &c, &own, None),
+            Ok((None, BTreeMap::new()))
+        );
+    }
+
+    #[test]
+    fn preflight_reports_the_session_account_names() {
+        let mut c = connection();
+        c.verified_identity.insert(
+            "uid-1".into(),
+            Identity {
+                target: 5,
+                sessions: vec!["s1".into()],
+                iban_sha256: Some(sha256_hex("NL01BANK0000000001")),
+                no_iban: false,
+            },
+        );
+        let mut api = Script::new(vec![(
+            "sessions/s1",
+            Ok(
+                json!({"status": "AUTHORIZED", "access": {"valid_until": "2026-12-01T00:00:00Z"},
+                "accounts": [{"uid": "uid-1", "name": "Main"}, {"uid": "pocket", "name": " Fun out "},
+                             {"uid": "nameless"}, {"uid": "blank", "name": ""}]}),
+            ),
+        )]);
+        assert_eq!(
+            preflight(&mut api, &c, &own(), None),
+            Ok((
+                Some("2026-12-01T00:00:00.000000Z".into()),
+                BTreeMap::from([
+                    ("uid-1".to_owned(), "Main".to_owned()),
+                    ("pocket".to_owned(), "Fun out".to_owned()),
+                ])
+            ))
+        );
     }
 
     #[test]
@@ -986,7 +1059,10 @@ mod tests {
             "sessions/s1",
             Ok(json!({"status": "AUTHORIZED", "accounts": ["uid-1"]})),
         )]);
-        assert_eq!(preflight(&mut api, &c, &own(), None), Ok(None));
+        assert_eq!(
+            preflight(&mut api, &c, &own(), None),
+            Ok((None, BTreeMap::new()))
+        );
         assert_eq!(api.asked, ["sessions/s1"]);
     }
 

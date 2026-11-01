@@ -468,10 +468,24 @@ pub fn saving(row: &WishRow, months: &[WishMonth]) -> Option<Saving> {
 
 /// What "free money" means on this page, with the savings pot the months
 /// start from.
-fn free_money_note(months: &[WishMonth], code: &str) -> String {
+fn free_money_note(months: &[WishMonth], must_keep: Decimal, code: &str) -> String {
     let note = "Free money each month: salary minus bills, planned payments and budget groups. Savings goals are not held back.";
     match months.first() {
-        Some(first) => format!("{note} Savings: {}.", amount(first.savings_before, code)),
+        // The pot the months start from already leaves out what is saved
+        // for wishes, so it is the wiggle room; the account holds both.
+        Some(first) => {
+            let free = first.savings_before;
+            if must_keep > Decimal::ZERO {
+                format!(
+                    "{note} Savings: {}, of which {} is saved for wishes; wiggle room {}.",
+                    amount(free + must_keep, code),
+                    amount(must_keep, code),
+                    amount(free, code)
+                )
+            } else {
+                format!("{note} Savings: {}.", amount(free, code))
+            }
+        }
         None => note.to_owned(),
     }
 }
@@ -972,7 +986,7 @@ fn page(ui: Ui, view: &WishesView, ctx: &Context) -> impl IntoView + use<> {
         .map(|m| month_card(m, &currency.code))
         .collect_view();
     let has_months = !view.months.is_empty();
-    let note = free_money_note(&view.months, &currency.code);
+    let note = free_money_note(&view.months, view.savings_must_keep, &currency.code);
     let strip = card_strip(ui, view, &ctx.get_value());
     let form = add_form(
         ui,
@@ -2908,11 +2922,15 @@ mod tests {
     fn free_money_note_names_the_savings_pot() {
         let months = [with_savings("2026-10-01", d(250, 0), Vec::new())];
         assert_eq!(
-            free_money_note(&months, "EUR"),
+            free_money_note(&months, d(624, 0), "EUR"),
+            "Free money each month: salary minus bills, planned payments and budget groups. Savings goals are not held back. Savings: €1,374, of which €624 is saved for wishes; wiggle room €750."
+        );
+        assert_eq!(
+            free_money_note(&months, Decimal::ZERO, "EUR"),
             "Free money each month: salary minus bills, planned payments and budget groups. Savings goals are not held back. Savings: €750."
         );
         assert_eq!(
-            free_money_note(&[], "EUR"),
+            free_money_note(&[], Decimal::ZERO, "EUR"),
             "Free money each month: salary minus bills, planned payments and budget groups. Savings goals are not held back."
         );
     }

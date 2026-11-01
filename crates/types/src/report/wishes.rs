@@ -122,4 +122,7 @@ pub struct WishesView {
     /// The bills a bill change can be made to.
     #[serde(default)]
     pub changeable_bills: Vec<ChangeableBill>,
+    /// Σ saved of planned one-off wishes: what must stay in savings.
+    #[serde(default)]
+    pub savings_must_keep: Decimal,
 }

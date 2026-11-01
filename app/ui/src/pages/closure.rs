@@ -4,6 +4,7 @@
 mod balances;
 pub mod bank_sync;
 mod panels;
+mod plan;
 mod split;
 mod steps;
 mod suggestion;
@@ -26,6 +27,7 @@ use rust_decimal::Decimal;
 use self::balances::{BalancesPanel, balances_locked, parse_balance, shows_balances};
 use self::bank_sync::{BankSyncPanel, bank_name};
 use self::panels::AccountsPanel;
+use self::plan::MoneyPlanPanel;
 use self::split::{DraftStore, LegacyNames, SplitEditor, SplitTarget, move_targets};
 use self::steps::{AllocationList, ReviewNames, ReviewStep, UnclassifiedAccounts as NewAccounts};
 use self::transfer::Hop;
@@ -825,7 +827,15 @@ pub fn MonthClosure() -> impl IntoView {
     };
     let panels = move || {
         let v = view.get()?;
-        Some(view! { <AccountsPanel accounts=v.accounts goals=v.goals /> })
+        let names = steps::account_names(&v);
+        let plan = v
+            .plan
+            .clone()
+            .map(|plan| view! { <MoneyPlanPanel plan=plan names=names /> });
+        Some(view! {
+            {plan}
+            <AccountsPanel accounts=v.accounts goals=v.goals />
+        })
     };
 
     view! {
