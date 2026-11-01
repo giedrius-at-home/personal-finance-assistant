@@ -23,6 +23,9 @@ CREATE TABLE review_deferrals (source_key TEXT PRIMARY KEY, updated_at TEXT NOT 
 CREATE TABLE account_roles (account_id TEXT PRIMARY KEY, payload_json TEXT NOT NULL);
 CREATE TABLE month_periods (month TEXT PRIMARY KEY, revision INTEGER NOT NULL,
     updated_at TEXT NOT NULL, payload_json TEXT NOT NULL);
+CREATE TABLE pots (pot_id TEXT PRIMARY KEY, payload_json TEXT NOT NULL);
+CREATE TABLE pot_entries (entry_id TEXT PRIMARY KEY, pot_id TEXT NOT NULL,
+    month TEXT NOT NULL, payload_json TEXT NOT NULL);
 CREATE TABLE source_versions (source_system TEXT NOT NULL, source_entity TEXT NOT NULL,
     external_id TEXT NOT NULL, content_hash TEXT NOT NULL, source_revision TEXT,
     source_updated_at TEXT, observed_at TEXT NOT NULL, record_kind TEXT NOT NULL,

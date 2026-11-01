@@ -664,3 +664,25 @@ fn pot_entries_name_the_month_and_skip_other_lines() {
     assert_eq!(entries[0].entry_id, "2026-09-01:1:g");
     assert_eq!(entries[0].note.as_deref(), Some("September 2026 closure"));
 }
+
+#[test]
+fn unconfirmed_names_lists_everything_not_confirmed_in_order() {
+    use finance_types::report::closure::{BalanceState, BalanceStatus};
+    let status = |name: &str, state| BalanceStatus {
+        account_id: format!("firefly:{name}"),
+        name: name.into(),
+        currency: eur(),
+        ledger: d("1"),
+        bank: None,
+        bank_reported_on: None,
+        check: None,
+        state,
+        adjusted_by: None,
+    };
+    let all = [
+        status("A", BalanceState::Confirmed),
+        status("B", BalanceState::Stale),
+        status("C", BalanceState::Unconfirmed),
+    ];
+    assert_eq!(unconfirmed_names(&all), ["B", "C"]);
+}

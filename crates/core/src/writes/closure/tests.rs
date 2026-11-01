@@ -79,6 +79,16 @@ fn with_periods(mut snap: Snapshot, conn: &Connection) -> Snapshot {
     snap
 }
 
+/// A check that matches a snapshot account's balance of `ledger`.
+fn confirmed(ledger: &str) -> BalanceCheck {
+    BalanceCheck {
+        balance: d(ledger),
+        ledger_balance: d(ledger),
+        confirmed_at: "2026-09-29T09:00:00Z".into(),
+        transaction_id: None,
+    }
+}
+
 fn salary_snapshot() -> Snapshot {
     snapshot(
         vec![account("abn")],
@@ -173,6 +183,10 @@ fn resplit_keeps_settle_time_so_earlier_transfers_still_match() {
         &conn,
         &MonthPeriod {
             revision: 1,
+            balance_checks: ["abn", "savings"]
+                .into_iter()
+                .map(|id| (id.to_owned(), confirmed("100")))
+                .collect(),
             ..period("2026-09-01", ClosureStatus::Settling)
         },
     );
@@ -663,4 +677,67 @@ fn confirm_refuses_closed_months_and_unchecked_accounts() {
     );
     let result = db.write(|w, snap| confirm_balance(w, snap, october(), 1, "firefly:1", d("5")));
     assert_eq!(error(result), "account cannot be confirmed");
+}
+
+fn statuses(db: &crate::writes::fixture::Db) -> Vec<finance_types::report::closure::BalanceStatus> {
+    let snap = db.snap();
+    let period = stored(db.store.connection(), "2026-10-01");
+    let roles = load_roles(db.store.connection()).unwrap();
+    crate::closure::balance_statuses(db.store.connection(), &snap, &period, &roles).unwrap()
+}
+
+fn october_split() -> Vec<AllocationLine> {
+    Vec::new()
+}
+
+#[test]
+fn settle_needs_every_account_confirmed() {
+    let mut db = confirm_db(ClosureStatus::Settling);
+    let refused = db.write(|w, snap| settle(w, snap, october(), 1, october_split()));
+    assert_eq!(
+        error(refused),
+        "confirm every account balance first: Checking"
+    );
+    let base = ledger(&db);
+    db.write(|w, snap| confirm_balance(w, snap, october(), 1, "firefly:1", base))
+        .unwrap();
+    db.write(|w, snap| settle(w, snap, october(), 2, october_split()))
+        .unwrap();
+    assert_eq!(
+        stored(db.store.connection(), "2026-10-01").status,
+        ClosureStatus::Settled
+    );
+}
+
+#[test]
+fn banks_screen_reconciliation_makes_the_check_stale() {
+    use finance_types::report::closure::BalanceState;
+    let mut db = confirm_db(ClosureStatus::Settling);
+    let base = ledger(&db);
+    db.write(|w, snap| confirm_balance(w, snap, october(), 1, "firefly:1", base + d("40")))
+        .unwrap();
+    let status = &statuses(&db)[0];
+    assert_eq!(status.state, BalanceState::Confirmed);
+    assert_eq!(status.adjusted_by, Some(d("40")));
+
+    db.write(|w, _| {
+        crate::bank_sync::book_reconciliation(w, 1, "Checking", "EUR", base + d("50"), "banks")
+    })
+    .unwrap();
+    assert_eq!(statuses(&db)[0].state, BalanceState::Stale);
+    let refused = db.write(|w, snap| settle(w, snap, october(), 2, october_split()));
+    assert_eq!(
+        error(refused),
+        "confirm every account balance first: Checking"
+    );
+
+    db.write(|w, snap| confirm_balance(w, snap, october(), 2, "firefly:1", base + d("50")))
+        .unwrap();
+    assert_eq!(statuses(&db)[0].state, BalanceState::Confirmed);
+    let check = stored(db.store.connection(), "2026-10-01").balance_checks["firefly:1"].clone();
+    // Confirm replaces its own earlier entry, so the banks entry stays and a new
+    // one covers the difference again.
+    assert!(check.transaction_id.is_some());
+    assert_eq!(ledger(&db), base + d("50"));
+    assert_eq!(reconciliations(db.store.connection()), 2);
 }

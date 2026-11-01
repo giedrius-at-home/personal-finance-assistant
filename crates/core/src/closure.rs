@@ -16,9 +16,9 @@ use finance_types::gateway::{
 use finance_types::report::Currency;
 use finance_types::report::allocation::CurrencyAllocation;
 use finance_types::report::closure::{
-    AccountReview, AccountRoleKind, AccountRoleView, AllocationLine, ClosureReview, ClosureView,
-    GroupReview, KnownPayment, MonthPeriod, NamedAccount, PotEntryView, PotView, PotsView,
-    SavingsSuggestion, TransferStatus, UnclassifiedAccounts,
+    AccountReview, AccountRoleKind, AccountRoleView, AllocationLine, BalanceState, BalanceStatus,
+    ClosureReview, ClosureView, GroupReview, KnownPayment, MonthPeriod, NamedAccount, PotEntryView,
+    PotView, PotsView, SavingsSuggestion, TransferStatus, UnclassifiedAccounts,
 };
 use finance_types::report::outlook::{DailySpendingForecast, ForecastExclusions};
 use finance_types::report::plans::{PlanStatus, PlannedPaymentView};
@@ -885,7 +885,7 @@ pub fn closure_view(
     let balances = pot_balances(&entries, None);
     let roles = load_roles(conn)?;
     Ok(ClosureView {
-        balances: Vec::new(),
+        balances: balance_statuses(conn, snap, &period, &roles)?,
         review: review_month(snap, periods, month, now),
         goals: snap
             .goals
@@ -901,6 +901,73 @@ pub fn closure_view(
         transfer_candidates: candidates(snap, &period),
         period,
     })
+}
+
+/// One status per checked account, in review order.
+pub fn balance_statuses(
+    conn: &Connection,
+    snap: &Snapshot,
+    period: &MonthPeriod,
+    roles: &[AccountRole],
+) -> Result<Vec<BalanceStatus>> {
+    let accounts = crate::writes::closure::checked_accounts(snap, roles);
+    if accounts.is_empty() {
+        return Ok(Vec::new());
+    }
+    let runs = crate::bank_sync::runs(conn)?;
+    accounts
+        .into_iter()
+        .map(|account| {
+            let currency = account.currency().clone();
+            let ledger = account.balance.amount;
+            let reported = runs
+                .values()
+                .flat_map(|run| &run.balances)
+                .find(|b| b.account_id == account.ledger_id && b.currency == currency.code);
+            let check = period.balance_checks.get(&account.account_id).cloned();
+            let state = match &check {
+                None => BalanceState::Unconfirmed,
+                Some(c) if c.ledger_balance == ledger => BalanceState::Confirmed,
+                Some(_) => BalanceState::Stale,
+            };
+            let booked = check
+                .as_ref()
+                .and_then(|c| c.transaction_id.as_deref())
+                .and_then(|id| id.strip_prefix("firefly:"))
+                .and_then(|id| id.parse::<i64>().ok());
+            let adjusted_by = match booked {
+                Some(id) => conn
+                    .query_row(
+                        "SELECT amount FROM postings WHERE transaction_id = ?1 AND account_id = ?2",
+                        rusqlite::params![id, account.ledger_id],
+                        |r| r.get::<_, String>(0),
+                    )
+                    .ok()
+                    .and_then(|text| text.parse::<Decimal>().ok()),
+                None => None,
+            };
+            Ok(BalanceStatus {
+                account_id: account.account_id.clone(),
+                name: account.name.clone(),
+                currency,
+                ledger,
+                bank: reported.and_then(|b| b.bank.parse().ok()),
+                bank_reported_on: reported.and_then(|b| b.reference_date.clone()),
+                check,
+                state,
+                adjusted_by,
+            })
+        })
+        .collect()
+}
+
+/// Names of checked accounts whose status is not Confirmed (empty = may settle).
+pub(crate) fn unconfirmed_names(statuses: &[BalanceStatus]) -> Vec<String> {
+    statuses
+        .iter()
+        .filter(|s| s.state != BalanceState::Confirmed)
+        .map(|s| s.name.clone())
+        .collect()
 }
 
 /// A currency the closure screen sends: three ASCII letters, any case.

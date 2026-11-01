@@ -547,6 +547,16 @@ pub fn settle(
     let lines = checked_lines(lines)?;
     let (all, period) = period(w, snap, month)?;
     require(&period, &[Settling, Settled], revision)?;
+    let roles = load_roles(&w.tx)?;
+    let missing = crate::closure::unconfirmed_names(&crate::closure::balance_statuses(
+        &w.tx, snap, &period, &roles,
+    )?);
+    if !missing.is_empty() {
+        return Err(invalid(&format!(
+            "confirm every account balance first: {}",
+            missing.join(", ")
+        )));
+    }
     require_no_later_closure(&all, month)?;
     ensure_general_pot(w)?;
     let review = review_month(snap, &all, month, &w.now);
