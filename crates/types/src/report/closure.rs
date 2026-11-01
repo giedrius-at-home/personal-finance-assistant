@@ -197,7 +197,9 @@ pub struct AccountReview {
     pub currency: Currency,
     pub role: AccountRoleKind,
     pub closing_balance: Decimal,
-    /// Last month's buffer plus money set aside for a purchase due this month.
+    /// Last month's buffer, money last month's split moved in from another
+    /// account (spending accounts only), plus money set aside for a purchase
+    /// due this month.
     pub carry_in: Decimal,
     pub income_planned: Decimal,
     pub income_actual: Decimal,

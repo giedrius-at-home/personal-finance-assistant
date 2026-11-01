@@ -67,8 +67,9 @@ fn routed(item: AllocationLine, via: &HashMap<String, String>) -> AllocationLine
 }
 
 /// Mark the lines whose money has to move to another account as pending
-/// transfers: into a pot's account, out of it for a take, or into the
-/// savings account that holds a goal; routed through via accounts.
+/// transfers: into a pot's account, out of it for a take, into the savings
+/// account that holds a goal, or into the account a move names; routed
+/// through via accounts.
 pub fn with_transfer_targets(
     lines: Vec<AllocationLine>,
     roles: &[AccountRole],

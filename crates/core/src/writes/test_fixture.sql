@@ -51,6 +51,8 @@ CREATE TABLE category_batches (batch_id TEXT PRIMARY KEY,
 INSERT INTO daily_review_policy VALUES (1,
     '{"activated_at":"2026-10-01T00:00:00Z","timezone":"Europe/Amsterdam","auto_threshold":"0.90","missed_after_days":30}');
 
+-- Account 5, Pocket: an own account with no postings, the target of the move
+-- tests; it shows as Unclassified in fixture reviews until a test gives it a role.
 INSERT INTO accounts (id, name, kind) VALUES (1, 'Checking', 'asset'), (2, 'Lidl', 'expense'),
     (3, 'Daiva Mirkliene', 'revenue'), (4, 'Albert Heijn', 'expense'),
     (5, 'Pocket', 'asset');
