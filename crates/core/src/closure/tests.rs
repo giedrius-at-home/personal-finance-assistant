@@ -822,22 +822,6 @@ fn stored_instants_drop_zero_microseconds() {
 }
 
 #[test]
-fn pot_entries_name_the_month_and_skip_other_lines() {
-    let september = MonthPeriod {
-        allocations: vec![
-            line("s", "stay", "5"),
-            line("g", "pot:general", "60"),
-            line("z", "pot:general", "0"),
-        ],
-        ..period("2026-09-01", ClosureStatus::Settled)
-    };
-    let entries = pot_entries(&september, "2026-09-30T10:00:00Z");
-    assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].entry_id, "2026-09-01:1:g");
-    assert_eq!(entries[0].note.as_deref(), Some("September 2026 closure"));
-}
-
-#[test]
 fn unconfirmed_names_lists_everything_not_confirmed_in_order() {
     use finance_types::report::closure::{BalanceState, BalanceStatus};
     let status = |name: &str, state| BalanceStatus {

@@ -25,7 +25,7 @@ fn find(wishes: &[Wish], id: &str) -> Result<Wish> {
         .ok_or_else(|| invalid("wish not found"))
 }
 
-fn store(w: &Writer<'_>, wish: &Wish) -> Result<()> {
+pub(crate) fn store(w: &Writer<'_>, wish: &Wish) -> Result<()> {
     w.put_json(
         "INSERT INTO wishes (wish_id, payload_json) VALUES (?2, ?1) \
          ON CONFLICT(wish_id) DO UPDATE SET payload_json = excluded.payload_json",

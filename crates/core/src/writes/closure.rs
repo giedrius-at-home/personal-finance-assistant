@@ -9,7 +9,7 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasher, Hasher};
 
-use finance_types::gateway::{AccountRole, Direction, PlannedPayment, PotRecord};
+use finance_types::gateway::{AccountRole, Direction, PlannedPayment, PotRecord, Wish, WishStatus};
 use finance_types::report::UnitMoney;
 use finance_types::report::closure::{
     AccountRoleDraft, AllocationLine, BalanceCheck, ClosureAction, ClosureReview, ClosureStatus,
@@ -29,14 +29,15 @@ use crate::closure::transfers::{
 use crate::closure::{
     BANKS, GENERAL_POT_ID, PLANNED_PURCHASE_CATEGORY, candidates, day_of, general_pot,
     load_periods, load_pot_entries, load_pots, load_roles, normalized_currency, parse_month,
-    period_or_new, plan_due_month, pot_balances, pot_entries, pot_view, review_month,
-    stored_instant, transactions_by_id, validate_allocations, wish_caps,
+    period_or_new, plan_due_month, pot_balances, pot_view, review_month, stored_instant,
+    transactions_by_id, validate_allocations, wish_caps,
 };
 use crate::load::parse_instant;
 use crate::model::Kind;
 use crate::period::{PeriodResolver, shift_month};
 use crate::plans::CLOSURE_PLAN_PREFIX;
 use crate::wishes::store::load_wishes;
+use crate::writes::wishes::store as store_wish;
 use crate::{Error, Result, Snapshot};
 
 use ClosureStatus::{ChangedAfterClose, Closed, Open, Settled, Settling};
@@ -229,7 +230,8 @@ fn cents(amount: Decimal) -> bool {
 /// The field rules the Python model enforced on every line a screen sends.
 fn checked_lines(lines: Vec<AllocationLine>) -> Result<Vec<AllocationLine>> {
     static DESTINATION: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"^(goal:[^\s]{1,128}|pot:[^\s]{1,64}|plan|buffer|stay)$").expect("valid regex")
+        Regex::new(r"^(goal:[^\s]{1,128}|pot:[^\s]{1,64}|wish:[^\s]{1,64}|plan|buffer|stay)$")
+            .expect("valid regex")
     });
     let bad = || invalid("invalid lines");
     if lines.len() > MAX_LINES {
@@ -356,7 +358,53 @@ fn plan_fields(line: &AllocationLine) -> impl PartialEq + '_ {
     )
 }
 
-/// Rewrite the month's pot entries; create or update the planned purchase of
+/// Bring each touched wish's `saved` from the period's previous lines to its new lines.
+/// Every line counts, split and delta alike; wishes no longer planned are skipped.
+/// `saved_month` only moves forward.
+pub(crate) fn apply_wish_lines(
+    w: &Writer<'_>,
+    period: &MonthPeriod,
+    previous: &[AllocationLine],
+) -> Result<()> {
+    let mut change: HashMap<&str, Decimal> = HashMap::new();
+    for line in previous {
+        if let Some(wish_id) = line.wish_id() {
+            *change.entry(wish_id).or_default() -= line.amount;
+        }
+    }
+    for line in &period.allocations {
+        if let Some(wish_id) = line.wish_id() {
+            *change.entry(wish_id).or_default() += line.amount;
+        }
+    }
+    if change.is_empty() {
+        return Ok(());
+    }
+    for wish in load_wishes(&w.tx)? {
+        let Some(delta) = change.get(wish.wish_id.as_str()) else {
+            continue;
+        };
+        if wish.status != WishStatus::Planned {
+            continue;
+        }
+        let saved = (wish.saved + delta).max(Decimal::ZERO);
+        let saved_month = wish.saved_month.clone().max(Some(period.month.clone()));
+        if saved == wish.saved && saved_month == wish.saved_month {
+            continue;
+        }
+        store_wish(
+            w,
+            &Wish {
+                saved,
+                saved_month,
+                ..wish
+            },
+        )?;
+    }
+    Ok(())
+}
+
+/// Bring the month's wishes to its lines; create or update the planned purchase of
 /// every plan line that is new or changed since `previous`. Unchanged lines
 /// leave their plan alone, so a plan the owner archived stays archived.
 fn record_side_effects(
@@ -365,14 +413,7 @@ fn record_side_effects(
     previous: &[AllocationLine],
     sync_plans: bool,
 ) -> Result<()> {
-    w.tx.execute("DELETE FROM pot_entries WHERE month = ?1", [&period.month])?;
-    for entry in pot_entries(period, &stamp(w)) {
-        w.put_json(
-            "INSERT INTO pot_entries(entry_id, pot_id, month, payload_json) VALUES (?2, ?3, ?4, ?1)",
-            &entry,
-            &[&entry.entry_id, &entry.pot_id, &entry.month],
-        )?;
-    }
+    apply_wish_lines(w, period, previous)?;
     if !sync_plans {
         return Ok(());
     }
@@ -742,7 +783,8 @@ pub fn resettle(
         &lines,
         &goal_ids(snap),
         Some(baseline),
-        &wish_caps(&load_wishes(&w.tx)?, &period.allocations),
+        // Delta lines append: earlier contributions stay booked, so none is added back.
+        &wish_caps(&load_wishes(&w.tx)?, &[]),
     )
     .map_err(invalid)?;
     let taken: HashSet<String> = period

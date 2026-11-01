@@ -665,31 +665,6 @@ pub fn validate_allocations(
     Ok(())
 }
 
-/// Ledger entries for every pot line of the month (split and delta).
-pub fn pot_entries(period: &MonthPeriod, created_at: &str) -> Vec<PotEntryRecord> {
-    let label = day_of(&period.month)
-        .map(|m| m.strftime("%B %Y").to_string())
-        .unwrap_or_default();
-    period
-        .allocations
-        .iter()
-        .enumerate()
-        .filter(|(_, l)| l.amount != Decimal::ZERO)
-        .filter_map(|(index, line)| {
-            Some(PotEntryRecord {
-                entry_id: format!("{}:{index}:{}", period.month, line.line_id),
-                pot_id: line.pot_id()?.to_owned(),
-                month: period.month.clone(),
-                amount: line.amount,
-                currency: line.currency.clone(),
-                line_id: Some(line.line_id.clone()),
-                note: Some(format!("{label} closure")),
-                created_at: created_at.to_owned(),
-            })
-        })
-        .collect()
-}
-
 /// Everyday habit spending still expected this month, outside every group.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EverydayForecast {

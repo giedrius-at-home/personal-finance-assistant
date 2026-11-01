@@ -16,6 +16,7 @@ use crate::closure::tests::{
     account, at, d, goal, line, period, review, role, snapshot, transfer, tx,
 };
 use crate::model::Kind;
+use finance_types::gateway::{Wish, WishDraft, WishPurchase, WishSource, WishStatus};
 
 const TABLES: &str = "
 CREATE TABLE month_periods (month TEXT PRIMARY KEY, revision INTEGER NOT NULL,
@@ -833,4 +834,189 @@ fn the_newest_bank_figure_and_its_date_reach_the_status() {
     let status = &statuses(&db)[0];
     assert_eq!(status.bank, None);
     assert_eq!(status.bank_reported_on, None);
+}
+
+/// October, settling, with the checking account confirmed, and one planned
+/// one-off wish of `amount` euros. A €500 salary leaves room to split.
+fn wish_db(amount: &str) -> (crate::writes::fixture::Db, String) {
+    let mut db = confirm_db(ClosureStatus::Settling);
+    db.store
+        .connection()
+        .execute_batch(
+            "INSERT INTO transactions (id, kind, date, booked_at, description, \
+                 source_account_id, destination_account_id, category_id, tags) \
+             VALUES (20, 'deposit', '2026-10-24', '2026-10-24T12:00:00', 'Salary', 3, 1, NULL, '[]');
+             INSERT INTO postings (transaction_id, account_id, amount, currency) \
+             VALUES (20, 3, '-500.00', 'EUR'), (20, 1, '500.00', 'EUR');",
+        )
+        .unwrap();
+    let base = ledger(&db);
+    db.write(|w, snap| confirm_balance(w, snap, october(), 1, "firefly:1", base))
+        .unwrap();
+    let draft = WishDraft {
+        wish_id: None,
+        parent_id: None,
+        name: "Bike".into(),
+        amount: d(amount),
+        currency: crate::closure::tests::eur(),
+        due_on: "2026-12-01".into(),
+        source: WishSource::Card,
+        kind: Default::default(),
+        must: false,
+    };
+    let wish = db
+        .write(|w, snap| crate::writes::wishes::save_wish(w, snap, draft))
+        .unwrap();
+    (db, wish.wish_id)
+}
+
+fn wish(db: &crate::writes::fixture::Db, wish_id: &str) -> Wish {
+    load_wishes(db.store.connection())
+        .unwrap()
+        .into_iter()
+        .find(|w| w.wish_id == wish_id)
+        .unwrap()
+}
+
+/// The checking account's line toward `destination`.
+fn checking(id: &str, destination: &str, amount: &str) -> AllocationLine {
+    AllocationLine {
+        from_account_id: "firefly:1".into(),
+        ..line(id, destination, amount)
+    }
+}
+
+/// October's review as it stands now.
+fn october_review(db: &crate::writes::fixture::Db) -> ClosureReview {
+    let periods = load_periods(db.store.connection()).unwrap();
+    review_month(
+        &db.snap(),
+        &periods,
+        october(),
+        &crate::writes::fixture::now(),
+    )
+}
+
+/// Settle October with `wished` toward the wish and the rest staying.
+fn settle_wish(db: &mut crate::writes::fixture::Db, wish_id: &str, wished: &str) -> Result<()> {
+    let leftover = october_review(db).accounts[0].leftover;
+    assert!(leftover > d("100"), "leftover {leftover}");
+    let mut lines = Vec::new();
+    if d(wished) > Decimal::ZERO {
+        lines.push(checking("w", &format!("wish:{wish_id}"), wished));
+    }
+    let rest = leftover - d(wished);
+    if rest > Decimal::ZERO {
+        lines.push(checking("s", "stay", &rest.to_string()));
+    }
+    let revision = stored(db.store.connection(), "2026-10-01").revision;
+    db.write(|w, snap| settle(w, snap, october(), revision, lines))
+}
+
+/// Mark October changed after its close, its baseline `less` below today's leftover.
+fn changed_after_close(db: &crate::writes::fixture::Db, less: &str) {
+    let conn = db.store.connection();
+    let mut changed = MonthPeriod {
+        status: ClosureStatus::ChangedAfterClose,
+        ..stored(conn, "2026-10-01")
+    };
+    put(conn, &changed);
+    let mut baseline = october_review(db);
+    baseline.accounts[0].leftover -= d(less);
+    changed.settled_snapshot = Some(baseline);
+    put(conn, &changed);
+}
+
+fn resettle_october(db: &mut crate::writes::fixture::Db, lines: Vec<AllocationLine>) -> Result<()> {
+    let revision = stored(db.store.connection(), "2026-10-01").revision;
+    db.write(|w, snap| resettle(w, snap, october(), revision, lines))
+}
+
+#[test]
+fn settle_raises_the_wish_saved_and_sets_its_month() {
+    let (mut db, id) = wish_db("900");
+    settle_wish(&mut db, &id, "40").unwrap();
+    let saved = wish(&db, &id);
+    assert_eq!(saved.saved, d("40"));
+    assert_eq!(saved.saved_month.as_deref(), Some("2026-10-01"));
+}
+
+#[test]
+fn resplit_without_the_wish_line_gives_the_money_back() {
+    let (mut db, id) = wish_db("900");
+    settle_wish(&mut db, &id, "40").unwrap();
+    settle_wish(&mut db, &id, "40").unwrap();
+    assert_eq!(wish(&db, &id).saved, d("40"));
+    settle_wish(&mut db, &id, "0").unwrap();
+    assert_eq!(wish(&db, &id).saved, Decimal::ZERO);
+}
+
+#[test]
+fn manual_lower_then_resplit_clamps_at_zero() {
+    let (mut db, id) = wish_db("900");
+    settle_wish(&mut db, &id, "40").unwrap();
+    db.write(|w, snap| crate::writes::wishes::record_saved(w, snap, &id, d("10")))
+        .unwrap();
+    settle_wish(&mut db, &id, "40").unwrap();
+    assert_eq!(wish(&db, &id).saved, d("10"));
+    settle_wish(&mut db, &id, "0").unwrap();
+    assert_eq!(wish(&db, &id).saved, Decimal::ZERO);
+}
+
+#[test]
+fn closure_never_moves_saved_month_backwards() {
+    let (mut db, id) = wish_db("900");
+    let later = Wish {
+        saved_month: Some("2026-11-01".into()),
+        ..wish(&db, &id)
+    };
+    db.write(|w, _| crate::writes::wishes::store(w, &later))
+        .unwrap();
+    settle_wish(&mut db, &id, "40").unwrap();
+    let saved = wish(&db, &id);
+    assert_eq!(saved.saved, d("40"));
+    assert_eq!(saved.saved_month.as_deref(), Some("2026-11-01"));
+}
+
+#[test]
+fn a_bought_wish_is_skipped_but_its_line_stays() {
+    let (mut db, id) = wish_db("900");
+    settle_wish(&mut db, &id, "40").unwrap();
+    let purchase = WishPurchase {
+        amount: d("40"),
+        on: "2026-10-20".into(),
+        source: WishSource::Account {
+            account_id: "firefly:1".into(),
+        },
+        cards: Vec::new(),
+    };
+    db.write(|w, snap| crate::writes::wishes::mark_bought(w, snap, &id, purchase, &[]))
+        .unwrap();
+    let before = wish(&db, &id);
+    assert_eq!(before.status, WishStatus::Bought);
+    changed_after_close(&db, "15");
+    resettle_october(&mut db, vec![checking("d", "buffer", "15")]).unwrap();
+    assert_eq!(wish(&db, &id).saved, before.saved);
+    let wish_line = format!("wish:{id}");
+    assert!(
+        stored(db.store.connection(), "2026-10-01")
+            .allocations
+            .iter()
+            .any(|l| l.destination == wish_line)
+    );
+}
+
+#[test]
+fn a_resettle_delta_line_adds_to_the_wish() {
+    let (mut db, id) = wish_db("60");
+    settle_wish(&mut db, &id, "40").unwrap();
+    changed_after_close(&db, "15");
+    let toward = format!("wish:{id}");
+    resettle_october(&mut db, vec![checking("d1", &toward, "15")]).unwrap();
+    assert_eq!(wish(&db, &id).saved, d("55"));
+    // Earlier lines stay booked: only 60 − 55 is left, not 60 again.
+    changed_after_close(&db, "10");
+    let refused = resettle_october(&mut db, vec![checking("d2", &toward, "10")]);
+    assert_eq!(error(refused), "saves more than the wish still needs");
+    assert_eq!(wish(&db, &id).saved, d("55"));
 }
