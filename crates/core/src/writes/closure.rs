@@ -797,10 +797,10 @@ pub fn resettle(
         },
     )?;
     record_side_effects(w, &saved, &previous, true)?;
-    // Buffer lines feed the next month's carry-in; plan lines their due month's.
+    // Buffer and move lines feed the next month's carry-in; plan lines their due month's.
     let mut affected: HashSet<Date> = marked
         .iter()
-        .filter(|l| l.destination == "buffer" && !l.amount.is_zero())
+        .filter(|l| feeds_next_month(l))
         .map(|_| shift_month(month, 1))
         .collect();
     affected.extend(
@@ -936,11 +936,7 @@ pub fn reopen(w: &Writer<'_>, snap: &Snapshot, month: Date, revision: u32) -> Re
     if let Some(following) = all.iter().find(|p| p.month == next)
         && !matches!(following.status, Open | Settling)
     {
-        if period
-            .allocations
-            .iter()
-            .any(|l| l.destination == "buffer" && !l.amount.is_zero())
-        {
+        if period.allocations.iter().any(feeds_next_month) {
             return Err(invalid("next month already uses this buffer"));
         }
         return Err(invalid("next month is already settled"));
@@ -955,6 +951,12 @@ pub fn reopen(w: &Writer<'_>, snap: &Snapshot, month: Date, revision: u32) -> Re
         },
     )?;
     Ok(())
+}
+
+/// A line the next month's carry-in reads: a non-zero buffer line, or a move
+/// to another account.
+fn feeds_next_month(line: &AllocationLine) -> bool {
+    (line.destination == "buffer" || line.target_account_id().is_some()) && !line.amount.is_zero()
 }
 
 fn check_line_id(line_id: &str) -> Result<()> {
