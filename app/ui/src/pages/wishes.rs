@@ -52,6 +52,33 @@ fn month_name(month: &str) -> String {
         .to_owned()
 }
 
+/// The card statement `day` (`YYYY-MM-DD`) is on, as `YYYY-MM-01`: a
+/// statement runs from the 26th to the 25th and is named by the month it
+/// ends in, so 27 Oct is on November's.
+fn statement_month(day: &str) -> String {
+    let num = |range: std::ops::Range<usize>| day.get(range).and_then(|t| t.parse::<u32>().ok());
+    let (Some(year), Some(month)) = (num(0..4), num(5..7)) else {
+        return day.to_owned();
+    };
+    let (year, month) = match (num(8..10).unwrap_or(1) >= 26, month) {
+        (true, 12) => (year + 1, 1),
+        (true, m) => (year, m + 1),
+        (false, m) => (year, m),
+    };
+    format!("{year:04}-{month:02}-01")
+}
+
+/// The days statement `month` covers: `2026-11-01` → `26 Oct – 25 Nov`.
+fn statement_period(month: &str) -> String {
+    let m: usize = month.get(5..7).and_then(|t| t.parse().ok()).unwrap_or(1);
+    let before = format!("2000-{:02}", if m == 1 { 12 } else { m - 1 });
+    format!(
+        "26 {} \u{2013} 25 {}",
+        format::month_short(&before),
+        format::month_short(month)
+    )
+}
+
 /// The ids whose verdicts belong to `row`: its own and its sub-wishes'.
 fn row_ids(row: &WishRow) -> Vec<&str> {
     std::iter::once(row.wish.wish_id.as_str())
@@ -481,8 +508,9 @@ fn payback_line(month: &WishMonth, code: &str) -> Option<String> {
 }
 
 /// A card purchase split over the cards in list order: each takes up to
-/// what it has left this month (usage entered for another month counts as
-/// €0), the last takes the rest. `month` is the purchase's `YYYY-MM`.
+/// what it has left on the statement (usage entered for another statement
+/// counts as €0), the last takes the rest. `month` is the `YYYY-MM` of the
+/// purchase's statement.
 fn fill_cards(total: Decimal, cards: &[CardSettings], month: &str) -> Vec<Decimal> {
     let mut left = total.max(Decimal::ZERO);
     let last = cards.len().saturating_sub(1);
@@ -912,10 +940,6 @@ pub fn Wishes() -> impl IntoView {
 }
 
 fn page(ui: Ui, view: &WishesView, ctx: &Context) -> impl IntoView + use<> {
-    let current_month = view
-        .months
-        .first()
-        .map_or_else(|| format!("{}-01", &today()[..7]), |m| m.month.clone());
     let months = StoredValue::new(view.months.clone());
     let ctx = StoredValue::new(Context {
         cards: view.settings.cards.clone(),
@@ -949,7 +973,7 @@ fn page(ui: Ui, view: &WishesView, ctx: &Context) -> impl IntoView + use<> {
         .collect_view();
     let has_months = !view.months.is_empty();
     let note = free_money_note(&view.months, &currency.code);
-    let strip = card_strip(ui, view, &ctx.get_value(), current_month);
+    let strip = card_strip(ui, view, &ctx.get_value());
     let form = add_form(
         ui,
         &ctx.get_value(),
@@ -1024,7 +1048,7 @@ impl CardRow {
         }
     }
 
-    /// The row as settings, with its usage entered for `month`; `None`
+    /// The row as settings, with its usage entered for statement `month`; `None`
     /// when a box does not hold an amount.
     fn settings(&self, month: &str) -> Option<CardSettings> {
         let limit = parse_amount(&self.limit.get_untracked()).ok()?;
@@ -1041,7 +1065,7 @@ impl CardRow {
     }
 }
 
-/// The stale notice: which cards still carry an earlier month's usage.
+/// The stale notice: which cards still carry a closed statement's usage.
 fn stale_notice(view: &WishesView) -> Option<String> {
     if view.stale_cards.is_empty() {
         return None;
@@ -1058,17 +1082,12 @@ fn stale_notice(view: &WishesView) -> Option<String> {
         })
         .collect();
     Some(format!(
-        "Usage for {} was entered for an earlier month; until re-entered it counts as €0.",
+        "Usage for {} was entered for a statement that has closed; enter this statement's usage.",
         names.join(", ")
     ))
 }
 
-fn card_strip(
-    ui: Ui,
-    view: &WishesView,
-    ctx: &Context,
-    current_month: String,
-) -> impl IntoView + use<> {
+fn card_strip(ui: Ui, view: &WishesView, ctx: &Context) -> impl IntoView + use<> {
     let cards = if view.settings.cards.is_empty() {
         WishSettings::default().cards
     } else {
@@ -1090,11 +1109,13 @@ fn card_strip(
     let stale = stale_notice(view).map(|text| {
         view! { <p role="status" class="mt-2 text-sm text-warning-fg">{text}</p> }
     });
-    let month_label = StoredValue::new(format::month_long(&current_month));
+    // Usage is typed for the statement open today (26th to 25th).
+    let statement = statement_month(&today());
+    let period = StoredValue::new(statement_period(&statement));
     let submit = move |ev: SubmitEvent| {
         ev.prevent_default();
         let cards: Option<Vec<CardSettings>> =
-            rows.with_untracked(|rows| rows.iter().map(|r| r.settings(&current_month)).collect());
+            rows.with_untracked(|rows| rows.iter().map(|r| r.settings(&statement)).collect());
         let Some(cards) = cards else {
             ui.set_message("card", "Enter each card's limit and the amount used.", true);
             return;
@@ -1148,7 +1169,7 @@ fn card_strip(
                         on:input=move |e| row.limit.set(event_target_value(&e))
                     />
                 </Field>
-                <Field label="Used this month" id=used_id.clone() hint=format!("So far in {}.", month_label.get_value())>
+                <Field label="Used this statement" id=used_id.clone() hint=format!("{}.", period.get_value())>
                     <input
                         id=used_id
                         type="text"
@@ -1554,7 +1575,7 @@ fn wish_body(
     let refill = move || {
         let total = parse_amount(&ui.buy_amount.get_untracked()).unwrap_or_default();
         let on = ui.buy_on.get_untracked();
-        let month = on.get(..7).unwrap_or_default().to_owned();
+        let month = statement_month(&on).get(..7).unwrap_or_default().to_owned();
         let fill = cards.with_value(|c| fill_cards(total, c, &month));
         ui.buy_cards
             .set(fill.into_iter().map(|n| n.to_string()).collect());
@@ -2159,6 +2180,16 @@ mod tests {
     }
 
     #[test]
+    fn statement_month_turns_on_the_26th() {
+        assert_eq!(statement_month("2026-10-25"), "2026-10-01");
+        assert_eq!(statement_month("2026-10-26"), "2026-11-01");
+        assert_eq!(statement_month("2026-11-01"), "2026-11-01");
+        assert_eq!(statement_month("2026-12-31"), "2027-01-01");
+        assert_eq!(statement_period("2026-11-01"), "26 Oct \u{2013} 25 Nov");
+        assert_eq!(statement_period("2027-01-01"), "26 Dec \u{2013} 25 Jan");
+    }
+
+    #[test]
     fn fill_cards_fills_in_order_and_last_takes_the_rest() {
         let cards = [
             settings_card("visa", 100, 30, "2026-10-01"),
@@ -2173,7 +2204,7 @@ mod tests {
             fill_cards(d(40, 0), &cards, "2026-10"),
             vec![d(40, 0), d(0, 0), d(0, 0)]
         );
-        // Usage from an earlier month counts as €0.
+        // Usage from an earlier statement counts as €0.
         assert_eq!(
             fill_cards(d(100, 0), &cards, "2026-11"),
             vec![d(100, 0), d(0, 0), d(0, 0)]
