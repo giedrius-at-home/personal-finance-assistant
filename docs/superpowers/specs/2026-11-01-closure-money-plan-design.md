@@ -141,8 +141,9 @@ the wizard, above the Accounts panel, shown whenever the view has a plan:
 
 ### Wishes page
 
-The free-money note ends with `Savings: €P. Keep €M for wishes already
-saved; wiggle room €W.` `WishesView` gains `savings_must_keep: Decimal`
+The free-money note ends with `Savings: €T, of which €M is saved for
+wishes; wiggle room €W.` (the pot the schedule starts from already leaves
+the saved money out, so it is the wiggle room and `T = W + M`). `WishesView` gains `savings_must_keep: Decimal`
 (`serde(default)`), computed the same way as `must_keep` above (shared
 helper in `wishes`).
 
