@@ -357,9 +357,11 @@ impl Wizard {
                     match step.await {
                         Ok(next) => last = Some(next),
                         Err(e) => {
-                            // Keep the rows confirmed before the failure on screen.
+                            // Keep the rows confirmed before the failure on screen;
+                            // they booked entries, so the rest of the app re-reads.
                             if let Some(next) = last {
                                 self.view.set(Some(next));
+                                self.app.refresh();
                             }
                             return Err(e);
                         }
