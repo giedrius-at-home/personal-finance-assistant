@@ -1086,6 +1086,7 @@ fn legacy_names(view: &ClosureView) -> LegacyNames {
             .map(|p| (p.pot_id.clone(), p.name.clone()))
             .collect(),
         wishes: view.wish_labels.clone(),
+        accounts: steps::account_names(view).into_iter().collect(),
     }
 }
 
