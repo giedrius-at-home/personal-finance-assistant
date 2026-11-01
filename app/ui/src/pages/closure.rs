@@ -23,7 +23,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use rust_decimal::Decimal;
 
-use self::balances::{BalancesPanel, balances_locked, parse_balance};
+use self::balances::{BalancesPanel, balances_locked, parse_balance, shows_balances};
 use self::bank_sync::{BankSyncPanel, bank_name};
 use self::panels::{AccountsPanel, PotsPanel};
 use self::split::{DraftStore, SplitEditor, SplitTarget};
@@ -986,6 +986,10 @@ fn step_view(
                 )),
                 _ => None,
             };
+            // A settled month still takes a re-confirmed balance.
+            let panel = shows_balances(status).then(|| view! {
+                <BalancesPanel balances=view.balances.clone() disabled=Signal::derive(move || wizard.busy.get()) />
+            });
             let body = match status {
                 S::Open | S::Settling => view! {
                     <BankSyncPanel
@@ -993,16 +997,20 @@ fn step_view(
                         disabled=Signal::derive(move || wizard.busy.get())
                         on_continue=Callback::new(move |missing| wizard.sync(missing))
                     />
-                    <BalancesPanel balances=view.balances.clone() disabled=Signal::derive(move || wizard.busy.get()) />
+                    {panel}
                     {unclassified.map(|data| view! { <NewAccounts data=data goals=view.goals.clone() /> })}
                 }
                 .into_any(),
-                S::Settled => locked(
-                    wizard,
-                    format!("The split is confirmed: the final sync that closes {name} runs from Transfers."),
-                    Some(3),
-                    None,
-                ),
+                S::Settled => view! {
+                    {panel}
+                    {locked(
+                        wizard,
+                        format!("The split is confirmed: the final sync that closes {name} runs from Transfers."),
+                        Some(3),
+                        None,
+                    )}
+                }
+                .into_any(),
                 S::Closed => reopen_here(month, format!("{name} is closed. Reopen {name} to sync it again.")),
                 S::ChangedAfterClose => locked(
                     wizard,

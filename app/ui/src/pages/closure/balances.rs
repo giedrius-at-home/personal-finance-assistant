@@ -2,7 +2,7 @@
 //! ledger balance next to the bank's, confirmed one by one before the split.
 
 use finance_types::report::Currency;
-use finance_types::report::closure::{BalanceState, BalanceStatus};
+use finance_types::report::closure::{BalanceState, BalanceStatus, ClosureStatus};
 use leptos::prelude::*;
 use rust_decimal::Decimal;
 
@@ -63,6 +63,15 @@ pub fn matching_rows(statuses: &[BalanceStatus], typed: &[String]) -> Vec<(Strin
         .filter(|(s, t)| s.state != BalanceState::Confirmed && same_figure(t, s.ledger))
         .map(|(s, t)| (s.account_id.clone(), t.trim().to_owned()))
         .collect()
+}
+
+/// Whether the sync step shows the Balances panel: while the month can still
+/// take a confirmed balance (the server accepts one up to Settled).
+pub fn shows_balances(status: ClosureStatus) -> bool {
+    matches!(
+        status,
+        ClosureStatus::Open | ClosureStatus::Settling | ClosureStatus::Settled
+    )
 }
 
 /// The split waits until every account balance reads Confirmed.
@@ -271,6 +280,15 @@ mod tests {
         assert!(!balances_locked(std::slice::from_ref(&ok)));
         let stale = status("b", d(1, 0), None, BalanceState::Stale);
         assert!(balances_locked(&[ok, stale]));
+    }
+
+    #[test]
+    fn panel_shows_until_the_month_closes() {
+        assert!(shows_balances(ClosureStatus::Open));
+        assert!(shows_balances(ClosureStatus::Settling));
+        assert!(shows_balances(ClosureStatus::Settled));
+        assert!(!shows_balances(ClosureStatus::Closed));
+        assert!(!shows_balances(ClosureStatus::ChangedAfterClose));
     }
 
     #[test]
