@@ -43,6 +43,31 @@ pub struct Family {
     pub over_cap: bool,
 }
 
+/// The card statement `date` is on, as the first of its month: a statement
+/// runs from the 26th to the 25th of the next month and is named by the
+/// month it ends in, so 27 Oct is on November's statement (26 Oct to 25 Nov,
+/// charged at the start of December).
+pub fn statement_month(date: Date) -> Date {
+    let month = date.first_of_month();
+    if date.day() >= 26 {
+        shift_months(month, 1)
+    } else {
+        month
+    }
+}
+
+impl Planned {
+    /// The month the item is paid in: a card item's statement month, else
+    /// the calendar month it is due in.
+    fn month(&self) -> Date {
+        if self.on_card {
+            statement_month(self.due)
+        } else {
+            self.due.first_of_month()
+        }
+    }
+}
+
 fn month_index(date: Date) -> i32 {
     i32::from(date.year()) * 12 + i32::from(date.month())
 }
@@ -125,9 +150,37 @@ fn days_between(from: Date, to: Date) -> i64 {
 /// How many times something starting on `first` and repeating `every` falls
 /// in the month of `month`, up to and including `ends_on`.
 pub fn occurrences(first: Date, every: Repeat, ends_on: Option<Date>, month: Date) -> u32 {
-    let start = month.first_of_month().max(first);
-    let last = month.last_of_month();
-    let end = ends_on.map_or(last, |e| e.min(last));
+    let from = month.first_of_month();
+    occurrences_between(first, every, ends_on, from, from.last_of_month())
+}
+
+/// How many times something starting on `first` and repeating `every` falls
+/// on the card statement named `month` (26th of the month before to the 25th).
+fn statement_occurrences(first: Date, every: Repeat, ends_on: Option<Date>, month: Date) -> u32 {
+    let month = month.first_of_month();
+    let from = month
+        .checked_sub(Span::new().months(1))
+        .ok()
+        .and_then(|m| m.with().day(26).build().ok());
+    let to = month.with().day(25).build().ok();
+    match (from, to) {
+        (Some(from), Some(to)) => occurrences_between(first, every, ends_on, from, to),
+        _ => 0,
+    }
+}
+
+/// How many times something starting on `first` and repeating `every` falls
+/// between `from` and `to` (both included, within two calendar months), up
+/// to and including `ends_on`.
+fn occurrences_between(
+    first: Date,
+    every: Repeat,
+    ends_on: Option<Date>,
+    from: Date,
+    to: Date,
+) -> u32 {
+    let start = from.max(first);
+    let end = ends_on.map_or(to, |e| e.min(to));
     if start > end {
         return 0;
     }
@@ -135,17 +188,18 @@ pub fn occurrences(first: Date, every: Repeat, ends_on: Option<Date>, month: Dat
         Repeat::Weekly => 7,
         Repeat::Biweekly => 14,
         Repeat::Monthly | Repeat::Yearly => {
-            if every == Repeat::Yearly && month.month() != first.month() {
-                return 0;
-            }
-            let day = first.day().min(month.days_in_month());
-            return u32::from(
-                month
-                    .with()
-                    .day(day)
-                    .build()
-                    .is_ok_and(|on| on >= start && on <= end),
-            );
+            let (a, b) = (from.first_of_month(), to.first_of_month());
+            let months: &[Date] = if a == b { &[a] } else { &[a, b] };
+            let hits = months
+                .iter()
+                .filter(|m| every == Repeat::Monthly || m.month() == first.month())
+                .filter_map(|m| {
+                    let day = first.day().min(m.days_in_month());
+                    m.with().day(day).build().ok()
+                })
+                .filter(|on| *on >= start && *on <= end)
+                .count();
+            return u32::try_from(hits).unwrap_or(0);
         }
     };
     let skipped = days_between(first, start).div_euclid(step)
@@ -242,7 +296,12 @@ pub fn repeat_demands(items: &[Planned], current_month: Date, months: usize) -> 
                 .iter()
                 .filter_map(|item| {
                     let (every, ends_on, each) = item.per_month?;
-                    let amount = Decimal::from(occurrences(item.due, every, ends_on, month)) * each;
+                    let count = if item.on_card {
+                        statement_occurrences(item.due, every, ends_on, month)
+                    } else {
+                        occurrences(item.due, every, ends_on, month)
+                    };
+                    let amount = Decimal::from(count) * each;
                     (amount != Decimal::ZERO).then(|| Demand {
                         wish_id: Some(item.wish_id.clone()),
                         label: item.label.clone(),
@@ -281,7 +340,7 @@ impl Saver {
             .filter(|i| i.per_month.is_none() && i.remaining > Decimal::ZERO)
             .map(|i| Saving {
                 item: i.clone(),
-                due_idx: months_ahead(i.due, current_month),
+                due_idx: months_ahead(i.month(), current_month),
                 left: i.remaining,
             })
             .filter(|s| s.due_idx < months)
@@ -360,7 +419,8 @@ pub fn horizon(items: &[Planned], current_month: Date) -> usize {
     let latest = items
         .iter()
         .map(|i| {
-            let ahead = months_ahead(i.due, current_month) + 1;
+            // A card item is charged the month after its statement.
+            let ahead = months_ahead(i.month(), current_month) + 1 + usize::from(i.on_card);
             if i.per_month.is_some() {
                 ahead.max(12)
             } else {
@@ -499,7 +559,8 @@ mod tests {
         assert!(out[0][0].set_aside && !out[0][0].on_card);
         assert_eq!(out[0][0].label, "Saving for flights");
         assert!(out[1].is_empty() && out[2].is_empty());
-        assert_eq!(horizon(&items, cur), 3);
+        // Through January, when December's statement is charged.
+        assert_eq!(horizon(&items, cur), 4);
         // Nothing saved by the due month: the purchase is the whole amount, on the card.
         let s = Saver::new(&items, cur, 3);
         let bought = &s.purchases(2)[0];
@@ -1007,5 +1068,47 @@ mod tests {
             items.iter().find(|i| i.wish_id == "p").unwrap().remaining,
             d("300")
         );
+    }
+
+    #[test]
+    fn statement_month_turns_on_the_26th() {
+        assert_eq!(statement_month(month("2026-10-25")), month("2026-10-01"));
+        assert_eq!(statement_month(month("2026-10-26")), month("2026-11-01"));
+        assert_eq!(statement_month(month("2026-11-01")), month("2026-11-01"));
+        assert_eq!(statement_month(month("2026-12-31")), month("2027-01-01"));
+    }
+
+    #[test]
+    fn card_wish_lands_in_its_statement_month() {
+        let card = wish("card", None, "100", "2026-10-27", true);
+        let bank = wish("bank", None, "100", "2026-10-27", false);
+        let (items, _) = plan_items(&[card, bank], oct(), &HashMap::new());
+        let s = Saver::new(&items, oct(), 3);
+        let ids = |v: Vec<Demand>| -> Vec<String> {
+            v.into_iter().filter_map(|x| x.wish_id).collect()
+        };
+        assert_eq!(ids(s.purchases(0)), vec!["bank".to_string()]);
+        assert_eq!(ids(s.purchases(1)), vec!["card".to_string()]);
+        // Through December, when November's statement is charged.
+        assert_eq!(horizon(&items, oct()), 3);
+    }
+
+    #[test]
+    fn repeating_card_wish_counts_by_statement() {
+        let mut w = recurring("gym", "30", "2026-10-27", Repeat::Monthly, None);
+        w.source = WishSource::Card;
+        let (items, _) = plan_items(&[w], oct(), &HashMap::new());
+        let out = repeat_demands(&items, oct(), 3);
+        // 27 Oct is November's statement, 27 Nov December's.
+        assert!(out[0].is_empty());
+        assert_eq!(amounts(&out[1]), vec![d("30")]);
+        assert_eq!(amounts(&out[2]), vec![d("30")]);
+        // A weekly card wish: Oct 26 - Nov 25 holds 5 Mondays from 26 Oct.
+        let mut w = recurring("lunch", "10", "2026-10-26", Repeat::Weekly, None);
+        w.source = WishSource::Card;
+        let (items, _) = plan_items(&[w], oct(), &HashMap::new());
+        let out = repeat_demands(&items, oct(), 2);
+        assert!(out[0].is_empty());
+        assert_eq!(amounts(&out[1]), vec![d("50")]);
     }
 }
