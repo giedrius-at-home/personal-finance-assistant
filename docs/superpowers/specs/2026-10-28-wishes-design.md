@@ -376,3 +376,31 @@ card, not that every month I put something and then pay the money back."
   fit even with the cards.
 - A month that already starts short (money committed before any wish) still
   covers its hole on the cards, as before (owner: "that is fine").
+
+## Addendum (2026-11-01): the card's statement period
+
+The owner's card statement runs from the 26th of one month to the 25th of
+the next, and the whole statement is charged on the 1st or 2nd of the month
+after it ends. The owner decided:
+
+1. **Statement month of a date** is its calendar month, except that a day
+   of 26 or later belongs to the next month's statement. 27 Oct is on the
+   November statement (26 Oct – 25 Nov), charged on 1/2 Dec; 10 Nov is on
+   it too.
+2. **A card wish** lands in the card room of its due date's statement
+   month and is charged one month after that statement month. A wish paid
+   from a bank account is unchanged (the calendar month it is due in). The
+   same holds for repeating card wishes and sub-wishes.
+3. **"Used so far" is per statement**: `used_month` names the statement
+   month (the one ending on the 25th), and the usage is stale once today
+   is past that 25th, not at calendar month end. Month 0's card room uses
+   the statement ending on the 25th of the current budget month; month 0's
+   card is still charged in month 1.
+
+- *(Claude's call)* Between the 26th and month end the owner types the
+  next statement's usage; month 1's card room holds it (at least the card
+  bill's regular spending), and it is not stale.
+- *(Claude's call)* The look-ahead reaches the month a card wish's
+  statement is charged, so its payback shows.
+- The card field reads "Used this statement", its hint the period
+  (e.g. "26 Oct – 25 Nov.").
