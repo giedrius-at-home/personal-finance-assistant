@@ -328,18 +328,24 @@ impl Wizard {
     }
 
     /// Confirm, in order, every row whose typed value equals its ledger
-    /// figure; stop at the first error.
+    /// figure; stop at the first error. The first post carries the revision
+    /// on screen, each later one the revision the previous answer returned,
+    /// so a change made elsewhere meanwhile stops the run as a conflict.
     pub fn confirm_matching(self, rows: Vec<(String, String)>) {
         if rows.is_empty() {
             return;
         }
+        let Some((month, first)) = self.base() else {
+            return;
+        };
         self.write(
             move || async move {
-                let mut last = None;
+                let mut last: Option<ClosureView> = None;
                 for (account_id, typed) in rows {
+                    let revision = last.as_ref().map_or(first, |v| v.period.revision);
+                    let month = month.clone();
                     let step = async {
                         let balance = parse_balance(&typed)?;
-                        let (month, revision) = self.latest().await?;
                         post_closure(ClosureAction::ConfirmBalance {
                             month,
                             revision,
