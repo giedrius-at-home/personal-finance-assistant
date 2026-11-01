@@ -223,3 +223,10 @@ On the closure page, between the Sync step and the Split step, a
   today; `writes/transactions.rs` has the search-row delete).
 - Whether "Confirm all matching" is one request or a loop of single
   confirms; the server side exposes only the single action.
+
+## Rollback
+
+Payloads carrying `balance_checks` are not readable by earlier releases
+(their `MonthPeriod` uses `deny_unknown_fields`), so this change is
+forward-only: do not roll back to a release before it once a month has a
+confirmed balance.
