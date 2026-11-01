@@ -115,7 +115,9 @@ pub fn with_transfer_targets(
                     _ => item,
                 };
             }
-            let target = item.goal_id().and_then(|g| savings_by_goal.get(g).copied());
+            let target = item
+                .target_account_id()
+                .or_else(|| item.goal_id().and_then(|g| savings_by_goal.get(g).copied()));
             match target {
                 Some(at) if at != item.from_account_id && item.amount > Decimal::ZERO => {
                     AllocationLine {

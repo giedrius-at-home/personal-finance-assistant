@@ -1050,3 +1050,61 @@ fn unconfirmed_names_lists_everything_not_confirmed_in_order() {
     ];
     assert_eq!(unconfirmed_names(&all), ["B", "C"]);
 }
+
+#[test]
+fn a_move_gets_a_pending_transfer_to_its_target() {
+    let roles = [role("abn", "spending", None, None)];
+    let lines = with_transfer_targets(
+        vec![
+            line("m", "account:vault", "100"),
+            AllocationLine {
+                from_account_id: "vault".into(),
+                ..line("same", "account:vault", "10")
+            },
+            line("zero", "account:vault", "0"),
+        ],
+        &roles,
+        &[],
+    );
+    assert_eq!(lines[0].to_account_id.as_deref(), Some("vault"));
+    assert_eq!(lines[0].transfer_status, TransferStatus::Pending);
+    assert!(lines[0].transfer_hops.is_empty());
+    for stay in &lines[1..] {
+        assert_eq!(stay.to_account_id, None);
+        assert_eq!(stay.transfer_status, TransferStatus::NotNeeded);
+    }
+}
+
+#[test]
+fn a_move_routes_through_the_via_account() {
+    let roles = [
+        role("abn", "spending", None, None),
+        role("revolut", "spending", None, None),
+        role("vault", "savings", None, Some("revolut")),
+    ];
+    let lines = with_transfer_targets(vec![line("m", "account:vault", "100")], &roles, &[]);
+    let hops: Vec<_> = lines[0]
+        .transfer_hops
+        .iter()
+        .map(|h| (h.from_account_id.as_str(), h.to_account_id.as_str()))
+        .collect();
+    assert_eq!(hops, [("abn", "revolut"), ("revolut", "vault")]);
+    assert_eq!(lines[0].to_account_id.as_deref(), Some("vault"));
+}
+
+#[test]
+fn a_move_is_matched_by_a_bank_transfer() {
+    let settled: Timestamp = "2026-09-30T10:00:00Z".parse().unwrap();
+    let lines = [AllocationLine {
+        transfer_status: TransferStatus::Pending,
+        to_account_id: Some("revolut".into()),
+        ..line("m", "account:revolut", "100")
+    }];
+    let bank = [Tx {
+        transfer_evidence: Some("paired_entries"),
+        ..transfer("t", "abn", "revolut", "100", "2026-09-30T12:00:00Z")
+    }];
+    let refs: Vec<&Tx> = bank.iter().collect();
+    let matched = match_transfers(&lines, &refs, settled, &zone());
+    assert_eq!(matched[0].transfer_status, TransferStatus::Matched);
+}

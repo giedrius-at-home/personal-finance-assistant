@@ -1050,3 +1050,10 @@ fn finalizing_a_settled_month_leaves_the_wish_saved_alone() {
     );
     assert_eq!(wish(&db, &id), before);
 }
+
+#[test]
+fn an_account_destination_passes_the_line_check() {
+    assert!(checked_lines(vec![checking("m", "account:firefly:5", "10")]).is_ok());
+    assert!(checked_lines(vec![checking("m", "account:", "10")]).is_err());
+    assert!(checked_lines(vec![checking("m", "account:a b", "10")]).is_err());
+}
