@@ -343,6 +343,14 @@ pub fn insert_transaction(conn: &Connection, t: &NewTransaction<'_>) -> Result<i
     Ok(id)
 }
 
+/// Remove one transaction with its postings and search row; Ok(false) when absent.
+pub fn delete_transaction(conn: &Connection, id: i64) -> Result<bool> {
+    conn.execute("DELETE FROM transactions_search WHERE rowid = ?1", [id])?;
+    conn.execute("DELETE FROM postings WHERE transaction_id = ?1", [id])?;
+    let gone = conn.execute("DELETE FROM transactions WHERE id = ?1", [id])?;
+    Ok(gone > 0)
+}
+
 /// The id of the `kind` (`expense` or `revenue`) account called `name`,
 /// created when there is none, as Firefly did for a counterparty name.
 pub fn counterparty_account(conn: &Connection, name: &str, kind: &str) -> Result<i64> {
