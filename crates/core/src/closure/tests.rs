@@ -527,6 +527,19 @@ fn a_move_needs_a_known_target_in_the_same_currency() {
         check(&[line("m", "account:abn", "10")]).unwrap_err(),
         "cannot move money to the same account"
     );
+    // Checked before the target lookup, whatever the account's standing.
+    assert_eq!(
+        validate_allocations(
+            &review,
+            &[line("m", "account:abn", "10")],
+            &goals,
+            None,
+            &wishes,
+            &HashSet::from(["abn"])
+        )
+        .unwrap_err(),
+        "cannot move money to the same account"
+    );
     assert_eq!(
         check(&[line("m", "account:usd", "10")]).unwrap_err(),
         "move currency does not match"

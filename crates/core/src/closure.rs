@@ -743,6 +743,9 @@ pub fn validate_allocations(
                 return Err("saves more than the wish still needs".into());
             }
         } else if let Some(target) = item.target_account_id() {
+            if target == item.from_account_id {
+                return Err("cannot move money to the same account".into());
+            }
             let Some(to) = review.accounts.iter().find(|a| {
                 a.account_id == target
                     && !inactive.contains(target)
@@ -750,9 +753,6 @@ pub fn validate_allocations(
             }) else {
                 return Err("move to an unknown account".into());
             };
-            if target == item.from_account_id {
-                return Err("cannot move money to the same account".into());
-            }
             if item.amount <= Decimal::ZERO {
                 return Err("a move must be positive".into());
             }

@@ -227,7 +227,7 @@ fn cents(amount: Decimal) -> bool {
 /// The field rules the Python model enforced on every line a screen sends.
 fn checked_lines(lines: Vec<AllocationLine>) -> Result<Vec<AllocationLine>> {
     static DESTINATION: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"^(goal:[^\s]{1,128}|pot:[^\s]{1,64}|wish:[^\s]{1,64}|account:[^\s]{1,64}|plan|buffer|stay)$")
+        Regex::new(r"^(goal:[^\s]{1,128}|pot:[^\s]{1,64}|wish:[^\s]{1,64}|account:[^\s]{1,128}|plan|buffer|stay)$")
             .expect("valid regex")
     });
     let bad = || invalid("invalid lines");

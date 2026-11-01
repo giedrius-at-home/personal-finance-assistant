@@ -1056,6 +1056,9 @@ fn an_account_destination_passes_the_line_check() {
     assert!(checked_lines(vec![checking("m", "account:firefly:5", "10")]).is_ok());
     assert!(checked_lines(vec![checking("m", "account:", "10")]).is_err());
     assert!(checked_lines(vec![checking("m", "account:a b", "10")]).is_err());
+    let long = format!("account:{}", "x".repeat(128));
+    assert!(checked_lines(vec![checking("m", &long, "10")]).is_ok());
+    assert!(checked_lines(vec![checking("m", &format!("{long}x"), "10")]).is_err());
 }
 
 /// October, settling, with a €500 salary on checking and a second spending
