@@ -431,7 +431,12 @@ pub fn AllocationList(
                 Some(to) => format!(
                     "{}{}",
                     account(to),
-                    if take { String::new() } else { format!(" ({label})") }
+                    // A move's label only repeats the account it names.
+                    if take || line.target_account_id().is_some() {
+                        String::new()
+                    } else {
+                        format!(" ({label})")
+                    }
                 ),
                 None => label.clone(),
             };
