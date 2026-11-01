@@ -133,6 +133,7 @@ pub fn BalancesPanel(balances: Vec<BalanceStatus>, disabled: Signal<bool>) -> im
             let (text, warn) = status_text(&status);
             let account_id = StoredValue::new(status.account_id.clone());
             let name = status.name.clone();
+            let confirm_label = format!("Confirm {name}");
             let row = StoredValue::new(status.clone());
             let show_confirm = move || row.with_value(|s| typed.with(|t| needs_confirm(s, t)));
             view! {
@@ -158,6 +159,7 @@ pub fn BalancesPanel(balances: Vec<BalanceStatus>, disabled: Signal<bool>) -> im
                                 variant=Variant::Secondary
                                 size=Size::Sm
                                 disabled=disabled
+                                label=confirm_label.clone()
                                 on_click=Callback::new(move |_| {
                                     wizard.confirm_balance(account_id.get_value(), typed.get_untracked());
                                 })
