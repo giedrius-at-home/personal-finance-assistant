@@ -518,6 +518,8 @@ fn wish_options_list_parents_then_sub_wishes_by_due_date() {
     assert_eq!(options[0].currency, eur());
     let names: HashMap<String, String> = wish_labels(&wishes, &options).into_iter().collect();
     assert_eq!(names["bike"], "Wish: Bike");
+    assert_eq!(names["trip"], "Wish: Trip rest");
+    assert_eq!(names["flight"], "Wish: Flight");
     assert_eq!(names["tv"], "Wish (bought): TV");
     assert_eq!(names["sofa"], "Wish (dropped): Sofa");
 }

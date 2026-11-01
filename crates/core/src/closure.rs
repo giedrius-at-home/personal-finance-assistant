@@ -635,11 +635,17 @@ pub fn period_wish_options(wishes: &[Wish], period: &MonthPeriod) -> Vec<WishOpt
 /// `(wish_id, label)` of every wish for naming lines: `Wish: <name>` while
 /// it is offered, else what became of it.
 pub fn wish_labels(wishes: &[Wish], options: &[WishOption]) -> Vec<(String, String)> {
+    let has_subs = |id: &str| {
+        wishes
+            .iter()
+            .any(|s| s.parent_id.as_deref() == Some(id) && s.kind == WishKind::OneOff)
+    };
     wishes
         .iter()
         .map(|w| {
             let offered = options.iter().any(|o| o.wish_id == w.wish_id);
             let label = match w.status {
+                _ if offered && has_subs(&w.wish_id) => format!("Wish: {} rest", w.name),
                 _ if offered => format!("Wish: {}", w.name),
                 WishStatus::Bought => format!("Wish (bought): {}", w.name),
                 WishStatus::Dropped => format!("Wish (dropped): {}", w.name),
