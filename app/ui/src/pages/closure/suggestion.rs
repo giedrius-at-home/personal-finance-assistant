@@ -35,7 +35,8 @@ pub struct Figures {
     /// One-off payments due in the three months after the current one.
     pub known_future: Decimal,
     pub safety_buffer: Decimal,
-    /// Positive lines to wishes, goals, plan lines and buffer lines.
+    /// Positive lines to wishes, goals, other accounts, plan lines and buffer
+    /// lines.
     pub assigned: Decimal,
     /// projected − everyday − known future payments − safety buffer − assigned.
     pub suggested: Decimal,
@@ -52,6 +53,7 @@ pub fn figures(inputs: &SavingsSuggestion, lines: &[SuggestionLine]) -> Figures 
                 || l.destination.starts_with("goal:")
                 || l.destination == "plan"
                 || l.destination == "buffer"
+                || l.destination.starts_with("account:")
         })
         .map(|l| l.amount)
         .sum();
@@ -268,5 +270,13 @@ mod tests {
         assert_eq!(wish.suggested, base.suggested - d("50"));
         let stay = figures(&inputs(), &[line("stay", "50"), line("pot:old", "50")]);
         assert_eq!(stay, base);
+    }
+
+    #[test]
+    fn move_lines_count_as_assigned() {
+        let base = figures(&inputs(), &[]);
+        let moved = figures(&inputs(), &[line("account:sw", "30")]);
+        assert_eq!(moved.assigned, d("30"));
+        assert_eq!(moved.suggested, base.suggested - d("30"));
     }
 }

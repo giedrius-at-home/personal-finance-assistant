@@ -26,7 +26,7 @@ use rust_decimal::Decimal;
 use self::balances::{BalancesPanel, balances_locked, parse_balance, shows_balances};
 use self::bank_sync::{BankSyncPanel, bank_name};
 use self::panels::AccountsPanel;
-use self::split::{DraftStore, LegacyNames, SplitEditor, SplitTarget};
+use self::split::{DraftStore, LegacyNames, SplitEditor, SplitTarget, move_targets};
 use self::steps::{AllocationList, ReviewNames, ReviewStep, UnclassifiedAccounts as NewAccounts};
 use self::transfer::Hop;
 use self::ui::{
@@ -656,6 +656,7 @@ fn ChangedAfterClose(view: ClosureView) -> impl IntoView {
             currency: a.currency.clone(),
             target: *d,
             note: None,
+            moves: move_targets(a, &view.review.accounts),
         })
         .collect();
     let none_changed = changed.is_empty();
@@ -1113,6 +1114,7 @@ fn split_editor(
                 } else {
                     None
                 },
+                moves: move_targets(a, &view.review.accounts),
             }
         })
         .collect();

@@ -277,7 +277,7 @@ pub fn ReviewStep(
                                 {row("Fixed payments".into(), Some(account.fixed_planned), account.fixed_actual, &account)}
                                 {groups}
                                 {row("Other spending".into(), None, account.other_spent, &account)}
-                                {row("Carry-in (buffer + planned purchases)".into(), None, account.carry_in, &account)}
+                                {row("Carry-in (buffer, moved in, planned purchases)".into(), None, account.carry_in, &account)}
                                 {adjusted.map(|x| note_row("Balance adjustment (not counted)".into(), x, &account))}
                                 <tr class=TROW>
                                     <th scope="row" class=LEFTOVER_LABEL>"Leftover"</th>
@@ -337,6 +337,12 @@ fn destination_label(line: &AllocationLine, view: &ClosureView) -> String {
                     .find(|p| p.pot_id == pot_id)
                     .map_or(pot_id, |p| p.name.as_str());
                 return format!("Pot (retired): {name}");
+            }
+            if let Some(account_id) = dest.strip_prefix("account:") {
+                let name = account_names(view)
+                    .remove(account_id)
+                    .unwrap_or_else(|| account_id.to_owned());
+                return format!("Move to {name}");
             }
             if let Some(wish_id) = dest.strip_prefix("wish:") {
                 return view
