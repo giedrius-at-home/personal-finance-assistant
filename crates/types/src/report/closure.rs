@@ -92,7 +92,7 @@ pub struct TransferHop {
 pub struct AllocationLine {
     pub line_id: String,
     pub from_account_id: String,
-    /// `goal:<id>`, `pot:<pot_id>`, `plan` (a planned purchase), `buffer`
+    /// `goal:<id>`, `wish:<wish_id>`, `pot:<pot_id>` (legacy, read-only), `plan` (a planned purchase), `buffer`
     /// (next month) or `stay`.
     pub destination: String,
     /// Negative only for a take from a pot (split) or a delta line.
@@ -141,6 +141,11 @@ impl AllocationLine {
     /// The savings goal of a `goal:<id>` line.
     pub fn goal_id(&self) -> Option<&str> {
         self.destination.strip_prefix("goal:")
+    }
+
+    /// The planned wish a `wish:<id>` line saves toward.
+    pub fn wish_id(&self) -> Option<&str> {
+        self.destination.strip_prefix("wish:")
     }
 }
 

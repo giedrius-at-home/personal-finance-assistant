@@ -28,14 +28,15 @@ use crate::closure::transfers::{
 };
 use crate::closure::{
     BANKS, GENERAL_POT_ID, PLANNED_PURCHASE_CATEGORY, candidates, day_of, general_pot,
-    load_periods, load_pot_entries, load_pots, load_roles, normalized_currency, open_pot_balances,
-    parse_month, period_or_new, plan_due_month, pot_balances, pot_entries, pot_view, review_month,
-    stored_instant, transactions_by_id, validate_allocations,
+    load_periods, load_pot_entries, load_pots, load_roles, normalized_currency, parse_month,
+    period_or_new, plan_due_month, pot_balances, pot_entries, pot_view, review_month,
+    stored_instant, transactions_by_id, validate_allocations, wish_caps,
 };
 use crate::load::parse_instant;
 use crate::model::Kind;
 use crate::period::{PeriodResolver, shift_month};
 use crate::plans::CLOSURE_PLAN_PREFIX;
+use crate::wishes::store::load_wishes;
 use crate::{Error, Result, Snapshot};
 
 use ClosureStatus::{ChangedAfterClose, Closed, Open, Settled, Settling};
@@ -558,17 +559,16 @@ pub fn settle(
         )));
     }
     require_no_later_closure(&all, month)?;
-    ensure_general_pot(w)?;
     let review = review_month(snap, &all, month, &w.now);
     let lines = client_lines(lines, LineKind::Split);
+    // Legacy pot lines still route; a new split cannot add one.
     let pots = load_pots(&w.tx, true)?;
-    let entries = load_pot_entries(&w.tx, None)?;
     validate_allocations(
         &review,
         &lines,
         &goal_ids(snap),
         None,
-        &open_pot_balances(&pots, &entries, Some(month)),
+        &wish_caps(&load_wishes(&w.tx)?, &period.allocations),
     )
     .map_err(invalid)?;
     let lines = with_plan_ids(month, lines, &HashSet::new())?;
@@ -734,18 +734,15 @@ pub fn resettle(
     let Some(baseline) = period.settled_snapshot.as_ref() else {
         return Err(invalid("closed month is missing its snapshot"));
     };
-    ensure_general_pot(w)?;
     let review = review_month(snap, &all, month, &w.now);
     let lines = client_lines(lines, LineKind::Delta);
     let pots = load_pots(&w.tx, true)?;
-    let entries = load_pot_entries(&w.tx, None)?;
     validate_allocations(
         &review,
         &lines,
         &goal_ids(snap),
         Some(baseline),
-        // Resettle appends to the month's entries, so takes draw on the full balance.
-        &open_pot_balances(&pots, &entries, None),
+        &wish_caps(&load_wishes(&w.tx)?, &period.allocations),
     )
     .map_err(invalid)?;
     let taken: HashSet<String> = period

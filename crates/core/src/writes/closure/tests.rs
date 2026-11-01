@@ -279,7 +279,7 @@ fn reopen_only_while_the_next_month_has_not_moved_on() {
 }
 
 #[test]
-fn pot_balance_follows_the_latest_split_and_limits_takes() {
+fn a_resplit_replaces_its_plans_and_refuses_pot_lines_and_takes() {
     let mut conn = db();
     put(
         &conn,
@@ -294,12 +294,13 @@ fn pot_balance_follows_the_latest_split_and_limits_takes() {
         plan_due_on: Some("2026-11-01".into()),
         ..line("p", "plan", "40")
     };
-    let split = || vec![line("a", "pot:general", "60"), bike.clone()];
     let now = "2026-09-29T10:00:00Z";
+    let pot = vec![line("a", "pot:general", "60"), bike.clone()];
+    let refused = write(&mut conn, now, |w| settle(w, &snap, sept(), 1, pot));
+    assert_eq!(error(refused), "pots are no longer available");
+    let split = || vec![line("a", "buffer", "60"), bike.clone()];
     write(&mut conn, now, |w| settle(w, &snap, sept(), 1, split())).unwrap();
     write(&mut conn, now, |w| settle(w, &snap, sept(), 2, split())).unwrap();
-    let balances = pot_balances(&load_pot_entries(&conn, None).unwrap(), None);
-    assert_eq!(balances["general"]["EUR"], d("60"));
     let plans: Vec<String> = conn
         .prepare("SELECT plan_id FROM planned_payments WHERE archived_at IS NULL")
         .unwrap()
@@ -308,10 +309,9 @@ fn pot_balance_follows_the_latest_split_and_limits_takes() {
         .collect::<std::result::Result<_, _>>()
         .unwrap();
     assert_eq!(plans, ["closure-2026-09-01-p"]);
-    // This month's own entries are replaced, so they cannot fund a take.
     let take = vec![line("t", "pot:general", "-50"), line("s", "stay", "150")];
     let refused = write(&mut conn, now, |w| settle(w, &snap, sept(), 3, take));
-    assert_eq!(error(refused), "take is larger than the pot balance");
+    assert_eq!(error(refused), "pots are no longer available");
     write(&mut conn, now, |w| {
         settle(w, &snap, sept(), 3, vec![line("s", "stay", "100")])
     })
