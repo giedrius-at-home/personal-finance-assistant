@@ -644,6 +644,14 @@ fn confirm_refuses_more_decimals_than_the_currency() {
 }
 
 #[test]
+fn confirm_accepts_trailing_zeros_past_the_minor_unit() {
+    let mut db = confirm_db(ClosureStatus::Settling);
+    db.write(|w, snap| confirm_balance(w, snap, october(), 1, "firefly:1", d("12.100")))
+        .unwrap();
+    assert_eq!(ledger(&db), d("12.10"));
+}
+
+#[test]
 fn confirm_books_a_negative_balance() {
     let mut db = confirm_db(ClosureStatus::Open);
     db.write(|w, snap| confirm_balance(w, snap, october(), 1, "firefly:1", d("-25.00")))

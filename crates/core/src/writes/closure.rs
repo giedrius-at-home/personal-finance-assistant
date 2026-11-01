@@ -832,7 +832,8 @@ pub fn confirm_balance(
         .find(|a| a.account_id == account_id)
         .ok_or_else(|| invalid("account cannot be confirmed"))?;
     let currency = account.currency();
-    if balance.scale() > u32::from(currency.minor_unit) {
+    // Trailing zeros are not extra precision: "12.100" is a fine EUR figure.
+    if balance.normalize().scale() > u32::from(currency.minor_unit) {
         return Err(invalid("invalid balance"));
     }
     if let Some(earlier) = period
