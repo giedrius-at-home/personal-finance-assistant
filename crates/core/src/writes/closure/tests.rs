@@ -4,7 +4,8 @@
 use std::collections::BTreeMap;
 
 use finance_types::report::closure::{
-    AccountRoleDraft, AllocationLine, ClosureStatus, MonthPeriod, PotDraft, TransferStatus,
+    AccountRoleDraft, AllocationLine, BalanceCheck, ClosureStatus, MonthPeriod, PotDraft,
+    TransferStatus,
 };
 use jiff::civil::date;
 use rusqlite::Connection;
@@ -106,7 +107,6 @@ fn record_sync_refuses_when_a_later_month_is_closed() {
     put(
         &conn,
         &MonthPeriod {
-            balance_checks: BTreeMap::new(),
             cutoff_at: Some("2026-09-30T09:00:00Z".into()),
             ..period("2026-09-01", ClosureStatus::Closed)
         },
@@ -132,7 +132,6 @@ fn resettle_flags_next_month_only_when_carry_in_changes() {
         put(
             &conn,
             &MonthPeriod {
-                balance_checks: BTreeMap::new(),
                 cutoff_at: Some("2026-08-31T18:00:00Z".into()),
                 settled_at: Some("2026-08-31T18:00:00Z".into()),
                 settled_snapshot: Some(review(baseline)),
@@ -143,7 +142,6 @@ fn resettle_flags_next_month_only_when_carry_in_changes() {
         put(
             &conn,
             &MonthPeriod {
-                balance_checks: BTreeMap::new(),
                 cutoff_at: Some("2026-09-30T09:00:00Z".into()),
                 revision: 1,
                 ..period("2026-09-01", ClosureStatus::Closed)
@@ -174,7 +172,6 @@ fn resplit_keeps_settle_time_so_earlier_transfers_still_match() {
     put(
         &conn,
         &MonthPeriod {
-            balance_checks: BTreeMap::new(),
             revision: 1,
             ..period("2026-09-01", ClosureStatus::Settling)
         },
@@ -227,7 +224,6 @@ fn resplit_keeps_settle_time_so_earlier_transfers_still_match() {
 fn reopen_only_while_the_next_month_has_not_moved_on() {
     let mut conn = db();
     let august = MonthPeriod {
-        balance_checks: BTreeMap::new(),
         cutoff_at: Some("2026-08-31T18:00:00Z".into()),
         settled_at: Some("2026-08-31T18:00:00Z".into()),
         allocations: vec![line("b", "buffer", "50")],
@@ -238,7 +234,6 @@ fn reopen_only_while_the_next_month_has_not_moved_on() {
     put(
         &conn,
         &MonthPeriod {
-            balance_checks: BTreeMap::new(),
             revision: 1,
             ..period("2026-09-01", ClosureStatus::Settled)
         },
@@ -251,7 +246,6 @@ fn reopen_only_while_the_next_month_has_not_moved_on() {
     put(
         &conn,
         &MonthPeriod {
-            balance_checks: BTreeMap::new(),
             revision: 2,
             ..period("2026-09-01", ClosureStatus::Settling)
         },
@@ -276,7 +270,6 @@ fn pot_balance_follows_the_latest_split_and_limits_takes() {
     put(
         &conn,
         &MonthPeriod {
-            balance_checks: BTreeMap::new(),
             revision: 1,
             ..period("2026-09-01", ClosureStatus::Settling)
         },
@@ -359,7 +352,6 @@ fn refinalize_after_reopen_adds_delta_lines_with_new_ids() {
     put(
         &conn,
         &MonthPeriod {
-            balance_checks: BTreeMap::new(),
             revision: 1,
             ..period("2026-09-01", ClosureStatus::Settling)
         },
@@ -408,7 +400,6 @@ fn marking_a_hop_by_hand_checks_revision_and_accounts() {
     put(
         &conn,
         &MonthPeriod {
-            balance_checks: BTreeMap::new(),
             settled_at: Some("2026-09-30T10:00:00Z".into()),
             allocations: hopped,
             revision: 1,
@@ -467,7 +458,6 @@ fn a_via_route_is_one_hop_and_replans_open_transfers() {
     put(
         &conn,
         &MonthPeriod {
-            balance_checks: BTreeMap::new(),
             settled_at: Some("2026-09-30T10:00:00Z".into()),
             allocations: direct,
             revision: 1,
@@ -532,4 +522,32 @@ fn a_via_route_is_one_hop_and_replans_open_transfers() {
             .as_deref(),
         Some("revolut")
     );
+}
+
+#[test]
+fn a_saved_period_keeps_its_stored_balance_checks() {
+    let mut conn = db();
+    let checks = BTreeMap::from([(
+        "firefly:1".to_string(),
+        BalanceCheck {
+            balance: d("1234.56"),
+            ledger_balance: d("1234.56"),
+            confirmed_at: "2026-09-29T09:00:00Z".into(),
+            transaction_id: Some("firefly:77".into()),
+        },
+    )]);
+    put(
+        &conn,
+        &MonthPeriod {
+            revision: 1,
+            balance_checks: checks.clone(),
+            ..period("2026-09-01", ClosureStatus::Settling)
+        },
+    );
+    let snap = salary_snapshot();
+    write(&mut conn, "2026-09-29T10:00:00Z", |w| {
+        settle(w, &snap, sept(), 1, vec![line("s", "stay", "100")])
+    })
+    .unwrap();
+    assert_eq!(stored(&conn, "2026-09-01").balance_checks, checks);
 }

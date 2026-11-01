@@ -795,7 +795,6 @@ pub fn period_or_new(
         .find(|p| p.month == text)
         .cloned()
         .unwrap_or_else(|| MonthPeriod {
-            balance_checks: BTreeMap::new(),
             month: text,
             starts_at: resolver.period_start_stamp(month),
             cutoff_at: None,
@@ -807,6 +806,7 @@ pub fn period_or_new(
             revision: 0,
             reviewed_through: None,
             reopened_at: None,
+            balance_checks: BTreeMap::new(),
         })
 }
 
