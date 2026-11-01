@@ -163,6 +163,7 @@ pub(crate) fn snapshot(
 
 pub(crate) fn period(month: &str, status: ClosureStatus) -> MonthPeriod {
     MonthPeriod {
+        balance_checks: BTreeMap::new(),
         month: month.into(),
         starts_at: "2026-08-31T18:00:00Z".into(),
         cutoff_at: None,
@@ -227,6 +228,7 @@ pub(crate) fn review(leftover: &str) -> ClosureReview {
 
 fn august() -> MonthPeriod {
     MonthPeriod {
+        balance_checks: BTreeMap::new(),
         cutoff_at: Some("2026-08-31T18:00:00Z".into()),
         ..period("2026-08-01", ClosureStatus::Closed)
     }
@@ -256,6 +258,7 @@ fn cutoff_day_is_split_by_first_observation() {
 #[test]
 fn late_cutoff_does_not_pull_next_month_bookings_back() {
     let september = MonthPeriod {
+        balance_checks: BTreeMap::new(),
         // Oct 2 10:00 Amsterdam local time.
         cutoff_at: Some("2026-10-02T08:00:00Z".into()),
         ..period("2026-09-01", ClosureStatus::Closed)
@@ -359,6 +362,7 @@ fn transfer_matching_uses_each_bank_transfer_once() {
 #[test]
 fn planned_purchase_money_carries_into_its_due_month() {
     let september = MonthPeriod {
+        balance_checks: BTreeMap::new(),
         allocations: vec![AllocationLine {
             plan_name: Some("Laptop".into()),
             plan_due_on: Some("2026-11-01".into()),
@@ -651,6 +655,7 @@ fn stored_instants_drop_zero_microseconds() {
 #[test]
 fn pot_entries_name_the_month_and_skip_other_lines() {
     let september = MonthPeriod {
+        balance_checks: BTreeMap::new(),
         allocations: vec![
             line("s", "stay", "5"),
             line("g", "pot:general", "60"),

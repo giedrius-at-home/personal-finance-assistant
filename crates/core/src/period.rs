@@ -148,9 +148,11 @@ impl PeriodResolver {
 mod tests {
     use super::*;
     use jiff::civil::date;
+    use std::collections::BTreeMap;
 
     fn resolver() -> PeriodResolver {
         let periods = vec![MonthPeriod {
+            balance_checks: BTreeMap::new(),
             month: "2026-09-01".into(),
             starts_at: "2026-09-01T00:00:00+02:00".into(),
             cutoff_at: Some("2026-09-28T10:00:00Z".into()),

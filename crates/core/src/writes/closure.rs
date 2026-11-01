@@ -6,7 +6,7 @@
 //! arrivals flag closed months, late transfers are ticked off); the screen
 //! pulls fresh bank data through `bank_sync` before it asks.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::{BuildHasher, Hasher};
 
 use finance_types::gateway::{AccountRole, Direction, PlannedPayment, PotRecord};
@@ -107,6 +107,7 @@ pub fn act(w: &Writer<'_>, snap: &Snapshot, action: ClosureAction) -> Result<Dat
             hop,
             ..
         } => unmark(w, month, revision, &line_id, hop),
+        ClosureAction::ConfirmBalance { .. } => Err(invalid("not available yet")),
     }?;
     Ok(month)
 }
@@ -159,6 +160,7 @@ fn require_no_later_closure(periods: &[MonthPeriod], month: Date) -> Result<()> 
 /// Save `period` if nobody saved it since its revision; `None` on a conflict.
 fn try_save(w: &Writer<'_>, period: MonthPeriod) -> Result<Option<MonthPeriod>> {
     let saved = MonthPeriod {
+        balance_checks: BTreeMap::new(),
         revision: period.revision + 1,
         ..period
     };
@@ -489,6 +491,7 @@ pub fn refresh_after_sync(w: &Writer<'_>, snap: &Snapshot) -> Result<()> {
             try_save(
                 w,
                 MonthPeriod {
+                    balance_checks: BTreeMap::new(),
                     allocations,
                     status,
                     ..period
@@ -520,6 +523,7 @@ pub fn sync(
     save(
         w,
         MonthPeriod {
+            balance_checks: BTreeMap::new(),
             status: Settling,
             missing_banks: missing,
             ..period
@@ -564,6 +568,7 @@ pub fn settle(
     let saved = save(
         w,
         MonthPeriod {
+            balance_checks: BTreeMap::new(),
             status: Settled,
             settled_at: Some(settled_at),
             settled_snapshot: Some(review),
@@ -692,6 +697,7 @@ pub fn finalize(
     let saved = save(
         w,
         MonthPeriod {
+            balance_checks: BTreeMap::new(),
             status: Closed,
             cutoff_at: Some(stamp(w)),
             settled_snapshot: Some(review),
@@ -745,6 +751,7 @@ pub fn resettle(
     let saved = save(
         w,
         MonthPeriod {
+            balance_checks: BTreeMap::new(),
             status: Closed,
             settled_snapshot: Some(review),
             allocations,
@@ -772,6 +779,7 @@ pub fn resettle(
         try_save(
             w,
             MonthPeriod {
+                balance_checks: BTreeMap::new(),
                 status: ChangedAfterClose,
                 ..later
             },
@@ -818,6 +826,7 @@ pub fn reopen(w: &Writer<'_>, snap: &Snapshot, month: Date, revision: u32) -> Re
     save(
         w,
         MonthPeriod {
+            balance_checks: BTreeMap::new(),
             status: Settled,
             cutoff_at: None,
             reopened_at: Some(stamp(w)),
@@ -871,6 +880,7 @@ pub fn mark(
     save(
         w,
         MonthPeriod {
+            balance_checks: BTreeMap::new(),
             allocations,
             ..period
         },
@@ -898,6 +908,7 @@ pub fn unmark(
     save(
         w,
         MonthPeriod {
+            balance_checks: BTreeMap::new(),
             allocations,
             ..period
         },
@@ -988,6 +999,7 @@ pub fn reroute_open_transfers(w: &Writer<'_>) -> Result<()> {
         try_save(
             w,
             MonthPeriod {
+                balance_checks: BTreeMap::new(),
                 allocations,
                 ..period
             },

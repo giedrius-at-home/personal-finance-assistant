@@ -795,6 +795,7 @@ pub fn period_or_new(
         .find(|p| p.month == text)
         .cloned()
         .unwrap_or_else(|| MonthPeriod {
+            balance_checks: BTreeMap::new(),
             month: text,
             starts_at: resolver.period_start_stamp(month),
             cutoff_at: None,
@@ -884,6 +885,7 @@ pub fn closure_view(
     let balances = pot_balances(&entries, None);
     let roles = load_roles(conn)?;
     Ok(ClosureView {
+        balances: Vec::new(),
         review: review_month(snap, periods, month, now),
         goals: snap
             .goals

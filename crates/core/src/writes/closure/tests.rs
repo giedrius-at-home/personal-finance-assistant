@@ -1,6 +1,8 @@
 //! Ports of the stateful cases in Python `tests/unit/test_month_closure.py`,
 //! on an in-memory database with the closure tables.
 
+use std::collections::BTreeMap;
+
 use finance_types::report::closure::{
     AccountRoleDraft, AllocationLine, ClosureStatus, MonthPeriod, PotDraft, TransferStatus,
 };
@@ -104,6 +106,7 @@ fn record_sync_refuses_when_a_later_month_is_closed() {
     put(
         &conn,
         &MonthPeriod {
+            balance_checks: BTreeMap::new(),
             cutoff_at: Some("2026-09-30T09:00:00Z".into()),
             ..period("2026-09-01", ClosureStatus::Closed)
         },
@@ -129,6 +132,7 @@ fn resettle_flags_next_month_only_when_carry_in_changes() {
         put(
             &conn,
             &MonthPeriod {
+                balance_checks: BTreeMap::new(),
                 cutoff_at: Some("2026-08-31T18:00:00Z".into()),
                 settled_at: Some("2026-08-31T18:00:00Z".into()),
                 settled_snapshot: Some(review(baseline)),
@@ -139,6 +143,7 @@ fn resettle_flags_next_month_only_when_carry_in_changes() {
         put(
             &conn,
             &MonthPeriod {
+                balance_checks: BTreeMap::new(),
                 cutoff_at: Some("2026-09-30T09:00:00Z".into()),
                 revision: 1,
                 ..period("2026-09-01", ClosureStatus::Closed)
@@ -169,6 +174,7 @@ fn resplit_keeps_settle_time_so_earlier_transfers_still_match() {
     put(
         &conn,
         &MonthPeriod {
+            balance_checks: BTreeMap::new(),
             revision: 1,
             ..period("2026-09-01", ClosureStatus::Settling)
         },
@@ -221,6 +227,7 @@ fn resplit_keeps_settle_time_so_earlier_transfers_still_match() {
 fn reopen_only_while_the_next_month_has_not_moved_on() {
     let mut conn = db();
     let august = MonthPeriod {
+        balance_checks: BTreeMap::new(),
         cutoff_at: Some("2026-08-31T18:00:00Z".into()),
         settled_at: Some("2026-08-31T18:00:00Z".into()),
         allocations: vec![line("b", "buffer", "50")],
@@ -231,6 +238,7 @@ fn reopen_only_while_the_next_month_has_not_moved_on() {
     put(
         &conn,
         &MonthPeriod {
+            balance_checks: BTreeMap::new(),
             revision: 1,
             ..period("2026-09-01", ClosureStatus::Settled)
         },
@@ -243,6 +251,7 @@ fn reopen_only_while_the_next_month_has_not_moved_on() {
     put(
         &conn,
         &MonthPeriod {
+            balance_checks: BTreeMap::new(),
             revision: 2,
             ..period("2026-09-01", ClosureStatus::Settling)
         },
@@ -267,6 +276,7 @@ fn pot_balance_follows_the_latest_split_and_limits_takes() {
     put(
         &conn,
         &MonthPeriod {
+            balance_checks: BTreeMap::new(),
             revision: 1,
             ..period("2026-09-01", ClosureStatus::Settling)
         },
@@ -349,6 +359,7 @@ fn refinalize_after_reopen_adds_delta_lines_with_new_ids() {
     put(
         &conn,
         &MonthPeriod {
+            balance_checks: BTreeMap::new(),
             revision: 1,
             ..period("2026-09-01", ClosureStatus::Settling)
         },
@@ -397,6 +408,7 @@ fn marking_a_hop_by_hand_checks_revision_and_accounts() {
     put(
         &conn,
         &MonthPeriod {
+            balance_checks: BTreeMap::new(),
             settled_at: Some("2026-09-30T10:00:00Z".into()),
             allocations: hopped,
             revision: 1,
@@ -455,6 +467,7 @@ fn a_via_route_is_one_hop_and_replans_open_transfers() {
     put(
         &conn,
         &MonthPeriod {
+            balance_checks: BTreeMap::new(),
             settled_at: Some("2026-09-30T10:00:00Z".into()),
             allocations: direct,
             revision: 1,
