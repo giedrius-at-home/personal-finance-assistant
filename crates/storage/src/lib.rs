@@ -13,7 +13,7 @@ use rusqlite::{Connection, OpenFlags};
 
 pub use ledger::{
     Ledger, LedgerAccount, LedgerBill, LedgerCategory, LedgerPosting, LedgerTransaction,
-    NewTransaction, counterparty_account, insert_transaction, search_text,
+    NewTransaction, counterparty_account, delete_transaction, insert_transaction, search_text,
 };
 
 #[derive(Debug, thiserror::Error)]

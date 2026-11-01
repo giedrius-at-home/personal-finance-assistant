@@ -632,46 +632,19 @@ impl Service {
         let currency = entry.currency.clone();
         let account = entry.account.clone();
         self.write(|w, _| {
-            let ledger = ledger_balance(&w.tx, account_id, &currency)?;
-            let difference = bank_amount - ledger;
-            if difference.is_zero() {
-                return Err(crate::writes::invalid("The ledger already matches the bank."));
-            }
-            let other = counterparty_account(
-                &w.tx,
-                &format!("{account} reconciliation ({currency})"),
-                "reconciliation",
-            )?;
-            let (source, destination) = if difference.is_sign_positive() {
-                (other, account_id)
-            } else {
-                (account_id, other)
-            };
-            let day = w.now.date().to_string();
             let description = format!(
                 "Balance reconciliation — bank reported {bank_amount} {currency}{}",
                 reported.map(|d| format!(" on {d}")).unwrap_or_default()
             );
-            insert_transaction(
-                &w.tx,
-                &NewTransaction {
-                    kind: "reconciliation",
-                    date: &day,
-                    description: &description,
-                    source_account_id: source,
-                    destination_account_id: destination,
-                    amount: difference.abs(),
-                    currency: &currency,
-                    external_id: None,
-                    internal_reference: None,
-                    notes: None,
-                    tags: &[],
-                },
-            )?;
-            w.record(
-                "reconciliation",
-                &serde_json::json!({"account_id": account_id, "difference": difference.to_string()}),
-            )?;
+            book_reconciliation(
+                w,
+                account_id,
+                &account,
+                &currency,
+                bank_amount,
+                &description,
+            )?
+            .ok_or_else(|| crate::writes::invalid("The ledger already matches the bank."))?;
             Ok(())
         })?;
         entry.ledger = entry.bank.clone();
@@ -699,8 +672,58 @@ impl Default for Attempt {
     }
 }
 
+/// Book a reconciliation entry that brings `account_id`'s ledger balance in
+/// `currency` to `target`. Returns the new transaction id, or None when the
+/// ledger already matches. Records the audit row.
+pub(crate) fn book_reconciliation(
+    w: &Writer<'_>,
+    account_id: i64,
+    account_name: &str,
+    currency: &str,
+    target: Decimal,
+    description: &str,
+) -> crate::Result<Option<i64>> {
+    let ledger = ledger_balance(&w.tx, account_id, currency)?;
+    let difference = target - ledger;
+    if difference.is_zero() {
+        return Ok(None);
+    }
+    let other = counterparty_account(
+        &w.tx,
+        &format!("{account_name} reconciliation ({currency})"),
+        "reconciliation",
+    )?;
+    let (source, destination) = if difference.is_sign_positive() {
+        (other, account_id)
+    } else {
+        (account_id, other)
+    };
+    let day = w.now.date().to_string();
+    let id = insert_transaction(
+        &w.tx,
+        &NewTransaction {
+            kind: "reconciliation",
+            date: &day,
+            description,
+            source_account_id: source,
+            destination_account_id: destination,
+            amount: difference.abs(),
+            currency,
+            external_id: None,
+            internal_reference: None,
+            notes: None,
+            tags: &[],
+        },
+    )?;
+    w.record(
+        "reconciliation",
+        &serde_json::json!({"account_id": account_id, "difference": difference.to_string()}),
+    )?;
+    Ok(Some(id))
+}
+
 /// The ledger balance of `account` in `currency` (sum of its postings).
-fn ledger_balance(conn: &Sql, account: i64, currency: &str) -> crate::Result<Decimal> {
+pub(crate) fn ledger_balance(conn: &Sql, account: i64, currency: &str) -> crate::Result<Decimal> {
     let mut stmt =
         conn.prepare_cached("SELECT amount FROM postings WHERE account_id = ?1 AND currency = ?2")?;
     let rows = stmt.query_map(rusqlite::params![account, currency], |r| {
@@ -1162,5 +1185,53 @@ mod tests {
         );
         assert_eq!(runs["revolut"].status, Some(SyncStatus::RuntimeUnavailable));
         assert_eq!(runs["swedbank"].status, Some(SyncStatus::Failed));
+    }
+
+    #[test]
+    fn book_reconciliation_moves_the_ledger_to_the_target_and_delete_undoes_it() {
+        use crate::closure::tests::d;
+        let mut db = crate::writes::fixture::db();
+        let before = ledger_balance(db.store.connection(), 1, "EUR").unwrap();
+        let id = db
+            .write(|w, _| book_reconciliation(w, 1, "Checking", "EUR", before + d("40"), "test"))
+            .unwrap()
+            .expect("booked");
+        let conn = db.store.connection();
+        assert_eq!(ledger_balance(conn, 1, "EUR").unwrap(), before + d("40"));
+        let kind: String = conn
+            .query_row("SELECT kind FROM transactions WHERE id = ?1", [id], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(kind, "reconciliation");
+        assert!(finance_storage::delete_transaction(conn, id).unwrap());
+        assert_eq!(ledger_balance(conn, 1, "EUR").unwrap(), before);
+        let left: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM postings WHERE transaction_id = ?1",
+                [id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(left, 0);
+        assert!(!finance_storage::delete_transaction(conn, id).unwrap());
+    }
+
+    #[test]
+    fn book_reconciliation_books_nothing_when_the_ledger_matches() {
+        let mut db = crate::writes::fixture::db();
+        let before = ledger_balance(db.store.connection(), 1, "EUR").unwrap();
+        let count = |db: &crate::writes::fixture::Db| -> i64 {
+            db.store
+                .connection()
+                .query_row("SELECT COUNT(*) FROM transactions", [], |r| r.get(0))
+                .unwrap()
+        };
+        let rows = count(&db);
+        let id = db
+            .write(|w, _| book_reconciliation(w, 1, "Checking", "EUR", before, "test"))
+            .unwrap();
+        assert_eq!(id, None);
+        assert_eq!(count(&db), rows);
     }
 }

@@ -1,8 +1,11 @@
 //! Ports of the stateful cases in Python `tests/unit/test_month_closure.py`,
 //! on an in-memory database with the closure tables.
 
+use std::collections::BTreeMap;
+
 use finance_types::report::closure::{
-    AccountRoleDraft, AllocationLine, ClosureStatus, MonthPeriod, PotDraft, TransferStatus,
+    AccountRoleDraft, AllocationLine, BalanceCheck, ClosureStatus, MonthPeriod, PotDraft,
+    TransferStatus,
 };
 use jiff::civil::date;
 use rusqlite::Connection;
@@ -74,6 +77,16 @@ fn stored(conn: &Connection, month: &str) -> MonthPeriod {
 fn with_periods(mut snap: Snapshot, conn: &Connection) -> Snapshot {
     snap.month_periods = load_periods(conn).unwrap();
     snap
+}
+
+/// A check that matches a snapshot account's balance of `ledger`.
+fn confirmed(ledger: &str) -> BalanceCheck {
+    BalanceCheck {
+        balance: d(ledger),
+        ledger_balance: d(ledger),
+        confirmed_at: "2026-09-29T09:00:00Z".into(),
+        transaction_id: None,
+    }
 }
 
 fn salary_snapshot() -> Snapshot {
@@ -170,6 +183,10 @@ fn resplit_keeps_settle_time_so_earlier_transfers_still_match() {
         &conn,
         &MonthPeriod {
             revision: 1,
+            balance_checks: ["abn", "savings"]
+                .into_iter()
+                .map(|id| (id.to_owned(), confirmed("100")))
+                .collect(),
             ..period("2026-09-01", ClosureStatus::Settling)
         },
     );
@@ -519,4 +536,301 @@ fn a_via_route_is_one_hop_and_replans_open_transfers() {
             .as_deref(),
         Some("revolut")
     );
+}
+
+#[test]
+fn a_saved_period_keeps_its_stored_balance_checks() {
+    let mut conn = db();
+    let checks = BTreeMap::from([(
+        "firefly:1".to_string(),
+        BalanceCheck {
+            balance: d("1234.56"),
+            ledger_balance: d("1234.56"),
+            confirmed_at: "2026-09-29T09:00:00Z".into(),
+            transaction_id: Some("firefly:77".into()),
+        },
+    )]);
+    put(
+        &conn,
+        &MonthPeriod {
+            revision: 1,
+            balance_checks: checks.clone(),
+            ..period("2026-09-01", ClosureStatus::Settling)
+        },
+    );
+    let snap = salary_snapshot();
+    write(&mut conn, "2026-09-29T10:00:00Z", |w| {
+        settle(w, &snap, sept(), 1, vec![line("s", "stay", "100")])
+    })
+    .unwrap();
+    assert_eq!(stored(&conn, "2026-09-01").balance_checks, checks);
+}
+
+fn confirm_db(status: ClosureStatus) -> crate::writes::fixture::Db {
+    let db = crate::writes::fixture::db();
+    put_role(
+        db.store.connection(),
+        &role("firefly:1", "spending", None, None),
+    );
+    put(
+        db.store.connection(),
+        &MonthPeriod {
+            revision: 1,
+            ..period("2026-10-01", status)
+        },
+    );
+    db
+}
+
+fn october() -> Date {
+    date(2026, 10, 1)
+}
+
+fn reconciliations(conn: &Connection) -> i64 {
+    conn.query_row(
+        "SELECT COUNT(*) FROM transactions WHERE kind = 'reconciliation'",
+        [],
+        |r| r.get(0),
+    )
+    .unwrap()
+}
+
+fn transaction_count(conn: &Connection) -> i64 {
+    conn.query_row("SELECT COUNT(*) FROM transactions", [], |r| r.get(0))
+        .unwrap()
+}
+
+fn ledger(db: &crate::writes::fixture::Db) -> Decimal {
+    crate::bank_sync::ledger_balance(db.store.connection(), 1, "EUR").unwrap()
+}
+
+#[test]
+fn confirm_books_the_difference_and_a_retype_replaces_it() {
+    let mut db = confirm_db(ClosureStatus::Settling);
+    let base = ledger(&db);
+    db.write(|w, snap| confirm_balance(w, snap, october(), 1, "firefly:1", base + d("40")))
+        .unwrap();
+    let check = stored(db.store.connection(), "2026-10-01").balance_checks["firefly:1"].clone();
+    assert!(check.transaction_id.is_some());
+    assert_eq!(check.balance, base + d("40"));
+    assert_eq!(check.ledger_balance, base + d("40"));
+    assert_eq!(reconciliations(db.store.connection()), 1);
+    assert_eq!(ledger(&db), base + d("40"));
+
+    db.write(|w, snap| confirm_balance(w, snap, october(), 2, "firefly:1", base - d("10")))
+        .unwrap();
+    let second = stored(db.store.connection(), "2026-10-01").balance_checks["firefly:1"].clone();
+    assert!(second.transaction_id.is_some());
+    assert_eq!(reconciliations(db.store.connection()), 1);
+    assert_eq!(ledger(&db), base - d("10"));
+
+    db.write(|w, snap| confirm_balance(w, snap, october(), 3, "firefly:1", base))
+        .unwrap();
+    let third = stored(db.store.connection(), "2026-10-01");
+    assert_eq!(third.balance_checks["firefly:1"].transaction_id, None);
+    assert_eq!(reconciliations(db.store.connection()), 0);
+    assert_eq!(ledger(&db), base);
+    assert_eq!(third.revision, 4);
+}
+
+#[test]
+fn confirm_refuses_more_decimals_than_the_currency() {
+    let mut db = confirm_db(ClosureStatus::Settling);
+    let rows = transaction_count(db.store.connection());
+    let result =
+        db.write(|w, snap| confirm_balance(w, snap, october(), 1, "firefly:1", d("12.345")));
+    assert_eq!(error(result), "invalid balance");
+    assert_eq!(transaction_count(db.store.connection()), rows);
+}
+
+#[test]
+fn confirm_accepts_trailing_zeros_past_the_minor_unit() {
+    let mut db = confirm_db(ClosureStatus::Settling);
+    db.write(|w, snap| confirm_balance(w, snap, october(), 1, "firefly:1", d("12.100")))
+        .unwrap();
+    assert_eq!(ledger(&db), d("12.10"));
+}
+
+#[test]
+fn confirm_books_a_negative_balance() {
+    let mut db = confirm_db(ClosureStatus::Open);
+    db.write(|w, snap| confirm_balance(w, snap, october(), 1, "firefly:1", d("-25.00")))
+        .unwrap();
+    assert_eq!(ledger(&db), d("-25"));
+}
+
+#[test]
+fn confirm_with_a_stale_revision_books_nothing() {
+    let mut db = confirm_db(ClosureStatus::Settling);
+    let rows = transaction_count(db.store.connection());
+    let result = db.write(|w, snap| confirm_balance(w, snap, october(), 0, "firefly:1", d("500")));
+    assert_eq!(error(result), "month closure changed; refresh");
+    assert_eq!(transaction_count(db.store.connection()), rows);
+}
+
+#[test]
+fn confirm_refuses_closed_months_and_unchecked_accounts() {
+    let mut db = confirm_db(ClosureStatus::Closed);
+    let result = db.write(|w, snap| confirm_balance(w, snap, october(), 1, "firefly:1", d("5")));
+    assert_eq!(error(result), "month is closed");
+
+    let mut db = confirm_db(ClosureStatus::Settling);
+    db.store
+        .connection()
+        .execute("DELETE FROM account_roles", [])
+        .unwrap();
+    put_role(
+        db.store.connection(),
+        &role("firefly:1", "ignored", None, None),
+    );
+    let result = db.write(|w, snap| confirm_balance(w, snap, october(), 1, "firefly:1", d("5")));
+    assert_eq!(error(result), "account cannot be confirmed");
+}
+
+fn statuses(db: &crate::writes::fixture::Db) -> Vec<finance_types::report::closure::BalanceStatus> {
+    let snap = db.snap();
+    let period = stored(db.store.connection(), "2026-10-01");
+    let roles = load_roles(db.store.connection()).unwrap();
+    crate::closure::balance_statuses(db.store.connection(), &snap, &period, &roles).unwrap()
+}
+
+fn october_split() -> Vec<AllocationLine> {
+    Vec::new()
+}
+
+#[test]
+fn settle_needs_every_account_confirmed() {
+    let mut db = confirm_db(ClosureStatus::Settling);
+    let refused = db.write(|w, snap| settle(w, snap, october(), 1, october_split()));
+    assert_eq!(
+        error(refused),
+        "confirm every account balance first: Checking"
+    );
+    let base = ledger(&db);
+    db.write(|w, snap| confirm_balance(w, snap, october(), 1, "firefly:1", base))
+        .unwrap();
+    db.write(|w, snap| settle(w, snap, october(), 2, october_split()))
+        .unwrap();
+    assert_eq!(
+        stored(db.store.connection(), "2026-10-01").status,
+        ClosureStatus::Settled
+    );
+}
+
+#[test]
+fn banks_screen_reconciliation_makes_the_check_stale() {
+    use finance_types::report::closure::BalanceState;
+    let mut db = confirm_db(ClosureStatus::Settling);
+    let base = ledger(&db);
+    db.write(|w, snap| confirm_balance(w, snap, october(), 1, "firefly:1", base + d("40")))
+        .unwrap();
+    let status = &statuses(&db)[0];
+    assert_eq!(status.state, BalanceState::Confirmed);
+    assert_eq!(status.adjusted_by, Some(d("40")));
+
+    db.write(|w, _| {
+        crate::bank_sync::book_reconciliation(w, 1, "Checking", "EUR", base + d("50"), "banks")
+    })
+    .unwrap();
+    assert_eq!(statuses(&db)[0].state, BalanceState::Stale);
+    let refused = db.write(|w, snap| settle(w, snap, october(), 2, october_split()));
+    assert_eq!(
+        error(refused),
+        "confirm every account balance first: Checking"
+    );
+
+    db.write(|w, snap| confirm_balance(w, snap, october(), 2, "firefly:1", base + d("50")))
+        .unwrap();
+    assert_eq!(statuses(&db)[0].state, BalanceState::Confirmed);
+    let check = stored(db.store.connection(), "2026-10-01").balance_checks["firefly:1"].clone();
+    // Confirm replaces its own earlier entry, so the banks entry stays and a new
+    // one covers the difference again.
+    assert!(check.transaction_id.is_some());
+    assert_eq!(ledger(&db), base + d("50"));
+    assert_eq!(reconciliations(db.store.connection()), 2);
+}
+
+#[test]
+fn confirm_never_deletes_a_stored_id_that_is_not_its_reconciliation() {
+    let mut db = confirm_db(ClosureStatus::Settling);
+    let mut stale = stored(db.store.connection(), "2026-10-01");
+    stale.balance_checks.insert(
+        "firefly:1".into(),
+        BalanceCheck {
+            balance: d("1"),
+            ledger_balance: d("1"),
+            confirmed_at: "2026-10-28T09:00:00Z".into(),
+            transaction_id: Some("firefly:10".into()),
+        },
+    );
+    put(db.store.connection(), &stale);
+    assert_eq!(statuses(&db)[0].adjusted_by, None);
+
+    let withdrawal = |db: &crate::writes::fixture::Db| -> i64 {
+        db.store
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM transactions WHERE id = 10 AND kind = 'withdrawal'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+    };
+    let base = ledger(&db);
+    db.write(|w, snap| confirm_balance(w, snap, october(), 1, "firefly:1", base + d("5")))
+        .unwrap();
+    assert_eq!(withdrawal(&db), 1);
+    assert_eq!(ledger(&db), base + d("5"));
+    assert_eq!(reconciliations(db.store.connection()), 1);
+}
+
+#[test]
+fn the_newest_bank_figure_and_its_date_reach_the_status() {
+    use finance_types::bank::{AccountBalance, BankRun};
+    let mut db = confirm_db(ClosureStatus::Settling);
+    let balance = |currency: &str, bank: &str, on: Option<&str>| AccountBalance {
+        account_id: 1,
+        account: "Checking".into(),
+        currency: currency.into(),
+        bank: bank.into(),
+        ledger: "0".into(),
+        balance_type: "CLBD".into(),
+        reference_date: on.map(Into::into),
+    };
+    let run = |balances| BankRun {
+        balances,
+        ..BankRun::default()
+    };
+    db.write(|w, _| {
+        crate::bank_sync::save_run(
+            w,
+            "rabobank",
+            &run(vec![
+                balance("EUR", "100.00", Some("2026-10-27")),
+                balance("EUR", "150.00", None),
+            ]),
+        )?;
+        crate::bank_sync::save_run(
+            w,
+            "revolut",
+            &run(vec![balance("EUR", "120.00", Some("2026-10-29"))]),
+        )
+    })
+    .unwrap();
+    let status = &statuses(&db)[0];
+    assert_eq!(status.bank, Some(d("120.00")));
+    assert_eq!(status.bank_reported_on.as_deref(), Some("2026-10-29"));
+
+    db.write(|w, _| {
+        crate::bank_sync::save_run(
+            w,
+            "rabobank",
+            &run(vec![balance("USD", "100.00", Some("2026-10-30"))]),
+        )?;
+        crate::bank_sync::save_run(w, "revolut", &run(Vec::new()))
+    })
+    .unwrap();
+    let status = &statuses(&db)[0];
+    assert_eq!(status.bank, None);
+    assert_eq!(status.bank_reported_on, None);
 }

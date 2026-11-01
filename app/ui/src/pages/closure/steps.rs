@@ -4,8 +4,8 @@
 use std::collections::{BTreeMap, HashMap};
 
 use finance_types::report::closure::{
-    AccountReview, AccountRoleKind, AllocationLine, ClosureReview, ClosureView, TransferStatus,
-    UnclassifiedAccounts as Unclassified,
+    AccountReview, AccountRoleKind, AllocationLine, BalanceStatus, ClosureReview, ClosureView,
+    TransferStatus, UnclassifiedAccounts as Unclassified,
 };
 use leptos::prelude::*;
 use rust_decimal::Decimal;
@@ -137,10 +137,27 @@ fn row(
     }
 }
 
+/// A row outside the leftover sum, in footnote type.
+fn note_row(label: String, actual: Decimal, account: &AccountReview) -> impl IntoView + use<> {
+    view! {
+        <tr>
+            <th scope="row" class=cn([ROW_LABEL, FOOTNOTE])>{label}</th>
+            <td class=TCELL></td>
+            <td class=cn([TCELL, FOOTNOTE, "text-right tabular-nums py-1.5 pl-1 pr-0 sm:pl-2"])>
+                {money(actual, &account.currency)}
+            </td>
+        </tr>
+    }
+}
+
 /// One card per non-savings account: planned against actual, ending in the
 /// leftover to split.
 #[component]
-pub fn ReviewStep(review: ClosureReview, names: ReviewNames) -> impl IntoView {
+pub fn ReviewStep(
+    review: ClosureReview,
+    names: ReviewNames,
+    balances: Vec<BalanceStatus>,
+) -> impl IntoView {
     let app = state();
     let accounts: Vec<AccountReview> = review
         .accounts
@@ -211,6 +228,10 @@ pub fn ReviewStep(review: ClosureReview, names: ReviewNames) -> impl IntoView {
                 }
             );
             let skipped = account.skipped_foreign;
+            let adjusted = balances
+                .iter()
+                .find(|b| b.account_id == account.account_id)
+                .and_then(|b| b.adjusted_by);
             let groups = account
                 .groups
                 .iter()
@@ -257,6 +278,7 @@ pub fn ReviewStep(review: ClosureReview, names: ReviewNames) -> impl IntoView {
                                 {groups}
                                 {row("Other spending".into(), None, account.other_spent, &account)}
                                 {row("Carry-in (buffer + planned purchases)".into(), None, account.carry_in, &account)}
+                                {adjusted.map(|x| note_row("Balance adjustment (not counted)".into(), x, &account))}
                                 <tr class=TROW>
                                     <th scope="row" class=LEFTOVER_LABEL>"Leftover"</th>
                                     <td class=TCELL></td>

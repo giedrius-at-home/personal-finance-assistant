@@ -1,6 +1,7 @@
 //! Manage → Close month: the month-closure wizard and the Overview nudge
 //! (personal-site `components/month-closure.tsx`).
 
+mod balances;
 pub mod bank_sync;
 mod panels;
 mod split;
@@ -22,6 +23,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use rust_decimal::Decimal;
 
+use self::balances::{BalancesPanel, balances_locked, parse_balance, shows_balances};
 use self::bank_sync::{BankSyncPanel, bank_name};
 use self::panels::{AccountsPanel, PotsPanel};
 use self::split::{DraftStore, SplitEditor, SplitTarget};
@@ -294,6 +296,80 @@ impl Wizard {
             format!(
                 "{name} reopened. Edit the split or finish the transfers, then close it again."
             ),
+        );
+    }
+
+    /// Confirm one account at `balance`; reloads the view on success.
+    pub fn confirm_balance(self, account_id: String, balance: String) {
+        let balance = match parse_balance(&balance) {
+            Ok(balance) => balance,
+            Err(e) => {
+                self.notice.set(String::new());
+                self.error.set(e);
+                return;
+            }
+        };
+        let Some((month, revision)) = self.base() else {
+            return;
+        };
+        self.write(
+            move || async move {
+                post_closure(ClosureAction::ConfirmBalance {
+                    month,
+                    revision,
+                    account_id,
+                    balance,
+                })
+                .await
+                .map(Some)
+            },
+            "Balance confirmed.".into(),
+        );
+    }
+
+    /// Confirm, in order, every row whose typed value equals its ledger
+    /// figure; stop at the first error. The first post carries the revision
+    /// on screen, each later one the revision the previous answer returned,
+    /// so a change made elsewhere meanwhile stops the run as a conflict.
+    pub fn confirm_matching(self, rows: Vec<(String, String)>) {
+        if rows.is_empty() {
+            return;
+        }
+        let Some((month, first)) = self.base() else {
+            return;
+        };
+        self.write(
+            move || async move {
+                let mut last: Option<ClosureView> = None;
+                for (account_id, typed) in rows {
+                    let revision = last.as_ref().map_or(first, |v| v.period.revision);
+                    let month = month.clone();
+                    let step = async {
+                        let balance = parse_balance(&typed)?;
+                        post_closure(ClosureAction::ConfirmBalance {
+                            month,
+                            revision,
+                            account_id,
+                            balance,
+                        })
+                        .await
+                    };
+                    match step.await {
+                        Ok(next) => last = Some(next),
+                        Err(e) => {
+                            // Keep the rows confirmed before the failure on screen;
+                            // they booked entries, so the rest of the app re-reads.
+                            if let Some(next) = last {
+                                self.view.set(Some(next));
+                                self.app.refresh();
+                            }
+                            return Err(e);
+                        }
+                    }
+                }
+                Ok(last)
+            },
+            "Balances confirmed.".into(),
         );
     }
 
@@ -918,6 +994,10 @@ fn step_view(
                 )),
                 _ => None,
             };
+            // A settled month still takes a re-confirmed balance.
+            let panel = shows_balances(status).then(|| view! {
+                <BalancesPanel balances=view.balances.clone() disabled=Signal::derive(move || wizard.busy.get()) />
+            });
             let body = match status {
                 S::Open | S::Settling => view! {
                     <BankSyncPanel
@@ -925,15 +1005,20 @@ fn step_view(
                         disabled=Signal::derive(move || wizard.busy.get())
                         on_continue=Callback::new(move |missing| wizard.sync(missing))
                     />
+                    {panel}
                     {unclassified.map(|data| view! { <NewAccounts data=data goals=view.goals.clone() /> })}
                 }
                 .into_any(),
-                S::Settled => locked(
-                    wizard,
-                    format!("The split is confirmed: the final sync that closes {name} runs from Transfers."),
-                    Some(3),
-                    None,
-                ),
+                S::Settled => view! {
+                    {panel}
+                    {locked(
+                        wizard,
+                        format!("The split is confirmed: the final sync that closes {name} runs from Transfers."),
+                        Some(3),
+                        None,
+                    )}
+                }
+                .into_any(),
                 S::Closed => reopen_here(month, format!("{name} is closed. Reopen {name} to sync it again.")),
                 S::ChangedAfterClose => locked(
                     wizard,
@@ -952,7 +1037,7 @@ fn step_view(
             view! {
                 <StepCard title="2. Review">
                     {(status == S::Open).then(|| locked(wizard, "Sync banks first so the review is complete.".into(), Some(0), None))}
-                    <ReviewStep review=view.review.clone() names=names />
+                    <ReviewStep review=view.review.clone() names=names balances=view.balances.clone() />
                     {(status == S::Settling).then(|| view! {
                         <div class=ACTIONS>
                             <Button size=Size::Sm on_click=Callback::new(move |_| wizard.go(2))>"Continue to Split"</Button>
@@ -985,6 +1070,12 @@ fn step_view(
                     "Sync banks first, then split the leftover.".into(),
                     Some(0),
                     None,
+                ),
+                S::Settling | S::Settled if balances_locked(&view.balances) => locked(
+                    wizard,
+                    "Confirm every account balance in Sync first.".into(),
+                    Some(0),
+                    Some("Go to Sync"),
                 ),
                 S::Settling | S::Settled => {
                     // Without a spending account the split has nothing to
