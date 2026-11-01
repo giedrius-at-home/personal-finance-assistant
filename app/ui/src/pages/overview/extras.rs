@@ -13,6 +13,7 @@ use serde::Serialize;
 
 use crate::api::invoke;
 use crate::ds::charts::{BarTone, ProgressBar};
+use crate::ds::sync_value;
 use crate::ds::{
     CONTROL, Eyebrow, Heading, Icon, Lucide, Money, Size, Variant, button_class, cn, money,
 };
@@ -408,7 +409,11 @@ pub fn BudgetExtras(
                                 min=step.clone()
                                 step=step
                                 placeholder="0.00"
-                                prop:value=move || s.amount.get()
+                                node_ref={
+                                    let node = NodeRef::<leptos::html::Input>::new();
+                                    sync_value(node, move || s.amount.get());
+                                    node
+                                }
                                 on:input=move |e| s.amount.set(event_target_value(&e))
                             />
                         </div>

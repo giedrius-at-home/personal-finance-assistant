@@ -9,6 +9,7 @@ pub use cn::cn;
 pub use icons::{Icon, Lucide};
 
 use finance_types::report::Currency;
+use leptos::html;
 use leptos::prelude::*;
 use rust_decimal::Decimal;
 
@@ -323,6 +324,22 @@ pub fn Switch(
 
 pub const CONTROL: &str = "h-10 w-full rounded-sm border border-border bg-card-strong px-3 text-sm text-fg placeholder:text-fg-muted focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring aria-invalid:border-negative disabled:cursor-not-allowed disabled:opacity-50";
 
+/// Keep an input's text equal to `value` without rewriting it on every
+/// keystroke. Writing `value` to a number input while the owner types
+/// "630." makes WebKit sanitise the text and throw the caret to the start,
+/// so the digits that follow land in front; writing only when the element
+/// already differs leaves the caret alone.
+pub fn sync_value(node: NodeRef<html::Input>, value: impl Fn() -> String + Send + Sync + 'static) {
+    Effect::new(move |_| {
+        let wanted = value();
+        if let Some(input) = node.get()
+            && input.value() != wanted
+        {
+            input.set_value(&wanted);
+        }
+    });
+}
+
 /// A text input bound to `value`.
 #[component]
 pub fn Input(
@@ -337,8 +354,11 @@ pub fn Input(
     #[prop(optional, into)] min: Option<String>,
     #[prop(optional, into)] max: Option<String>,
 ) -> impl IntoView {
+    let node = NodeRef::<html::Input>::new();
+    sync_value(node, move || value.get());
     view! {
         <input
+            node_ref=node
             id=id
             type=kind.unwrap_or_else(|| "text".into())
             class=cn([CONTROL, class.as_str()])
@@ -348,7 +368,6 @@ pub fn Input(
             min=min
             max=max
             disabled=move || disabled.get()
-            prop:value=move || value.get()
             on:input=move |e| value.set(event_target_value(&e))
         />
     }
