@@ -7,15 +7,13 @@
 //! pulls fresh bank data through `bank_sync` before it asks.
 
 use std::collections::{HashMap, HashSet};
-use std::hash::{BuildHasher, Hasher};
 
-use finance_types::gateway::{AccountRole, Direction, PlannedPayment, PotRecord, Wish, WishStatus};
+use finance_types::gateway::{AccountRole, Direction, PlannedPayment, Wish, WishStatus};
 use finance_types::report::UnitMoney;
 use finance_types::report::closure::{
     AccountRoleDraft, AllocationLine, BalanceCheck, ClosureAction, ClosureReview, ClosureStatus,
-    LineKind, MonthPeriod, PotDraft, PotView, TransferStatus,
+    LineKind, MonthPeriod, TransferStatus,
 };
-use jiff::Timestamp;
 use jiff::civil::Date;
 use regex::Regex;
 use rusqlite::{OptionalExtension, params};
@@ -27,9 +25,8 @@ use crate::closure::transfers::{
     mark_transfer, match_transfers, reroute_pending, unmark_transfer, with_transfer_targets,
 };
 use crate::closure::{
-    BANKS, GENERAL_POT_ID, PLANNED_PURCHASE_CATEGORY, candidates, day_of, general_pot,
-    load_periods, load_pot_entries, load_pots, load_roles, normalized_currency, parse_month,
-    period_or_new, plan_due_month, pot_balances, pot_view, review_month, stored_instant,
+    BANKS, PLANNED_PURCHASE_CATEGORY, candidates, day_of, load_periods, load_pots, load_roles,
+    normalized_currency, parse_month, period_or_new, plan_due_month, review_month, stored_instant,
     transactions_by_id, validate_allocations, wish_caps,
 };
 use crate::load::parse_instant;
@@ -327,15 +324,6 @@ fn with_plan_ids(
 
 fn goal_ids(snap: &Snapshot) -> HashSet<&str> {
     snap.goals.iter().map(|g| g.goal.goal_id.as_str()).collect()
-}
-
-/// The general pot exists from the first closure read on.
-fn ensure_general_pot(w: &Writer<'_>) -> Result<()> {
-    w.put_json(
-        "INSERT OR IGNORE INTO pots(pot_id, payload_json) VALUES (?2, ?1)",
-        &general_pot(w.now.timestamp()),
-        &[&GENERAL_POT_ID],
-    )
 }
 
 fn active_payments(w: &Writer<'_>) -> Result<Vec<PlannedPayment>> {
@@ -1044,74 +1032,6 @@ pub fn unmark(
         },
     )?;
     Ok(())
-}
-
-/// A fresh pot id (Python used `uuid4().hex`).
-fn new_pot_id(now: Timestamp) -> String {
-    (0u8..2)
-        .map(|part| {
-            let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
-            hasher.write_u8(part);
-            hasher.write_i128(now.as_nanosecond());
-            format!("{:016x}", hasher.finish())
-        })
-        .collect()
-}
-
-/// Create or change a pot. Only an empty pot can be archived, and never
-/// the general one.
-pub fn save_pot(w: &Writer<'_>, snap: &Snapshot, draft: PotDraft) -> Result<PotView> {
-    if !chars_within(&draft.name, 128) || !optional_within(&draft.account_id, 128) {
-        return Err(invalid("invalid pot"));
-    }
-    ensure_general_pot(w)?;
-    let pots = load_pots(&w.tx, true)?;
-    if let Some(account) = &draft.account_id
-        && !snap.accounts.iter().any(|a| &a.account_id == account)
-    {
-        return Err(invalid("unknown account"));
-    }
-    let name = draft.name.trim();
-    if name.is_empty() {
-        return Err(invalid("pot name is required"));
-    }
-    let current = match &draft.pot_id {
-        None => PotRecord {
-            pot_id: new_pot_id(w.now.timestamp()),
-            name: name.to_owned(),
-            account_id: None,
-            archived: false,
-            created_at: stamp(w),
-        },
-        Some(id) => pots
-            .iter()
-            .find(|p| &p.pot_id == id)
-            .cloned()
-            .ok_or_else(|| invalid("unknown pot"))?,
-    };
-    let balances = pot_balances(&load_pot_entries(&w.tx, None)?, None);
-    if draft.archived && !current.archived {
-        if current.pot_id == GENERAL_POT_ID {
-            return Err(invalid("general savings cannot be archived"));
-        }
-        let own = balances.get(&current.pot_id);
-        if own.is_some_and(|b| b.values().any(|v| !v.is_zero())) {
-            return Err(invalid("only an empty pot can be archived"));
-        }
-    }
-    let saved = PotRecord {
-        name: name.to_owned(),
-        account_id: draft.account_id,
-        archived: draft.archived,
-        ..current
-    };
-    w.put_json(
-        "INSERT INTO pots(pot_id, payload_json) VALUES (?2, ?1) \
-         ON CONFLICT(pot_id) DO UPDATE SET payload_json = excluded.payload_json",
-        &saved,
-        &[&saved.pot_id],
-    )?;
-    Ok(pot_view(&saved, &balances))
 }
 
 /// Apply a changed via route to transfers that have not been made yet.

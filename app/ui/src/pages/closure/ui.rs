@@ -5,7 +5,7 @@ use std::cell::Cell;
 
 use finance_types::report::Currency;
 use finance_types::report::closure::{
-    AccountRoleDraft, ClosureAction, ClosureView, PotDraft, PotView, PotsView, UnclassifiedAccounts,
+    AccountRoleDraft, ClosureAction, ClosureView, UnclassifiedAccounts,
 };
 use leptos::prelude::*;
 use rust_decimal::Decimal;
@@ -359,11 +359,6 @@ struct ActionArgs {
 }
 
 #[derive(Serialize)]
-struct PotArgs {
-    pot: PotDraft,
-}
-
-#[derive(Serialize)]
 struct RoleArgs {
     role: AccountRoleDraft,
 }
@@ -380,10 +375,6 @@ pub async fn load_closure(month: &str) -> Result<ClosureView, String> {
 
 pub async fn load_unclassified() -> Result<UnclassifiedAccounts, String> {
     invoke("unclassified_accounts", &NoArgs {}).await
-}
-
-pub async fn load_pots() -> Result<PotsView, String> {
-    invoke("closure_pots", &NoArgs {}).await
 }
 
 pub async fn post_closure(action: ClosureAction) -> Result<ClosureView, String> {
@@ -409,9 +400,4 @@ pub async fn post_role(
         },
     )
     .await
-}
-
-/// Creates a pot (no `pot_id`) or saves a rename, location change or archive.
-pub async fn post_pot(pot: PotDraft) -> Result<PotView, String> {
-    invoke("save_pot", &PotArgs { pot }).await
 }

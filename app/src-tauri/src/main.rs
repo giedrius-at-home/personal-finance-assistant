@@ -15,7 +15,7 @@ use finance_core::service::Service;
 use finance_secrets::{Item, Secret};
 use finance_types::gateway::{BudgetPlan, Wish, WishDraft, WishPurchase, WishSettings};
 use finance_types::report::closure::{
-    AccountRoleDraft, ClosureAction, ClosureView, PotDraft, PotView, PotsView, UnclassifiedAccounts,
+    AccountRoleDraft, ClosureAction, ClosureView, UnclassifiedAccounts,
 };
 use finance_types::report::review::{TransactionSearchQuery, TransactionSearchResult};
 use finance_types::report::wishes::WishesView;
@@ -124,16 +124,6 @@ fn closure_action(
     action: ClosureAction,
 ) -> Result<ClosureView, String> {
     traced("closure_action", service.closure_action(action))
-}
-
-#[tauri::command(async)]
-fn closure_pots(service: State<'_, Service>) -> Result<PotsView, String> {
-    traced("closure_pots", service.pots())
-}
-
-#[tauri::command(async)]
-fn save_pot(service: State<'_, Service>, pot: PotDraft) -> Result<PotView, String> {
-    traced("save_pot", service.save_pot(pot))
 }
 
 #[tauri::command(async)]
@@ -510,8 +500,6 @@ fn main() {
             archive_planned_payment,
             closure,
             closure_action,
-            closure_pots,
-            save_pot,
             wishes,
             save_wish,
             record_wish_saved,

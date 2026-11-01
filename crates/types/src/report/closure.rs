@@ -319,37 +319,6 @@ pub struct PotView {
     pub balances: BTreeMap<String, Decimal>,
 }
 
-/// One pot ledger entry (a closure line that moved money in or out).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PotEntryView {
-    pub entry_id: String,
-    pub pot_id: String,
-    pub month: String,
-    pub amount: Decimal,
-    pub currency: Currency,
-    pub note: Option<String>,
-}
-
-/// Every pot (archived ones too) and the 50 newest entries.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PotsView {
-    pub pots: Vec<PotView>,
-    pub entries: Vec<PotEntryView>,
-}
-
-/// A pot to create (`pot_id: None`) or change.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PotDraft {
-    #[serde(default)]
-    pub pot_id: Option<String>,
-    pub name: String,
-    #[serde(default)]
-    pub account_id: Option<String>,
-    #[serde(default)]
-    pub archived: bool,
-}
-
 /// A one-off planned payment due in the months after the funded one.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KnownPayment {

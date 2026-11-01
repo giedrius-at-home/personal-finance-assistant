@@ -18,8 +18,8 @@ use finance_types::report::Currency;
 use finance_types::report::allocation::CurrencyAllocation;
 use finance_types::report::closure::{
     AccountReview, AccountRoleKind, AccountRoleView, AllocationLine, BalanceState, BalanceStatus,
-    ClosureReview, ClosureView, GroupReview, KnownPayment, MonthPeriod, NamedAccount, PotEntryView,
-    PotView, PotsView, SavingsSuggestion, TransferStatus, UnclassifiedAccounts,
+    ClosureReview, ClosureView, GroupReview, KnownPayment, MonthPeriod, NamedAccount, PotView,
+    SavingsSuggestion, TransferStatus, UnclassifiedAccounts,
 };
 use finance_types::report::outlook::{DailySpendingForecast, ForecastExclusions};
 use finance_types::report::plans::{PlanStatus, PlannedPaymentView};
@@ -88,23 +88,21 @@ pub fn load_roles(conn: &Connection) -> Result<Vec<AccountRole>> {
     )
 }
 
-/// The general pot as Python created it on first read.
-pub(crate) fn general_pot(now: Timestamp) -> PotRecord {
-    PotRecord {
-        pot_id: GENERAL_POT_ID.to_owned(),
-        name: GENERAL_POT_NAME.to_owned(),
-        account_id: None,
-        archived: false,
-        created_at: stored_instant(now),
-    }
-}
-
 /// Pots by creation; the general pot is always there (a read-only store
 /// that lacks it gets one in memory).
 pub fn load_pots(conn: &Connection, include_archived: bool) -> Result<Vec<PotRecord>> {
     let mut pots: Vec<PotRecord> = payloads(conn, "SELECT payload_json FROM pots ORDER BY rowid")?;
     if !pots.iter().any(|p| p.pot_id == GENERAL_POT_ID) {
-        pots.insert(0, general_pot(Timestamp::now()));
+        pots.insert(
+            0,
+            PotRecord {
+                pot_id: GENERAL_POT_ID.to_owned(),
+                name: GENERAL_POT_NAME.to_owned(),
+                account_id: None,
+                archived: false,
+                created_at: stored_instant(Timestamp::now()),
+            },
+        );
     }
     pots.retain(|p| include_archived || !p.archived);
     Ok(pots)
@@ -149,28 +147,6 @@ pub fn pot_view(pot: &PotRecord, balances: &PotBalances) -> PotView {
         archived: pot.archived,
         balances: balances.get(&pot.pot_id).cloned().unwrap_or_default(),
     }
-}
-
-/// Every pot (archived too) and the 50 newest entries (Python `pots_view`).
-pub fn pots_view(conn: &Connection) -> Result<PotsView> {
-    let balances = pot_balances(&load_pot_entries(conn, None)?, None);
-    Ok(PotsView {
-        pots: load_pots(conn, true)?
-            .iter()
-            .map(|p| pot_view(p, &balances))
-            .collect(),
-        entries: load_pot_entries(conn, Some(50))?
-            .into_iter()
-            .map(|e| PotEntryView {
-                entry_id: e.entry_id,
-                pot_id: e.pot_id,
-                month: e.month,
-                amount: e.amount,
-                currency: e.currency,
-                note: e.note,
-            })
-            .collect(),
-    })
 }
 
 /// Accounts in the Python service's order (`ORDER BY canonical_id`).

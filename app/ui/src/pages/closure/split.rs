@@ -18,9 +18,6 @@ use super::ui::{
 };
 use crate::ds::{Button, Size, Variant, cn};
 
-/// Select value that opens the inline "new pot" form; never submitted.
-pub const NEW_POT: &str = "__new_pot";
-
 /// One line as typed.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Draft {
@@ -189,9 +186,6 @@ fn compute(setup: &Setup, drafts: &DraftStore) -> Rows {
                 .iter()
                 .zip(&parsed)
                 .map(|(line, value)| {
-                    if line.destination == NEW_POT {
-                        return Some("Create the pot or pick another destination.".into());
-                    }
                     if line.destination == "plan" {
                         if line.plan_name.trim().is_empty() {
                             return Some("Name the planned purchase.".into());
@@ -266,10 +260,6 @@ pub fn SplitEditor(
     /// submit, so takes may reuse them.
     #[prop(optional)]
     committed: Vec<AllocationLine>,
-    /// Accounts a new pot's money can sit on.
-    #[prop(optional)]
-    locations: Vec<(String, String)>,
-    #[prop(optional)] can_create_pot: bool,
     #[prop(default = None)] suggestion: Option<SavingsSuggestion>,
     /// Known categories a planned purchase can be matched by.
     #[prop(optional)]
@@ -545,7 +535,6 @@ pub fn SplitEditor(
 
     let goals = StoredValue::new(goals);
     let pots = StoredValue::new(pots);
-    let locations = StoredValue::new(locations);
     let categories = StoredValue::new(categories);
     let min_plan_month = StoredValue::new(min_plan_month);
     let fieldsets = accounts
@@ -583,11 +572,9 @@ pub fn SplitEditor(
                                         rows=rows
                                         pots=pots
                                         goals=goals
-                                        locations=locations
                                         categories=categories
                                         min_plan_month=min_plan_month
                                         allow_negative=allow_negative
-                                        can_create_pot=can_create_pot
                                     />
                                 }
                             }
@@ -664,8 +651,8 @@ pub fn SplitEditor(
     }
 }
 
-/// One allocation line: destination, amount, and the extra fields a plan or
-/// a new pot needs.
+/// One allocation line: destination, amount, and the extra fields a plan
+/// needs.
 #[component]
 fn SplitLine(
     account: StoredValue<SplitTarget>,
@@ -675,15 +662,12 @@ fn SplitLine(
     rows: Memo<Rows>,
     pots: StoredValue<Vec<PotView>>,
     goals: StoredValue<Vec<(String, String)>>,
-    locations: StoredValue<Vec<(String, String)>>,
     categories: StoredValue<Vec<String>>,
     min_plan_month: StoredValue<String>,
     allow_negative: bool,
-    can_create_pot: bool,
 ) -> impl IntoView {
     let wizard = expect_context::<Wizard>();
     let store = wizard.drafts;
-    let disabled = Signal::derive(move || wizard.busy.get());
     let account_id = StoredValue::new(account.with_value(|a| a.account_id.clone()));
     let key = StoredValue::new(key_id);
     let currency = account.with_value(|a| a.currency.clone());
@@ -752,9 +736,6 @@ fn SplitLine(
                     );
                 });
                 list.push(("plan".into(), "Plan a purchase…".into()));
-                if can_create_pot {
-                    list.push((NEW_POT.into(), "New pot…".into()));
-                }
             }
             let current = draft.with(|d| d.destination.clone());
             let mut list = options(list);
@@ -778,7 +759,6 @@ fn SplitLine(
     );
     let unit = currency.minor_unit;
     let is_plan = Memo::new(move |_| draft.with(|d| d.destination == "plan"));
-    let is_new_pot = Memo::new(move |_| can_create_pot && draft.with(|d| d.destination == NEW_POT));
 
     let plan_form = move || {
         let what = field_id();
@@ -858,56 +838,6 @@ fn SplitLine(
         }
     };
 
-    let new_pot_form = move || {
-        let name = RwSignal::new(String::new());
-        let location = RwSignal::new(String::new());
-        let creating = RwSignal::new(false);
-        let name_id = field_id();
-        let location_id = field_id();
-        let this = account_id.get_value();
-        let mut opts = vec![(String::new(), "Not set".to_owned(), false)];
-        locations.with_value(|l| {
-            opts.extend(l.iter().map(|(id, label)| {
-                let suffix = if *id == this { " (this account)" } else { "" };
-                (id.clone(), format!("{label}{suffix}"), false)
-            }));
-        });
-        view! {
-            <div class=cn([INLINE_FORM, "sm:col-span-3"]) role="group" aria-label="New pot">
-                <FieldBox label="Pot name".into_any() id=name_id.clone() class=GROW>
-                    <TextBox id=name_id value=name on_input=Callback::new(move |v| name.set(v)) maxlength=128 />
-                </FieldBox>
-                <FieldBox label="Money sits on".into_any() id=location_id.clone() class=GROW>
-                    <Choice
-                        id=location_id
-                        value=location
-                        options=Signal::stored(opts)
-                        on_change=Callback::new(move |v| location.set(v))
-                    />
-                </FieldBox>
-                <Button
-                    size=Size::Sm
-                    disabled=Signal::derive(move || disabled.get() || creating.get() || name.with(|n| n.trim().is_empty()))
-                    on_click=Callback::new(move |_| {
-                        let place = location.get_untracked();
-                        wizard.create_pot_for_line(
-                            name.get_untracked().trim().to_owned(),
-                            (!place.is_empty()).then_some(place),
-                            account_id.get_value(),
-                            key.get_value(),
-                            creating,
-                        );
-                    })
-                >
-                    {move || if creating.get() { "Creating…" } else { "Create pot" }}
-                </Button>
-                <Button size=Size::Sm variant=Variant::Ghost on_click=Callback::new(move |_| {
-                    update(Box::new(|d| d.destination = "stay".into()));
-                })>"Cancel"</Button>
-            </div>
-        }
-    };
-
     view! {
         <div class="grid items-end gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_auto]">
             <FieldBox label=destination_label id=destination_id.clone()>
@@ -953,7 +883,6 @@ fn SplitLine(
                 })>"Remove"</Button>
             </div>
             <Show when=move || is_plan.get()>{plan_form}</Show>
-            <Show when=move || is_new_pot.get()>{new_pot_form}</Show>
             {move || error().map(|e| view! { <small class=cn([WARN, "text-xs sm:col-span-3"])>{e}</small> })}
         </div>
     }

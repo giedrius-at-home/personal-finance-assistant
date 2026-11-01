@@ -2,20 +2,21 @@
 //!
 //! usage:
 //!   parity_closure view DB [NOW]      the closure views of 2026-09-01 and
-//!                                     2026-10-01, the pots and the
-//!                                     unclassified accounts, as JSON
+//!                                     2026-10-01 and the unclassified
+//!                                     accounts, as JSON (pot steps are
+//!                                     refused: pots are retired)
 //!   parity_closure actions DB STEPS   replay the steps the Python run wrote
 //!                                     on DB (a COPY: it is changed) and
 //!                                     print each outcome and the rows
 
 use std::path::PathBuf;
 
-use finance_core::closure::{closure_view, parse_month, pots_view, unclassified_accounts};
+use finance_core::closure::{closure_view, parse_month, unclassified_accounts};
 use finance_core::writes::Writer;
 use finance_core::writes::closure as closure_writes;
 use finance_core::{Error, Snapshot};
 use finance_storage::Store;
-use finance_types::report::closure::{AccountRoleDraft, ClosureAction, PotDraft};
+use finance_types::report::closure::{AccountRoleDraft, ClosureAction};
 use jiff::Zoned;
 use jiff::tz::TimeZone;
 use rusqlite::Connection;
@@ -48,10 +49,6 @@ fn view(path: &std::path::Path, now: Option<&str>) -> anyhow::Result<()> {
         out.insert(format!("closure_{month}"), serde_json::to_value(view)?);
     }
     out.insert(
-        "pots".into(),
-        serde_json::to_value(pots_view(store.connection())?)?,
-    );
-    out.insert(
         "unclassified".into(),
         serde_json::to_value(unclassified_accounts(&snap))?,
     );
@@ -62,7 +59,7 @@ fn view(path: &std::path::Path, now: Option<&str>) -> anyhow::Result<()> {
 fn actions(path: &std::path::Path, steps: &std::path::Path) -> anyhow::Result<()> {
     let steps: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(steps)?)?;
     let mut store = Store::open(path)?;
-    let mut created: Vec<String> = Vec::new();
+    let created: Vec<String> = Vec::new();
     let mut results = Vec::new();
     for step in &steps {
         let now: Zoned = step["now"]
@@ -100,20 +97,7 @@ fn actions(path: &std::path::Path, steps: &std::path::Path) -> anyhow::Result<()
         let tx = store.connection_mut().transaction()?;
         let w = Writer { tx, now };
         let outcome: Result<Value, Error> = (|| match kind {
-            "pot" => {
-                let mut request = request.clone();
-                if request["pot_id"] == "$new" {
-                    request["pot_id"] = json!(created.last());
-                }
-                let draft: PotDraft = serde_json::from_value(request)
-                    .map_err(|_| Error::Rejected("invalid pot".into()))?;
-                let fresh = draft.pot_id.is_none();
-                let saved = closure_writes::save_pot(&w, &snap, draft)?;
-                if fresh {
-                    created.push(saved.pot_id.clone());
-                }
-                Ok(json!({"ok": true}))
-            }
+            "pot" => Err(Error::Rejected("pots are no longer available".into())),
             "role" => {
                 let draft: AccountRoleDraft = serde_json::from_value(request.clone())
                     .map_err(|_| Error::Rejected("invalid role".into()))?;

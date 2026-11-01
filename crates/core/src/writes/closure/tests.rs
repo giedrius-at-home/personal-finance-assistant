@@ -4,8 +4,7 @@
 use std::collections::BTreeMap;
 
 use finance_types::report::closure::{
-    AccountRoleDraft, AllocationLine, BalanceCheck, ClosureStatus, MonthPeriod, PotDraft,
-    TransferStatus,
+    AccountRoleDraft, AllocationLine, BalanceCheck, ClosureStatus, MonthPeriod, TransferStatus,
 };
 use jiff::civil::date;
 use rusqlite::Connection;
@@ -317,7 +316,8 @@ fn a_resplit_replaces_its_plans_and_refuses_pot_lines_and_takes() {
         settle(w, &snap, sept(), 3, vec![line("s", "stay", "100")])
     })
     .unwrap();
-    assert!(pot_balances(&load_pot_entries(&conn, None).unwrap(), None).is_empty());
+    let entries = crate::closure::load_pot_entries(&conn, None).unwrap();
+    assert!(crate::closure::pot_balances(&entries, None).is_empty());
     let active: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM planned_payments WHERE archived_at IS NULL",
@@ -329,35 +329,12 @@ fn a_resplit_replaces_its_plans_and_refuses_pot_lines_and_takes() {
 }
 
 #[test]
-fn pots_are_created_trimmed_and_general_is_never_archived() {
+fn reopen_refuses_an_open_month() {
     let mut conn = db();
     let snap = salary_snapshot();
-    let draft = |pot_id: Option<&str>, name: &str, archived: bool| PotDraft {
-        pot_id: pot_id.map(str::to_owned),
-        name: name.into(),
-        account_id: None,
-        archived,
-    };
-    let now = "2026-09-29T10:00:00Z";
-    let saved = write(&mut conn, now, |w| {
-        save_pot(w, &snap, draft(None, " Holiday ", false))
-    })
-    .unwrap();
-    assert_eq!(saved.name, "Holiday");
-    assert_eq!(saved.pot_id.len(), 32);
-    let general = write(&mut conn, now, |w| {
-        save_pot(w, &snap, draft(Some("general"), "x", true))
+    let reopen_open = write(&mut conn, "2026-09-29T10:00:00Z", |w| {
+        reopen(w, &snap, date(2026, 8, 1), 0)
     });
-    assert_eq!(error(general), "general savings cannot be archived");
-    let unknown = write(&mut conn, now, |w| {
-        save_pot(w, &snap, draft(Some("nope"), "x", false))
-    });
-    assert_eq!(error(unknown), "unknown pot");
-    let listed = crate::closure::pots_view(&conn).unwrap();
-    assert_eq!(listed.pots[0].pot_id, "general");
-    assert_eq!(listed.pots.len(), 2);
-    assert!(listed.entries.is_empty());
-    let reopen_open = write(&mut conn, now, |w| reopen(w, &snap, date(2026, 8, 1), 0));
     assert_eq!(error(reopen_open), "month is open");
 }
 
