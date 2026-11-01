@@ -25,7 +25,7 @@
 1. A balance typed with more decimals than the currency allows (e.g. `12.345` EUR) must be refused with `"invalid balance"`, not rounded silently. → Task 3 test `confirm_refuses_more_decimals_than_the_currency`.
 2. A negative balance (an overdrawn account) must be accepted and booked, since liabilities and overdrafts are real. → Task 3 test `confirm_books_a_negative_balance`.
 3. A confirm sent with a revision the screen read before another save must be refused with `"month closure changed; refresh"` and book nothing. → Task 3 test `confirm_with_a_stale_revision_books_nothing`.
-4. A reconciliation made on the Banks screen after a confirm must turn the check `Stale`; confirming again at the ledger figure must book nothing and leave the earlier entry gone. → Task 4 test `banks_screen_reconciliation_makes_the_check_stale`.
+4. A reconciliation made on the Banks screen after a confirm must turn the check `Stale`; confirming again must delete the closure's own earlier entry and rebook so the ledger ends at the confirmed figure, leaving two entries (banks + closure); closure entries never stack. → Task 4 test `banks_screen_reconciliation_makes_the_check_stale`.
 5. "Confirm all matching" that fails on the second row must stop, show the error, and leave the first row confirmed (the server saved it). → Task 5, manual check listed in its verification step; the server side is covered by Task 3's per-row semantics.
 
 ---
@@ -303,7 +303,8 @@ fn banks_screen_reconciliation_makes_the_check_stale() {
     // confirm L+40 → statuses()[0].state == Confirmed, adjusted_by == Some(40)
     // book_reconciliation(w, 1, "Checking", "EUR", L+50, "banks") → state == Stale
     // settle → refused naming Checking
-    // confirm at L+50 → Confirmed, transaction_id None (ledger already matched), only the banks entry remains
+    // confirm at L+50 → Confirmed; the closure's own entry is deleted and rebooked so the ledger ends at L+50;
+    // two entries remain (banks + closure), closure entries never stack
 }
 ```
 In `crates/core/src/closure/tests.rs`, a pure test on `unconfirmed_names` with three hand-built statuses (Confirmed, Stale, Unconfirmed) expecting the two names in order.

@@ -196,8 +196,9 @@ On the closure page, between the Sync step and the Split step, a
   balance with no change.
 - The Banks screen's Reconcile keeps working. A reconciliation made there
   makes the closure check stale (balance moved), so the owner confirms once
-  more; the closure confirm then books nothing because the ledger already
-  matches.
+  more; that confirm deletes the closure's own earlier entry and books a new
+  one so the ledger ends at the confirmed figure. Two entries remain (the
+  Banks one and the closure one); closure entries never stack.
 - The daily review and AI daily report never saw reconciliation entries and
   still do not.
 
