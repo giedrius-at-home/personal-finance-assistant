@@ -922,4 +922,3 @@ fn unconfirmed_names_lists_everything_not_confirmed_in_order() {
     ];
     assert_eq!(unconfirmed_names(&all), ["B", "C"]);
 }
-
