@@ -236,3 +236,14 @@ The October balance check of Revolut Savings goes stale (ledger moves from
   closure page.
 - Whether `plan` is computed inside `closure_view` from the dashboard
   already built for the suggestion (preferred: one dashboard call).
+
+## Addendum (2026-11-01, later): the split starts from the plan
+
+Owner started the follow-up. A **fresh** split (no stored lines) of an
+account the plan moves money out of starts with one `account:<target>`
+line per plan move, in the plan's order, each capped by what is left of
+the leftover and skipped when the split cannot reach that account, then a
+`stay` line for the rest (none when nothing is left). The account's note
+reads "Prefilled from the money plan; edit freely." A confirmed split keeps
+its lines; a resettle and a deficit account are unchanged. Validation and
+the destination list are untouched.

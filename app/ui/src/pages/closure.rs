@@ -660,6 +660,7 @@ fn ChangedAfterClose(view: ClosureView) -> impl IntoView {
             target: *d,
             note: None,
             moves: move_targets(a, &view.review.accounts, &eligible),
+            plan_moves: Vec::new(),
         })
         .collect();
     let none_changed = changed.is_empty();
@@ -1117,6 +1118,23 @@ fn split_editor(
             .any(|l| l.from_account_id == account.account_id && l.kind == LineKind::Split)
     };
     let eligible = move_eligible(view);
+    // A fresh split starts from the money plan's moves; a confirmed split
+    // keeps its own lines.
+    let plan_moves = |account_id: &str| -> Vec<(String, Decimal)> {
+        if settled {
+            return Vec::new();
+        }
+        view.plan
+            .as_ref()
+            .map(|p| {
+                p.moves
+                    .iter()
+                    .filter(|m| m.from_account_id == account_id)
+                    .map(|m| (m.to_account_id.clone(), m.amount))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
     let targets: Vec<SplitTarget> = view
         .review
         .accounts
@@ -1124,6 +1142,11 @@ fn split_editor(
         .filter(|a| a.leftover > Decimal::ZERO || has_lines(a))
         .map(|a| {
             let deficit = a.leftover <= Decimal::ZERO;
+            let plan_moves = if deficit {
+                Vec::new()
+            } else {
+                plan_moves(&a.account_id)
+            };
             SplitTarget {
                 account_id: a.account_id.clone(),
                 name: a.name.clone(),
@@ -1131,12 +1154,15 @@ fn split_editor(
                 target: if deficit { Decimal::ZERO } else { a.leftover },
                 note: if deficit {
                     Some("Deficit: nothing to split.".into())
+                } else if !plan_moves.is_empty() {
+                    Some("Prefilled from the money plan; edit freely.".into())
                 } else if a.role == AccountRoleKind::Savings {
                     Some("Savings account".into())
                 } else {
                     None
                 },
                 moves: move_targets(a, &view.review.accounts, &eligible),
+                plan_moves,
             }
         })
         .collect();

@@ -54,6 +54,54 @@ pub struct SplitTarget {
     /// `(account_id, name)` of the accounts a line from this one can move
     /// money to.
     pub moves: Vec<(String, String)>,
+    /// The money plan's moves out of this account, `(account_id, amount)`,
+    /// in the plan's order: a fresh split starts from them.
+    pub plan_moves: Vec<(String, Decimal)>,
+}
+
+/// The lines a fresh split of `account` starts from: one `account:` line per
+/// plan move (capped by what is left of the target), then a `stay` line for
+/// the rest; without plan moves, one `stay` line for the whole target. A
+/// deficit account starts empty.
+pub fn prefilled_drafts(
+    account: &SplitTarget,
+    allow_negative: bool,
+    mut key: impl FnMut() -> String,
+) -> Vec<Draft> {
+    if !allow_negative && account.target <= Decimal::ZERO {
+        return Vec::new();
+    }
+    let unit = account.currency.minor_unit;
+    let mut left = account.target;
+    let mut lines = Vec::new();
+    for (target, amount) in &account.plan_moves {
+        if left <= Decimal::ZERO {
+            break;
+        }
+        if !account.moves.iter().any(|(id, _)| id == target) {
+            continue;
+        }
+        let amount = (*amount).min(left);
+        if amount <= Decimal::ZERO {
+            continue;
+        }
+        left -= amount;
+        lines.push(Draft {
+            key: key(),
+            destination: format!("account:{target}"),
+            amount: fixed(amount, unit),
+            ..Draft::default()
+        });
+    }
+    if left > Decimal::ZERO || lines.is_empty() {
+        lines.push(Draft {
+            key: key(),
+            destination: "stay".into(),
+            amount: fixed(left, unit),
+            ..Draft::default()
+        });
+    }
+    lines
 }
 
 /// `(account_id, name)` of every account a line from `source` can move
@@ -396,18 +444,14 @@ pub fn SplitEditor(
                     })
                     .map(draft_from)
                     .collect();
-                // A deficit account has nothing to split; it starts empty and
-                // only lists old lines to remove.
-                let empty = !allow_negative && account.target <= Decimal::ZERO;
-                let lines = if !existing.is_empty() || empty {
-                    existing
+                // A confirmed split keeps its lines; a fresh one starts from
+                // the money plan (or one "stay" line). A deficit account has
+                // nothing to split: it starts empty and only lists old lines
+                // to remove.
+                let lines = if existing.is_empty() {
+                    prefilled_drafts(account, allow_negative, new_id)
                 } else {
-                    vec![Draft {
-                        key: new_id(),
-                        destination: "stay".into(),
-                        amount: fixed(account.target, account.currency.minor_unit),
-                        ..Draft::default()
-                    }]
+                    existing
                 };
                 (account.account_id.clone(), lines)
             })
@@ -877,7 +921,64 @@ mod tests {
             target: target.parse().unwrap(),
             note: None,
             moves: Vec::new(),
+            plan_moves: Vec::new(),
         }
+    }
+
+    fn amounts(lines: &[Draft]) -> Vec<(&str, &str)> {
+        lines
+            .iter()
+            .map(|l| (l.destination.as_str(), l.amount.as_str()))
+            .collect()
+    }
+
+    #[test]
+    fn a_fresh_split_starts_from_the_plan_moves_capped_by_the_leftover() {
+        let mut abn = account("a", "500.00");
+        abn.moves = vec![pair("g", "Groceries"), pair("s", "Savings")];
+        abn.plan_moves = vec![
+            ("g".into(), "180".parse().unwrap()),
+            ("s".into(), "800".parse().unwrap()),
+        ];
+        assert_eq!(
+            amounts(&prefilled_drafts(&abn, false, new_key)),
+            vec![("account:g", "180.00"), ("account:s", "320.00")]
+        );
+        abn.target = "1200.00".parse().unwrap();
+        assert_eq!(
+            amounts(&prefilled_drafts(&abn, false, new_key)),
+            vec![
+                ("account:g", "180.00"),
+                ("account:s", "800.00"),
+                ("stay", "220.00")
+            ]
+        );
+    }
+
+    #[test]
+    fn a_plan_move_to_an_account_the_split_cannot_reach_is_skipped() {
+        let mut abn = account("a", "100.00");
+        abn.moves = vec![pair("g", "Groceries")];
+        abn.plan_moves = vec![
+            ("gone".into(), "40".parse().unwrap()),
+            ("g".into(), "30".parse().unwrap()),
+        ];
+        assert_eq!(
+            amounts(&prefilled_drafts(&abn, false, new_key)),
+            vec![("account:g", "30.00"), ("stay", "70.00")]
+        );
+    }
+
+    #[test]
+    fn without_plan_moves_the_split_starts_with_one_stay_line() {
+        assert_eq!(
+            amounts(&prefilled_drafts(&account("a", "50.00"), false, new_key)),
+            vec![("stay", "50.00")]
+        );
+        assert!(prefilled_drafts(&account("a", "-5.00"), false, new_key).is_empty());
+        let mut deficit = account("a", "-5.00");
+        deficit.plan_moves = vec![("g".into(), "10".parse().unwrap())];
+        assert!(prefilled_drafts(&deficit, false, new_key).is_empty());
     }
 
     fn review(id: &str, name: &str, currency: &str, role: AccountRoleKind) -> AccountReview {
