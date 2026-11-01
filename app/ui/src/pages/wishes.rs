@@ -468,26 +468,12 @@ pub fn saving(row: &WishRow, months: &[WishMonth]) -> Option<Saving> {
 
 /// What "free money" means on this page, with the savings pot the months
 /// start from.
-fn free_money_note(months: &[WishMonth], must_keep: Decimal, code: &str) -> String {
-    let note = "Free money each month: salary minus bills, planned payments and budget groups. Savings goals are not held back.";
-    match months.first() {
-        // The pot the months start from already leaves out what is saved
-        // for wishes, so it is the wiggle room; the account holds both.
-        Some(first) => {
-            let free = first.savings_before;
-            if must_keep > Decimal::ZERO {
-                format!(
-                    "{note} Savings: {}, of which {} is saved for wishes; wiggle room {}.",
-                    amount(free + must_keep, code),
-                    amount(must_keep, code),
-                    amount(free, code)
-                )
-            } else {
-                format!("{note} Savings: {}.", amount(free, code))
-            }
-        }
-        None => note.to_owned(),
-    }
+/// The savings fields: the account total, what the wishes already saved and
+/// the room above that. The pot the months start from already leaves the
+/// saved money out, so it is the wiggle room.
+fn savings_fields(months: &[WishMonth], must_keep: Decimal) -> Option<(Decimal, Decimal, Decimal)> {
+    let free = months.first()?.savings_before;
+    Some((free + must_keep, must_keep, free))
 }
 
 /// What the wishes put on the cards this month, paid back on the 1st of
@@ -986,7 +972,21 @@ fn page(ui: Ui, view: &WishesView, ctx: &Context) -> impl IntoView + use<> {
         .map(|m| month_card(m, &currency.code))
         .collect_view();
     let has_months = !view.months.is_empty();
-    let note = free_money_note(&view.months, view.savings_must_keep, &currency.code);
+    let savings = savings_fields(&view.months, view.savings_must_keep).map(|(total, saved, room)| {
+        let negative = room < Decimal::ZERO;
+        let (total, saved, room) = (
+            crate::ds::money(total, &currency),
+            crate::ds::money(saved, &currency),
+            crate::ds::money(room, &currency),
+        );
+        view! {
+            <div class="mt-3 grid grid-cols-3 gap-3">
+                <Stat label="Savings">{total}</Stat>
+                <Stat label="Saved for wishes">{saved}</Stat>
+                <Stat label="Wiggle room" tone=if negative { Tone::Negative } else { Tone::Neutral }>{room}</Stat>
+            </div>
+        }
+    });
     let strip = card_strip(ui, view, &ctx.get_value());
     let form = add_form(
         ui,
@@ -1006,7 +1006,7 @@ fn page(ui: Ui, view: &WishesView, ctx: &Context) -> impl IntoView + use<> {
             <Card>
                 <Eyebrow>"WISHES"</Eyebrow>
                 <h2 class="mt-2 text-lg font-semibold">"Planned purchases"</h2>
-                <p class="mt-1 text-sm text-fg-muted">{note}</p>
+                {savings}
                 {feedback(ui, "dropped".into())}
                 <div class="mt-3 grid">{rows}</div>
                 {empty.then(|| view! { <p class="mt-3 text-sm text-fg-muted">"No planned wishes yet."</p> })}
@@ -1562,7 +1562,14 @@ fn wish_body(
     };
     let recurring = matches!(wish.kind, WishKind::Recurring { .. });
     let target = format!("wish:{}", wish.wish_id);
-    let saved = RwSignal::new(wish.saved.to_string());
+    let suggested = row.suggested_saved;
+    let saved = RwSignal::new(suggested.to_string());
+    let suggestion_hint = (suggested != wish.saved).then(|| {
+        format!(
+            "Suggested, +{} this month",
+            amount(suggested - wish.saved, &code)
+        )
+    });
     let id = StoredValue::new(wish.wish_id.clone());
     let save_saved = {
         let target = target.clone();
@@ -1759,7 +1766,10 @@ fn wish_body(
                 {one_off.then(move || view! {
                 <form class="flex items-end gap-2" on:submit=save_saved>
                     <div class="grid gap-1">
-                        <label for=saved_id.clone() class="text-xs text-fg-muted">"Saved so far"</label>
+                        <label for=saved_id.clone() class="text-xs text-fg-muted">
+                            "Saved so far"
+                            {suggestion_hint.clone().map(|h| view! { <span class="text-accent">{format!(" ({h})")}</span> })}
+                        </label>
                         <input
                             id=saved_id
                             type="text"
@@ -2069,6 +2079,7 @@ mod tests {
             rest: Decimal::ZERO,
             over_cap: false,
             monthly_set_aside: Decimal::ZERO,
+            suggested_saved: Decimal::ZERO,
             short: Decimal::ZERO,
             tradeoffs: false,
             not_judged: None,
@@ -2919,19 +2930,12 @@ mod tests {
     }
 
     #[test]
-    fn free_money_note_names_the_savings_pot() {
+    fn savings_fields_add_the_saved_part_back_onto_the_pot() {
         let months = [with_savings("2026-10-01", d(250, 0), Vec::new())];
         assert_eq!(
-            free_money_note(&months, d(624, 0), "EUR"),
-            "Free money each month: salary minus bills, planned payments and budget groups. Savings goals are not held back. Savings: €1,374, of which €624 is saved for wishes; wiggle room €750."
+            savings_fields(&months, d(624, 0)),
+            Some((d(1374, 0), d(624, 0), d(750, 0)))
         );
-        assert_eq!(
-            free_money_note(&months, Decimal::ZERO, "EUR"),
-            "Free money each month: salary minus bills, planned payments and budget groups. Savings goals are not held back. Savings: €750."
-        );
-        assert_eq!(
-            free_money_note(&[], Decimal::ZERO, "EUR"),
-            "Free money each month: salary minus bills, planned payments and budget groups. Savings goals are not held back."
-        );
+        assert_eq!(savings_fields(&[], d(624, 0)), None);
     }
 }

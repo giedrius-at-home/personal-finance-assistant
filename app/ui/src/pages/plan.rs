@@ -22,6 +22,7 @@ use serde::Serialize;
 use serde::de::IgnoredAny;
 
 use crate::api::invoke;
+use crate::ds::money_plan::MoneyPlanFields;
 use crate::ds::sync_value;
 use crate::ds::{
     Button, CONTROL, Card, CardTone, Eyebrow, Field, Icon, Lucide, Money, MonthSwitcher, Size,
@@ -348,11 +349,21 @@ fn page(ui: Ui, report: &Dashboard) -> impl IntoView + use<> {
         } else {
             "Salary not recorded yet"
         };
+        let plan_fields = report.money_plan.clone().map(|plan| {
+            let names: HashMap<String, String> = accounts.iter().cloned().collect();
+            view! {
+                <div class="mt-4 border-t border-line pt-4">
+                    <Eyebrow>"WHERE THE MONEY GOES"</Eyebrow>
+                    <div class="mt-3"><MoneyPlanFields plan=plan names=names /></div>
+                </div>
+            }
+        });
         view! {
             <Card>
                 <Eyebrow>"MONTHLY PAYDAY"</Eyebrow>
                 <h2 class="mt-2 text-lg font-semibold">{title}</h2>
                 {body}
+                {plan_fields}
             </Card>
         }
     });

@@ -2,6 +2,7 @@
 
 use finance_types::report::Currency;
 use finance_types::report::allocation::CurrencyAllocation;
+use finance_types::report::closure::MoneyPlan;
 use finance_types::report::trends::{ForecastMethod, SpendingForecast};
 use leptos::ev;
 use leptos::prelude::*;
@@ -48,12 +49,17 @@ pub fn OwnerMonthlyOverview() -> impl IntoView {
                     .filter(|f| f.currency.code == a.currency.code)
                     .cloned()
                     .collect();
+                let plan = report
+                    .money_plan
+                    .clone()
+                    .filter(|p| p.currency.code == a.currency.code);
                 view! {
                     <CurrencyOverview
                         allocation=a.clone()
                         forecasts=forecasts
                         through_date=through.clone()
                         show_forecast=show_forecast
+                        plan=plan
                     />
                 }
             })
@@ -420,6 +426,8 @@ fn CurrencyOverview(
     forecasts: Vec<SpendingForecast>,
     through_date: String,
     show_forecast: bool,
+    /// Where the money should go now, in this currency.
+    plan: Option<MoneyPlan>,
 ) -> impl IntoView {
     let app = state();
     let a = &allocation;
@@ -431,6 +439,13 @@ fn CurrencyOverview(
     let next_negative = next_funded && a.next_shortfall > zero;
     let remaining = remaining_days(&through_date);
 
+    // The month's money is the spending accounts plus the savings account;
+    // what the wishes already saved is spoken for, like a bill.
+    let wish_savings = plan.as_ref().and_then(|p| p.savings.clone());
+    let saved_for_wishes = wish_savings.as_ref().map_or(zero, |s| s.must_keep);
+    let savings_balance = wish_savings.as_ref().map_or(zero, |s| s.balance);
+    let wiggle_room = a.current_wiggle_room + savings_balance - saved_for_wishes;
+    let current_total = (current_total + savings_balance).max(zero);
     let mut current_parts = vec![("Bills".to_owned(), a.current_fixed_remaining, Part::Fixed)];
     current_parts.extend(
         a.groups
@@ -438,11 +453,28 @@ fn CurrencyOverview(
             .map(|g| (g.group.clone(), g.remaining, Part::Groups)),
     );
     current_parts.push(("Plans".into(), a.current_plans_remaining, Part::Goals));
-    current_parts.push((
-        "Wiggle room".into(),
-        a.current_wiggle_room.max(zero),
-        Part::Free,
-    ));
+    if saved_for_wishes > zero {
+        current_parts.push(("Saved for wishes".into(), saved_for_wishes, Part::Plans));
+    }
+    current_parts.push(("Wiggle room".into(), wiggle_room.max(zero), Part::Free));
+    let wish_rows = wish_savings
+        .as_ref()
+        .filter(|s| !s.wishes.is_empty())
+        .map(|s| {
+            let rows = s
+                .wishes
+                .iter()
+                .map(|(name, saved)| {
+                    view! {
+                        <div class="flex justify-between gap-4 text-xs text-fg-muted">
+                            <span class="truncate">{name.clone()}</span>
+                            <span class="tabular-nums">{money(*saved, &unit)}</span>
+                        </div>
+                    }
+                })
+                .collect_view();
+            view! { <div class="mt-2 grid gap-0.5 pl-4">{rows}</div> }
+        });
 
     let mut next_parts = vec![("Bills".to_owned(), a.next_fixed, Part::Fixed)];
     if a.next_group_rows.is_empty() {
@@ -623,12 +655,21 @@ fn CurrencyOverview(
     );
     let current_bar = allocation_bar(current_total, &current_parts, &unit);
     let current_legend = allocation_legend(&current_parts, &unit);
-    let current_result =
-        allocation_result("Spendable wiggle room", a.current_wiggle_room, &unit, false);
+    let current_result = allocation_result(
+        if wish_savings.is_some() {
+            "Wiggle room after bills, groups, plans and wishes"
+        } else {
+            "Spendable wiggle room"
+        },
+        wiggle_room,
+        &unit,
+        wiggle_room < zero,
+    );
     let next_bar = allocation_bar(next_total, &next_parts, &unit);
     let next_legend = allocation_legend(&next_parts, &unit);
     let next_result = allocation_result(next_label, next_value, &unit, next_negative);
     let breakdown = view! { <BankBalanceBreakdown allocation=allocation.clone() /> }.into_any();
+
     view! {
         <section class="flex flex-col gap-5 text-fg" aria-label=section_label>
             {status}
@@ -648,6 +689,7 @@ fn CurrencyOverview(
                     </header>
                     {current_bar}
                     {current_legend}
+                    {wish_rows}
                     {current_result}
                     {expected_note}
                 </Card>

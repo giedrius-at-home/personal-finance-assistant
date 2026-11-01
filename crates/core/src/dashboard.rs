@@ -165,6 +165,33 @@ pub fn dashboard(
         forecaster,
     });
 
+    let money_plan = monthly_allocation
+        .currencies
+        .iter()
+        .find(|c| c.currency.code == "EUR")
+        .map(|allocation| {
+            let roles: Vec<finance_types::gateway::AccountRole> =
+                snap.account_roles.values().cloned().collect();
+            let accounts = crate::writes::closure::checked_accounts(snap, &roles);
+            let budget = snap
+                .budget_plans
+                .iter()
+                .find(|p| p.month == allocation.current_month && p.currency.code == "EUR");
+            let wishes = crate::wishes::store::load_wishes(store.connection())?;
+            Ok::<_, crate::Error>(crate::closure::plan::money_plan(
+                &crate::closure::plan::PlanInputs {
+                    as_of: ctx.now.date(),
+                    allocation,
+                    budget,
+                    payments: &payments,
+                    accounts: &accounts,
+                    roles: &roles,
+                    wishes: &wishes,
+                    salary_account_id: snap.settings.salary_account_id.as_deref(),
+                },
+            ))
+        })
+        .transpose()?;
     let daily_ids: HashSet<String> = snap
         .daily_review_entries
         .iter()
@@ -194,6 +221,7 @@ pub fn dashboard(
         savings_outlooks,
         daily_forecasts,
         monthly_allocation: Some(monthly_allocation),
+        money_plan,
         spending_forecasts,
         time_trends,
         last_firefly_refresh: snap.sync_health.0.map(|t| t.to_string()),

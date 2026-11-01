@@ -988,8 +988,6 @@ fn suggestion_and_plan(
     snap: &Snapshot,
     now: &Zoned,
     forecaster: Option<&dyn crate::daily::SeriesForecaster>,
-    roles: &[AccountRole],
-    wishes: &[Wish],
 ) -> Result<(Option<SavingsSuggestion>, Option<MoneyPlan>)> {
     let overview = dashboard::dashboard(store, snap, now, forecaster)?;
     let Some(allocation) = overview
@@ -1007,22 +1005,7 @@ fn suggestion_and_plan(
         snap.settings.safety_buffer_eur,
         everyday_forecast(&overview.daily_forecasts, &allocation.current_month),
     );
-    let budget = snap
-        .budget_plans
-        .iter()
-        .find(|p| p.month == allocation.current_month && p.currency.code == "EUR");
-    let accounts = crate::writes::closure::checked_accounts(snap, roles);
-    let plan = plan::money_plan(&plan::PlanInputs {
-        as_of,
-        allocation,
-        budget,
-        payments: &overview.planned_payments,
-        accounts: &accounts,
-        roles,
-        wishes,
-        salary_account_id: snap.settings.salary_account_id.as_deref(),
-    });
-    Ok((Some(suggestion), Some(plan)))
+    Ok((Some(suggestion), overview.money_plan))
 }
 
 /// Everything the closure screen shows for `month` (Python `closure_view`).
@@ -1045,8 +1028,7 @@ pub fn closure_view(
     let roles = load_roles(conn)?;
     let all_wishes = crate::wishes::store::load_wishes(conn)?;
     let wishes = period_wish_options(&all_wishes, &period);
-    let (suggestion, plan) =
-        suggestion_and_plan(store, snap, now, forecaster, &roles, &all_wishes)?;
+    let (suggestion, plan) = suggestion_and_plan(store, snap, now, forecaster)?;
     Ok(ClosureView {
         balances: balance_statuses(conn, snap, &period, &roles)?,
         plan,

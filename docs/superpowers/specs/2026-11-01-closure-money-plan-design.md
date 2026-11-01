@@ -247,3 +247,24 @@ the leftover and skipped when the split cannot reach that account, then a
 reads "Prefilled from the money plan; edit freely." A confirmed split keeps
 its lines; a resettle and a deficit account are unchanged. Validation and
 the destination list are untouched.
+
+## Addendum (2026-11-01, night): data fields on every screen
+
+Owner: the figures belong on Overview, Plan and Wishes too, as data fields
+(label and value), never as sentences, and folded into the existing cards.
+
+- The money plan is computed once on the dashboard (`Dashboard.money_plan`);
+  the closure reads it from there.
+- **Overview, This month**: the budget bar and legend gain "Saved for
+  wishes" (each wish listed under it) and the wiggle room becomes
+  spending wiggle room + savings balance − saved for wishes, the result row
+  reading "Wiggle room after bills, groups, plans and wishes".
+- **Plan, Monthly payday**: the plan's fields under the salary: accounts
+  (balance, keep, short / needs / spare / to send on), transfer rows, the
+  savings fields.
+- **Wishes**: a Savings / Saved for wishes / Wiggle room strip replaces the
+  footnote sentence; each one-off wish's "Saved so far" field is prefilled
+  with `suggested_saved` = saved + this month's set-aside until that month's
+  figure is recorded (`WishRow.suggested_saved`), with a "Suggested, +€X this
+  month" hint.
+- **Close month**: the same fields component, no sentences.

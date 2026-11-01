@@ -84,6 +84,9 @@ pub struct Dashboard {
     pub monthly_allocation: Option<allocation::MonthlyAllocation>,
     pub savings_outlooks: Vec<outlook::SavingsOutlook>,
     pub daily_forecasts: Vec<outlook::DailySpendingForecast>,
+    /// Where the money should go now, from the current balances (EUR).
+    #[serde(default)]
+    pub money_plan: Option<closure::MoneyPlan>,
 }
 
 /// The category review inbox (Transactions screen).
