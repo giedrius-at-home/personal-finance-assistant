@@ -353,8 +353,6 @@ pub struct SavingsSuggestion {
     pub known_future_payments: Decimal,
     pub known_payments: Vec<KnownPayment>,
     pub safety_buffer: Decimal,
-    pub general_pot_id: String,
-    pub general_balance: Decimal,
 }
 
 /// One own-account bank transfer since the split (paired legs as one).

@@ -681,7 +681,6 @@ pub fn savings_suggestion(
     as_of: Date,
     payments: &[PlannedPaymentView],
     safety_buffer: Decimal,
-    general_balance: Decimal,
     forecast: Option<EverydayForecast>,
 ) -> SavingsSuggestion {
     let month = day_of(&allocation.current_month).unwrap_or(as_of.first_of_month());
@@ -725,8 +724,6 @@ pub fn savings_suggestion(
         known_future_payments: sum(known.iter().map(|k| k.amount)),
         known_payments: known,
         safety_buffer,
-        general_pot_id: GENERAL_POT_ID.to_owned(),
-        general_balance,
     }
 }
 
@@ -823,9 +820,7 @@ pub fn candidates(
 fn suggestion(
     store: &Store,
     snap: &Snapshot,
-    month: Date,
     now: &Zoned,
-    entries: &[PotEntryRecord],
     forecaster: Option<&dyn crate::daily::SeriesForecaster>,
 ) -> Result<Option<SavingsSuggestion>> {
     let overview = dashboard::dashboard(store, snap, now, forecaster)?;
@@ -836,17 +831,11 @@ fn suggestion(
     else {
         return Ok(None);
     };
-    let general = pot_balances(entries, Some(month))
-        .get(GENERAL_POT_ID)
-        .and_then(|b| b.get("EUR"))
-        .copied()
-        .unwrap_or_default();
     Ok(Some(savings_suggestion(
         allocation,
         now.with_time_zone(snap.zone.clone()).date(),
         &overview.planned_payments,
         snap.settings.safety_buffer_eur,
-        general,
         everyday_forecast(&overview.daily_forecasts, &allocation.current_month),
     )))
 }
@@ -881,7 +870,7 @@ pub fn closure_view(
             .iter()
             .map(|p| pot_view(p, &balances))
             .collect(),
-        suggestion: suggestion(store, snap, month, now, &entries, forecaster)?,
+        suggestion: suggestion(store, snap, now, forecaster)?,
         accounts: account_role_views(&accounts_by_id(&snap.accounts), &roles),
         transfer_candidates: candidates(snap, &period),
         period,

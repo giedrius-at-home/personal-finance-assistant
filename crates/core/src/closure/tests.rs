@@ -769,7 +769,6 @@ fn suggestion_starts_from_overview_and_reserves_what_is_still_to_come() {
         date(2026, 10, 2),
         &payments,
         d("300"),
-        Decimal::ZERO,
         Some(forecast),
     );
     assert_eq!(
@@ -785,14 +784,7 @@ fn suggestion_starts_from_overview_and_reserves_what_is_still_to_come() {
         .collect();
     assert_eq!(known, [("laptop", d("900")), ("insurance", d("300"))]);
     assert_eq!(found.known_future_payments, d("1200"));
-    let unforecast = savings_suggestion(
-        &allocation,
-        date(2026, 10, 2),
-        &[],
-        d("300"),
-        Decimal::ZERO,
-        None,
-    );
+    let unforecast = savings_suggestion(&allocation, date(2026, 10, 2), &[], d("300"), None);
     assert!(!unforecast.forecast_available);
     assert_eq!(unforecast.everyday_remaining, Decimal::ZERO);
 }

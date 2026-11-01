@@ -7,8 +7,8 @@ use finance_types::report::outlook::ForecastExclusions;
 use leptos::prelude::*;
 use rust_decimal::Decimal;
 
-use super::ui::{ACTIONS, CALLOUT, SMALL};
-use crate::ds::{Button, Size, Variant, cn};
+use super::ui::CALLOUT;
+use crate::ds::cn;
 
 const BREAKDOWN: &str = "grid gap-1 text-xs";
 const BREAKDOWN_ROW: &str = "flex justify-between gap-3 [&>:last-child]:shrink-0 [&>:last-child]:text-right [&>:last-child]:tabular-nums";
@@ -35,40 +35,26 @@ pub struct Figures {
     /// One-off payments due in the three months after the current one.
     pub known_future: Decimal,
     pub safety_buffer: Decimal,
-    pub takes: Decimal,
-    /// Of `takes`, what this split already takes from general savings.
-    pub general_takes: Decimal,
-    /// Positive lines to pots other than general, plan lines and buffer lines.
+    /// Positive lines to wishes, goals, plan lines and buffer lines.
     pub assigned: Decimal,
-    /// projected − everyday − known future payments − safety buffer − assigned + takes.
+    /// projected − everyday − known future payments − safety buffer − assigned.
     pub suggested: Decimal,
-    /// Already assigned to the general pot in this split.
-    pub general: Decimal,
-    /// General savings balance before this month's split.
-    pub general_balance: Decimal,
 }
 
 /// What is available now less what is still expected this month, known
 /// future payments, the safety buffer and this split's own lines.
 pub fn figures(inputs: &SavingsSuggestion, lines: &[SuggestionLine]) -> Figures {
-    let general_destination = format!("pot:{}", inputs.general_pot_id);
-    let (mut takes, mut general_takes, mut assigned, mut general) =
-        (Decimal::ZERO, Decimal::ZERO, Decimal::ZERO, Decimal::ZERO);
-    for line in lines.iter().filter(|l| l.currency == "EUR") {
-        let pot = line.destination.starts_with("pot:");
-        if pot && line.amount < Decimal::ZERO {
-            takes += line.amount.abs();
-            if line.destination == general_destination {
-                general_takes += line.amount.abs();
-            }
-        } else if line.destination == general_destination {
-            general += line.amount;
-        } else if line.amount <= Decimal::ZERO {
-            continue;
-        } else if pot || line.destination == "plan" || line.destination == "buffer" {
-            assigned += line.amount;
-        }
-    }
+    let assigned: Decimal = lines
+        .iter()
+        .filter(|l| l.currency == "EUR" && l.amount > Decimal::ZERO)
+        .filter(|l| {
+            l.destination.starts_with("wish:")
+                || l.destination.starts_with("goal:")
+                || l.destination == "plan"
+                || l.destination == "buffer"
+        })
+        .map(|l| l.amount)
+        .sum();
     let projected = inputs.projected_available;
     let everyday = inputs.everyday_remaining.max(Decimal::ZERO);
     let known_future = inputs.known_future_payments.max(Decimal::ZERO);
@@ -78,12 +64,8 @@ pub fn figures(inputs: &SavingsSuggestion, lines: &[SuggestionLine]) -> Figures 
         everyday,
         known_future,
         safety_buffer,
-        takes,
-        general_takes,
         assigned,
-        general,
-        suggested: projected - everyday - known_future - safety_buffer - assigned + takes,
-        general_balance: inputs.general_balance,
+        suggested: projected - everyday - known_future - safety_buffer - assigned,
     }
 }
 
@@ -151,37 +133,15 @@ fn row(label: String, value: String) -> impl IntoView {
     view! { <li class=BREAKDOWN_ROW><span>{label}</span><span>{value}</span></li> }
 }
 
-/// Suggests what to move to general savings, or how much to take from it
-/// when money is short.
+/// How much is short or left over once this month's needs are covered.
 #[component]
 pub fn SuggestionPanel(
     inputs: SavingsSuggestion,
     figures: Figures,
-    disabled: Signal<bool>,
-    /// Adds (or grows) a general-pot line by the amount.
-    on_apply: Callback<Decimal>,
-    /// Adds (or grows) a take from the general pot by the amount.
-    on_take: Callback<Decimal>,
     /// Keeps the "Why this number?" disclosure open across recomputes.
     open: RwSignal<bool>,
 ) -> impl IntoView {
-    let Figures {
-        suggested,
-        general,
-        general_balance,
-        ..
-    } = figures;
-    let to_apply = suggested - general;
-    let short = if suggested < Decimal::ZERO {
-        suggested.abs()
-    } else {
-        Decimal::ZERO
-    };
-    // General savings can give what it held before this split, less what
-    // this split already takes from it.
-    let can_take = short
-        .min(general_balance - figures.general_takes)
-        .max(Decimal::ZERO);
+    let suggested = figures.suggested;
     let forecast_label = if inputs
         .forecast_model
         .as_deref()
@@ -191,48 +151,14 @@ pub fn SuggestionPanel(
     } else {
         "weekday baseline"
     };
-    let positive = (suggested > Decimal::ZERO).then(|| {
-        view! {
-            <p><strong>{format!("Suggested to General savings: {}", eur(suggested))}</strong></p>
-            {(general > Decimal::ZERO).then(|| view! {
-                <small class=SMALL>{format!("{} already assigned to General savings in this split.", eur(general))}</small>
-            })}
-            {if to_apply > Decimal::ZERO {
-                view! {
-                    <div class=ACTIONS>
-                        <Button size=Size::Sm disabled=disabled on_click=Callback::new(move |_| on_apply.run(to_apply))>
-                            {format!("Apply {}", eur(to_apply))}
-                        </Button>
-                    </div>
-                }
-                .into_any()
-            } else {
-                let text = if to_apply.is_zero() {
-                    "Suggestion applied.".to_owned()
-                } else {
-                    format!("{} more than suggested.", eur(to_apply.abs()))
-                };
-                view! { <small class=SMALL>{text}</small> }.into_any()
-            }}
-        }
-    });
-    let negative = (suggested < Decimal::ZERO).then(|| {
-        let tail = if can_take > Decimal::ZERO {
-            format!(" — take {} from General savings?", eur(can_take))
-        } else {
-            ". General savings has nothing to take.".to_owned()
-        };
-        view! {
-            <p><strong>{format!("{} is short by {}", month_name(&inputs.month, 0), eur(short))}</strong>{tail}</p>
-            {(can_take > Decimal::ZERO).then(|| view! {
-                <div class=ACTIONS>
-                    <Button size=Size::Sm variant=Variant::Secondary disabled=disabled on_click=Callback::new(move |_| on_take.run(can_take))>
-                        {format!("Take {}", eur(can_take))}
-                    </Button>
-                </div>
-            })}
-        }
-    });
+    let month = month_name(&inputs.month, 0);
+    let headline = if suggested < Decimal::ZERO {
+        format!("{month} is short by {}", eur(suggested.abs()))
+    } else if suggested > Decimal::ZERO {
+        format!("{month} has {} to spare", eur(suggested))
+    } else {
+        format!("{month} has nothing to spare")
+    };
     let known = (!inputs.known_payments.is_empty()).then(|| {
         let items = inputs
             .known_payments
@@ -256,9 +182,7 @@ pub fn SuggestionPanel(
     };
     view! {
         <section class=CALLOUT aria-label="Savings suggestion">
-            {positive}
-            {negative}
-            {suggested.is_zero().then(|| view! { <p><strong>"Nothing left to suggest for General savings."</strong></p> })}
+            <p><strong>{headline}</strong></p>
             <details prop:open=move || open.get() on:toggle=move |e| {
                 if let Some(target) = e.target() {
                     let now = js_sys::Reflect::get(&target, &"open".into())
@@ -289,11 +213,60 @@ pub fn SuggestionPanel(
                     {known}
                     {row("− Safety buffer".into(), eur(figures.safety_buffer))}
                     {row("− Already assigned in this split".into(), eur(figures.assigned))}
-                    {(figures.takes > Decimal::ZERO).then(|| row("+ Taken from pots".into(), eur(figures.takes)))}
                     <li class=TOTAL_ROW><span>"= Suggested"</span><strong>{eur(suggested)}</strong></li>
-                    {row("General savings balance before this month's split".into(), eur(general_balance))}
                 </ul>
             </details>
         </section>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn d(value: &str) -> Decimal {
+        value.parse().unwrap()
+    }
+
+    fn inputs() -> SavingsSuggestion {
+        SavingsSuggestion {
+            as_of: "2026-10-02".into(),
+            month: "2026-10-01".into(),
+            projected_available: d("1000"),
+            bank_balance: d("1000"),
+            protected_savings: Decimal::ZERO,
+            salary_reserved: Decimal::ZERO,
+            bills_remaining: Decimal::ZERO,
+            plans_remaining: Decimal::ZERO,
+            groups_remaining: Decimal::ZERO,
+            expected_income: Decimal::ZERO,
+            everyday_remaining: d("200"),
+            forecast_available: true,
+            forecast_model: None,
+            forecast_excluded: None,
+            known_future_payments: d("100"),
+            known_payments: Vec::new(),
+            safety_buffer: d("300"),
+        }
+    }
+
+    fn line(destination: &str, amount: &str) -> SuggestionLine {
+        SuggestionLine {
+            destination: destination.into(),
+            amount: d(amount),
+            currency: "EUR".into(),
+        }
+    }
+
+    #[test]
+    fn wish_lines_count_as_assigned() {
+        let base = figures(&inputs(), &[]);
+        assert_eq!(base.assigned, Decimal::ZERO);
+        assert_eq!(base.suggested, d("400"));
+        let wish = figures(&inputs(), &[line("wish:w1", "50")]);
+        assert_eq!(wish.assigned, d("50"));
+        assert_eq!(wish.suggested, base.suggested - d("50"));
+        let stay = figures(&inputs(), &[line("stay", "50"), line("pot:old", "50")]);
+        assert_eq!(stay, base);
     }
 }

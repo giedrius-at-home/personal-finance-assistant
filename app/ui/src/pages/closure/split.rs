@@ -75,10 +75,6 @@ fn parse(draft: &Draft, minor_unit: u8, allow_negative: bool) -> Option<Decimal>
     (!bad).then_some(value)
 }
 
-fn amount_of(draft: &Draft) -> Decimal {
-    parse_amount(draft.amount.trim()).unwrap_or_default()
-}
-
 fn draft_from(line: &AllocationLine) -> Draft {
     let take = line.pot_id().is_some() && line.amount.is_sign_negative();
     let amount = minor_amount(&line.amount.to_string(), line.currency.minor_unit);
@@ -375,126 +371,6 @@ pub fn SplitEditor(
     };
 
     // Savings suggestion (EUR only, split mode).
-    let general = suggestion
-        .as_ref()
-        .map(|s| format!("pot:{}", s.general_pot_id))
-        .unwrap_or_default();
-    let general = StoredValue::new(general);
-    let eur_rows = move || -> Vec<Row> {
-        rows.with_untracked(|r| {
-            r.rows
-                .iter()
-                .filter(|row| row.account.currency.code == "EUR")
-                .cloned()
-                .collect()
-        })
-    };
-    // Moves up to `amount` from the account with the most unassigned or
-    // staying money into general savings.
-    let apply_suggestion = Callback::new(move |amount: Decimal| {
-        let mut free: Vec<(Row, Decimal)> = eur_rows()
-            .into_iter()
-            .map(|row| {
-                let staying: Decimal = row
-                    .lines
-                    .iter()
-                    .filter(|l| l.destination == "stay" && !l.take)
-                    .map(amount_of)
-                    .sum();
-                let free = row.remaining.max(Decimal::ZERO) + staying;
-                (row, free)
-            })
-            .collect();
-        free.sort_by_key(|a| std::cmp::Reverse(a.1));
-        let Some((row, free)) = free.into_iter().next() else {
-            return;
-        };
-        if free <= Decimal::ZERO {
-            return;
-        }
-        let moved = amount.min(free);
-        let mut from_stay = moved - row.remaining.max(Decimal::ZERO);
-        let unit = row.account.currency.minor_unit;
-        let general = general.get_value();
-        let mut next: Vec<Draft> = Vec::new();
-        for line in row.lines {
-            if from_stay <= Decimal::ZERO || line.destination != "stay" || line.take {
-                next.push(line);
-                continue;
-            }
-            let used = from_stay.min(amount_of(&line));
-            from_stay -= used;
-            let left = amount_of(&line) - used;
-            if left > Decimal::ZERO {
-                next.push(Draft {
-                    amount: fixed(left, unit),
-                    ..line
-                });
-            }
-        }
-        if let Some(existing) = next
-            .iter_mut()
-            .find(|l| l.destination == general && !l.take)
-        {
-            existing.amount = fixed(amount_of(existing) + moved, unit);
-        } else {
-            next.push(Draft {
-                key: new_id(),
-                destination: general,
-                amount: fixed(moved, unit),
-                ..Draft::default()
-            });
-        }
-        set_account(row.account.account_id, Box::new(move |_| next));
-    });
-    // Takes `amount` from general savings onto the account with the largest
-    // leftover; it stays there for next month.
-    let take_from_general = Callback::new(move |amount: Decimal| {
-        let mut list = eur_rows();
-        list.sort_by_key(|a| std::cmp::Reverse(a.account.target));
-        let Some(row) = list.into_iter().next() else {
-            return;
-        };
-        let unit = row.account.currency.minor_unit;
-        let general = general.get_value();
-        set_account(
-            row.account.account_id,
-            Box::new(move |mut lines| {
-                let grow =
-                    |lines: &mut Vec<Draft>, matches: &dyn Fn(&Draft) -> bool, create: Draft| {
-                        if let Some(found) = lines.iter_mut().find(|l| matches(l)) {
-                            found.amount = fixed(amount_of(found) + amount, unit);
-                        } else {
-                            lines.push(create);
-                        }
-                    };
-                let g = general.clone();
-                grow(
-                    &mut lines,
-                    &|l| l.take && l.destination == g,
-                    Draft {
-                        key: new_id(),
-                        destination: general.clone(),
-                        amount: fixed(amount, unit),
-                        take: true,
-                        ..Draft::default()
-                    },
-                );
-                grow(
-                    &mut lines,
-                    &|l| l.destination == "stay" && !l.take,
-                    Draft {
-                        key: new_id(),
-                        destination: "stay".into(),
-                        amount: fixed(amount, unit),
-                        ..Draft::default()
-                    },
-                );
-                lines
-            }),
-        );
-    });
-
     let suggestion_open = RwSignal::new(false);
     let suggestion = StoredValue::new(suggestion);
     let has_eur = accounts.iter().any(|a| a.currency.code == "EUR");
@@ -525,9 +401,6 @@ pub fn SplitEditor(
             <SuggestionPanel
                 inputs=inputs
                 figures=figures
-                disabled=disabled
-                on_apply=apply_suggestion
-                on_take=take_from_general
                 open=suggestion_open
             />
         })
@@ -596,13 +469,7 @@ pub fn SplitEditor(
                                     let take_id = take_id.clone();
                                     view! {
                                         <Button size=Size::Sm variant=Variant::Secondary on_click=Callback::new(move |_| {
-                                            let general = general.get_value();
-                                            let pot = pots.with_value(|p| {
-                                                p.iter()
-                                                    .find(|pot| format!("pot:{}", pot.pot_id) == general)
-                                                    .or_else(|| p.first())
-                                                    .map(|pot| pot.pot_id.clone())
-                                            });
+                                            let pot = pots.with_value(|p| p.first().map(|pot| pot.pot_id.clone()));
                                             let Some(pot) = pot else { return };
                                             let draft = Draft {
                                                 key: new_id(),
