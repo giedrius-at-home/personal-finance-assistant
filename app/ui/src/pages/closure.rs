@@ -17,7 +17,7 @@ use std::future::Future;
 use finance_types::report::Dashboard;
 use finance_types::report::closure::{
     AccountReview, AccountRoleKind, AllocationLine, ClosureAction, ClosureStatus, ClosureView,
-    LineKind, PotDraft, PotView, TransferStatus, UnclassifiedAccounts,
+    LineKind, TransferStatus, UnclassifiedAccounts,
 };
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -25,14 +25,14 @@ use rust_decimal::Decimal;
 
 use self::balances::{BalancesPanel, balances_locked, parse_balance, shows_balances};
 use self::bank_sync::{BankSyncPanel, bank_name};
-use self::panels::{AccountsPanel, PotsPanel};
-use self::split::{DraftStore, SplitEditor, SplitTarget};
+use self::panels::AccountsPanel;
+use self::split::{DraftStore, LegacyNames, SplitEditor, SplitTarget};
 use self::steps::{AllocationList, ReviewNames, ReviewStep, UnclassifiedAccounts as NewAccounts};
 use self::transfer::Hop;
 use self::ui::{
     ACTIONS, CALLOUT, CONFLICT, Choice, ERROR, FOOTNOTE, FieldBox, LIST, SUBHEADING, StepCard,
     WARN, date_time, field_id, load_closure, load_unclassified, money, month_label, month_to_close,
-    next_month, post_closure, post_pot, post_role, previous_month, recent_months,
+    next_month, post_closure, post_role, previous_month, recent_months,
 };
 use crate::ds::{
     Button, Card, CardTone, EmptyState, Eyebrow, Icon, Lucide, Size, StepState, Variant, step_class,
@@ -436,84 +436,6 @@ impl Wizard {
             "Account saved.".into(),
         );
     }
-
-    /// Saves a pot and reloads the month so balances and destinations
-    /// follow; resolves to the saved pot.
-    async fn save_pot_now(self, pot: PotDraft) -> Option<PotView> {
-        if self.busy.get_untracked() {
-            return None;
-        }
-        self.busy.set(true);
-        self.error.set(String::new());
-        self.notice.set(String::new());
-        let existing = pot.pot_id.is_some();
-        let result = post_pot(pot).await;
-        let saved = match result {
-            Ok(saved) => {
-                self.notice.set(if existing {
-                    format!("{} saved.", saved.name)
-                } else {
-                    format!("{} created.", saved.name)
-                });
-                let _ = self.reload().await;
-                Some(saved)
-            }
-            Err(e) => {
-                self.error.set(if e.is_empty() {
-                    "Could not save the pot.".into()
-                } else {
-                    e
-                });
-                None
-            }
-        };
-        self.busy.set(false);
-        saved
-    }
-
-    /// Save a pot from the Pots panel; `editing` closes the edit form.
-    pub fn save_pot(self, pot: PotDraft, editing: Option<RwSignal<bool>>) {
-        spawn_local(async move {
-            if self.save_pot_now(pot).await.is_some()
-                && let Some(editing) = editing
-            {
-                let _ = editing.try_set(false);
-            }
-        });
-    }
-
-    /// "New pot…" inside a split line: create the pot, then point the line
-    /// at it.
-    pub fn create_pot_for_line(
-        self,
-        name: String,
-        location: Option<String>,
-        account_id: String,
-        key: String,
-        creating: RwSignal<bool>,
-    ) {
-        creating.set(true);
-        spawn_local(async move {
-            let draft = PotDraft {
-                pot_id: None,
-                name,
-                account_id: location,
-                archived: false,
-            };
-            if let Some(pot) = self.save_pot_now(draft).await {
-                self.drafts.update(|s| {
-                    if let Some(line) = s
-                        .accounts
-                        .get_mut(&account_id)
-                        .and_then(|lines| lines.iter_mut().find(|d| d.key == key))
-                    {
-                        line.destination = format!("pot:{}", pot.pot_id);
-                    }
-                });
-            }
-            let _ = creating.try_set(false);
-        });
-    }
 }
 
 /// A step that cannot act in this status: one line why, and the button
@@ -658,11 +580,7 @@ fn ClosedSummary(view: ClosureView) -> impl IntoView {
 }
 
 #[component]
-fn ChangedAfterClose(
-    view: ClosureView,
-    pots: Vec<PotView>,
-    locations: Vec<(String, String)>,
-) -> impl IntoView {
+fn ChangedAfterClose(view: ClosureView) -> impl IntoView {
     let wizard = expect_context::<Wizard>();
     // Mirrors the backend's delta validation: clamped leftovers, and
     // accounts that dropped out of the review since the split still count
@@ -749,6 +667,8 @@ fn ChangedAfterClose(
         .to_owned();
     let key = format!("{month}:{}:resettle", view.period.revision);
     let goals = view.goals.clone();
+    let wishes = view.wishes.clone();
+    let legacy = legacy_names(&view);
     let allocations = view.period.allocations.clone();
     view! {
         <StepCard
@@ -762,8 +682,8 @@ fn ChangedAfterClose(
             {none_changed.then(|| view! { <p class=FOOTNOTE>"No leftover changed. Confirm to close the month again."</p> })}
             <SplitEditor
                 month=month
-                pots=pots
-                locations=locations
+                wishes=wishes
+                legacy=legacy
                 goals=goals
                 allow_negative=true
                 submit_label="Confirm changes"
@@ -775,7 +695,7 @@ fn ChangedAfterClose(
     }
 }
 
-/// The wizard: month picker, steps, then the Accounts and Pots panels.
+/// The wizard: month picker, steps, then the Accounts panel.
 #[component]
 pub fn MonthClosure() -> impl IntoView {
     let app = state();
@@ -903,17 +823,7 @@ pub fn MonthClosure() -> impl IntoView {
     };
     let panels = move || {
         let v = view.get()?;
-        let locations: Vec<(String, String)> = v
-            .review
-            .accounts
-            .iter()
-            .filter(|a| a.role != AccountRoleKind::Ignored)
-            .map(|a| (a.account_id.clone(), a.name.clone()))
-            .collect();
-        Some(view! {
-            <AccountsPanel accounts=v.accounts.clone() goals=v.goals.clone() />
-            <PotsPanel view=v locations=locations />
-        })
+        Some(view! { <AccountsPanel accounts=v.accounts goals=v.goals /> })
     };
 
     view! {
@@ -968,14 +878,6 @@ fn step_view(
     let status = view.period.status;
     let month = wizard.month.get_untracked();
     let name = month_label(&month, false);
-    let pots: Vec<PotView> = view.pots.iter().filter(|p| !p.archived).cloned().collect();
-    let locations: Vec<(String, String)> = view
-        .review
-        .accounts
-        .iter()
-        .filter(|a| a.role != AccountRoleKind::Ignored)
-        .map(|a| (a.account_id.clone(), a.name.clone()))
-        .collect();
     use ClosureStatus as S;
     match step {
         0 => {
@@ -1047,9 +949,7 @@ fn step_view(
             }
             .into_any()
         }
-        2 if status == S::ChangedAfterClose => {
-            view! { <ChangedAfterClose view=view pots=pots locations=locations /> }.into_any()
-        }
+        2 if status == S::ChangedAfterClose => view! { <ChangedAfterClose view=view /> }.into_any(),
         2 => {
             let title = format!(
                 "3. {}",
@@ -1060,7 +960,7 @@ fn step_view(
                 }
             );
             let description = match status {
-                S::Settling => Some("Assign every account's leftover to a pot, a planned purchase, a goal, the next-month buffer, or leave it where it is.".to_owned()),
+                S::Settling => Some("Assign every account's leftover to a wish, a planned purchase, a goal, the next-month buffer, or leave it where it is.".to_owned()),
                 S::Settled => Some("Change where each leftover goes. Confirming replaces the split and its transfer list.".to_owned()),
                 _ => None,
             };
@@ -1086,7 +986,7 @@ fn step_view(
                         .iter()
                         .any(|a| a.role == AccountRoleKind::Spending);
                     let editor = if has_spending {
-                        split_editor(wizard, &view, &month, pots, locations, report)
+                        split_editor(wizard, &view, &month, report)
                     } else {
                         view! {
                             <EmptyState class="p-4" title="No accounts to split" description="Set account types in the Accounts panel below." />
@@ -1166,34 +1066,39 @@ fn step_view(
     }
 }
 
+/// Names for old lines' destinations: pots and wishes no longer offered.
+fn legacy_names(view: &ClosureView) -> LegacyNames {
+    LegacyNames {
+        pots: view
+            .pots
+            .iter()
+            .map(|p| (p.pot_id.clone(), p.name.clone()))
+            .collect(),
+        wishes: view.wish_labels.clone(),
+    }
+}
+
 /// The first split or its edit.
 fn split_editor(
     wizard: Wizard,
     view: &ClosureView,
     month: &str,
-    pots: Vec<PotView>,
-    locations: Vec<(String, String)>,
     report: Option<&Dashboard>,
 ) -> AnyView {
     let settled = view.period.status == ClosureStatus::Settled;
     let allocations = &view.period.allocations;
-    // A deficit account is offered only to take from a pot (it has one, or a
-    // pot holds its currency).
-    let can_take = |account: &AccountReview| {
+    // A deficit account shows only when it has old lines (a take from a
+    // pot) to remove.
+    let has_lines = |account: &AccountReview| {
         allocations
             .iter()
             .any(|l| l.from_account_id == account.account_id && l.kind == LineKind::Split)
-            || pots.iter().any(|p| {
-                p.balances
-                    .get(&account.currency.code)
-                    .is_some_and(|b| *b > Decimal::ZERO)
-            })
     };
     let targets: Vec<SplitTarget> = view
         .review
         .accounts
         .iter()
-        .filter(|a| a.leftover > Decimal::ZERO || can_take(a))
+        .filter(|a| a.leftover > Decimal::ZERO || has_lines(a))
         .map(|a| {
             let deficit = a.leftover <= Decimal::ZERO;
             SplitTarget {
@@ -1202,7 +1107,7 @@ fn split_editor(
                 currency: a.currency.clone(),
                 target: if deficit { Decimal::ZERO } else { a.leftover },
                 note: if deficit {
-                    Some("Deficit: nothing to split, but you can take from a pot.".into())
+                    Some("Deficit: nothing to split.".into())
                 } else if a.role == AccountRoleKind::Savings {
                     Some("Savings account".into())
                 } else {
@@ -1226,12 +1131,10 @@ fn split_editor(
     view! {
         <SplitEditor
             month=month.to_owned()
-            pots=pots
-            locations=locations
-            committed=allocations.clone()
+            wishes=view.wishes.clone()
+            legacy=legacy_names(view)
             suggestion=view.suggestion.clone()
             categories=categories
-            can_create_pot=true
             goals=view.goals.clone()
             initial=if settled { allocations.clone() } else { Vec::new() }
             submit_label=if settled { "Confirm new split" } else { "Confirm split" }

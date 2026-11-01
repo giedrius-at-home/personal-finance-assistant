@@ -40,8 +40,6 @@
     "allow-archive-planned-payment",
     "allow-closure",
     "allow-closure-action",
-    "allow-closure-pots",
-    "allow-save-pot",
     "allow-save-account-role",
     "allow-unclassified-accounts",
     "allow-manage-workspace",

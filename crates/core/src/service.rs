@@ -9,7 +9,7 @@ use finance_storage::Store;
 use finance_types::DataStatus;
 use finance_types::gateway::{Wish, WishDraft, WishPurchase, WishSettings};
 use finance_types::report::closure::{
-    AccountRoleDraft, ClosureAction, ClosureView, PotDraft, PotView, PotsView, UnclassifiedAccounts,
+    AccountRoleDraft, ClosureAction, ClosureView, UnclassifiedAccounts,
 };
 use finance_types::report::review::{self as rv, TransactionSearchQuery, TransactionSearchResult};
 use finance_types::report::wishes::WishesView;
@@ -552,15 +552,6 @@ impl Service {
         }
         let month = self.write(|w, snap| crate::writes::closure::act(w, snap, action))?;
         self.closure(&month.to_string())
-    }
-
-    /// Every pot (archived too) and the 50 newest pot entries.
-    pub fn pots(&self) -> Result<PotsView, String> {
-        self.read(|store, _| crate::closure::pots_view(store.connection()))
-    }
-
-    pub fn save_pot(&self, pot: PotDraft) -> Result<PotView, String> {
-        self.write(|w, snap| crate::writes::closure::save_pot(w, snap, pot))
     }
 
     /// Save an account's closure role; open transfers follow a new route.

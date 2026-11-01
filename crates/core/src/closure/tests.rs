@@ -4,7 +4,10 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::str::FromStr;
 
-use finance_types::gateway::{AccountRole, OwnerSettings, SavingsGoal, SavingsGoalRecord};
+use finance_types::gateway::{
+    AccountRole, OwnerSettings, PotRecord, Repeat, SavingsGoal, SavingsGoalRecord, Wish, WishKind,
+    WishPurchase, WishSource, WishStatus,
+};
 use finance_types::report::closure::{
     AccountReview, AccountRoleKind, AllocationLine, ClosureReview, ClosureStatus, LineKind,
     MonthPeriod, TransferHop, TransferStatus,
@@ -269,9 +272,9 @@ fn late_cutoff_does_not_pull_next_month_bookings_back() {
 #[test]
 fn settle_requires_every_euro_assigned_to_known_destinations() {
     let goals: HashSet<&str> = HashSet::from(["emergency"]);
-    let pots = PotBalances::new();
+    let wishes = WishCaps::new();
     let check = |leftover: &str, lines: &[AllocationLine]| {
-        validate_allocations(&review(leftover), lines, &goals, None, &pots)
+        validate_allocations(&review(leftover), lines, &goals, None, &wishes)
     };
     assert!(
         check(
@@ -307,13 +310,270 @@ fn settle_requires_every_euro_assigned_to_known_destinations() {
 #[test]
 fn delta_mode_assigns_the_leftover_change() {
     let goals = HashSet::new();
-    let pots = PotBalances::new();
+    let wishes = WishCaps::new();
     let baseline = review("100");
     let check = |lines: &[AllocationLine]| {
-        validate_allocations(&review("40"), lines, &goals, Some(&baseline), &pots)
+        validate_allocations(&review("40"), lines, &goals, Some(&baseline), &wishes)
     };
     assert!(check(&[line("d", "buffer", "-60")]).is_ok());
     assert!(check(&[line("d", "buffer", "-50")]).is_err());
+}
+
+fn wish(id: &str, amount: &str, saved: &str, parent: Option<&str>) -> Wish {
+    Wish {
+        wish_id: id.into(),
+        parent_id: parent.map(str::to_owned),
+        name: id.into(),
+        amount: d(amount),
+        currency: eur(),
+        due_on: "2027-01-01".into(),
+        source: WishSource::Card,
+        saved: d(saved),
+        saved_month: None,
+        status: WishStatus::Planned,
+        bought: None,
+        kind: WishKind::OneOff,
+        must: false,
+        created_at: "2026-09-01T00:00:00Z".into(),
+    }
+}
+
+fn usd() -> Currency {
+    Currency::new("USD")
+}
+
+#[test]
+fn pot_lines_and_takes_are_refused_on_a_new_split() {
+    let goals = HashSet::new();
+    let wishes = WishCaps::new();
+    let check = |lines: &[AllocationLine]| {
+        validate_allocations(&review("10"), lines, &goals, None, &wishes)
+    };
+    assert_eq!(
+        check(&[line("p", "pot:general", "10")]).unwrap_err(),
+        "pots are no longer available"
+    );
+    assert_eq!(
+        check(&[line("s", "stay", "-10")]).unwrap_err(),
+        "pots are no longer available"
+    );
+    // A resettle may still refuse a pot line, even a positive one.
+    let baseline = review("0");
+    assert_eq!(
+        validate_allocations(
+            &review("10"),
+            &[line("p", "pot:general", "10")],
+            &goals,
+            Some(&baseline),
+            &wishes
+        )
+        .unwrap_err(),
+        "pots are no longer available"
+    );
+}
+
+#[test]
+fn wish_lines_need_a_planned_one_off_wish_with_room() {
+    let goals = HashSet::new();
+    let bought = Wish {
+        status: WishStatus::Bought,
+        bought: Some(WishPurchase {
+            amount: d("50"),
+            on: "2026-09-10".into(),
+            source: WishSource::Card,
+            cards: Vec::new(),
+        }),
+        ..wish("bought", "50", "0", None)
+    };
+    let repeating = Wish {
+        kind: WishKind::Recurring {
+            every: Repeat::Monthly,
+            ends_on: None,
+        },
+        ..wish("repeat", "50", "0", None)
+    };
+    let caps = wish_caps(&[wish("bike", "100", "90", None), bought, repeating], &[]);
+    let check = |leftover: &str, lines: &[AllocationLine]| {
+        validate_allocations(&review(leftover), lines, &goals, None, &caps)
+    };
+    assert_eq!(
+        check("10", &[line("w", "wish:nope", "10")]).unwrap_err(),
+        "unknown wish"
+    );
+    assert_eq!(
+        check("10", &[line("w", "wish:bought", "10")]).unwrap_err(),
+        "unknown wish"
+    );
+    assert_eq!(
+        check("10", &[line("w", "wish:repeat", "10")]).unwrap_err(),
+        "unknown wish"
+    );
+    assert_eq!(
+        check("10", &[line("w", "wish:bike", "-5")]).unwrap_err(),
+        "a wish line must be positive"
+    );
+    let baseline = review("100");
+    assert_eq!(
+        validate_allocations(
+            &review("95"),
+            &[line("w", "wish:bike", "-5")],
+            &goals,
+            Some(&baseline),
+            &caps
+        )
+        .unwrap_err(),
+        "a wish line must be positive"
+    );
+    assert_eq!(
+        check(
+            "20",
+            &[line("a", "wish:bike", "15"), line("b", "wish:bike", "5")]
+        )
+        .unwrap_err(),
+        "saves more than the wish still needs"
+    );
+    assert!(check("10", &[line("w", "wish:bike", "10")]).is_ok());
+}
+
+#[test]
+fn wish_line_currency_must_match() {
+    let caps = wish_caps(&[wish("bike", "100", "0", None)], &[]);
+    let usd_line = AllocationLine {
+        currency: usd(),
+        ..line("w", "wish:bike", "10")
+    };
+    assert_eq!(
+        validate_allocations(&review("10"), &[usd_line], &HashSet::new(), None, &caps).unwrap_err(),
+        "wish currency does not match"
+    );
+}
+
+#[test]
+fn parent_cap_is_its_rest_and_earlier_lines_count_back() {
+    let wishes = [
+        wish("trip", "500", "250", None),
+        wish("flight", "200", "0", Some("trip")),
+    ];
+    let caps = wish_caps(&wishes, &[]);
+    assert_eq!(caps["trip"].room, d("50"));
+    assert_eq!(caps["trip"].currency, eur());
+    assert_eq!(caps["flight"].room, d("200"));
+    let earlier = [line("x", "wish:trip", "30"), line("y", "buffer", "70")];
+    let caps = wish_caps(&wishes, &earlier);
+    assert_eq!(caps["trip"].room, d("80"));
+    // Saved past the cap leaves no room rather than a negative one.
+    let caps = wish_caps(&[wish("bike", "100", "120", None)], &[]);
+    assert_eq!(caps["bike"].room, Decimal::ZERO);
+}
+
+#[test]
+fn a_sub_wish_needs_a_planned_parent() {
+    let planned = [
+        wish("trip", "500", "0", None),
+        wish("flight", "200", "0", Some("trip")),
+    ];
+    assert!(wish_caps(&planned, &[]).contains_key("flight"));
+    let mut bought_parent = wish("trip", "500", "0", None);
+    bought_parent.status = WishStatus::Bought;
+    let wishes = [bought_parent, wish("flight", "200", "0", Some("trip"))];
+    assert!(!wish_caps(&wishes, &[]).contains_key("flight"));
+    // A parent that is gone leaves the sub-wish without a cap too.
+    let orphan = [wish("flight", "200", "0", Some("missing"))];
+    assert!(wish_caps(&orphan, &[]).is_empty());
+    let options = wish_options(&wishes, &[]);
+    let names: HashMap<String, String> = wish_labels(&wishes, &options).into_iter().collect();
+    assert_eq!(names["flight"], "Wish (no longer planned): flight");
+}
+
+#[test]
+fn wish_options_list_parents_then_sub_wishes_by_due_date() {
+    let mut later = wish("bike", "1200", "300", None);
+    later.due_on = "2027-06-01".into();
+    later.name = "Bike".into();
+    let mut trip = wish("trip", "500", "250", None);
+    trip.name = "Trip".into();
+    let mut flight = wish("flight", "200", "0", Some("trip"));
+    flight.name = "Flight".into();
+    let mut bought = wish("tv", "400", "400", None);
+    bought.name = "TV".into();
+    bought.status = WishStatus::Bought;
+    let mut dropped = wish("sofa", "900", "0", None);
+    dropped.name = "Sofa".into();
+    dropped.status = WishStatus::Dropped;
+    let wishes = [later, flight, bought, trip, dropped];
+    let options = wish_options(&wishes, &[]);
+    let labels: Vec<(&str, &str)> = options
+        .iter()
+        .map(|o| (o.wish_id.as_str(), o.label.as_str()))
+        .collect();
+    assert_eq!(
+        labels,
+        [
+            ("trip", "Wish: Trip rest"),
+            ("flight", "Wish: Flight (€0.00 of €200.00)"),
+            ("bike", "Wish: Bike (€300.00 of €1,200.00)"),
+        ]
+    );
+    assert_eq!(options[0].room, d("50"));
+    assert_eq!(options[0].currency, eur());
+    let names: HashMap<String, String> = wish_labels(&wishes, &options).into_iter().collect();
+    assert_eq!(names["bike"], "Wish: Bike");
+    assert_eq!(names["trip"], "Wish: Trip rest");
+    assert_eq!(names["flight"], "Wish: Flight");
+    assert_eq!(names["tv"], "Wish (bought): TV");
+    assert_eq!(names["sofa"], "Wish (dropped): Sofa");
+}
+
+#[test]
+fn a_fully_saved_wish_is_not_offered_but_still_has_a_cap() {
+    let wishes = [
+        wish("bike", "100", "100", None),
+        wish("tv", "50", "0", None),
+    ];
+    let ids: Vec<String> = wish_options(&wishes, &[])
+        .into_iter()
+        .map(|o| o.wish_id)
+        .collect();
+    assert_eq!(ids, ["tv"]);
+    assert_eq!(wish_caps(&wishes, &[])["bike"].room, Decimal::ZERO);
+    // An earlier line to it gives room back, so it is offered again.
+    let earlier = [line("x", "wish:bike", "30")];
+    assert_eq!(wish_options(&wishes, &earlier).len(), 2);
+}
+
+#[test]
+fn a_resettle_does_not_count_earlier_wish_lines_back() {
+    let wishes = [wish("bike", "100", "40", None)];
+    let mut settled = period("2026-10-01", ClosureStatus::Settled);
+    settled.allocations = vec![line("x", "wish:bike", "40")];
+    let changed = MonthPeriod {
+        status: ClosureStatus::ChangedAfterClose,
+        ..settled.clone()
+    };
+    assert_eq!(period_wish_options(&wishes, &settled)[0].room, d("100"));
+    assert_eq!(period_wish_options(&wishes, &changed)[0].room, d("60"));
+}
+
+#[test]
+fn legacy_pot_lines_still_route_and_match() {
+    let pots = [PotRecord {
+        pot_id: "general".into(),
+        name: "General savings".into(),
+        account_id: Some("savings".into()),
+        archived: false,
+        created_at: "2026-01-01T00:00:00Z".into(),
+    }];
+    let lines = with_transfer_targets(vec![line("p", "pot:general", "300")], &[], &pots);
+    assert_eq!(lines[0].to_account_id.as_deref(), Some("savings"));
+    assert_eq!(lines[0].transfer_status, TransferStatus::Pending);
+    let moves = [
+        paired("debit", "300", "2026-09-30T12:00:00Z"),
+        paired("credit", "300", "2026-09-30T12:00:00Z"),
+    ];
+    let refs: Vec<&Tx> = moves.iter().collect();
+    let settled: Timestamp = "2026-09-30T10:00:00Z".parse().unwrap();
+    let matched = match_transfers(&lines, &refs, settled, &zone());
+    assert_eq!(matched[0].transfer_status, TransferStatus::Matched);
 }
 
 fn pending(id: &str, amount: &str) -> AllocationLine {
@@ -597,7 +857,6 @@ fn suggestion_starts_from_overview_and_reserves_what_is_still_to_come() {
         date(2026, 10, 2),
         &payments,
         d("300"),
-        Decimal::ZERO,
         Some(forecast),
     );
     assert_eq!(
@@ -613,14 +872,7 @@ fn suggestion_starts_from_overview_and_reserves_what_is_still_to_come() {
         .collect();
     assert_eq!(known, [("laptop", d("900")), ("insurance", d("300"))]);
     assert_eq!(found.known_future_payments, d("1200"));
-    let unforecast = savings_suggestion(
-        &allocation,
-        date(2026, 10, 2),
-        &[],
-        d("300"),
-        Decimal::ZERO,
-        None,
-    );
+    let unforecast = savings_suggestion(&allocation, date(2026, 10, 2), &[], d("300"), None);
     assert!(!unforecast.forecast_available);
     assert_eq!(unforecast.everyday_remaining, Decimal::ZERO);
 }
@@ -647,22 +899,6 @@ fn stored_instants_drop_zero_microseconds() {
     assert_eq!(stored_instant(fine), "2026-10-26T20:00:00.123456Z");
     assert!(parse_month("2026-10-02").is_err());
     assert_eq!(parse_month("2026-10-01").unwrap(), date(2026, 10, 1));
-}
-
-#[test]
-fn pot_entries_name_the_month_and_skip_other_lines() {
-    let september = MonthPeriod {
-        allocations: vec![
-            line("s", "stay", "5"),
-            line("g", "pot:general", "60"),
-            line("z", "pot:general", "0"),
-        ],
-        ..period("2026-09-01", ClosureStatus::Settled)
-    };
-    let entries = pot_entries(&september, "2026-09-30T10:00:00Z");
-    assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].entry_id, "2026-09-01:1:g");
-    assert_eq!(entries[0].note.as_deref(), Some("September 2026 closure"));
 }
 
 #[test]

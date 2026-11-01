@@ -92,10 +92,10 @@ pub struct TransferHop {
 pub struct AllocationLine {
     pub line_id: String,
     pub from_account_id: String,
-    /// `goal:<id>`, `pot:<pot_id>`, `plan` (a planned purchase), `buffer`
+    /// `goal:<id>`, `wish:<wish_id>`, `pot:<pot_id>` (legacy, read-only), `plan` (a planned purchase), `buffer`
     /// (next month) or `stay`.
     pub destination: String,
-    /// Negative only for a take from a pot (split) or a delta line.
+    /// Negative only on a delta line (and on legacy pot takes).
     pub amount: Decimal,
     pub currency: Currency,
     #[serde(default)]
@@ -133,7 +133,7 @@ pub struct AllocationLine {
 }
 
 impl AllocationLine {
-    /// The pot a `pot:<id>` line moves money into (or takes it from).
+    /// The retired pot of a legacy `pot:<id>` line.
     pub fn pot_id(&self) -> Option<&str> {
         self.destination.strip_prefix("pot:")
     }
@@ -141,6 +141,11 @@ impl AllocationLine {
     /// The savings goal of a `goal:<id>` line.
     pub fn goal_id(&self) -> Option<&str> {
         self.destination.strip_prefix("goal:")
+    }
+
+    /// The planned wish a `wish:<id>` line saves toward.
+    pub fn wish_id(&self) -> Option<&str> {
+        self.destination.strip_prefix("wish:")
     }
 }
 
@@ -314,35 +319,16 @@ pub struct PotView {
     pub balances: BTreeMap<String, Decimal>,
 }
 
-/// One pot ledger entry (a closure line that moved money in or out).
+/// A planned one-off wish a split line can save toward (view only).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PotEntryView {
-    pub entry_id: String,
-    pub pot_id: String,
-    pub month: String,
-    pub amount: Decimal,
+pub struct WishOption {
+    pub wish_id: String,
+    /// `Wish: <name> (€saved of €amount)`, or `Wish: <name> rest` for a
+    /// parent with sub-wishes.
+    pub label: String,
     pub currency: Currency,
-    pub note: Option<String>,
-}
-
-/// Every pot (archived ones too) and the 50 newest entries.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PotsView {
-    pub pots: Vec<PotView>,
-    pub entries: Vec<PotEntryView>,
-}
-
-/// A pot to create (`pot_id: None`) or change.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PotDraft {
-    #[serde(default)]
-    pub pot_id: Option<String>,
-    pub name: String,
-    #[serde(default)]
-    pub account_id: Option<String>,
-    #[serde(default)]
-    pub archived: bool,
+    /// What the wish can still take this month.
+    pub room: Decimal,
 }
 
 /// A one-off planned payment due in the months after the funded one.
@@ -379,8 +365,6 @@ pub struct SavingsSuggestion {
     pub known_future_payments: Decimal,
     pub known_payments: Vec<KnownPayment>,
     pub safety_buffer: Decimal,
-    pub general_pot_id: String,
-    pub general_balance: Decimal,
 }
 
 /// One own-account bank transfer since the split (paired legs as one).
@@ -403,8 +387,16 @@ pub struct ClosureView {
     pub review: ClosureReview,
     /// `(goal_id, name)` of every savings goal.
     pub goals: Vec<(String, String)>,
-    /// Open pots with their balances.
+    /// Pots with their balances: legacy, for naming old `pot:` lines.
     pub pots: Vec<PotView>,
+    /// Wishes a split line can save toward: parents, then their sub-wishes.
+    #[serde(default)]
+    pub wishes: Vec<WishOption>,
+    /// `(wish_id, label)` of every wish, for naming lines: `Wish: <name>`,
+    /// or `Wish (bought): <name>` / `Wish (dropped): <name>` /
+    /// `Wish (no longer planned): <name>` once it can take no line.
+    #[serde(default)]
+    pub wish_labels: Vec<(String, String)>,
     pub suggestion: Option<SavingsSuggestion>,
     /// Every known account and its role, ignored ones included.
     pub accounts: Vec<AccountRoleView>,

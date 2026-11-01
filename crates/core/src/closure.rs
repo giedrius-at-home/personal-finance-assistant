@@ -11,14 +11,15 @@ use std::sync::LazyLock;
 
 use finance_storage::Store;
 use finance_types::gateway::{
-    AccountRole, BudgetPlan, Direction, GroupMapping, PotEntryRecord, PotRecord,
+    AccountRole, BudgetPlan, Direction, GroupMapping, PotEntryRecord, PotRecord, Wish, WishKind,
+    WishStatus,
 };
 use finance_types::report::Currency;
 use finance_types::report::allocation::CurrencyAllocation;
 use finance_types::report::closure::{
     AccountReview, AccountRoleKind, AccountRoleView, AllocationLine, BalanceState, BalanceStatus,
-    ClosureReview, ClosureView, GroupReview, KnownPayment, MonthPeriod, NamedAccount, PotEntryView,
-    PotView, PotsView, SavingsSuggestion, TransferStatus, UnclassifiedAccounts,
+    ClosureReview, ClosureStatus, ClosureView, GroupReview, KnownPayment, MonthPeriod,
+    NamedAccount, PotView, SavingsSuggestion, TransferStatus, UnclassifiedAccounts, WishOption,
 };
 use finance_types::report::outlook::{DailySpendingForecast, ForecastExclusions};
 use finance_types::report::plans::{PlanStatus, PlannedPaymentView};
@@ -87,23 +88,21 @@ pub fn load_roles(conn: &Connection) -> Result<Vec<AccountRole>> {
     )
 }
 
-/// The general pot as Python created it on first read.
-pub(crate) fn general_pot(now: Timestamp) -> PotRecord {
-    PotRecord {
-        pot_id: GENERAL_POT_ID.to_owned(),
-        name: GENERAL_POT_NAME.to_owned(),
-        account_id: None,
-        archived: false,
-        created_at: stored_instant(now),
-    }
-}
-
 /// Pots by creation; the general pot is always there (a read-only store
 /// that lacks it gets one in memory).
 pub fn load_pots(conn: &Connection, include_archived: bool) -> Result<Vec<PotRecord>> {
     let mut pots: Vec<PotRecord> = payloads(conn, "SELECT payload_json FROM pots ORDER BY rowid")?;
     if !pots.iter().any(|p| p.pot_id == GENERAL_POT_ID) {
-        pots.insert(0, general_pot(Timestamp::now()));
+        pots.insert(
+            0,
+            PotRecord {
+                pot_id: GENERAL_POT_ID.to_owned(),
+                name: GENERAL_POT_NAME.to_owned(),
+                account_id: None,
+                archived: false,
+                created_at: stored_instant(Timestamp::now()),
+            },
+        );
     }
     pots.retain(|p| include_archived || !p.archived);
     Ok(pots)
@@ -140,24 +139,6 @@ pub fn pot_balances(entries: &[PotEntryRecord], exclude_month: Option<Date>) -> 
     balances
 }
 
-/// What a take may draw from each open pot.
-pub fn open_pot_balances(
-    pots: &[PotRecord],
-    entries: &[PotEntryRecord],
-    exclude_month: Option<Date>,
-) -> PotBalances {
-    let balances = pot_balances(entries, exclude_month);
-    pots.iter()
-        .filter(|p| !p.archived)
-        .map(|p| {
-            (
-                p.pot_id.clone(),
-                balances.get(&p.pot_id).cloned().unwrap_or_default(),
-            )
-        })
-        .collect()
-}
-
 pub fn pot_view(pot: &PotRecord, balances: &PotBalances) -> PotView {
     PotView {
         pot_id: pot.pot_id.clone(),
@@ -166,28 +147,6 @@ pub fn pot_view(pot: &PotRecord, balances: &PotBalances) -> PotView {
         archived: pot.archived,
         balances: balances.get(&pot.pot_id).cloned().unwrap_or_default(),
     }
-}
-
-/// Every pot (archived too) and the 50 newest entries (Python `pots_view`).
-pub fn pots_view(conn: &Connection) -> Result<PotsView> {
-    let balances = pot_balances(&load_pot_entries(conn, None)?, None);
-    Ok(PotsView {
-        pots: load_pots(conn, true)?
-            .iter()
-            .map(|p| pot_view(p, &balances))
-            .collect(),
-        entries: load_pot_entries(conn, Some(50))?
-            .into_iter()
-            .map(|e| PotEntryView {
-                entry_id: e.entry_id,
-                pot_id: e.pot_id,
-                month: e.month,
-                amount: e.amount,
-                currency: e.currency,
-                note: e.note,
-            })
-            .collect(),
-    })
 }
 
 /// Accounts in the Python service's order (`ORDER BY canonical_id`).
@@ -512,16 +471,208 @@ pub fn review_month(
     })
 }
 
-/// Split mode: every positive leftover fully assigned with positive lines;
-/// a negative pot line takes money out of a pot and adds it to the account.
+/// What a one-off planned wish can still take this month.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WishCap {
+    pub currency: Currency,
+    pub room: Decimal,
+}
+
+/// What each one-off planned wish can still take this month, keyed by wish id.
+pub type WishCaps = HashMap<String, WishCap>;
+
+/// Caps from the wishes and the period's previous lines (earlier
+/// contribution added back). A parent with sub-wishes is capped on its rest,
+/// as the wish schedule counts it (`plan_items`); every other wish on its
+/// own amount. Only one-off planned wishes take a line.
+pub fn wish_caps(wishes: &[Wish], previous: &[AllocationLine]) -> WishCaps {
+    let one_off = |w: &Wish| w.kind == WishKind::OneOff;
+    let mut children: HashMap<&str, Vec<&Wish>> = HashMap::new();
+    for w in wishes {
+        if let Some(p) = w.parent_id.as_deref() {
+            children.entry(p).or_default().push(w);
+        }
+    }
+    // As `earmarked`: a part of a parent that is no longer planned (or gone)
+    // takes no line.
+    let parent_planned = |id: &str| {
+        wishes
+            .iter()
+            .any(|p| p.wish_id == id && p.status == WishStatus::Planned)
+    };
+    wishes
+        .iter()
+        .filter(|w| w.status == WishStatus::Planned && one_off(w))
+        .filter(|w| w.parent_id.as_deref().is_none_or(parent_planned))
+        .map(|w| {
+            let subs: Vec<&Wish> = children
+                .get(w.wish_id.as_str())
+                .map(|v| v.iter().copied().filter(|s| one_off(s)).collect())
+                .unwrap_or_default();
+            let need = if subs.is_empty() {
+                w.amount
+            } else {
+                let mut rest = w.amount;
+                for sub in subs {
+                    match sub.status {
+                        WishStatus::Planned => rest -= sub.amount,
+                        WishStatus::Bought => {
+                            rest -= sub.bought.as_ref().map_or(sub.amount, |b| b.amount);
+                        }
+                        WishStatus::Dropped | WishStatus::Started => {}
+                    }
+                }
+                rest.max(Decimal::ZERO)
+            };
+            let earlier = sum(previous
+                .iter()
+                .filter(|l| l.wish_id() == Some(w.wish_id.as_str()))
+                .map(|l| l.amount));
+            (
+                w.wish_id.clone(),
+                WishCap {
+                    currency: w.currency.clone(),
+                    room: (need - w.saved + earlier).max(Decimal::ZERO),
+                },
+            )
+        })
+        .collect()
+}
+
+/// `€12.00`: the amount at the currency's minor unit, `USD 12.00` for a
+/// currency without a sign here.
+fn short_money(value: Decimal, currency: &Currency) -> String {
+    let mut value = value.round_dp(u32::from(currency.minor_unit));
+    value.rescale(u32::from(currency.minor_unit));
+    let text = value.abs().to_string();
+    let (whole, fraction) = text
+        .split_once('.')
+        .map_or((text.as_str(), None), |(w, f)| (w, Some(f)));
+    // Thousands separators, as the UI's `money` writes them.
+    let mut grouped = String::new();
+    for (i, digit) in whole.chars().enumerate() {
+        if i > 0 && (whole.len() - i) % 3 == 0 {
+            grouped.push(',');
+        }
+        grouped.push(digit);
+    }
+    let sign = if value.is_sign_negative() && !value.is_zero() {
+        "-"
+    } else {
+        ""
+    };
+    let value = match fraction {
+        Some(f) => format!("{sign}{grouped}.{f}"),
+        None => format!("{sign}{grouped}"),
+    };
+    match currency.code.as_str() {
+        "EUR" => format!("€{value}"),
+        "GBP" => format!("£{value}"),
+        "USD" => format!("${value}"),
+        code => format!("{code} {value}"),
+    }
+}
+
+/// The wishes a split line can save toward, as the Wishes page orders them:
+/// top-level wishes by due date, each followed by its sub-wishes. A parent
+/// with sub-wishes takes money toward its rest. A wish with no room left is
+/// not offered.
+pub fn wish_options(wishes: &[Wish], previous: &[AllocationLine]) -> Vec<WishOption> {
+    let caps = wish_caps(wishes, previous);
+    let by_due = |list: &mut Vec<&Wish>| {
+        list.sort_by(|a, b| (&a.due_on, &a.created_at).cmp(&(&b.due_on, &b.created_at)));
+    };
+    let ids: HashSet<&str> = wishes.iter().map(|w| w.wish_id.as_str()).collect();
+    let mut tops: Vec<&Wish> = wishes
+        .iter()
+        .filter(|w| w.parent_id.as_deref().is_none_or(|p| !ids.contains(p)))
+        .collect();
+    by_due(&mut tops);
+    let mut out = Vec::new();
+    for top in tops {
+        let mut subs: Vec<&Wish> = wishes
+            .iter()
+            .filter(|w| w.parent_id.as_deref() == Some(top.wish_id.as_str()))
+            .collect();
+        by_due(&mut subs);
+        let parent = subs.iter().any(|s| s.kind == WishKind::OneOff);
+        for wish in std::iter::once(top).chain(subs) {
+            // A fully saved wish stays in the caps (a stored line to it still
+            // validates and labels) but is not offered.
+            let Some(cap) = caps.get(&wish.wish_id).filter(|c| c.room > Decimal::ZERO) else {
+                continue;
+            };
+            let label = if parent && wish.wish_id == top.wish_id {
+                format!("Wish: {} rest", wish.name)
+            } else {
+                format!(
+                    "Wish: {} ({} of {})",
+                    wish.name,
+                    short_money(wish.saved, &wish.currency),
+                    short_money(wish.amount, &wish.currency)
+                )
+            };
+            out.push(WishOption {
+                wish_id: wish.wish_id.clone(),
+                label,
+                currency: cap.currency.clone(),
+                room: cap.room,
+            });
+        }
+    }
+    out
+}
+
+/// The wish options for the period's editor, with room as the server will
+/// check it: a split or re-split replaces the period's lines, so their
+/// earlier contribution counts back; a resettle appends delta lines, so it
+/// does not.
+pub fn period_wish_options(wishes: &[Wish], period: &MonthPeriod) -> Vec<WishOption> {
+    if period.status == ClosureStatus::ChangedAfterClose {
+        wish_options(wishes, &[])
+    } else {
+        wish_options(wishes, &period.allocations)
+    }
+}
+
+/// `(wish_id, label)` of every wish for naming lines: `Wish: <name>` while
+/// it is offered, else what became of it.
+pub fn wish_labels(wishes: &[Wish], options: &[WishOption]) -> Vec<(String, String)> {
+    let has_subs = |id: &str| {
+        wishes
+            .iter()
+            .any(|s| s.parent_id.as_deref() == Some(id) && s.kind == WishKind::OneOff)
+    };
+    wishes
+        .iter()
+        .map(|w| {
+            let offered = options.iter().any(|o| o.wish_id == w.wish_id);
+            let label = match w.status {
+                _ if offered && has_subs(&w.wish_id) => format!("Wish: {} rest", w.name),
+                _ if offered => format!("Wish: {}", w.name),
+                WishStatus::Bought => format!("Wish (bought): {}", w.name),
+                WishStatus::Dropped => format!("Wish (dropped): {}", w.name),
+                // Planned or started but not one-off (repeating, bill change):
+                // it never takes a line, so an old line to it is legacy.
+                WishStatus::Planned | WishStatus::Started => {
+                    format!("Wish (no longer planned): {}", w.name)
+                }
+            };
+            (w.wish_id.clone(), label)
+        })
+        .collect()
+}
+
+/// Split mode: every positive leftover fully assigned with positive lines.
 /// Delta mode (`baseline` given): lines sum to the leftover change; negatives
-/// allowed. `pots` holds the open pots and what a take may draw from them.
+/// allowed, except on a wish line. Pot lines are legacy and refused in both.
+/// `wishes` holds what each planned wish can still take.
 pub fn validate_allocations(
     review: &ClosureReview,
     lines: &[AllocationLine],
     goal_ids: &HashSet<&str>,
     baseline: Option<&ClosureReview>,
-    pots: &PotBalances,
+    wishes: &WishCaps,
 ) -> std::result::Result<(), String> {
     let before: HashMap<&str, Decimal> = baseline
         .map(|b| {
@@ -551,7 +702,7 @@ pub fn validate_allocations(
         );
     }
     let known: HashSet<&str> = accounts.iter().map(|a| a.account_id.as_str()).collect();
-    let mut taken: Vec<((&str, &str), Decimal)> = Vec::new();
+    let mut to_wish: HashMap<&str, Decimal> = HashMap::new();
     let next_month = day_of(&review.month).map(|m| shift_month(m, 1));
     for item in lines {
         if !known.contains(item.from_account_id.as_str()) {
@@ -560,17 +711,23 @@ pub fn validate_allocations(
         if item.goal_id().is_some_and(|g| !goal_ids.contains(g)) {
             return Err("unknown savings goal".into());
         }
-        if let Some(pot) = item.pot_id() {
-            if !pots.contains_key(pot) {
-                return Err("unknown pot".into());
+        if let Some(wish) = item.wish_id() {
+            let Some(cap) = wishes.get(wish) else {
+                return Err("unknown wish".into());
+            };
+            if item.amount <= Decimal::ZERO {
+                return Err("a wish line must be positive".into());
             }
-            if item.amount < Decimal::ZERO {
-                let key = (pot, item.currency.code.as_str());
-                match taken.iter_mut().find(|(k, _)| *k == key) {
-                    Some((_, total)) => *total -= item.amount,
-                    None => taken.push((key, -item.amount)),
-                }
+            if item.currency != cap.currency {
+                return Err("wish currency does not match".into());
             }
+            let total = to_wish.entry(wish).or_default();
+            *total += item.amount;
+            if *total > cap.room {
+                return Err("saves more than the wish still needs".into());
+            }
+        } else if item.pot_id().is_some() || (item.amount < Decimal::ZERO && baseline.is_none()) {
+            return Err("pots are no longer available".into());
         }
         if item.destination == "plan" {
             let (Some(_), Some(due)) = (&item.plan_name, item.plan_due_on.as_deref()) else {
@@ -582,16 +739,6 @@ pub fn validate_allocations(
             if item.amount <= Decimal::ZERO {
                 return Err("a planned purchase must be positive".into());
             }
-        }
-    }
-    for ((pot, code), amount) in &taken {
-        let balance = pots
-            .get(*pot)
-            .and_then(|b| b.get(*code))
-            .copied()
-            .unwrap_or_default();
-        if *amount > balance {
-            return Err("take is larger than the pot balance".into());
         }
     }
     for account in &accounts {
@@ -611,15 +758,10 @@ pub fn validate_allocations(
                     .unwrap_or_default()
                     .max(Decimal::ZERO)
         } else {
-            let takes = own
-                .iter()
-                .any(|l| l.pot_id().is_some() && l.amount < Decimal::ZERO);
-            if account.leftover <= Decimal::ZERO && !own.is_empty() && !takes {
+            if account.leftover <= Decimal::ZERO && !own.is_empty() {
                 return Err(format!("{} has a deficit; nothing to split", account.name));
             }
-            if own.iter().any(|l| {
-                l.amount == Decimal::ZERO || (l.amount < Decimal::ZERO && l.pot_id().is_none())
-            }) {
+            if own.iter().any(|l| l.amount <= Decimal::ZERO) {
                 return Err("allocation amounts must be positive".into());
             }
             account.leftover.max(Decimal::ZERO)
@@ -629,31 +771,6 @@ pub fn validate_allocations(
         }
     }
     Ok(())
-}
-
-/// Ledger entries for every pot line of the month (split and delta).
-pub fn pot_entries(period: &MonthPeriod, created_at: &str) -> Vec<PotEntryRecord> {
-    let label = day_of(&period.month)
-        .map(|m| m.strftime("%B %Y").to_string())
-        .unwrap_or_default();
-    period
-        .allocations
-        .iter()
-        .enumerate()
-        .filter(|(_, l)| l.amount != Decimal::ZERO)
-        .filter_map(|(index, line)| {
-            Some(PotEntryRecord {
-                entry_id: format!("{}:{index}:{}", period.month, line.line_id),
-                pot_id: line.pot_id()?.to_owned(),
-                month: period.month.clone(),
-                amount: line.amount,
-                currency: line.currency.clone(),
-                line_id: Some(line.line_id.clone()),
-                note: Some(format!("{label} closure")),
-                created_at: created_at.to_owned(),
-            })
-        })
-        .collect()
 }
 
 /// Everyday habit spending still expected this month, outside every group.
@@ -696,7 +813,6 @@ pub fn savings_suggestion(
     as_of: Date,
     payments: &[PlannedPaymentView],
     safety_buffer: Decimal,
-    general_balance: Decimal,
     forecast: Option<EverydayForecast>,
 ) -> SavingsSuggestion {
     let month = day_of(&allocation.current_month).unwrap_or(as_of.first_of_month());
@@ -740,8 +856,6 @@ pub fn savings_suggestion(
         known_future_payments: sum(known.iter().map(|k| k.amount)),
         known_payments: known,
         safety_buffer,
-        general_pot_id: GENERAL_POT_ID.to_owned(),
-        general_balance,
     }
 }
 
@@ -838,9 +952,7 @@ pub fn candidates(
 fn suggestion(
     store: &Store,
     snap: &Snapshot,
-    month: Date,
     now: &Zoned,
-    entries: &[PotEntryRecord],
     forecaster: Option<&dyn crate::daily::SeriesForecaster>,
 ) -> Result<Option<SavingsSuggestion>> {
     let overview = dashboard::dashboard(store, snap, now, forecaster)?;
@@ -851,17 +963,11 @@ fn suggestion(
     else {
         return Ok(None);
     };
-    let general = pot_balances(entries, Some(month))
-        .get(GENERAL_POT_ID)
-        .and_then(|b| b.get("EUR"))
-        .copied()
-        .unwrap_or_default();
     Ok(Some(savings_suggestion(
         allocation,
         now.with_time_zone(snap.zone.clone()).date(),
         &overview.planned_payments,
         snap.settings.safety_buffer_eur,
-        general,
         everyday_forecast(&overview.daily_forecasts, &allocation.current_month),
     )))
 }
@@ -884,6 +990,8 @@ pub fn closure_view(
     let entries = load_pot_entries(conn, None)?;
     let balances = pot_balances(&entries, None);
     let roles = load_roles(conn)?;
+    let all_wishes = crate::wishes::store::load_wishes(conn)?;
+    let wishes = period_wish_options(&all_wishes, &period);
     Ok(ClosureView {
         balances: balance_statuses(conn, snap, &period, &roles)?,
         review: review_month(snap, periods, month, now),
@@ -892,11 +1000,13 @@ pub fn closure_view(
             .iter()
             .map(|g| (g.goal.goal_id.clone(), g.goal.name.clone()))
             .collect(),
-        pots: load_pots(conn, false)?
+        pots: load_pots(conn, true)?
             .iter()
             .map(|p| pot_view(p, &balances))
             .collect(),
-        suggestion: suggestion(store, snap, month, now, &entries, forecaster)?,
+        wish_labels: wish_labels(&all_wishes, &wishes),
+        wishes,
+        suggestion: suggestion(store, snap, now, forecaster)?,
         accounts: account_role_views(&accounts_by_id(&snap.accounts), &roles),
         transfer_candidates: candidates(snap, &period),
         period,

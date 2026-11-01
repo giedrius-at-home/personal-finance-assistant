@@ -23,8 +23,6 @@ const COMMANDS: &[&str] = &[
     "archive_planned_payment",
     "closure",
     "closure_action",
-    "closure_pots",
-    "save_pot",
     "wishes",
     "save_wish",
     "record_wish_saved",

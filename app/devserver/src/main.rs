@@ -84,11 +84,6 @@ struct WishSettingsArgs {
 }
 
 #[derive(Deserialize)]
-struct PotArgs {
-    pot: finance_types::report::closure::PotDraft,
-}
-
-#[derive(Deserialize)]
 struct RoleArgs {
     role: finance_types::report::closure::AccountRoleDraft,
 }
@@ -229,11 +224,6 @@ fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
         "closure_action" => {
             let a: ClosureActionArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
             ok(service.closure_action(a.action))
-        }
-        "closure_pots" => ok(service.pots()),
-        "save_pot" => {
-            let a: PotArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
-            ok(service.save_pot(a.pot))
         }
         "wishes" => ok(service.wishes()),
         "save_wish" => {

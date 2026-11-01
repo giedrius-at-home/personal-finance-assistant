@@ -1,21 +1,19 @@
 //! Month closure actions (Python `closure_service.py`, with the request
 //! checks of `closure_routes.py`): sync, settle, finalize, resettle, reopen,
-//! marking transfers by hand, pots and account roles.
+//! marking transfers by hand and account roles.
 //!
 //! "Sync" re-reads the local data and runs the post-sync step (late
 //! arrivals flag closed months, late transfers are ticked off); the screen
 //! pulls fresh bank data through `bank_sync` before it asks.
 
 use std::collections::{HashMap, HashSet};
-use std::hash::{BuildHasher, Hasher};
 
-use finance_types::gateway::{AccountRole, Direction, PlannedPayment, PotRecord};
+use finance_types::gateway::{AccountRole, Direction, PlannedPayment, Wish, WishStatus};
 use finance_types::report::UnitMoney;
 use finance_types::report::closure::{
     AccountRoleDraft, AllocationLine, BalanceCheck, ClosureAction, ClosureReview, ClosureStatus,
-    LineKind, MonthPeriod, PotDraft, PotView, TransferStatus,
+    LineKind, MonthPeriod, TransferStatus,
 };
-use jiff::Timestamp;
 use jiff::civil::Date;
 use regex::Regex;
 use rusqlite::{OptionalExtension, params};
@@ -27,15 +25,16 @@ use crate::closure::transfers::{
     mark_transfer, match_transfers, reroute_pending, unmark_transfer, with_transfer_targets,
 };
 use crate::closure::{
-    BANKS, GENERAL_POT_ID, PLANNED_PURCHASE_CATEGORY, candidates, day_of, general_pot,
-    load_periods, load_pot_entries, load_pots, load_roles, normalized_currency, open_pot_balances,
-    parse_month, period_or_new, plan_due_month, pot_balances, pot_entries, pot_view, review_month,
-    stored_instant, transactions_by_id, validate_allocations,
+    BANKS, PLANNED_PURCHASE_CATEGORY, candidates, day_of, load_periods, load_pots, load_roles,
+    normalized_currency, parse_month, period_or_new, plan_due_month, review_month, stored_instant,
+    transactions_by_id, validate_allocations, wish_caps,
 };
 use crate::load::parse_instant;
 use crate::model::Kind;
 use crate::period::{PeriodResolver, shift_month};
 use crate::plans::CLOSURE_PLAN_PREFIX;
+use crate::wishes::store::load_wishes;
+use crate::writes::wishes::store as store_wish;
 use crate::{Error, Result, Snapshot};
 
 use ClosureStatus::{ChangedAfterClose, Closed, Open, Settled, Settling};
@@ -228,7 +227,8 @@ fn cents(amount: Decimal) -> bool {
 /// The field rules the Python model enforced on every line a screen sends.
 fn checked_lines(lines: Vec<AllocationLine>) -> Result<Vec<AllocationLine>> {
     static DESTINATION: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"^(goal:[^\s]{1,128}|pot:[^\s]{1,64}|plan|buffer|stay)$").expect("valid regex")
+        Regex::new(r"^(goal:[^\s]{1,128}|pot:[^\s]{1,64}|wish:[^\s]{1,64}|plan|buffer|stay)$")
+            .expect("valid regex")
     });
     let bad = || invalid("invalid lines");
     if lines.len() > MAX_LINES {
@@ -326,15 +326,6 @@ fn goal_ids(snap: &Snapshot) -> HashSet<&str> {
     snap.goals.iter().map(|g| g.goal.goal_id.as_str()).collect()
 }
 
-/// The general pot exists from the first closure read on.
-fn ensure_general_pot(w: &Writer<'_>) -> Result<()> {
-    w.put_json(
-        "INSERT OR IGNORE INTO pots(pot_id, payload_json) VALUES (?2, ?1)",
-        &general_pot(w.now.timestamp()),
-        &[&GENERAL_POT_ID],
-    )
-}
-
 fn active_payments(w: &Writer<'_>) -> Result<Vec<PlannedPayment>> {
     crate::load::payloads(
         &w.tx,
@@ -355,7 +346,54 @@ fn plan_fields(line: &AllocationLine) -> impl PartialEq + '_ {
     )
 }
 
-/// Rewrite the month's pot entries; create or update the planned purchase of
+/// Bring each touched wish's `saved` from the period's previous lines to its new lines.
+/// Every line counts, split and delta alike; wishes no longer planned are skipped.
+/// `saved_month` only moves forward, even when a re-split removes the line
+/// (spec). Only one-off wishes can hold a line; validation enforces that.
+pub(crate) fn apply_wish_lines(
+    w: &Writer<'_>,
+    period: &MonthPeriod,
+    previous: &[AllocationLine],
+) -> Result<()> {
+    let mut change: HashMap<&str, Decimal> = HashMap::new();
+    for line in previous {
+        if let Some(wish_id) = line.wish_id() {
+            *change.entry(wish_id).or_default() -= line.amount;
+        }
+    }
+    for line in &period.allocations {
+        if let Some(wish_id) = line.wish_id() {
+            *change.entry(wish_id).or_default() += line.amount;
+        }
+    }
+    if change.is_empty() {
+        return Ok(());
+    }
+    for wish in load_wishes(&w.tx)? {
+        let Some(delta) = change.get(wish.wish_id.as_str()) else {
+            continue;
+        };
+        if wish.status != WishStatus::Planned {
+            continue;
+        }
+        let saved = (wish.saved + delta).max(Decimal::ZERO);
+        let saved_month = wish.saved_month.clone().max(Some(period.month.clone()));
+        if saved == wish.saved && saved_month == wish.saved_month {
+            continue;
+        }
+        store_wish(
+            w,
+            &Wish {
+                saved,
+                saved_month,
+                ..wish
+            },
+        )?;
+    }
+    Ok(())
+}
+
+/// Bring the month's wishes to its lines; create or update the planned purchase of
 /// every plan line that is new or changed since `previous`. Unchanged lines
 /// leave their plan alone, so a plan the owner archived stays archived.
 fn record_side_effects(
@@ -364,14 +402,7 @@ fn record_side_effects(
     previous: &[AllocationLine],
     sync_plans: bool,
 ) -> Result<()> {
-    w.tx.execute("DELETE FROM pot_entries WHERE month = ?1", [&period.month])?;
-    for entry in pot_entries(period, &stamp(w)) {
-        w.put_json(
-            "INSERT INTO pot_entries(entry_id, pot_id, month, payload_json) VALUES (?2, ?3, ?4, ?1)",
-            &entry,
-            &[&entry.entry_id, &entry.pot_id, &entry.month],
-        )?;
-    }
+    apply_wish_lines(w, period, previous)?;
     if !sync_plans {
         return Ok(());
     }
@@ -558,17 +589,16 @@ pub fn settle(
         )));
     }
     require_no_later_closure(&all, month)?;
-    ensure_general_pot(w)?;
     let review = review_month(snap, &all, month, &w.now);
     let lines = client_lines(lines, LineKind::Split);
+    // Legacy pot lines still route; a new split cannot add one.
     let pots = load_pots(&w.tx, true)?;
-    let entries = load_pot_entries(&w.tx, None)?;
     validate_allocations(
         &review,
         &lines,
         &goal_ids(snap),
         None,
-        &open_pot_balances(&pots, &entries, Some(month)),
+        &wish_caps(&load_wishes(&w.tx)?, &period.allocations),
     )
     .map_err(invalid)?;
     let lines = with_plan_ids(month, lines, &HashSet::new())?;
@@ -734,18 +764,16 @@ pub fn resettle(
     let Some(baseline) = period.settled_snapshot.as_ref() else {
         return Err(invalid("closed month is missing its snapshot"));
     };
-    ensure_general_pot(w)?;
     let review = review_month(snap, &all, month, &w.now);
     let lines = client_lines(lines, LineKind::Delta);
     let pots = load_pots(&w.tx, true)?;
-    let entries = load_pot_entries(&w.tx, None)?;
     validate_allocations(
         &review,
         &lines,
         &goal_ids(snap),
         Some(baseline),
-        // Resettle appends to the month's entries, so takes draw on the full balance.
-        &open_pot_balances(&pots, &entries, None),
+        // Delta lines append: earlier contributions stay booked, so none is added back.
+        &wish_caps(&load_wishes(&w.tx)?, &[]),
     )
     .map_err(invalid)?;
     let taken: HashSet<String> = period
@@ -1005,74 +1033,6 @@ pub fn unmark(
         },
     )?;
     Ok(())
-}
-
-/// A fresh pot id (Python used `uuid4().hex`).
-fn new_pot_id(now: Timestamp) -> String {
-    (0u8..2)
-        .map(|part| {
-            let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
-            hasher.write_u8(part);
-            hasher.write_i128(now.as_nanosecond());
-            format!("{:016x}", hasher.finish())
-        })
-        .collect()
-}
-
-/// Create or change a pot. Only an empty pot can be archived, and never
-/// the general one.
-pub fn save_pot(w: &Writer<'_>, snap: &Snapshot, draft: PotDraft) -> Result<PotView> {
-    if !chars_within(&draft.name, 128) || !optional_within(&draft.account_id, 128) {
-        return Err(invalid("invalid pot"));
-    }
-    ensure_general_pot(w)?;
-    let pots = load_pots(&w.tx, true)?;
-    if let Some(account) = &draft.account_id
-        && !snap.accounts.iter().any(|a| &a.account_id == account)
-    {
-        return Err(invalid("unknown account"));
-    }
-    let name = draft.name.trim();
-    if name.is_empty() {
-        return Err(invalid("pot name is required"));
-    }
-    let current = match &draft.pot_id {
-        None => PotRecord {
-            pot_id: new_pot_id(w.now.timestamp()),
-            name: name.to_owned(),
-            account_id: None,
-            archived: false,
-            created_at: stamp(w),
-        },
-        Some(id) => pots
-            .iter()
-            .find(|p| &p.pot_id == id)
-            .cloned()
-            .ok_or_else(|| invalid("unknown pot"))?,
-    };
-    let balances = pot_balances(&load_pot_entries(&w.tx, None)?, None);
-    if draft.archived && !current.archived {
-        if current.pot_id == GENERAL_POT_ID {
-            return Err(invalid("general savings cannot be archived"));
-        }
-        let own = balances.get(&current.pot_id);
-        if own.is_some_and(|b| b.values().any(|v| !v.is_zero())) {
-            return Err(invalid("only an empty pot can be archived"));
-        }
-    }
-    let saved = PotRecord {
-        name: name.to_owned(),
-        account_id: draft.account_id,
-        archived: draft.archived,
-        ..current
-    };
-    w.put_json(
-        "INSERT INTO pots(pot_id, payload_json) VALUES (?2, ?1) \
-         ON CONFLICT(pot_id) DO UPDATE SET payload_json = excluded.payload_json",
-        &saved,
-        &[&saved.pot_id],
-    )?;
-    Ok(pot_view(&saved, &balances))
 }
 
 /// Apply a changed via route to transfers that have not been made yet.
