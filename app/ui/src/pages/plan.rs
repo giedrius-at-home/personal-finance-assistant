@@ -22,6 +22,7 @@ use serde::Serialize;
 use serde::de::IgnoredAny;
 
 use crate::api::invoke;
+use crate::ds::sync_value;
 use crate::ds::{
     Button, CONTROL, Card, CardTone, Eyebrow, Field, Icon, Lucide, Money, MonthSwitcher, Size,
     Variant, card_class, cn,
@@ -671,7 +672,11 @@ fn create_form(
                     step="0.01"
                     placeholder="0.00"
                     class=CONTROL
-                    prop:value=move || ui.amount.get()
+                    node_ref={
+                        let node = NodeRef::<leptos::html::Input>::new();
+                        sync_value(node, move || ui.amount.get());
+                        node
+                    }
                     on:input=move |e| ui.amount.set(event_target_value(&e))
                 />
             </Field>
@@ -1119,7 +1124,11 @@ fn bill_editor(ui: Ui, bill: StoredValue<SubscriptionRow>) -> impl IntoView {
                     min="0"
                     step="0.01"
                     class=CONTROL
-                    prop:value=move || amount_min.get()
+                    node_ref={
+                        let node = NodeRef::<leptos::html::Input>::new();
+                        sync_value(node, move || amount_min.get());
+                        node
+                    }
                     on:input=move |e| amount_min.set(event_target_value(&e))
                 />
             </Field>
@@ -1132,7 +1141,11 @@ fn bill_editor(ui: Ui, bill: StoredValue<SubscriptionRow>) -> impl IntoView {
                     min="0"
                     step="0.01"
                     class=CONTROL
-                    prop:value=move || amount_max.get()
+                    node_ref={
+                        let node = NodeRef::<leptos::html::Input>::new();
+                        sync_value(node, move || amount_max.get());
+                        node
+                    }
                     on:input=move |e| amount_max.set(event_target_value(&e))
                 />
             </Field>

@@ -17,6 +17,7 @@ use wasm_bindgen::prelude::*;
 
 use crate::api::invoke;
 use crate::ds::charts::{BudgetBar, ProgressBar, fmt};
+use crate::ds::sync_value;
 use crate::ds::{
     CONTROL, Card, CardTone, Checkbox, Eyebrow, Heading, Icon, Lucide, Select, Size, Variant,
     button_class, cn, money,
@@ -994,7 +995,11 @@ fn editor_form(
                                             min="0"
                                             step=step.clone()
                                             placeholder="0.00"
-                                            prop:value=field(|e| e.amount.clone())
+                                            node_ref={
+                                                let node = NodeRef::<html::Input>::new();
+                                                sync_value(node, field(|e| e.amount.clone()));
+                                                node
+                                            }
                                             on:input=set(|e, v| e.amount = v)
                                         />
                                     </div>
@@ -1027,7 +1032,11 @@ fn editor_form(
                                             step="1"
                                             placeholder="Never cut"
                                             aria-describedby="budget-group-importance-hint"
-                                            prop:value=field(|e| e.importance.clone())
+                                            node_ref={
+                                                let node = NodeRef::<html::Input>::new();
+                                                sync_value(node, field(|e| e.importance.clone()));
+                                                node
+                                            }
                                             on:input=set(|e, v| e.importance = v)
                                         />
                                         <p id="budget-group-importance-hint" class="text-xs text-fg-muted">
@@ -1046,7 +1055,11 @@ fn editor_form(
                                             step=step
                                             placeholder="0.00"
                                             aria-describedby="budget-group-floor-hint"
-                                            prop:value=field(|e| e.floor.clone())
+                                            node_ref={
+                                                let node = NodeRef::<html::Input>::new();
+                                                sync_value(node, field(|e| e.floor.clone()));
+                                                node
+                                            }
                                             on:input=set(|e, v| e.floor = v)
                                         />
                                         <p id="budget-group-floor-hint" class="text-xs text-fg-muted">
