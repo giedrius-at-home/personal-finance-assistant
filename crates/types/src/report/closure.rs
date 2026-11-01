@@ -92,8 +92,9 @@ pub struct TransferHop {
 pub struct AllocationLine {
     pub line_id: String,
     pub from_account_id: String,
-    /// `goal:<id>`, `wish:<wish_id>`, `pot:<pot_id>` (legacy, read-only), `plan` (a planned purchase), `buffer`
-    /// (next month) or `stay`.
+    /// `goal:<id>`, `wish:<wish_id>`, `account:<account_id>` (a move to
+    /// another own account), `pot:<pot_id>` (legacy, read-only), `plan` (a
+    /// planned purchase), `buffer` (next month) or `stay`.
     pub destination: String,
     /// Negative only on a delta line (and on legacy pot takes).
     pub amount: Decimal,
@@ -147,6 +148,11 @@ impl AllocationLine {
     pub fn wish_id(&self) -> Option<&str> {
         self.destination.strip_prefix("wish:")
     }
+
+    /// The own account an `account:<id>` line moves money to.
+    pub fn target_account_id(&self) -> Option<&str> {
+        self.destination.strip_prefix("account:")
+    }
 }
 
 /// One budget group's plan and spending, under the account it lives on.
@@ -191,7 +197,9 @@ pub struct AccountReview {
     pub currency: Currency,
     pub role: AccountRoleKind,
     pub closing_balance: Decimal,
-    /// Last month's buffer plus money set aside for a purchase due this month.
+    /// Last month's buffer, money last month's split moved in from another
+    /// account (spending accounts only), plus money set aside for a purchase
+    /// due this month.
     pub carry_in: Decimal,
     pub income_planned: Decimal,
     pub income_actual: Decimal,

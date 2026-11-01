@@ -1050,3 +1050,233 @@ fn finalizing_a_settled_month_leaves_the_wish_saved_alone() {
     );
     assert_eq!(wish(&db, &id), before);
 }
+
+#[test]
+fn an_account_destination_passes_the_line_check() {
+    assert!(checked_lines(vec![checking("m", "account:firefly:5", "10")]).is_ok());
+    assert!(checked_lines(vec![checking("m", "account:", "10")]).is_err());
+    assert!(checked_lines(vec![checking("m", "account:a b", "10")]).is_err());
+    let long = format!("account:{}", "x".repeat(128));
+    assert!(checked_lines(vec![checking("m", &long, "10")]).is_ok());
+    assert!(checked_lines(vec![checking("m", &format!("{long}x"), "10")]).is_err());
+}
+
+/// October, settling, with a €500 salary on checking and a second spending
+/// account, Pocket (`firefly:5`); both balances confirmed.
+fn move_db() -> crate::writes::fixture::Db {
+    let (mut db, _) = wish_db("900");
+    put_role(
+        db.store.connection(),
+        &role("firefly:5", "spending", None, None),
+    );
+    let revision = stored(db.store.connection(), "2026-10-01").revision;
+    db.write(|w, snap| confirm_balance(w, snap, october(), revision, "firefly:5", Decimal::ZERO))
+        .unwrap();
+    db
+}
+
+fn checking_leftover(db: &crate::writes::fixture::Db) -> Decimal {
+    october_review(db)
+        .accounts
+        .iter()
+        .find(|a| a.account_id == "firefly:1")
+        .unwrap()
+        .leftover
+}
+
+/// Settle October with `moved` to Pocket and the rest staying on checking.
+fn settle_move(db: &mut crate::writes::fixture::Db, moved: &str) -> Result<()> {
+    let leftover = checking_leftover(db);
+    assert!(leftover > d(moved), "leftover {leftover}");
+    let lines = vec![
+        checking("m", "account:firefly:5", moved),
+        checking("s", "stay", &(leftover - d(moved)).to_string()),
+    ];
+    let revision = stored(db.store.connection(), "2026-10-01").revision;
+    db.write(|w, snap| settle(w, snap, october(), revision, lines))
+}
+
+fn finalize_october(db: &mut crate::writes::fixture::Db) {
+    let revision = stored(db.store.connection(), "2026-10-01").revision;
+    db.write(|w, snap| finalize(w, snap, october(), revision, &[]))
+        .unwrap();
+    assert_eq!(
+        stored(db.store.connection(), "2026-10-01").status,
+        ClosureStatus::Closed
+    );
+}
+
+fn move_line<'a>(period: &'a MonthPeriod, line_id: &str) -> &'a AllocationLine {
+    period
+        .allocations
+        .iter()
+        .find(|l| l.line_id == line_id)
+        .unwrap()
+}
+
+#[test]
+fn a_move_is_guarded_like_a_buffer_line() {
+    let mut db = move_db();
+    settle_move(&mut db, "100").unwrap();
+    finalize_october(&mut db);
+    // November already settled on the carry-in the move feeds.
+    put(
+        db.store.connection(),
+        &MonthPeriod {
+            settled_at: Some("2026-11-28T10:00:00Z".into()),
+            ..period("2026-11-01", ClosureStatus::Settled)
+        },
+    );
+    let revision = stored(db.store.connection(), "2026-10-01").revision;
+    let refused = db.write(|w, snap| reopen(w, snap, october(), revision));
+    assert_eq!(error(refused), "next month already uses this buffer");
+}
+
+#[test]
+fn a_move_to_an_inactive_account_is_refused() {
+    let mut db = move_db();
+    db.store
+        .connection()
+        .execute_batch("UPDATE accounts SET active = 0 WHERE id = 5;")
+        .unwrap();
+    assert_eq!(
+        error(settle_move(&mut db, "100")),
+        "move to an unknown account"
+    );
+}
+
+#[test]
+fn next_month_carries_a_move_in_on_its_target() {
+    let mut db = move_db();
+    settle_move(&mut db, "300").unwrap();
+    // November spends the moved money from Pocket.
+    db.store
+        .connection()
+        .execute_batch(
+            "INSERT INTO transactions (id, kind, date, booked_at, description, \
+                 source_account_id, destination_account_id, category_id, tags) \
+             VALUES (22, 'withdrawal', '2026-11-05', '2026-11-05T12:00:00', 'Lidl Utrecht', 5, 2, NULL, '[]');
+             INSERT INTO postings (transaction_id, account_id, amount, currency) \
+             VALUES (22, 5, '-300.00', 'EUR'), (22, 2, '300.00', 'EUR');",
+        )
+        .unwrap();
+    let periods = load_periods(db.store.connection()).unwrap();
+    let november = review_month(
+        &db.snap(),
+        &periods,
+        date(2026, 11, 1),
+        &crate::writes::fixture::now(),
+    );
+    let pocket = november
+        .accounts
+        .iter()
+        .find(|a| a.account_id == "firefly:5")
+        .unwrap();
+    assert_eq!(pocket.carry_in, d("300"));
+    assert_eq!(pocket.leftover, Decimal::ZERO);
+}
+
+#[test]
+fn a_zero_move_does_not_feed_next_month() {
+    assert!(!feeds_next_month(&checking("m", "account:firefly:5", "0")));
+    assert!(feeds_next_month(&checking("m", "account:firefly:5", "1")));
+    let mut db = move_db();
+    settle_move(&mut db, "100").unwrap();
+    finalize_october(&mut db);
+    let conn = db.store.connection();
+    let mut october_period = stored(conn, "2026-10-01");
+    for l in &mut october_period.allocations {
+        if l.line_id == "m" {
+            l.amount = Decimal::ZERO;
+        }
+    }
+    put(conn, &october_period);
+    put(
+        conn,
+        &MonthPeriod {
+            settled_at: Some("2026-11-28T10:00:00Z".into()),
+            ..period("2026-11-01", ClosureStatus::Settled)
+        },
+    );
+    let revision = stored(db.store.connection(), "2026-10-01").revision;
+    // November settled on its own: reopening still waits for it, but the
+    // zero move is not what blocks it.
+    let refused = db.write(|w, snap| reopen(w, snap, october(), revision));
+    assert_eq!(error(refused), "next month is already settled");
+}
+
+#[test]
+fn settling_a_move_stores_a_pending_transfer() {
+    let mut db = move_db();
+    settle_move(&mut db, "100").unwrap();
+    let october_period = stored(db.store.connection(), "2026-10-01");
+    let moved = move_line(&october_period, "m");
+    assert_eq!(moved.to_account_id.as_deref(), Some("firefly:5"));
+    assert_eq!(moved.transfer_status, TransferStatus::Pending);
+    // The owner moves the money and ticks the transfer off by hand.
+    db.store
+        .connection()
+        .execute_batch(
+            "INSERT INTO transactions (id, kind, date, booked_at, description, \
+                 source_account_id, destination_account_id, category_id, tags) \
+             VALUES (21, 'transfer', '2026-10-27', '2026-10-27T09:00:00', 'To Pocket', 1, 5, NULL, '[]');
+             INSERT INTO postings (transaction_id, account_id, amount, currency) \
+             VALUES (21, 1, '-100.00', 'EUR'), (21, 5, '100.00', 'EUR');",
+        )
+        .unwrap();
+    let ids = vec!["firefly:21".to_owned()];
+    db.write(|w, snap| mark(w, snap, october(), october_period.revision, "m", None, &ids))
+        .unwrap();
+    let marked = stored(db.store.connection(), "2026-10-01");
+    let moved = move_line(&marked, "m");
+    assert_eq!(moved.transfer_status, TransferStatus::Matched);
+    assert!(moved.manual);
+    assert_eq!(moved.moved_amount, Some(d("100")));
+    assert_eq!(moved.matched_transaction_ids, ids);
+}
+
+#[test]
+fn a_resettle_delta_move_gets_its_own_transfer() {
+    let mut db = move_db();
+    settle_move(&mut db, "100").unwrap();
+    finalize_october(&mut db);
+    // November closed on the carry-in the move feeds.
+    put(
+        db.store.connection(),
+        &MonthPeriod {
+            revision: 1,
+            settled_at: Some("2026-11-28T10:00:00Z".into()),
+            cutoff_at: Some("2026-11-30T10:00:00Z".into()),
+            ..period("2026-11-01", ClosureStatus::Closed)
+        },
+    );
+    // October changed after its close: checking has 15 more left over.
+    let conn = db.store.connection();
+    let mut changed = MonthPeriod {
+        status: ClosureStatus::ChangedAfterClose,
+        ..stored(conn, "2026-10-01")
+    };
+    let mut baseline = october_review(&db);
+    baseline
+        .accounts
+        .iter_mut()
+        .find(|a| a.account_id == "firefly:1")
+        .unwrap()
+        .leftover -= d("15");
+    changed.settled_snapshot = Some(baseline);
+    put(conn, &changed);
+    resettle_october(&mut db, vec![checking("d", "account:firefly:5", "15")]).unwrap();
+    let october_period = stored(db.store.connection(), "2026-10-01");
+    let delta = move_line(&october_period, "d");
+    assert_eq!(delta.kind, LineKind::Delta);
+    assert_eq!(delta.to_account_id.as_deref(), Some("firefly:5"));
+    assert_eq!(delta.transfer_status, TransferStatus::Pending);
+    assert_eq!(
+        move_line(&october_period, "m").transfer_status,
+        TransferStatus::Pending
+    );
+    assert_eq!(
+        stored(db.store.connection(), "2026-11-01").status,
+        ClosureStatus::ChangedAfterClose
+    );
+}

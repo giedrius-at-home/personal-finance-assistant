@@ -11,7 +11,7 @@ mod transfer;
 mod ui;
 
 use std::cell::RefCell;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::future::Future;
 
 use finance_types::report::Dashboard;
@@ -26,7 +26,7 @@ use rust_decimal::Decimal;
 use self::balances::{BalancesPanel, balances_locked, parse_balance, shows_balances};
 use self::bank_sync::{BankSyncPanel, bank_name};
 use self::panels::AccountsPanel;
-use self::split::{DraftStore, LegacyNames, SplitEditor, SplitTarget};
+use self::split::{DraftStore, LegacyNames, SplitEditor, SplitTarget, move_targets};
 use self::steps::{AllocationList, ReviewNames, ReviewStep, UnclassifiedAccounts as NewAccounts};
 use self::transfer::Hop;
 use self::ui::{
@@ -647,6 +647,7 @@ fn ChangedAfterClose(view: ClosureView) -> impl IntoView {
             }
         })
         .collect_view();
+    let eligible = move_eligible(&view);
     let changed: Vec<SplitTarget> = deltas
         .iter()
         .filter(|(_, d)| !d.is_zero())
@@ -656,6 +657,7 @@ fn ChangedAfterClose(view: ClosureView) -> impl IntoView {
             currency: a.currency.clone(),
             target: *d,
             note: None,
+            moves: move_targets(a, &view.review.accounts, &eligible),
         })
         .collect();
     let none_changed = changed.is_empty();
@@ -1066,6 +1068,15 @@ fn step_view(
     }
 }
 
+/// Accounts a move can target: the balance check's (active, spending or
+/// savings).
+fn move_eligible(view: &ClosureView) -> HashSet<&str> {
+    view.balances
+        .iter()
+        .map(|b| b.account_id.as_str())
+        .collect()
+}
+
 /// Names for old lines' destinations: pots and wishes no longer offered.
 fn legacy_names(view: &ClosureView) -> LegacyNames {
     LegacyNames {
@@ -1075,6 +1086,7 @@ fn legacy_names(view: &ClosureView) -> LegacyNames {
             .map(|p| (p.pot_id.clone(), p.name.clone()))
             .collect(),
         wishes: view.wish_labels.clone(),
+        accounts: steps::account_names(view).into_iter().collect(),
     }
 }
 
@@ -1094,6 +1106,7 @@ fn split_editor(
             .iter()
             .any(|l| l.from_account_id == account.account_id && l.kind == LineKind::Split)
     };
+    let eligible = move_eligible(view);
     let targets: Vec<SplitTarget> = view
         .review
         .accounts
@@ -1113,6 +1126,7 @@ fn split_editor(
                 } else {
                     None
                 },
+                moves: move_targets(a, &view.review.accounts, &eligible),
             }
         })
         .collect();

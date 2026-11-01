@@ -200,18 +200,28 @@ pub fn plan_due_month(line: &AllocationLine) -> Option<Date> {
         .map(|d| d.first_of_month())
 }
 
-/// The previous month's buffer lines, plus money any month set aside for a
-/// planned purchase due this month (it pays for that purchase here).
-pub fn carry_in_for(month: Date, periods: &[MonthPeriod]) -> HashMap<String, Decimal> {
+/// The previous month's buffer lines and moves into a spending account (to
+/// that target), plus money any month set aside for a planned purchase due
+/// this month (it pays for that purchase here).
+pub fn carry_in_for(
+    month: Date,
+    periods: &[MonthPeriod],
+    roles: &[AccountRole],
+) -> HashMap<String, Decimal> {
+    let spends = |id: &str| {
+        roles.iter().any(|r| {
+            r.account_id == id && AccountRoleKind::parse(&r.role) == AccountRoleKind::Spending
+        })
+    };
     let mut carried: HashMap<String, Decimal> = HashMap::new();
     let previous = shift_month(month, -1).to_string();
     if let Some(previous) = periods.iter().find(|p| p.month == previous) {
-        for line in previous
-            .allocations
-            .iter()
-            .filter(|l| l.destination == "buffer")
-        {
-            *carried.entry(line.from_account_id.clone()).or_default() += line.amount;
+        for line in &previous.allocations {
+            if line.destination == "buffer" {
+                *carried.entry(line.from_account_id.clone()).or_default() += line.amount;
+            } else if let Some(target) = line.target_account_id().filter(|t| spends(t)) {
+                *carried.entry(target.to_owned()).or_default() += line.amount;
+            }
         }
     }
     for period in periods {
@@ -466,7 +476,11 @@ pub fn review_month(
         mappings: &snap.group_mappings,
         payments: &payments,
         roles: &snap.account_roles,
-        carry_in: &carry_in_for(month, periods),
+        carry_in: &carry_in_for(
+            month,
+            periods,
+            &snap.account_roles.values().cloned().collect::<Vec<_>>(),
+        ),
         fixed_ids: &fixed_ids,
     })
 }
@@ -666,13 +680,15 @@ pub fn wish_labels(wishes: &[Wish], options: &[WishOption]) -> Vec<(String, Stri
 /// Split mode: every positive leftover fully assigned with positive lines.
 /// Delta mode (`baseline` given): lines sum to the leftover change; negatives
 /// allowed, except on a wish line. Pot lines are legacy and refused in both.
-/// `wishes` holds what each planned wish can still take.
+/// `wishes` holds what each planned wish can still take; `inactive` lists the
+/// accounts a move cannot target.
 pub fn validate_allocations(
     review: &ClosureReview,
     lines: &[AllocationLine],
     goal_ids: &HashSet<&str>,
     baseline: Option<&ClosureReview>,
     wishes: &WishCaps,
+    inactive: &HashSet<&str>,
 ) -> std::result::Result<(), String> {
     let before: HashMap<&str, Decimal> = baseline
         .map(|b| {
@@ -725,6 +741,23 @@ pub fn validate_allocations(
             *total += item.amount;
             if *total > cap.room {
                 return Err("saves more than the wish still needs".into());
+            }
+        } else if let Some(target) = item.target_account_id() {
+            if target == item.from_account_id {
+                return Err("cannot move money to the same account".into());
+            }
+            let Some(to) = review.accounts.iter().find(|a| {
+                a.account_id == target
+                    && !inactive.contains(target)
+                    && matches!(a.role, AccountRoleKind::Spending | AccountRoleKind::Savings)
+            }) else {
+                return Err("move to an unknown account".into());
+            };
+            if item.amount <= Decimal::ZERO {
+                return Err("a move must be positive".into());
+            }
+            if to.currency != item.currency {
+                return Err("move currency does not match".into());
             }
         } else if item.pot_id().is_some() || (item.amount < Decimal::ZERO && baseline.is_none()) {
             return Err("pots are no longer available".into());

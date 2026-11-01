@@ -227,7 +227,7 @@ fn cents(amount: Decimal) -> bool {
 /// The field rules the Python model enforced on every line a screen sends.
 fn checked_lines(lines: Vec<AllocationLine>) -> Result<Vec<AllocationLine>> {
     static DESTINATION: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"^(goal:[^\s]{1,128}|pot:[^\s]{1,64}|wish:[^\s]{1,64}|plan|buffer|stay)$")
+        Regex::new(r"^(goal:[^\s]{1,128}|pot:[^\s]{1,64}|wish:[^\s]{1,64}|account:[^\s]{1,128}|plan|buffer|stay)$")
             .expect("valid regex")
     });
     let bad = || invalid("invalid lines");
@@ -599,6 +599,7 @@ pub fn settle(
         &goal_ids(snap),
         None,
         &wish_caps(&load_wishes(&w.tx)?, &period.allocations),
+        &inactive_ids(snap),
     )
     .map_err(invalid)?;
     let lines = with_plan_ids(month, lines, &HashSet::new())?;
@@ -774,6 +775,7 @@ pub fn resettle(
         Some(baseline),
         // Delta lines append: earlier contributions stay booked, so none is added back.
         &wish_caps(&load_wishes(&w.tx)?, &[]),
+        &inactive_ids(snap),
     )
     .map_err(invalid)?;
     let taken: HashSet<String> = period
@@ -797,10 +799,10 @@ pub fn resettle(
         },
     )?;
     record_side_effects(w, &saved, &previous, true)?;
-    // Buffer lines feed the next month's carry-in; plan lines their due month's.
+    // Buffer and move lines feed the next month's carry-in; plan lines their due month's.
     let mut affected: HashSet<Date> = marked
         .iter()
-        .filter(|l| l.destination == "buffer" && !l.amount.is_zero())
+        .filter(|l| feeds_next_month(l))
         .map(|_| shift_month(month, 1))
         .collect();
     affected.extend(
@@ -822,6 +824,15 @@ pub fn resettle(
         )?;
     }
     Ok(())
+}
+
+/// Accounts closed in the ledger: a move cannot target them.
+fn inactive_ids(snap: &Snapshot) -> HashSet<&str> {
+    snap.accounts
+        .iter()
+        .filter(|a| !a.active)
+        .map(|a| a.account_id.as_str())
+        .collect()
 }
 
 /// Accounts a month's balance check covers, in review order: active, role spending or savings.
@@ -936,11 +947,7 @@ pub fn reopen(w: &Writer<'_>, snap: &Snapshot, month: Date, revision: u32) -> Re
     if let Some(following) = all.iter().find(|p| p.month == next)
         && !matches!(following.status, Open | Settling)
     {
-        if period
-            .allocations
-            .iter()
-            .any(|l| l.destination == "buffer" && !l.amount.is_zero())
-        {
+        if period.allocations.iter().any(feeds_next_month) {
             return Err(invalid("next month already uses this buffer"));
         }
         return Err(invalid("next month is already settled"));
@@ -955,6 +962,12 @@ pub fn reopen(w: &Writer<'_>, snap: &Snapshot, month: Date, revision: u32) -> Re
         },
     )?;
     Ok(())
+}
+
+/// A line the next month's carry-in reads: a non-zero buffer line, or a move
+/// to another account.
+fn feeds_next_month(line: &AllocationLine) -> bool {
+    (line.destination == "buffer" || line.target_account_id().is_some()) && !line.amount.is_zero()
 }
 
 fn check_line_id(line_id: &str) -> Result<()> {

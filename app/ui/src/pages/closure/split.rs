@@ -1,11 +1,12 @@
 //! The split editor and its lines (personal-site
 //! `components/month-closure/split-editor.tsx` and `split-line.tsx`).
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use finance_types::report::Currency;
 use finance_types::report::closure::{
-    AllocationLine, LineKind, SavingsSuggestion, TransferStatus, WishOption,
+    AccountReview, AccountRoleKind, AllocationLine, LineKind, SavingsSuggestion, TransferStatus,
+    WishOption,
 };
 use leptos::prelude::*;
 use rust_decimal::Decimal;
@@ -50,27 +51,62 @@ pub struct SplitTarget {
     /// The leftover (settle) or the leftover change (resettle).
     pub target: Decimal,
     pub note: Option<String>,
+    /// `(account_id, name)` of the accounts a line from this one can move
+    /// money to.
+    pub moves: Vec<(String, String)>,
+}
+
+/// `(account_id, name)` of every account a line from `source` can move
+/// money to: the other spending and savings accounts of the review in the
+/// same currency that are in `eligible` (the balance check's accounts, so
+/// active ones), sorted by name.
+pub fn move_targets(
+    source: &AccountReview,
+    all: &[AccountReview],
+    eligible: &HashSet<&str>,
+) -> Vec<(String, String)> {
+    let mut list: Vec<(String, String)> = all
+        .iter()
+        .filter(|a| a.account_id != source.account_id)
+        .filter(|a| eligible.contains(a.account_id.as_str()))
+        .filter(|a| matches!(a.role, AccountRoleKind::Spending | AccountRoleKind::Savings))
+        .filter(|a| a.currency == source.currency)
+        .map(|a| (a.account_id.clone(), a.name.clone()))
+        .collect();
+    list.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
+    list
 }
 
 /// Names for destinations the list no longer offers: `(pot_id, name)` of
-/// old pots and `(wish_id, label)` of every wish.
+/// old pots, `(wish_id, label)` of every wish and `(account_id, name)` of
+/// every account the view knows.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LegacyNames {
     pub pots: Vec<(String, String)>,
     pub wishes: Vec<(String, String)>,
+    pub accounts: Vec<(String, String)>,
 }
 
 /// The label of a destination the list no longer offers, `None` for one it
-/// does: `Pot (retired): <name>`, or what became of a wish that cannot take
-/// a line (`Wish (bought): <name>` …).
+/// does: `Pot (retired): <name>`, what became of a wish that cannot take
+/// a line (`Wish (bought): <name>` …), or `Move to <name> (no longer
+/// available)` for an account not among `moves`.
 pub fn legacy_label(
     destination: &str,
     wishes: &[WishOption],
+    moves: &[(String, String)],
     legacy: &LegacyNames,
 ) -> Option<String> {
     let find = |list: &[(String, String)], id: &str| {
         list.iter().find(|(k, _)| k == id).map(|(_, v)| v.clone())
     };
+    if let Some(account) = destination.strip_prefix("account:") {
+        if moves.iter().any(|(id, _)| id == account) {
+            return None;
+        }
+        let name = find(&legacy.accounts, account).unwrap_or_else(|| account.to_owned());
+        return Some(format!("Move to {name} (no longer available)"));
+    }
     if let Some(pot) = destination.strip_prefix("pot:") {
         let name = find(&legacy.pots, pot).unwrap_or_else(|| pot.to_owned());
         return Some(format!("Pot (retired): {name}"));
@@ -83,12 +119,14 @@ pub fn legacy_label(
 }
 
 /// `(value, label)` of every destination a line can pick, in order: Stays on
-/// this account, Next month's buffer, each wish, each goal, Plan a purchase….
+/// this account, Next month's buffer, Move to each of `moves` (by name), each
+/// wish, each goal, Plan a purchase….
 /// A `current` value the list does not offer (an old pot, a bought wish)
 /// comes first with its legacy label.
 pub fn destination_options(
     wishes: &[WishOption],
     goals: &[(String, String)],
+    moves: &[(String, String)],
     current: &str,
     legacy: &LegacyNames,
 ) -> Vec<(String, String)> {
@@ -96,6 +134,13 @@ pub fn destination_options(
         ("stay".into(), "Stays on this account".into()),
         ("buffer".into(), "Next month's buffer".into()),
     ];
+    let mut sorted = moves.to_vec();
+    sorted.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
+    list.extend(
+        sorted
+            .into_iter()
+            .map(|(id, name)| (format!("account:{id}"), format!("Move to {name}"))),
+    );
     list.extend(
         wishes
             .iter()
@@ -108,7 +153,8 @@ pub fn destination_options(
     );
     list.push(("plan".into(), "Plan a purchase…".into()));
     if !list.iter().any(|(v, _)| v == current) {
-        let label = legacy_label(current, wishes, legacy).unwrap_or_else(|| current.to_owned());
+        let label =
+            legacy_label(current, wishes, moves, legacy).unwrap_or_else(|| current.to_owned());
         list.insert(0, (current.to_owned(), label));
     }
     list
@@ -121,7 +167,10 @@ fn parse(draft: &Draft, minor_unit: u8, allow_negative: bool, legacy: bool) -> O
     if decimal_places(value) > u32::from(minor_unit) {
         return None;
     }
-    if draft.destination == "plan" || (draft.destination.starts_with("wish:") && !legacy) {
+    if draft.destination == "plan"
+        || draft.destination.starts_with("account:")
+        || (draft.destination.starts_with("wish:") && !legacy)
+    {
         return (value > Decimal::ZERO).then_some(value);
     }
     let bad = if allow_negative || legacy {
@@ -220,7 +269,9 @@ fn compute(setup: &Setup, drafts: &DraftStore) -> Rows {
             let offered = wishes_in(&setup.wishes, &account.currency);
             let legacy: Vec<bool> = lines
                 .iter()
-                .map(|l| legacy_label(&l.destination, &offered, &setup.legacy).is_some())
+                .map(|l| {
+                    legacy_label(&l.destination, &offered, &account.moves, &setup.legacy).is_some()
+                })
                 .collect();
             let parsed: Vec<Option<Decimal>> = lines
                 .iter()
@@ -239,6 +290,8 @@ fn compute(setup: &Setup, drafts: &DraftStore) -> Rows {
                             .and_then(|id| setup.wishes.iter().find(|w| w.wish_id == id));
                         return Some(if line.destination.starts_with("pot:") {
                             "Pots are retired: remove this line.".into()
+                        } else if line.destination.starts_with("account:") {
+                            "This account takes no moves: remove this line.".into()
                         } else if let Some(wish) = elsewhere {
                             format!(
                                 "The wish saves in {}, not {}: remove this line.",
@@ -297,7 +350,8 @@ fn compute(setup: &Setup, drafts: &DraftStore) -> Rows {
 
 /// Per-account allocation lines. Every account's lines must add up exactly
 /// to its target before the owner can submit. Split mode needs positive
-/// amounts; delta mode (resettle) allows negatives, except toward a wish.
+/// amounts; delta mode (resettle) allows negatives, except toward a wish
+/// or another account.
 /// An old line to a pot or to a wish that takes no more money shows read
 /// only and must be removed.
 #[component]
@@ -626,8 +680,11 @@ fn SplitLine(
     let error = move || position().and_then(|p| p.1);
     let old = Memo::new(move |_| {
         draft.with(|d| {
-            wishes
-                .with_value(|w| legacy.with_value(|l| legacy_label(&d.destination, w, l).is_some()))
+            wishes.with_value(|w| {
+                account.with_value(|a| {
+                    legacy.with_value(|l| legacy_label(&d.destination, w, &a.moves, l).is_some())
+                })
+            })
         })
     });
     let can_remove = Signal::derive(move || {
@@ -639,7 +696,11 @@ fn SplitLine(
     let destination_options = Signal::derive(move || {
         let current = draft.with(|d| d.destination.clone());
         let list = wishes.with_value(|w| {
-            goals.with_value(|g| legacy.with_value(|l| destination_options(w, g, &current, l)))
+            goals.with_value(|g| {
+                account.with_value(|a| {
+                    legacy.with_value(|l| destination_options(w, g, &a.moves, &current, l))
+                })
+            })
         });
         options(list)
     });
@@ -800,6 +861,7 @@ mod tests {
         LegacyNames {
             pots: vec![pair("general", "General savings")],
             wishes: vec![pair("tv", "Wish (bought): TV")],
+            accounts: vec![pair("gone", "Old pocket")],
         }
     }
 
@@ -814,6 +876,26 @@ mod tests {
             currency: Currency::new("EUR"),
             target: target.parse().unwrap(),
             note: None,
+            moves: Vec::new(),
+        }
+    }
+
+    fn review(id: &str, name: &str, currency: &str, role: AccountRoleKind) -> AccountReview {
+        AccountReview {
+            account_id: id.into(),
+            name: name.into(),
+            currency: Currency::new(currency),
+            role,
+            closing_balance: Decimal::ZERO,
+            carry_in: Decimal::ZERO,
+            income_planned: Decimal::ZERO,
+            income_actual: Decimal::ZERO,
+            fixed_planned: Decimal::ZERO,
+            fixed_actual: Decimal::ZERO,
+            other_spent: Decimal::ZERO,
+            groups: Vec::new(),
+            leftover: Decimal::ZERO,
+            skipped_foreign: 0,
         }
     }
 
@@ -940,18 +1022,21 @@ mod tests {
     }
 
     #[test]
-    fn destinations_list_wishes_before_goals() {
+    fn destinations_list_moves_then_wishes_then_goals() {
         let wishes = [
             wish("trip", "Wish: Trip rest"),
             wish("bike", "Wish: Bike (€0.00 of €900.00)"),
         ];
         let goals = [pair("house", "House")];
-        let list = destination_options(&wishes, &goals, "stay", &legacy());
+        let moves = [pair("sw", "Swedbank"), pair("rg", "Revolut Groceries")];
+        let list = destination_options(&wishes, &goals, &moves, "stay", &legacy());
         assert_eq!(
             list,
             [
                 pair("stay", "Stays on this account"),
                 pair("buffer", "Next month's buffer"),
+                pair("account:rg", "Move to Revolut Groceries"),
+                pair("account:sw", "Move to Swedbank"),
                 pair("wish:trip", "Wish: Trip rest"),
                 pair("wish:bike", "Wish: Bike (€0.00 of €900.00)"),
                 pair("goal:house", "Goal: House"),
@@ -962,7 +1047,7 @@ mod tests {
 
     #[test]
     fn a_legacy_pot_stays_listed_once_with_its_retired_label() {
-        let list = destination_options(&[], &[], "pot:general", &legacy());
+        let list = destination_options(&[], &[], &[], "pot:general", &legacy());
         assert_eq!(
             list[0],
             pair("pot:general", "Pot (retired): General savings")
@@ -974,23 +1059,23 @@ mod tests {
                 .count(),
             1
         );
-        let unknown = destination_options(&[], &[], "pot:gone", &legacy());
+        let unknown = destination_options(&[], &[], &[], "pot:gone", &legacy());
         assert_eq!(unknown[0], pair("pot:gone", "Pot (retired): gone"));
     }
 
     #[test]
     fn a_wish_no_longer_offered_keeps_its_line_with_what_became_of_it() {
         let wishes = [wish("bike", "Wish: Bike (€0.00 of €900.00)")];
-        let bought = destination_options(&wishes, &[], "wish:tv", &legacy());
+        let bought = destination_options(&wishes, &[], &[], "wish:tv", &legacy());
         assert_eq!(bought[0], pair("wish:tv", "Wish (bought): TV"));
-        let unknown = destination_options(&wishes, &[], "wish:x", &legacy());
+        let unknown = destination_options(&wishes, &[], &[], "wish:x", &legacy());
         assert_eq!(unknown[0], pair("wish:x", "Wish (no longer planned): x"));
         assert_eq!(
             values(&unknown).iter().filter(|v| **v == "wish:x").count(),
             1
         );
         // An offered wish is not repeated.
-        let offered = destination_options(&wishes, &[], "wish:bike", &legacy());
+        let offered = destination_options(&wishes, &[], &[], "wish:bike", &legacy());
         assert_eq!(
             values(&offered)
                 .iter()
@@ -998,7 +1083,88 @@ mod tests {
                 .count(),
             1
         );
-        assert_eq!(legacy_label("wish:bike", &wishes, &legacy()), None);
-        assert_eq!(legacy_label("goal:house", &wishes, &legacy()), None);
+        assert_eq!(legacy_label("wish:bike", &wishes, &[], &legacy()), None);
+        assert_eq!(legacy_label("goal:house", &wishes, &[], &legacy()), None);
+    }
+
+    #[test]
+    fn a_move_no_longer_offered_is_a_read_only_line_to_remove() {
+        let moves = [pair("rg", "Revolut Groceries")];
+        assert_eq!(legacy_label("account:rg", &[], &moves, &legacy()), None);
+        let stale = destination_options(&[], &[], &moves, "account:gone", &legacy());
+        assert_eq!(
+            stale[0],
+            pair("account:gone", "Move to Old pocket (no longer available)")
+        );
+        let unknown = destination_options(&[], &[], &moves, "account:x", &legacy());
+        assert_eq!(
+            unknown[0],
+            pair("account:x", "Move to x (no longer available)")
+        );
+        let mut from = account("a", "10");
+        from.moves = moves.to_vec();
+        let rows = rows(
+            vec![from],
+            Vec::new(),
+            false,
+            &[(
+                "a",
+                vec![draft("account:gone", "4.00"), draft("account:rg", "6.00")],
+            )],
+        );
+        assert_eq!(
+            rows.rows[0].errors,
+            [
+                Some("This account takes no moves: remove this line.".to_owned()),
+                None
+            ]
+        );
+        assert!(!rows.complete);
+    }
+
+    #[test]
+    fn move_options_skip_self_ignored_and_other_currencies() {
+        let all = [
+            review("abn", "ABN AMRO", "EUR", AccountRoleKind::Spending),
+            review("sw", "Swedbank", "EUR", AccountRoleKind::Spending),
+            review("rs", "Revolut Savings", "EUR", AccountRoleKind::Savings),
+            review("old", "Old card", "EUR", AccountRoleKind::Ignored),
+            review("new", "New card", "EUR", AccountRoleKind::Unclassified),
+            review("usd", "Revolut USD", "USD", AccountRoleKind::Spending),
+            review("rg", "Revolut Groceries", "EUR", AccountRoleKind::Spending),
+        ];
+        let mut eligible: HashSet<&str> = all.iter().map(|a| a.account_id.as_str()).collect();
+        assert_eq!(
+            move_targets(&all[0], &all, &eligible),
+            [
+                pair("rg", "Revolut Groceries"),
+                pair("rs", "Revolut Savings"),
+                pair("sw", "Swedbank"),
+            ]
+        );
+        // An inactive account is not in the balance check, so takes no move.
+        eligible.remove("sw");
+        assert_eq!(
+            move_targets(&all[0], &all, &eligible),
+            [
+                pair("rg", "Revolut Groceries"),
+                pair("rs", "Revolut Savings")
+            ]
+        );
+    }
+
+    #[test]
+    fn a_move_line_stays_positive_in_delta_mode() {
+        let mut from = account("a", "-10");
+        from.moves = vec![pair("b", "b")];
+        let rows = rows(
+            vec![from],
+            Vec::new(),
+            true,
+            &[("a", vec![draft("account:b", "-10.00")])],
+        );
+        assert_eq!(rows.rows[0].parsed, [None]);
+        let ok = super::parse(&draft("account:b", "10.00"), 2, true, false);
+        assert_eq!(ok, Some("10.00".parse().unwrap()));
     }
 }
