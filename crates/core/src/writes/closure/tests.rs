@@ -1006,3 +1006,47 @@ fn a_resettle_delta_line_adds_to_the_wish() {
     assert_eq!(error(refused), "saves more than the wish still needs");
     assert_eq!(wish(&db, &id).saved, d("55"));
 }
+
+#[test]
+fn a_resplit_gives_back_only_its_own_months_wish_line() {
+    let (mut db, id) = wish_db("900");
+    settle_wish(&mut db, &id, "40").unwrap();
+    // November settled another 40 toward the same wish.
+    let conn = db.store.connection();
+    put(
+        conn,
+        &MonthPeriod {
+            status: ClosureStatus::Settled,
+            allocations: vec![checking("n", &format!("wish:{id}"), "40")],
+            ..period("2026-11-01", ClosureStatus::Settled)
+        },
+    );
+    let booked = Wish {
+        saved: d("80"),
+        saved_month: Some("2026-11-01".into()),
+        ..wish(&db, &id)
+    };
+    db.write(|w, _| crate::writes::wishes::store(w, &booked))
+        .unwrap();
+    assert_eq!(wish(&db, &id).saved, d("80"));
+    // October re-split without its line: only October's 40 comes back.
+    settle_wish(&mut db, &id, "0").unwrap();
+    assert_eq!(wish(&db, &id).saved, d("40"));
+    let november = stored(db.store.connection(), "2026-11-01");
+    assert_eq!(november.allocations.len(), 1);
+}
+
+#[test]
+fn finalizing_a_settled_month_leaves_the_wish_saved_alone() {
+    let (mut db, id) = wish_db("900");
+    settle_wish(&mut db, &id, "40").unwrap();
+    let before = wish(&db, &id);
+    let revision = stored(db.store.connection(), "2026-10-01").revision;
+    db.write(|w, snap| finalize(w, snap, october(), revision, &[]))
+        .unwrap();
+    assert_eq!(
+        stored(db.store.connection(), "2026-10-01").status,
+        ClosureStatus::Closed
+    );
+    assert_eq!(wish(&db, &id), before);
+}

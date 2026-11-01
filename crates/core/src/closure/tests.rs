@@ -526,7 +526,10 @@ fn wish_options_list_parents_then_sub_wishes_by_due_date() {
 
 #[test]
 fn a_fully_saved_wish_is_not_offered_but_still_has_a_cap() {
-    let wishes = [wish("bike", "100", "100", None), wish("tv", "50", "0", None)];
+    let wishes = [
+        wish("bike", "100", "100", None),
+        wish("tv", "50", "0", None),
+    ];
     let ids: Vec<String> = wish_options(&wishes, &[])
         .into_iter()
         .map(|o| o.wish_id)
