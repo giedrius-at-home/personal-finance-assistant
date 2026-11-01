@@ -18,8 +18,8 @@ use finance_types::report::Currency;
 use finance_types::report::allocation::CurrencyAllocation;
 use finance_types::report::closure::{
     AccountReview, AccountRoleKind, AccountRoleView, AllocationLine, BalanceState, BalanceStatus,
-    ClosureReview, ClosureView, GroupReview, KnownPayment, MonthPeriod, NamedAccount, PotView,
-    SavingsSuggestion, TransferStatus, UnclassifiedAccounts, WishOption,
+    ClosureReview, ClosureStatus, ClosureView, GroupReview, KnownPayment, MonthPeriod,
+    NamedAccount, PotView, SavingsSuggestion, TransferStatus, UnclassifiedAccounts, WishOption,
 };
 use finance_types::report::outlook::{DailySpendingForecast, ForecastExclusions};
 use finance_types::report::plans::{PlanStatus, PlannedPaymentView};
@@ -536,6 +536,27 @@ pub fn wish_caps(wishes: &[Wish], previous: &[AllocationLine]) -> WishCaps {
 fn short_money(value: Decimal, currency: &Currency) -> String {
     let mut value = value.round_dp(u32::from(currency.minor_unit));
     value.rescale(u32::from(currency.minor_unit));
+    let text = value.abs().to_string();
+    let (whole, fraction) = text
+        .split_once('.')
+        .map_or((text.as_str(), None), |(w, f)| (w, Some(f)));
+    // Thousands separators, as the UI's `money` writes them.
+    let mut grouped = String::new();
+    for (i, digit) in whole.chars().enumerate() {
+        if i > 0 && (whole.len() - i) % 3 == 0 {
+            grouped.push(',');
+        }
+        grouped.push(digit);
+    }
+    let sign = if value.is_sign_negative() && !value.is_zero() {
+        "-"
+    } else {
+        ""
+    };
+    let value = match fraction {
+        Some(f) => format!("{sign}{grouped}.{f}"),
+        None => format!("{sign}{grouped}"),
+    };
     match currency.code.as_str() {
         "EUR" => format!("€{value}"),
         "GBP" => format!("£{value}"),
@@ -591,6 +612,18 @@ pub fn wish_options(wishes: &[Wish], previous: &[AllocationLine]) -> Vec<WishOpt
     out
 }
 
+/// The wish options for the period's editor, with room as the server will
+/// check it: a split or re-split replaces the period's lines, so their
+/// earlier contribution counts back; a resettle appends delta lines, so it
+/// does not.
+pub fn period_wish_options(wishes: &[Wish], period: &MonthPeriod) -> Vec<WishOption> {
+    if period.status == ClosureStatus::ChangedAfterClose {
+        wish_options(wishes, &[])
+    } else {
+        wish_options(wishes, &period.allocations)
+    }
+}
+
 /// `(wish_id, label)` of every wish for naming lines: `Wish: <name>` while
 /// it is offered, else what became of it.
 pub fn wish_labels(wishes: &[Wish], options: &[WishOption]) -> Vec<(String, String)> {
@@ -602,6 +635,8 @@ pub fn wish_labels(wishes: &[Wish], options: &[WishOption]) -> Vec<(String, Stri
                 _ if offered => format!("Wish: {}", w.name),
                 WishStatus::Bought => format!("Wish (bought): {}", w.name),
                 WishStatus::Dropped => format!("Wish (dropped): {}", w.name),
+                // Planned or started but not one-off (repeating, bill change):
+                // it never takes a line, so an old line to it is legacy.
                 WishStatus::Planned | WishStatus::Started => {
                     format!("Wish (no longer planned): {}", w.name)
                 }
@@ -939,7 +974,7 @@ pub fn closure_view(
     let balances = pot_balances(&entries, None);
     let roles = load_roles(conn)?;
     let all_wishes = crate::wishes::store::load_wishes(conn)?;
-    let wishes = wish_options(&all_wishes, &period.allocations);
+    let wishes = period_wish_options(&all_wishes, &period);
     Ok(ClosureView {
         balances: balance_statuses(conn, snap, &period, &roles)?,
         review: review_month(snap, periods, month, now),

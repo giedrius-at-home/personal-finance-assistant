@@ -233,8 +233,17 @@ fn compute(setup: &Setup, drafts: &DraftStore) -> Rows {
                 .zip(&legacy)
                 .map(|((line, value), old)| {
                     if *old {
+                        let elsewhere = line
+                            .destination
+                            .strip_prefix("wish:")
+                            .and_then(|id| setup.wishes.iter().find(|w| w.wish_id == id));
                         return Some(if line.destination.starts_with("pot:") {
                             "Pots are retired: remove this line.".into()
+                        } else if let Some(wish) = elsewhere {
+                            format!(
+                                "The wish saves in {}, not {}: remove this line.",
+                                wish.currency.code, account.currency.code
+                            )
                         } else {
                             "This wish takes no more money: remove this line.".into()
                         });
@@ -796,6 +805,138 @@ mod tests {
 
     fn values(list: &[(String, String)]) -> Vec<&str> {
         list.iter().map(|(v, _)| v.as_str()).collect()
+    }
+
+    fn account(id: &str, target: &str) -> SplitTarget {
+        SplitTarget {
+            account_id: id.into(),
+            name: id.into(),
+            currency: Currency::new("EUR"),
+            target: target.parse().unwrap(),
+            note: None,
+        }
+    }
+
+    fn draft(destination: &str, amount: &str) -> Draft {
+        Draft {
+            key: new_key(),
+            destination: destination.into(),
+            amount: amount.into(),
+            ..Draft::default()
+        }
+    }
+
+    fn new_key() -> String {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        format!("k{}", NEXT.fetch_add(1, Ordering::Relaxed))
+    }
+
+    fn rows(
+        accounts: Vec<SplitTarget>,
+        wishes: Vec<WishOption>,
+        allow_negative: bool,
+        lines: &[(&str, Vec<Draft>)],
+    ) -> Rows {
+        let setup = Setup {
+            accounts,
+            wishes,
+            legacy: legacy(),
+            allow_negative,
+            min_plan_month: "2026-11".into(),
+        };
+        let drafts = DraftStore {
+            key: "k".into(),
+            accounts: lines
+                .iter()
+                .map(|(id, l)| ((*id).to_owned(), l.clone()))
+                .collect(),
+        };
+        compute(&setup, &drafts)
+    }
+
+    #[test]
+    fn a_legacy_line_blocks_the_split_until_removed() {
+        let rows = rows(
+            vec![account("a", "50")],
+            Vec::new(),
+            false,
+            &[(
+                "a",
+                vec![draft("pot:general", "-20.00"), draft("stay", "70.00")],
+            )],
+        );
+        assert!(!rows.complete);
+        let row = &rows.rows[0];
+        assert!(row.valid, "the old take keeps its negative amount");
+        assert!(row.remaining.is_zero());
+        assert_eq!(
+            row.errors[0].as_deref(),
+            Some("Pots are retired: remove this line.")
+        );
+    }
+
+    #[test]
+    fn wish_room_is_shared_across_lines_and_accounts() {
+        let bike = wish("bike", "Wish: Bike"); // room 100
+        let ok = rows(
+            vec![account("a", "60"), account("b", "40")],
+            vec![bike.clone()],
+            false,
+            &[
+                ("a", vec![draft("wish:bike", "60.00")]),
+                ("b", vec![draft("wish:bike", "40.00")]),
+            ],
+        );
+        assert!(ok.complete);
+        let over = rows(
+            vec![account("a", "70"), account("b", "40")],
+            vec![bike],
+            false,
+            &[
+                (
+                    "a",
+                    vec![draft("wish:bike", "30.00"), draft("wish:bike", "40.00")],
+                ),
+                ("b", vec![draft("wish:bike", "40.00")]),
+            ],
+        );
+        assert!(!over.complete);
+        assert_eq!(over.rows[0].errors, [None, None]);
+        assert_eq!(
+            over.rows[1].errors[0].as_deref(),
+            Some("More than the wish still needs (€30.00 left).")
+        );
+    }
+
+    #[test]
+    fn a_wish_line_stays_positive_in_delta_mode() {
+        let rows = rows(
+            vec![account("a", "-10")],
+            vec![wish("bike", "Wish: Bike")],
+            true,
+            &[("a", vec![draft("wish:bike", "-10.00")])],
+        );
+        assert_eq!(rows.rows[0].parsed, [None]);
+        assert!(!rows.complete);
+        let buffer = super::parse(&draft("buffer", "-10.00"), 2, true, false);
+        assert_eq!(buffer, Some("-10.00".parse().unwrap()));
+    }
+
+    #[test]
+    fn a_wish_in_another_currency_says_so() {
+        let mut usd = wish("trip", "Wish: Trip");
+        usd.currency = Currency::new("USD");
+        let rows = rows(
+            vec![account("a", "10")],
+            vec![usd],
+            false,
+            &[("a", vec![draft("wish:trip", "10.00")])],
+        );
+        assert_eq!(
+            rows.rows[0].errors[0].as_deref(),
+            Some("The wish saves in USD, not EUR: remove this line.")
+        );
     }
 
     #[test]

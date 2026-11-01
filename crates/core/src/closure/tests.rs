@@ -492,7 +492,7 @@ fn wish_options_list_parents_then_sub_wishes_by_due_date() {
         [
             ("trip", "Wish: Trip rest"),
             ("flight", "Wish: Flight (€0.00 of €200.00)"),
-            ("bike", "Wish: Bike (€300.00 of €1200.00)"),
+            ("bike", "Wish: Bike (€300.00 of €1,200.00)"),
         ]
     );
     assert_eq!(options[0].room, d("50"));
@@ -501,6 +501,19 @@ fn wish_options_list_parents_then_sub_wishes_by_due_date() {
     assert_eq!(names["bike"], "Wish: Bike");
     assert_eq!(names["tv"], "Wish (bought): TV");
     assert_eq!(names["sofa"], "Wish (dropped): Sofa");
+}
+
+#[test]
+fn a_resettle_does_not_count_earlier_wish_lines_back() {
+    let wishes = [wish("bike", "100", "40", None)];
+    let mut settled = period("2026-10-01", ClosureStatus::Settled);
+    settled.allocations = vec![line("x", "wish:bike", "40")];
+    let changed = MonthPeriod {
+        status: ClosureStatus::ChangedAfterClose,
+        ..settled.clone()
+    };
+    assert_eq!(period_wish_options(&wishes, &settled)[0].room, d("100"));
+    assert_eq!(period_wish_options(&wishes, &changed)[0].room, d("60"));
 }
 
 #[test]

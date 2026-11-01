@@ -351,7 +351,7 @@ fn destination_label(line: &AllocationLine, view: &ClosureView) -> String {
             view.goals
                 .iter()
                 .find(|(id, _)| dest.strip_prefix("goal:") == Some(id.as_str()))
-                .map_or_else(|| dest.to_owned(), |(_, name)| format!("goal {name}"))
+                .map_or_else(|| dest.to_owned(), |(_, name)| format!("Goal: {name}"))
         }
     }
 }
