@@ -103,7 +103,8 @@ pub fn status_text(status: &BalanceStatus) -> (String, bool) {
                 format!("Off by {}", money(bank - status.ledger, &status.currency)),
                 true,
             ),
-            _ => (String::new(), false),
+            Some(_) => ("Matches".to_owned(), false),
+            None => (String::new(), false),
         },
     }
 }
@@ -325,6 +326,8 @@ mod tests {
         let s = status("a", d(1000, 2), None, BalanceState::Stale);
         assert_eq!(status_text(&s), ("Changed since confirmed".into(), true));
         let s = status("a", d(1000, 2), Some(d(1000, 2)), BalanceState::Unconfirmed);
+        assert_eq!(status_text(&s), ("Matches".into(), false));
+        let s = status("a", d(1000, 2), None, BalanceState::Unconfirmed);
         assert_eq!(status_text(&s), (String::new(), false));
         let s = status("a", d(1000, 2), Some(d(1250, 2)), BalanceState::Unconfirmed);
         let (text, warn) = status_text(&s);
