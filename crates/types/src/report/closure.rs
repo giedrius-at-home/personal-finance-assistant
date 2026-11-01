@@ -319,6 +319,18 @@ pub struct PotView {
     pub balances: BTreeMap<String, Decimal>,
 }
 
+/// A planned one-off wish a split line can save toward (view only).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WishOption {
+    pub wish_id: String,
+    /// `Wish: <name> (€saved of €amount)`, or `Wish: <name> rest` for a
+    /// parent with sub-wishes.
+    pub label: String,
+    pub currency: Currency,
+    /// What the wish can still take this month.
+    pub room: Decimal,
+}
+
 /// A one-off planned payment due in the months after the funded one.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KnownPayment {
@@ -375,8 +387,16 @@ pub struct ClosureView {
     pub review: ClosureReview,
     /// `(goal_id, name)` of every savings goal.
     pub goals: Vec<(String, String)>,
-    /// Open pots with their balances.
+    /// Pots with their balances: legacy, for naming old `pot:` lines.
     pub pots: Vec<PotView>,
+    /// Wishes a split line can save toward: parents, then their sub-wishes.
+    #[serde(default)]
+    pub wishes: Vec<WishOption>,
+    /// `(wish_id, label)` of every wish, for naming lines: `Wish: <name>`,
+    /// or `Wish (bought): <name>` / `Wish (dropped): <name>` /
+    /// `Wish (no longer planned): <name>` once it can take no line.
+    #[serde(default)]
+    pub wish_labels: Vec<(String, String)>,
     pub suggestion: Option<SavingsSuggestion>,
     /// Every known account and its role, ignored ones included.
     pub accounts: Vec<AccountRoleView>,

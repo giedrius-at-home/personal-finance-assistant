@@ -336,7 +336,17 @@ fn destination_label(line: &AllocationLine, view: &ClosureView) -> String {
                     .iter()
                     .find(|p| p.pot_id == pot_id)
                     .map_or(pot_id, |p| p.name.as_str());
-                return format!("pot {name}");
+                return format!("Pot (retired): {name}");
+            }
+            if let Some(wish_id) = dest.strip_prefix("wish:") {
+                return view
+                    .wish_labels
+                    .iter()
+                    .find(|(id, _)| id == wish_id)
+                    .map_or_else(
+                        || format!("Wish (no longer planned): {wish_id}"),
+                        |(_, label)| label.clone(),
+                    );
             }
             view.goals
                 .iter()
@@ -394,6 +404,7 @@ pub fn AllocationList(
     let items = shown
         .into_iter()
         .map(|line| {
+            // A legacy take from a pot.
             let take = line.pot_id().is_some() && line.amount.is_sign_negative();
             let amount = money(
                 if take { line.amount.abs() } else { line.amount },
@@ -401,7 +412,7 @@ pub fn AllocationList(
             );
             let label = destination_label(&line, &view);
             let transfer = line.transfer_status != TransferStatus::NotNeeded;
-            // A take moves money from the pot's account to this one;
+            // A take moved money from the pot's account to this one;
             // anything else from this account onwards.
             let from = account(if take {
                 line.transfer_source_account_id

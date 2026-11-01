@@ -467,6 +467,43 @@ fn parent_cap_is_its_rest_and_earlier_lines_count_back() {
 }
 
 #[test]
+fn wish_options_list_parents_then_sub_wishes_by_due_date() {
+    let mut later = wish("bike", "1200", "300", None);
+    later.due_on = "2027-06-01".into();
+    later.name = "Bike".into();
+    let mut trip = wish("trip", "500", "250", None);
+    trip.name = "Trip".into();
+    let mut flight = wish("flight", "200", "0", Some("trip"));
+    flight.name = "Flight".into();
+    let mut bought = wish("tv", "400", "400", None);
+    bought.name = "TV".into();
+    bought.status = WishStatus::Bought;
+    let mut dropped = wish("sofa", "900", "0", None);
+    dropped.name = "Sofa".into();
+    dropped.status = WishStatus::Dropped;
+    let wishes = [later, flight, bought, trip, dropped];
+    let options = wish_options(&wishes, &[]);
+    let labels: Vec<(&str, &str)> = options
+        .iter()
+        .map(|o| (o.wish_id.as_str(), o.label.as_str()))
+        .collect();
+    assert_eq!(
+        labels,
+        [
+            ("trip", "Wish: Trip rest"),
+            ("flight", "Wish: Flight (€0.00 of €200.00)"),
+            ("bike", "Wish: Bike (€300.00 of €1200.00)"),
+        ]
+    );
+    assert_eq!(options[0].room, d("50"));
+    assert_eq!(options[0].currency, eur());
+    let names: HashMap<String, String> = wish_labels(&wishes, &options).into_iter().collect();
+    assert_eq!(names["bike"], "Wish: Bike");
+    assert_eq!(names["tv"], "Wish (bought): TV");
+    assert_eq!(names["sofa"], "Wish (dropped): Sofa");
+}
+
+#[test]
 fn legacy_pot_lines_still_route_and_match() {
     let pots = [PotRecord {
         pot_id: "general".into(),

@@ -19,7 +19,7 @@ use finance_types::report::allocation::CurrencyAllocation;
 use finance_types::report::closure::{
     AccountReview, AccountRoleKind, AccountRoleView, AllocationLine, BalanceState, BalanceStatus,
     ClosureReview, ClosureView, GroupReview, KnownPayment, MonthPeriod, NamedAccount, PotView,
-    SavingsSuggestion, TransferStatus, UnclassifiedAccounts,
+    SavingsSuggestion, TransferStatus, UnclassifiedAccounts, WishOption,
 };
 use finance_types::report::outlook::{DailySpendingForecast, ForecastExclusions};
 use finance_types::report::plans::{PlanStatus, PlannedPaymentView};
@@ -531,6 +531,86 @@ pub fn wish_caps(wishes: &[Wish], previous: &[AllocationLine]) -> WishCaps {
         .collect()
 }
 
+/// `€12.00`: the amount at the currency's minor unit, `USD 12.00` for a
+/// currency without a sign here.
+fn short_money(value: Decimal, currency: &Currency) -> String {
+    let mut value = value.round_dp(u32::from(currency.minor_unit));
+    value.rescale(u32::from(currency.minor_unit));
+    match currency.code.as_str() {
+        "EUR" => format!("€{value}"),
+        "GBP" => format!("£{value}"),
+        "USD" => format!("${value}"),
+        code => format!("{code} {value}"),
+    }
+}
+
+/// The wishes a split line can save toward, as the Wishes page orders them:
+/// top-level wishes by due date, each followed by its sub-wishes. A parent
+/// with sub-wishes takes money toward its rest.
+pub fn wish_options(wishes: &[Wish], previous: &[AllocationLine]) -> Vec<WishOption> {
+    let caps = wish_caps(wishes, previous);
+    let by_due = |list: &mut Vec<&Wish>| {
+        list.sort_by(|a, b| (&a.due_on, &a.created_at).cmp(&(&b.due_on, &b.created_at)));
+    };
+    let ids: HashSet<&str> = wishes.iter().map(|w| w.wish_id.as_str()).collect();
+    let mut tops: Vec<&Wish> = wishes
+        .iter()
+        .filter(|w| w.parent_id.as_deref().is_none_or(|p| !ids.contains(p)))
+        .collect();
+    by_due(&mut tops);
+    let mut out = Vec::new();
+    for top in tops {
+        let mut subs: Vec<&Wish> = wishes
+            .iter()
+            .filter(|w| w.parent_id.as_deref() == Some(top.wish_id.as_str()))
+            .collect();
+        by_due(&mut subs);
+        let parent = subs.iter().any(|s| s.kind == WishKind::OneOff);
+        for wish in std::iter::once(top).chain(subs) {
+            let Some(cap) = caps.get(&wish.wish_id) else {
+                continue;
+            };
+            let label = if parent && wish.wish_id == top.wish_id {
+                format!("Wish: {} rest", wish.name)
+            } else {
+                format!(
+                    "Wish: {} ({} of {})",
+                    wish.name,
+                    short_money(wish.saved, &wish.currency),
+                    short_money(wish.amount, &wish.currency)
+                )
+            };
+            out.push(WishOption {
+                wish_id: wish.wish_id.clone(),
+                label,
+                currency: cap.currency.clone(),
+                room: cap.room,
+            });
+        }
+    }
+    out
+}
+
+/// `(wish_id, label)` of every wish for naming lines: `Wish: <name>` while
+/// it is offered, else what became of it.
+pub fn wish_labels(wishes: &[Wish], options: &[WishOption]) -> Vec<(String, String)> {
+    wishes
+        .iter()
+        .map(|w| {
+            let offered = options.iter().any(|o| o.wish_id == w.wish_id);
+            let label = match w.status {
+                _ if offered => format!("Wish: {}", w.name),
+                WishStatus::Bought => format!("Wish (bought): {}", w.name),
+                WishStatus::Dropped => format!("Wish (dropped): {}", w.name),
+                WishStatus::Planned | WishStatus::Started => {
+                    format!("Wish (no longer planned): {}", w.name)
+                }
+            };
+            (w.wish_id.clone(), label)
+        })
+        .collect()
+}
+
 /// Split mode: every positive leftover fully assigned with positive lines.
 /// Delta mode (`baseline` given): lines sum to the leftover change; negatives
 /// allowed, except on a wish line. Pot lines are legacy and refused in both.
@@ -858,6 +938,8 @@ pub fn closure_view(
     let entries = load_pot_entries(conn, None)?;
     let balances = pot_balances(&entries, None);
     let roles = load_roles(conn)?;
+    let all_wishes = crate::wishes::store::load_wishes(conn)?;
+    let wishes = wish_options(&all_wishes, &period.allocations);
     Ok(ClosureView {
         balances: balance_statuses(conn, snap, &period, &roles)?,
         review: review_month(snap, periods, month, now),
@@ -866,10 +948,12 @@ pub fn closure_view(
             .iter()
             .map(|g| (g.goal.goal_id.clone(), g.goal.name.clone()))
             .collect(),
-        pots: load_pots(conn, false)?
+        pots: load_pots(conn, true)?
             .iter()
             .map(|p| pot_view(p, &balances))
             .collect(),
+        wish_labels: wish_labels(&all_wishes, &wishes),
+        wishes,
         suggestion: suggestion(store, snap, now, forecaster)?,
         accounts: account_role_views(&accounts_by_id(&snap.accounts), &roles),
         transfer_candidates: candidates(snap, &period),

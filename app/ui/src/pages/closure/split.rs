@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use finance_types::report::Currency;
 use finance_types::report::closure::{
-    AllocationLine, LineKind, PotView, SavingsSuggestion, TransferStatus,
+    AllocationLine, LineKind, SavingsSuggestion, TransferStatus, WishOption,
 };
 use leptos::prelude::*;
 use rust_decimal::Decimal;
@@ -23,10 +23,8 @@ use crate::ds::{Button, Size, Variant, cn};
 pub struct Draft {
     pub key: String,
     pub destination: String,
-    /// As typed. A take is typed positive and saved negative.
+    /// As typed.
     pub amount: String,
-    /// A take from a pot: money arriving on this account.
-    pub take: bool,
     pub plan_name: String,
     /// YYYY-MM; saved as the first day of that month.
     pub plan_month: Option<String>,
@@ -36,7 +34,7 @@ pub struct Draft {
 }
 
 /// The drafts of one split, kept by the wizard so a reload of the month
-/// (a new pot, say) does not lose what was typed.
+/// does not lose what was typed.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct DraftStore {
     pub key: String,
@@ -54,20 +52,79 @@ pub struct SplitTarget {
     pub note: Option<String>,
 }
 
+/// Names for destinations the list no longer offers: `(pot_id, name)` of
+/// old pots and `(wish_id, label)` of every wish.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LegacyNames {
+    pub pots: Vec<(String, String)>,
+    pub wishes: Vec<(String, String)>,
+}
+
+/// The label of a destination the list no longer offers, `None` for one it
+/// does: `Pot (retired): <name>`, or what became of a wish that cannot take
+/// a line (`Wish (bought): <name>` …).
+pub fn legacy_label(
+    destination: &str,
+    wishes: &[WishOption],
+    legacy: &LegacyNames,
+) -> Option<String> {
+    let find = |list: &[(String, String)], id: &str| {
+        list.iter().find(|(k, _)| k == id).map(|(_, v)| v.clone())
+    };
+    if let Some(pot) = destination.strip_prefix("pot:") {
+        let name = find(&legacy.pots, pot).unwrap_or_else(|| pot.to_owned());
+        return Some(format!("Pot (retired): {name}"));
+    }
+    let wish = destination.strip_prefix("wish:")?;
+    if wishes.iter().any(|w| w.wish_id == wish) {
+        return None;
+    }
+    Some(find(&legacy.wishes, wish).unwrap_or_else(|| format!("Wish (no longer planned): {wish}")))
+}
+
+/// `(value, label)` of every destination a line can pick, in order: Stays on
+/// this account, Next month's buffer, each wish, each goal, Plan a purchase….
+/// A `current` value the list does not offer (an old pot, a bought wish)
+/// comes first with its legacy label.
+pub fn destination_options(
+    wishes: &[WishOption],
+    goals: &[(String, String)],
+    current: &str,
+    legacy: &LegacyNames,
+) -> Vec<(String, String)> {
+    let mut list: Vec<(String, String)> = vec![
+        ("stay".into(), "Stays on this account".into()),
+        ("buffer".into(), "Next month's buffer".into()),
+    ];
+    list.extend(
+        wishes
+            .iter()
+            .map(|w| (format!("wish:{}", w.wish_id), w.label.clone())),
+    );
+    list.extend(
+        goals
+            .iter()
+            .map(|(id, name)| (format!("goal:{id}"), format!("Goal: {name}"))),
+    );
+    list.push(("plan".into(), "Plan a purchase…".into()));
+    if !list.iter().any(|(v, _)| v == current) {
+        let label = legacy_label(current, wishes, legacy).unwrap_or_else(|| current.to_owned());
+        list.insert(0, (current.to_owned(), label));
+    }
+    list
+}
+
 /// The signed amount a draft stands for, or `None` when it is not a valid
-/// amount for its line.
-fn parse(draft: &Draft, minor_unit: u8, allow_negative: bool) -> Option<Decimal> {
+/// amount for its line. A legacy line keeps whatever it was saved with.
+fn parse(draft: &Draft, minor_unit: u8, allow_negative: bool, legacy: bool) -> Option<Decimal> {
     let value = parse_amount(draft.amount.trim())?;
     if decimal_places(value) > u32::from(minor_unit) {
         return None;
     }
-    if draft.take {
-        return (value > Decimal::ZERO).then_some(-value);
-    }
-    if draft.destination == "plan" {
+    if draft.destination == "plan" || (draft.destination.starts_with("wish:") && !legacy) {
         return (value > Decimal::ZERO).then_some(value);
     }
-    let bad = if allow_negative {
+    let bad = if allow_negative || legacy {
         value.is_zero()
     } else {
         value <= Decimal::ZERO
@@ -76,18 +133,12 @@ fn parse(draft: &Draft, minor_unit: u8, allow_negative: bool) -> Option<Decimal>
 }
 
 fn draft_from(line: &AllocationLine) -> Draft {
-    let take = line.pot_id().is_some() && line.amount.is_sign_negative();
     let amount = minor_amount(&line.amount.to_string(), line.currency.minor_unit);
     let plan = line.destination == "plan";
     Draft {
         key: line.line_id.clone(),
         destination: line.destination.clone(),
-        amount: if take {
-            amount.trim_start_matches('-').to_owned()
-        } else {
-            amount
-        },
-        take,
+        amount,
         plan_name: if plan {
             line.plan_name.clone().unwrap_or_default()
         } else {
@@ -115,14 +166,6 @@ fn draft_from(line: &AllocationLine) -> Draft {
     }
 }
 
-/// `Pot name · €12.00` (the balance in the account's currency, if any).
-pub fn pot_label(pot: &PotView, currency: &Currency) -> String {
-    match pot.balances.get(&currency.code) {
-        Some(balance) => format!("{} · {}", pot.name, money(*balance, currency)),
-        None => pot.name.clone(),
-    }
-}
-
 #[derive(Clone, Debug, PartialEq)]
 struct Row {
     account: SplitTarget,
@@ -141,28 +184,28 @@ struct Rows {
 
 struct Setup {
     accounts: Vec<SplitTarget>,
-    pots: Vec<PotView>,
-    committed: Vec<AllocationLine>,
+    wishes: Vec<WishOption>,
+    legacy: LegacyNames,
     allow_negative: bool,
     min_plan_month: String,
 }
 
+/// The wishes a line from an account in `currency` can save toward.
+fn wishes_in(wishes: &[WishOption], currency: &Currency) -> Vec<WishOption> {
+    wishes
+        .iter()
+        .filter(|w| w.currency == *currency)
+        .cloned()
+        .collect()
+}
+
 fn compute(setup: &Setup, drafts: &DraftStore) -> Rows {
-    // What each pot can still give per currency: its balance without this
-    // month's saved entries, minus other takes.
-    let mut room: HashMap<String, Decimal> = HashMap::new();
-    for pot in &setup.pots {
-        for (code, balance) in &pot.balances {
-            room.insert(format!("{}|{code}", pot.pot_id), *balance);
-        }
-    }
-    for line in &setup.committed {
-        if let Some(pot) = line.pot_id() {
-            let key = format!("{pot}|{}", line.currency.code);
-            let now = room.get(&key).copied().unwrap_or_default();
-            room.insert(key, now - line.amount);
-        }
-    }
+    // What each wish can still take, less the lines above this one.
+    let mut room: HashMap<&str, Decimal> = setup
+        .wishes
+        .iter()
+        .map(|w| (w.wish_id.as_str(), w.room))
+        .collect();
     let mut complete = true;
     let rows = setup
         .accounts
@@ -174,14 +217,28 @@ fn compute(setup: &Setup, drafts: &DraftStore) -> Rows {
                 .cloned()
                 .unwrap_or_default();
             let unit = account.currency.minor_unit;
+            let offered = wishes_in(&setup.wishes, &account.currency);
+            let legacy: Vec<bool> = lines
+                .iter()
+                .map(|l| legacy_label(&l.destination, &offered, &setup.legacy).is_some())
+                .collect();
             let parsed: Vec<Option<Decimal>> = lines
                 .iter()
-                .map(|l| parse(l, unit, setup.allow_negative))
+                .zip(&legacy)
+                .map(|(l, old)| parse(l, unit, setup.allow_negative, *old))
                 .collect();
             let errors: Vec<Option<String>> = lines
                 .iter()
                 .zip(&parsed)
-                .map(|(line, value)| {
+                .zip(&legacy)
+                .map(|((line, value), old)| {
+                    if *old {
+                        return Some(if line.destination.starts_with("pot:") {
+                            "Pots are retired: remove this line.".into()
+                        } else {
+                            "This wish takes no more money: remove this line.".into()
+                        });
+                    }
                     if line.destination == "plan" {
                         if line.plan_name.trim().is_empty() {
                             return Some("Name the planned purchase.".into());
@@ -194,18 +251,16 @@ fn compute(setup: &Setup, drafts: &DraftStore) -> Rows {
                             return Some("Plan it for a later month.".into());
                         }
                     }
-                    if let (true, Some(value)) = (line.take, value) {
-                        let key = format!(
-                            "{}|{}",
-                            line.destination.trim_start_matches("pot:"),
-                            account.currency.code
-                        );
-                        let left = room.get(&key).copied().unwrap_or_default();
-                        room.insert(key, left + value);
-                        if left + value < Decimal::ZERO {
+                    if let (Some(wish), Some(value)) =
+                        (line.destination.strip_prefix("wish:"), value)
+                        && let Some(left) = room.get_mut(wish)
+                    {
+                        let before = *left;
+                        *left -= *value;
+                        if *left < Decimal::ZERO {
                             return Some(format!(
-                                "More than the pot holds ({} left).",
-                                money(left.max(Decimal::ZERO), &account.currency)
+                                "More than the wish still needs ({} left).",
+                                money(before.max(Decimal::ZERO), &account.currency)
                             ));
                         }
                     }
@@ -232,9 +287,10 @@ fn compute(setup: &Setup, drafts: &DraftStore) -> Rows {
 }
 
 /// Per-account allocation lines. Every account's lines must add up exactly
-/// to its target before the owner can submit; a take from a pot adds to
-/// what the account has to assign. Split mode needs positive amounts except
-/// for takes; delta mode (resettle) allows negatives.
+/// to its target before the owner can submit. Split mode needs positive
+/// amounts; delta mode (resettle) allows negatives, except toward a wish.
+/// An old line to a pot or to a wish that takes no more money shows read
+/// only and must be removed.
 #[component]
 pub fn SplitEditor(
     accounts: Vec<SplitTarget>,
@@ -249,13 +305,12 @@ pub fn SplitEditor(
     /// month after it.
     #[prop(into)]
     month: String,
-    /// Active pots to offer as destinations.
+    /// Planned wishes a line can save toward.
     #[prop(optional)]
-    pots: Vec<PotView>,
-    /// Lines already saved for this month: their pot entries are replaced on
-    /// submit, so takes may reuse them.
+    wishes: Vec<WishOption>,
+    /// Names for old lines' destinations.
     #[prop(optional)]
-    committed: Vec<AllocationLine>,
+    legacy: LegacyNames,
     #[prop(default = None)] suggestion: Option<SavingsSuggestion>,
     /// Known categories a planned purchase can be matched by.
     #[prop(optional)]
@@ -279,7 +334,7 @@ pub fn SplitEditor(
                     .map(draft_from)
                     .collect();
                 // A deficit account has nothing to split; it starts empty and
-                // may only take from a pot.
+                // only lists old lines to remove.
                 let empty = !allow_negative && account.target <= Decimal::ZERO;
                 let lines = if !existing.is_empty() || empty {
                     existing
@@ -302,8 +357,8 @@ pub fn SplitEditor(
     let min_plan_month = next_month(&month)[..7].to_owned();
     let setup = StoredValue::new(Setup {
         accounts: accounts.clone(),
-        pots: pots.clone(),
-        committed,
+        wishes: wishes.clone(),
+        legacy: legacy.clone(),
         allow_negative,
         min_plan_month: min_plan_month.clone(),
     });
@@ -407,7 +462,7 @@ pub fn SplitEditor(
     };
 
     let goals = StoredValue::new(goals);
-    let pots = StoredValue::new(pots);
+    let legacy = StoredValue::new(legacy);
     let categories = StoredValue::new(categories);
     let min_plan_month = StoredValue::new(min_plan_month);
     let fieldsets = accounts
@@ -422,9 +477,8 @@ pub fn SplitEditor(
                 store.with(|s| s.accounts.get(&each_id).cloned().unwrap_or_default())
             };
             let add_id = account_id.clone();
-            let take_id = account_id.clone();
             let legend = account.with_value(|a| (a.name.clone(), money(a.target, &a.currency), a.note.clone()));
-            let can_take = !allow_negative && pots.with_value(|p| !p.is_empty());
+            let offered = StoredValue::new(account.with_value(|a| wishes_in(&wishes, &a.currency)));
             view! {
                 <fieldset class="min-w-0 rounded-lg border border-border bg-card-muted p-4 sm:p-5">
                     <legend class="float-left mb-3 w-full text-sm">
@@ -441,9 +495,9 @@ pub fn SplitEditor(
                                         account=account
                                         index=index
                                         key_id=draft.key.clone()
-                                        take=draft.take
                                         rows=rows
-                                        pots=pots
+                                        wishes=offered
+                                        legacy=legacy
                                         goals=goals
                                         categories=categories
                                         min_plan_month=min_plan_month
@@ -465,22 +519,6 @@ pub fn SplitEditor(
                                     };
                                     set_account(add_id.clone(), Box::new(move |mut l| { l.push(draft); l }));
                                 })>"Add line"</Button>
-                                {can_take.then(|| {
-                                    let take_id = take_id.clone();
-                                    view! {
-                                        <Button size=Size::Sm variant=Variant::Secondary on_click=Callback::new(move |_| {
-                                            let pot = pots.with_value(|p| p.first().map(|pot| pot.pot_id.clone()));
-                                            let Some(pot) = pot else { return };
-                                            let draft = Draft {
-                                                key: new_id(),
-                                                destination: format!("pot:{pot}"),
-                                                take: true,
-                                                ..Draft::default()
-                                            };
-                                            set_account(take_id.clone(), Box::new(move |mut l| { l.push(draft); l }));
-                                        })>"Take from pot"</Button>
-                                    }
-                                })}
                             </div>
                             {move || row().map(|row| {
                                 let ok = row.remaining.is_zero() && row.valid;
@@ -519,15 +557,15 @@ pub fn SplitEditor(
 }
 
 /// One allocation line: destination, amount, and the extra fields a plan
-/// needs.
+/// needs. An old line (a pot, a wish that takes no more money) is read only.
 #[component]
 fn SplitLine(
     account: StoredValue<SplitTarget>,
     index: usize,
     key_id: String,
-    take: bool,
     rows: Memo<Rows>,
-    pots: StoredValue<Vec<PotView>>,
+    wishes: StoredValue<Vec<WishOption>>,
+    legacy: StoredValue<LegacyNames>,
     goals: StoredValue<Vec<(String, String)>>,
     categories: StoredValue<Vec<String>>,
     min_plan_month: StoredValue<String>,
@@ -577,53 +615,28 @@ fn SplitLine(
     };
     let invalid_amount = Signal::derive(move || position().is_some_and(|p| p.0));
     let error = move || position().and_then(|p| p.1);
-    let can_remove = Signal::derive(move || {
-        position()
-            .is_some_and(|(_, _, count, target)| count > 1 || (!allow_negative && target.is_zero()))
-    });
-    let destination_options = {
-        let currency = currency.clone();
-        Signal::derive(move || {
-            let mut list: Vec<(String, String)> = Vec::new();
-            let pot_options = pots.with_value(|p| {
-                p.iter()
-                    .map(|pot| (format!("pot:{}", pot.pot_id), pot_label(pot, &currency)))
-                    .collect::<Vec<_>>()
-            });
-            if take {
-                list.extend(pot_options);
-            } else {
-                list.push(("stay".into(), "Stays on this account".into()));
-                list.push(("buffer".into(), "Next month's buffer".into()));
-                list.extend(pot_options);
-                goals.with_value(|g| {
-                    list.extend(
-                        g.iter()
-                            .map(|(id, name)| (format!("goal:{id}"), format!("Goal: {name}"))),
-                    );
-                });
-                list.push(("plan".into(), "Plan a purchase…".into()));
-            }
-            let current = draft.with(|d| d.destination.clone());
-            let mut list = options(list);
-            if !list.iter().any(|(v, _, _)| *v == current) {
-                list.insert(0, (current.clone(), current, false));
-            }
-            list
+    let old = Memo::new(move |_| {
+        draft.with(|d| {
+            wishes
+                .with_value(|w| legacy.with_value(|l| legacy_label(&d.destination, w, l).is_some()))
         })
-    };
+    });
+    let can_remove = Signal::derive(move || {
+        old.get()
+            || position().is_some_and(|(_, _, count, target)| {
+                count > 1 || (!allow_negative && target.is_zero())
+            })
+    });
+    let destination_options = Signal::derive(move || {
+        let current = draft.with(|d| d.destination.clone());
+        let list = wishes.with_value(|w| {
+            goals.with_value(|g| legacy.with_value(|l| destination_options(w, g, &current, l)))
+        });
+        options(list)
+    });
     let destination_id = field_id();
     let amount_id = field_id();
-    let destination_label = if take {
-        view! { <span class="text-positive-fg">"Take from pot"</span> }.into_any()
-    } else {
-        "Destination".into_any()
-    };
-    let amount_label = format!(
-        "{} ({})",
-        if take { "Take" } else { "Amount" },
-        currency.code
-    );
+    let amount_label = format!("Amount ({})", currency.code);
     let unit = currency.minor_unit;
     let is_plan = Memo::new(move |_| draft.with(|d| d.destination == "plan"));
 
@@ -707,11 +720,12 @@ fn SplitLine(
 
     view! {
         <div class="grid items-end gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_auto]">
-            <FieldBox label=destination_label id=destination_id.clone()>
+            <FieldBox label="Destination".into_any() id=destination_id.clone()>
                 <Choice
                     id=destination_id
                     value=Signal::derive(move || draft.with(|d| d.destination.clone()))
                     options=destination_options
+                    disabled=old
                     on_change=Callback::new(move |destination: String| {
                         let min = min_plan_month.get_value();
                         update(Box::new(move |d| {
@@ -728,6 +742,7 @@ fn SplitLine(
                     id=amount_id
                     inputmode="decimal"
                     value=Signal::derive(move || draft.with(|d| d.amount.clone()))
+                    readonly=old
                     invalid=invalid_amount
                     on_input=Callback::new(move |v: String| update(Box::new(move |d| d.amount = v)))
                     on_blur=Callback::new(move |_| {
@@ -752,5 +767,97 @@ fn SplitLine(
             <Show when=move || is_plan.get()>{plan_form}</Show>
             {move || error().map(|e| view! { <small class=cn([WARN, "text-xs sm:col-span-3"])>{e}</small> })}
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn wish(id: &str, label: &str) -> WishOption {
+        WishOption {
+            wish_id: id.into(),
+            label: label.into(),
+            currency: Currency::new("EUR"),
+            room: Decimal::ONE_HUNDRED,
+        }
+    }
+
+    fn pair(a: &str, b: &str) -> (String, String) {
+        (a.into(), b.into())
+    }
+
+    fn legacy() -> LegacyNames {
+        LegacyNames {
+            pots: vec![pair("general", "General savings")],
+            wishes: vec![pair("tv", "Wish (bought): TV")],
+        }
+    }
+
+    fn values(list: &[(String, String)]) -> Vec<&str> {
+        list.iter().map(|(v, _)| v.as_str()).collect()
+    }
+
+    #[test]
+    fn destinations_list_wishes_before_goals() {
+        let wishes = [
+            wish("trip", "Wish: Trip rest"),
+            wish("bike", "Wish: Bike (€0.00 of €900.00)"),
+        ];
+        let goals = [pair("house", "House")];
+        let list = destination_options(&wishes, &goals, "stay", &legacy());
+        assert_eq!(
+            list,
+            [
+                pair("stay", "Stays on this account"),
+                pair("buffer", "Next month's buffer"),
+                pair("wish:trip", "Wish: Trip rest"),
+                pair("wish:bike", "Wish: Bike (€0.00 of €900.00)"),
+                pair("goal:house", "Goal: House"),
+                pair("plan", "Plan a purchase…"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_legacy_pot_stays_listed_once_with_its_retired_label() {
+        let list = destination_options(&[], &[], "pot:general", &legacy());
+        assert_eq!(
+            list[0],
+            pair("pot:general", "Pot (retired): General savings")
+        );
+        assert_eq!(
+            values(&list)
+                .iter()
+                .filter(|v| v.starts_with("pot:"))
+                .count(),
+            1
+        );
+        let unknown = destination_options(&[], &[], "pot:gone", &legacy());
+        assert_eq!(unknown[0], pair("pot:gone", "Pot (retired): gone"));
+    }
+
+    #[test]
+    fn a_wish_no_longer_offered_keeps_its_line_with_what_became_of_it() {
+        let wishes = [wish("bike", "Wish: Bike (€0.00 of €900.00)")];
+        let bought = destination_options(&wishes, &[], "wish:tv", &legacy());
+        assert_eq!(bought[0], pair("wish:tv", "Wish (bought): TV"));
+        let unknown = destination_options(&wishes, &[], "wish:x", &legacy());
+        assert_eq!(unknown[0], pair("wish:x", "Wish (no longer planned): x"));
+        assert_eq!(
+            values(&unknown).iter().filter(|v| **v == "wish:x").count(),
+            1
+        );
+        // An offered wish is not repeated.
+        let offered = destination_options(&wishes, &[], "wish:bike", &legacy());
+        assert_eq!(
+            values(&offered)
+                .iter()
+                .filter(|v| **v == "wish:bike")
+                .count(),
+            1
+        );
+        assert_eq!(legacy_label("wish:bike", &wishes, &legacy()), None);
+        assert_eq!(legacy_label("goal:house", &wishes, &legacy()), None);
     }
 }

@@ -26,7 +26,7 @@ pub const LIST: &str = "grid divide-y divide-line";
 pub const SUBHEADING: &str = "mt-2 text-sm font-semibold";
 pub const ERROR: &str =
     "rounded-lg border border-negative/30 bg-negative/10 px-4 py-3 text-sm text-negative-fg";
-/// Inline forms (new pot, account type, planned purchase): fields wrap,
+/// Inline forms (account type, planned purchase): fields wrap,
 /// buttons sit on the field baseline.
 pub const INLINE_FORM: &str = "flex flex-wrap items-end gap-3";
 /// A field inside an inline form: grows from 11rem and wraps below that.
@@ -152,11 +152,13 @@ pub fn TextBox(
     #[prop(optional, into)] min: Option<String>,
     #[prop(optional)] maxlength: Option<usize>,
     #[prop(optional, into)] invalid: Signal<bool>,
+    #[prop(optional, into)] readonly: Signal<bool>,
     #[prop(optional, into)] on_blur: Option<Callback<()>>,
 ) -> impl IntoView {
     view! {
         <input
             id=id
+            readonly=move || readonly.get()
             type=kind.unwrap_or_else(|| "text".into())
             class=CONTROL
             placeholder=placeholder

@@ -1,14 +1,13 @@
-//! The Accounts and Pots panels under the wizard (personal-site
-//! `components/month-closure/accounts-panel.tsx` and `pots-panel.tsx`).
+//! The Accounts panel under the wizard (personal-site
+//! `components/month-closure/accounts-panel.tsx`).
 
 use std::collections::HashSet;
 
-use finance_types::report::Currency;
-use finance_types::report::closure::{AccountRoleKind, AccountRoleView, ClosureView, PotView};
+use finance_types::report::closure::{AccountRoleKind, AccountRoleView};
 use leptos::prelude::*;
 
 use super::Wizard;
-use super::ui::{Choice, FieldBox, GROW, INLINE_FORM, LIST, SMALL, StepCard, field_id, money};
+use super::ui::{Choice, FieldBox, GROW, INLINE_FORM, LIST, StepCard, field_id};
 use crate::ds::EmptyState;
 
 const ROLES: [(&str, &str, &str); 3] = [
@@ -156,78 +155,6 @@ pub fn AccountsPanel(
                 view! { <EmptyState class="p-4" title="No accounts yet." /> }.into_any()
             } else {
                 view! { <ul class=LIST>{rows}</ul> }.into_any()
-            }}
-        </StepCard>
-    }
-}
-
-fn unit_for(code: &str, view: &ClosureView) -> Currency {
-    view.review
-        .accounts
-        .iter()
-        .find(|a| a.currency.code == code)
-        .map(|a| a.currency.clone())
-        .unwrap_or_else(|| Currency {
-            code: code.to_owned(),
-            minor_unit: 2,
-        })
-}
-
-fn balances(pot: &PotView, view: &ClosureView) -> String {
-    if pot.balances.is_empty() {
-        return "Empty".into();
-    }
-    pot.balances
-        .iter()
-        .map(|(code, amount)| money(*amount, &unit_for(code, view)))
-        .collect::<Vec<_>>()
-        .join(" · ")
-}
-
-#[component]
-fn PotRow(
-    pot: PotView,
-    view: StoredValue<ClosureView>,
-    locations: StoredValue<Vec<(String, String)>>,
-) -> impl IntoView {
-    let where_ = match &pot.account_id {
-        Some(id) => locations.with_value(|l| {
-            l.iter()
-                .find(|(lid, _)| lid == id)
-                .map_or_else(|| id.clone(), |(_, label)| label.clone())
-        }),
-        None => "No account set".into(),
-    };
-    let total = view.with_value(|v| balances(&pot, v));
-    view! {
-        <li class="grid gap-2 py-3 text-sm">
-            <div class="flex flex-wrap justify-between gap-x-4 gap-y-1">
-                <span><strong>{pot.name}</strong><small class=SMALL>{where_}</small></span>
-                <strong class="tabular-nums">{total}</strong>
-            </div>
-        </li>
-    }
-}
-
-/// Savings pots from before wishes took their place, read only.
-#[component]
-pub fn PotsPanel(view: ClosureView, locations: Vec<(String, String)>) -> impl IntoView {
-    let active: Vec<PotView> = view.pots.iter().filter(|p| !p.archived).cloned().collect();
-    let view = StoredValue::new(view);
-    let locations = StoredValue::new(locations);
-    view! {
-        <StepCard
-            title="Pots"
-            description=Some("Money set aside before wishes took over. Pots no longer change.".to_owned())
-        >
-            {if active.is_empty() {
-                view! { <EmptyState class="p-4" title="No pots." /> }.into_any()
-            } else {
-                view! {
-                    <ul class=LIST>
-                        {active.into_iter().map(|pot| view! { <PotRow pot=pot view=view locations=locations /> }).collect_view()}
-                    </ul>
-                }.into_any()
             }}
         </StepCard>
     }
