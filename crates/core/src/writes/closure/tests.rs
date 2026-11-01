@@ -957,20 +957,29 @@ fn closure_never_moves_saved_month_backwards() {
 
 #[test]
 fn a_bought_wish_is_skipped_but_its_line_stays() {
-    let (mut db, id) = wish_db("900");
-    settle_wish(&mut db, &id, "40").unwrap();
-    let purchase = WishPurchase {
-        amount: d("40"),
-        on: "2026-10-20".into(),
-        source: WishSource::Account {
-            account_id: "firefly:1".into(),
-        },
-        cards: Vec::new(),
+    let bought = || {
+        let (mut db, id) = wish_db("900");
+        settle_wish(&mut db, &id, "40").unwrap();
+        let purchase = WishPurchase {
+            amount: d("40"),
+            on: "2026-10-20".into(),
+            source: WishSource::Account {
+                account_id: "firefly:1".into(),
+            },
+            cards: Vec::new(),
+        };
+        db.write(|w, snap| crate::writes::wishes::mark_bought(w, snap, &id, purchase, &[]))
+            .unwrap();
+        assert_eq!(wish(&db, &id).status, WishStatus::Bought);
+        (db, id)
     };
-    db.write(|w, snap| crate::writes::wishes::mark_bought(w, snap, &id, purchase, &[]))
-        .unwrap();
+    // A re-split without the line would give the money back; a bought wish keeps it.
+    let (mut db, id) = bought();
+    settle_wish(&mut db, &id, "0").unwrap();
+    assert_eq!(wish(&db, &id).saved, d("40"));
+    // A resettle keeps the earlier line in the period.
+    let (mut db, id) = bought();
     let before = wish(&db, &id);
-    assert_eq!(before.status, WishStatus::Bought);
     changed_after_close(&db, "15");
     resettle_october(&mut db, vec![checking("d", "buffer", "15")]).unwrap();
     assert_eq!(wish(&db, &id).saved, before.saved);

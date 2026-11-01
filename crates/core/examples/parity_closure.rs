@@ -59,7 +59,6 @@ fn view(path: &std::path::Path, now: Option<&str>) -> anyhow::Result<()> {
 fn actions(path: &std::path::Path, steps: &std::path::Path) -> anyhow::Result<()> {
     let steps: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(steps)?)?;
     let mut store = Store::open(path)?;
-    let created: Vec<String> = Vec::new();
     let mut results = Vec::new();
     for step in &steps {
         let now: Zoned = step["now"]
@@ -130,21 +129,15 @@ fn actions(path: &std::path::Path, steps: &std::path::Path) -> anyhow::Result<()
         "{}",
         serde_json::to_string_pretty(&json!({
             "results": results,
-            "rows": rows(store.connection(), &created)?,
+            "rows": rows(store.connection())?,
         }))?
     );
     Ok(())
 }
 
-/// The closure rows, new pot ids replaced by `$new<n>` like the Python dump.
-fn rows(conn: &Connection, created: &[String]) -> anyhow::Result<Value> {
-    let fix = |text: String| {
-        created
-            .iter()
-            .enumerate()
-            .fold(text, |t, (i, id)| t.replace(id, &format!("$new{}", i + 1)))
-    };
-    let parse = |text: String| serde_json::from_str::<Value>(&fix(text)).unwrap_or(Value::Null);
+/// The closure rows, like the Python dump.
+fn rows(conn: &Connection) -> anyhow::Result<Value> {
+    let parse = |text: String| serde_json::from_str::<Value>(&text).unwrap_or(Value::Null);
     let query = |sql: &str, columns: &[&str]| -> anyhow::Result<Vec<Value>> {
         let mut stmt = conn.prepare(sql)?;
         let rows = stmt.query_map([], |r| {
@@ -159,7 +152,7 @@ fn rows(conn: &Connection, created: &[String]) -> anyhow::Result<Value> {
                         if *name == "payload" {
                             parse(text)
                         } else {
-                            Value::String(fix(text))
+                            Value::String(text)
                         }
                     }
                 };

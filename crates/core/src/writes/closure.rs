@@ -1,6 +1,6 @@
 //! Month closure actions (Python `closure_service.py`, with the request
 //! checks of `closure_routes.py`): sync, settle, finalize, resettle, reopen,
-//! marking transfers by hand, pots and account roles.
+//! marking transfers by hand and account roles.
 //!
 //! "Sync" re-reads the local data and runs the post-sync step (late
 //! arrivals flag closed months, late transfers are ticked off); the screen
@@ -348,7 +348,8 @@ fn plan_fields(line: &AllocationLine) -> impl PartialEq + '_ {
 
 /// Bring each touched wish's `saved` from the period's previous lines to its new lines.
 /// Every line counts, split and delta alike; wishes no longer planned are skipped.
-/// `saved_month` only moves forward.
+/// `saved_month` only moves forward, even when a re-split removes the line
+/// (spec). Only one-off wishes can hold a line; validation enforces that.
 pub(crate) fn apply_wish_lines(
     w: &Writer<'_>,
     period: &MonthPeriod,
