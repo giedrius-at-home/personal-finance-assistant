@@ -70,6 +70,10 @@ pub struct SavingsOutlook {
     pub lower_final: Decimal,
     pub upper_final: Decimal,
     pub expected_unplanned: Decimal,
+    /// Unplanned spending expected from tomorrow to the end of the running
+    /// budget month (the model's mean over its simulated paths).
+    #[serde(default)]
+    pub expected_unplanned_month: Decimal,
     pub expected_income: Decimal,
     pub received_refunds: Decimal,
     pub on_track_probability: Option<Decimal>,

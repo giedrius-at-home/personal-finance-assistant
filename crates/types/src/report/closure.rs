@@ -420,8 +420,33 @@ pub struct SavingsStanding {
     pub must_keep: Decimal,
     /// `(name, saved)` of every wish with money saved.
     pub wishes: Vec<(String, Decimal)>,
-    /// `balance + incoming − must_keep`; negative when the wishes need more.
+    /// `(label, amount)` estimates set aside this month: unplanned spending
+    /// expected from past months.
+    #[serde(default)]
+    pub expected: Vec<(String, Decimal)>,
+    /// `balance + incoming − must_keep − Σ expected`; negative when the
+    /// wishes and estimates need more.
     pub wiggle_room: Decimal,
+}
+
+/// The next payment of a category paid like a bill whose amount varies,
+/// predicted from its past monthly totals.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PredictedBill {
+    pub category: String,
+    /// The account its last payment left.
+    pub account_id: String,
+    pub amount: Decimal,
+    /// `YYYY-MM-DD`: the day of the month it was last paid, in the month
+    /// still to pay.
+    pub due_on: String,
+    /// Already paid in the running budget month (the prediction is for the
+    /// next one).
+    pub paid_this_month: bool,
+    /// `TimesFM` or `Average of the last 3 months`.
+    pub method: String,
+    /// The past monthly totals it was predicted from, oldest first.
+    pub history: Vec<Decimal>,
 }
 
 /// Where the money should go now, from the current balances (EUR only).
@@ -435,6 +460,8 @@ pub struct MoneyPlan {
     pub accounts: Vec<PlanAccount>,
     pub moves: Vec<PlanMove>,
     pub savings: Option<SavingsStanding>,
+    #[serde(default)]
+    pub predicted_bills: Vec<PredictedBill>,
 }
 
 /// One own-account bank transfer since the split (paired legs as one).

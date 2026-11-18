@@ -44,6 +44,10 @@ pub struct OwnerSettings {
     pub critical_cooldown_hours: u16,
     #[serde(default)]
     pub forecast_excluded_categories: Vec<String>,
+    /// Categories paid like a bill whose amount varies (an NS invoice): the
+    /// next payment is predicted from the past months and set aside.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub predicted_bill_categories: Vec<String>,
 }
 
 impl OwnerSettings {

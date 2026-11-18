@@ -186,6 +186,20 @@ pub fn MoneyPlanFields(
             })
             .collect_view();
         let has_wishes = !s.wishes.is_empty();
+        let estimate_rows = s
+            .expected
+            .iter()
+            .map(|(label, amount)| {
+                let (label, amount) = (label.clone(), money(*amount, &unit));
+                view! {
+                    <div class="flex justify-between gap-4 text-xs text-fg-muted">
+                        <span>{label}</span>
+                        <span class="tabular-nums">{"−"}{amount}</span>
+                    </div>
+                }
+            })
+            .collect_view();
+        let has_estimates = !s.expected.is_empty();
         view! {
             <div class="grid gap-2">
                 <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -195,6 +209,33 @@ pub fn MoneyPlanFields(
                     <Stat label="Wiggle room" tone=if negative { Tone::Negative } else { Tone::Neutral }>{room}</Stat>
                 </div>
                 {has_wishes.then(|| view! { <div class="grid gap-0.5">{wish_rows}</div> })}
+                {has_estimates.then(|| view! { <div class="grid gap-0.5">{estimate_rows}</div> })}
+            </div>
+        }
+    });
+    let predicted = (!plan.predicted_bills.is_empty()).then(|| {
+        let rows = plan
+            .predicted_bills
+            .iter()
+            .map(|b| {
+                let label = if b.paid_this_month {
+                    format!("{} · next on {} ({})", b.category, b.due_on, b.method)
+                } else {
+                    format!("{} · due {} ({})", b.category, b.due_on, b.method)
+                };
+                let amount = money(b.amount, &unit);
+                view! {
+                    <div class="flex justify-between gap-4 text-sm">
+                        <span class="text-fg-muted">{label}</span>
+                        <span class="tabular-nums">{"≈ "}{amount}</span>
+                    </div>
+                }
+            })
+            .collect_view();
+        view! {
+            <div class="grid gap-1">
+                <div class="text-xs font-medium uppercase tracking-wide text-fg-muted">"Predicted bills"</div>
+                {rows}
             </div>
         }
     });
@@ -203,6 +244,7 @@ pub fn MoneyPlanFields(
             {table}
             <div class="grid gap-1">{transfer_rows_view}</div>
             {savings}
+            {predicted}
         </div>
     }
 }
@@ -261,8 +303,10 @@ mod tests {
                 incoming: d("800"),
                 must_keep: d("624"),
                 wishes: Vec::new(),
+                expected: Vec::new(),
                 wiggle_room: d("1376"),
             }),
+            predicted_bills: Vec::new(),
         }
     }
 

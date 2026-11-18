@@ -34,6 +34,7 @@ fn label(key: &str) -> &str {
         "warning_cooldown_hours" => "Warning cooldown (hours)",
         "critical_cooldown_hours" => "Critical cooldown (hours)",
         "forecast_excluded_categories" => "Not part of everyday spending",
+        "predicted_bill_categories" => "Bills predicted from past months",
         "policy_version" => "Policy version",
         other => other,
     }
@@ -76,6 +77,10 @@ fn values(s: &OwnerSettings) -> Vec<(&'static str, String)> {
             "forecast_excluded_categories",
             s.forecast_excluded_categories.join(","),
         ),
+        (
+            "predicted_bill_categories",
+            s.predicted_bill_categories.join(","),
+        ),
     ]
 }
 
@@ -86,6 +91,7 @@ struct Draft {
     salary: RwSignal<String>,
     buffer: RwSignal<String>,
     excluded: RwSignal<String>,
+    predicted: RwSignal<String>,
     salary_account: RwSignal<String>,
     timezone: RwSignal<String>,
     hour: RwSignal<String>,
@@ -105,6 +111,7 @@ impl Draft {
             salary: s(),
             buffer: s(),
             excluded: s(),
+            predicted: s(),
             salary_account: s(),
             timezone: s(),
             hour: s(),
@@ -127,6 +134,7 @@ impl Draft {
         );
         self.buffer.set(s.safety_buffer_eur.to_string());
         self.excluded.set(s.forecast_excluded_categories.join(", "));
+        self.predicted.set(s.predicted_bill_categories.join(", "));
         self.salary_account
             .set(s.salary_account_id.clone().unwrap_or_default());
         self.timezone.set(s.timezone.clone());
@@ -157,6 +165,14 @@ impl Draft {
             critical_cooldown_hours: self.critical_hours.get_untracked(),
             forecast_excluded_categories: self
                 .excluded
+                .get_untracked()
+                .split(',')
+                .map(str::trim)
+                .filter(|n| !n.is_empty())
+                .map(str::to_owned)
+                .collect(),
+            predicted_bill_categories: self
+                .predicted
                 .get_untracked()
                 .split(',')
                 .map(str::trim)
@@ -290,6 +306,13 @@ fn SettingsCard(
                             hint="Comma-separated categories of fixed or planned costs the everyday spending forecast leaves out."
                         >
                             <Input id="set-excluded" value=draft.excluded placeholder="e.g. Education, Flights" />
+                        </Field>
+                        <Field
+                            label="Bills predicted from past months"
+                            id="set-predicted"
+                            hint="Comma-separated categories paid like a bill whose amount varies; the plan sets their next payment aside."
+                        >
+                            <Input id="set-predicted" value=draft.predicted placeholder="e.g. NS" />
                         </Field>
                         <Field label="Salary account" id="set-salary-account" hint="The account your salary is paid into.">
                             <Select id="set-salary-account" value=draft.salary_account options=Signal::derive(move || accounts.clone()) />
