@@ -574,6 +574,16 @@ pub fn savings_outlooks(input: &OutlookInputs) -> Vec<SavingsOutlook> {
             .iter()
             .map(|p| np::sum_iter(p.iter().map(|d| d[1])))
             .collect();
+        // Days left in the running budget month after today; path day i is
+        // today + 1 + i.
+        let next_start = input
+            .resolver
+            .period_start_date(shift_month(input.current_month, 1));
+        let month_days = usize::try_from(days_between(today, next_start) - 1).unwrap_or(0);
+        let month_unplanned: Vec<f64> = paths
+            .iter()
+            .map(|p| np::sum_iter(p.iter().take(month_days).map(|d| d[1].max(0.0))))
+            .collect();
         results.push(SavingsOutlook {
             currency: currency.clone(),
             as_of: today.to_string(),
@@ -586,6 +596,7 @@ pub fn savings_outlooks(input: &OutlookInputs) -> Vec<SavingsOutlook> {
             lower_final: money(last(&lower)),
             upper_final: money(last(&upper)),
             expected_unplanned: money(np::mean(&unplanned_totals)),
+            expected_unplanned_month: money(np::mean(&month_unplanned)),
             expected_income: money(np::sum(&income)),
             received_refunds: money_dec(refunds),
             on_track_probability: reliable

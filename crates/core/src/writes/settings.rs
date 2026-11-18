@@ -191,6 +191,7 @@ pub fn from_form(form: &SettingsForm, current: &OwnerSettings) -> Result<OwnerSe
         warning_cooldown_hours: hours(&form.warning_cooldown_hours)?,
         critical_cooldown_hours: hours(&form.critical_cooldown_hours)?,
         forecast_excluded_categories: form.forecast_excluded_categories.clone(),
+        predicted_bill_categories: form.predicted_bill_categories.clone(),
     };
     Ok(settings)
 }
@@ -260,24 +261,36 @@ pub fn validate(mut s: OwnerSettings) -> Result<OwnerSettings> {
     if jiff::tz::TimeZone::get(&s.timezone).is_err() {
         return Err(invalid("Timezone is unknown."));
     }
+    s.forecast_excluded_categories = category_names(
+        &s.forecast_excluded_categories,
+        "Each excluded category needs a name of at most 128 characters.",
+        "Exclude at most 50 categories.",
+    )?;
+    s.predicted_bill_categories = category_names(
+        &s.predicted_bill_categories,
+        "Each predicted bill needs a category name of at most 128 characters.",
+        "Predict at most 50 categories.",
+    )?;
+    Ok(s)
+}
+
+/// Trimmed, case-insensitively unique category names, at most 50.
+fn category_names(raw: &[String], too_long: &str, too_many: &str) -> Result<Vec<String>> {
     let mut names: Vec<String> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
-    for raw in &s.forecast_excluded_categories {
+    for raw in raw {
         let name = raw.trim();
         if name.chars().count() > 128 || name.contains(',') {
-            return Err(invalid(
-                "Each excluded category needs a name of at most 128 characters.",
-            ));
+            return Err(invalid(too_long));
         }
         if !name.is_empty() && seen.insert(name.to_lowercase()) {
             names.push(name.to_owned());
         }
     }
     if names.len() > 50 {
-        return Err(invalid("Exclude at most 50 categories."));
+        return Err(invalid(too_many));
     }
-    s.forecast_excluded_categories = names;
-    Ok(s)
+    Ok(names)
 }
 
 /// The route checks around the model: a changed salary account must exist,
@@ -452,6 +465,7 @@ mod tests {
             warning_cooldown_hours: s.warning_cooldown_hours.to_string(),
             critical_cooldown_hours: s.critical_cooldown_hours.to_string(),
             forecast_excluded_categories: s.forecast_excluded_categories.clone(),
+            predicted_bill_categories: s.predicted_bill_categories.clone(),
         }
     }
 

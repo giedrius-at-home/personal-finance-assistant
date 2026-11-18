@@ -22,6 +22,9 @@ pub const CLOSURE_PLAN_PREFIX: &str = "closure-";
 pub const CLOSURE_PLAN_TOLERANCE: Decimal = Decimal::from_parts(110, 0, 0, false, 2);
 /// …but a much smaller purchase in the same category is not that purchase.
 pub const CLOSURE_PLAN_MINIMUM: Decimal = Decimal::from_parts(5, 0, 0, false, 1);
+/// Plans written when a wish is marked bought (`wish-<wish id>`): matched on
+/// account, amount and date only, whatever category the payment has.
+pub const WISH_PLAN_PREFIX: &str = "wish-";
 /// Monthly salary plans generated from owner settings rather than entered by hand.
 pub const RECURRING_PLAN_PREFIX: &str = "recurring-";
 /// An owner-entered plan may be paid early, but never long before it is due.
@@ -165,6 +168,10 @@ impl<'a> Reconciler<'a> {
             && &t.account_id != account
         {
             return false;
+        }
+        if plan.plan_id.starts_with(WISH_PLAN_PREFIX) {
+            // The purchase itself was recorded; any category may hold it.
+            return true;
         }
         if let Some(wanted) = &plan.match_description {
             // Merchant evidence takes precedence over broad accounting categories.
@@ -530,6 +537,45 @@ mod tests {
         );
         let shared = reconcile(&[first, plan("second")], &[insurance("a")]);
         assert!(shared.iter().all(|v| v.status == PlanStatus::NeedsReview));
+    }
+
+    #[test]
+    fn bought_wish_plan_matches_its_payment_in_any_category() {
+        let mut bought = plan("wish-zoo");
+        bought.match_category = "Wishes".into();
+        bought.amount = eur("114");
+        bought.due_on = "2026-09-24".into();
+        bought.account_id = Some("bank".into());
+        let mut elsewhere = tx(
+            "other-account",
+            Some("Entertainment"),
+            "114",
+            "2026-09-24",
+            Kind::Outflow,
+        );
+        elsewhere.account_id = "savings".into();
+        let found = &reconcile(
+            std::slice::from_ref(&bought),
+            &[
+                elsewhere,
+                tx(
+                    "price",
+                    Some("Entertainment"),
+                    "98",
+                    "2026-09-24",
+                    Kind::Outflow,
+                ),
+                tx(
+                    "zoo",
+                    Some("Entertainment"),
+                    "114",
+                    "2026-09-24",
+                    Kind::Outflow,
+                ),
+            ],
+        )[0];
+        assert_eq!(found.status, PlanStatus::Paid);
+        assert_eq!(found.transaction_id.as_deref(), Some("zoo"));
     }
 
     #[test]

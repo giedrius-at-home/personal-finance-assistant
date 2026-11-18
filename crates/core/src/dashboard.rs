@@ -165,6 +165,19 @@ pub fn dashboard(
         forecaster,
     });
 
+    // The unplanned estimate and the varying bills, for the money plan.
+    let expected_unplanned = savings_outlooks
+        .iter()
+        .find(|o| o.currency.code == "EUR")
+        .map_or(rust_decimal::Decimal::ZERO, |o| o.expected_unplanned_month);
+    let predicted_bills = crate::bill_forecast::predicted_bills(
+        txs,
+        &snap.settings.predicted_bill_categories,
+        "EUR",
+        current_month,
+        |t| ctx.resolver.month_of(t),
+        forecaster,
+    );
     let money_plan = monthly_allocation
         .currencies
         .iter()
@@ -188,6 +201,8 @@ pub fn dashboard(
                     roles: &roles,
                     wishes: &wishes,
                     salary_account_id: snap.settings.salary_account_id.as_deref(),
+                    expected_unplanned,
+                    predicted_bills: &predicted_bills,
                 },
             ))
         })

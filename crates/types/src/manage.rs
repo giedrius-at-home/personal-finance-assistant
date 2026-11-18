@@ -76,6 +76,8 @@ pub struct SettingsForm {
     pub warning_cooldown_hours: String,
     pub critical_cooldown_hours: String,
     pub forecast_excluded_categories: Vec<String>,
+    #[serde(default)]
+    pub predicted_bill_categories: Vec<String>,
 }
 
 /// Before and after of a settings change; `token` binds both.

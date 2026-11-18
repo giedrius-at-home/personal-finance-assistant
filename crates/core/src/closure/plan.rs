@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use finance_types::gateway::{AccountRole, BudgetPlan, Direction, Wish, WishKind, WishStatus};
 use finance_types::report::allocation::CurrencyAllocation;
 use finance_types::report::closure::{
-    AccountRoleKind, MoneyPlan, PlanAccount, PlanMove, SavingsStanding,
+    AccountRoleKind, MoneyPlan, PlanAccount, PlanMove, PredictedBill, SavingsStanding,
 };
 use finance_types::report::plans::{PlanStatus, PlannedPaymentView};
 use jiff::civil::Date;
@@ -32,6 +32,12 @@ pub struct PlanInputs<'a> {
     pub roles: &'a [AccountRole],
     pub wishes: &'a [Wish],
     pub salary_account_id: Option<&'a str>,
+    /// Unplanned spending expected for the rest of the month (the outlook's
+    /// estimate from past months); kept back from the wiggle room.
+    pub expected_unplanned: Decimal,
+    /// Varying bills predicted from past months; one still to pay this
+    /// month is kept on its account.
+    pub predicted_bills: &'a [PredictedBill],
 }
 
 /// Σ `saved` of planned one-off wishes in `currency`: money that must stay
@@ -105,6 +111,13 @@ pub fn money_plan(input: &PlanInputs<'_>) -> MoneyPlan {
                 .sum();
             if plans > Decimal::ZERO {
                 parts.push(("Planned payments".to_owned(), plans));
+            }
+            for bill in input
+                .predicted_bills
+                .iter()
+                .filter(|b| !b.paid_this_month && b.account_id == id && b.amount > Decimal::ZERO)
+            {
+                parts.push((format!("{} (predicted)", bill.category), bill.amount));
             }
             for group in input.budget.map(|b| b.groups.as_slice()).unwrap_or(&[]) {
                 if group.account_id.as_deref() != Some(id) {
@@ -201,6 +214,16 @@ pub fn money_plan(input: &PlanInputs<'_>) -> MoneyPlan {
         let account = accounts.iter().find(|a| a.account_id == id)?;
         let wishes = wishes_must_keep(input.wishes, code);
         let must_keep: Decimal = wishes.iter().map(|(_, v)| *v).sum();
+        let expected: Vec<(String, Decimal)> = (input.expected_unplanned > Decimal::ZERO)
+            .then(|| {
+                (
+                    "Unplanned spending (estimate)".to_owned(),
+                    input.expected_unplanned,
+                )
+            })
+            .into_iter()
+            .collect();
+        let set_aside: Decimal = expected.iter().map(|(_, v)| *v).sum();
         Some(SavingsStanding {
             account_id: account.account_id.clone(),
             name: account.name.clone(),
@@ -208,7 +231,8 @@ pub fn money_plan(input: &PlanInputs<'_>) -> MoneyPlan {
             incoming,
             must_keep,
             wishes,
-            wiggle_room: account.balance + incoming - must_keep,
+            expected,
+            wiggle_room: account.balance + incoming - must_keep - set_aside,
         })
     });
 
@@ -219,6 +243,7 @@ pub fn money_plan(input: &PlanInputs<'_>) -> MoneyPlan {
         accounts,
         moves,
         savings,
+        predicted_bills: input.predicted_bills.to_vec(),
     }
 }
 
@@ -337,6 +362,8 @@ mod tests {
             roles,
             wishes,
             salary_account_id: Some("firefly:1"),
+            expected_unplanned: Decimal::ZERO,
+            predicted_bills: &[],
         })
     }
 
@@ -400,6 +427,54 @@ mod tests {
         let savings = plan.savings.unwrap();
         assert_eq!(savings.incoming, d("800"));
         assert_eq!(savings.wiggle_room, d("2000"));
+    }
+
+    #[test]
+    fn estimates_are_kept_back_and_an_unpaid_prediction_stays_on_its_account() {
+        let (accounts, roles) = setup();
+        let refs: Vec<&Account> = accounts.iter().collect();
+        let allocation = allocation();
+        let budget = budget();
+        let bill = |paid: bool| PredictedBill {
+            category: "NS".into(),
+            account_id: "firefly:1".into(),
+            amount: d("28.50"),
+            due_on: "2026-11-10".into(),
+            paid_this_month: paid,
+            method: "TimesFM".into(),
+            history: vec![d("20"), d("31")],
+        };
+        let make = |bills: &[PredictedBill]| {
+            money_plan(&PlanInputs {
+                as_of: date(2026, 11, 1),
+                allocation: &allocation,
+                budget: Some(&budget),
+                payments: &[],
+                accounts: &refs,
+                roles: &roles,
+                wishes: &[],
+                salary_account_id: Some("firefly:1"),
+                expected_unplanned: d("150"),
+                predicted_bills: bills,
+            })
+        };
+        let unpaid = make(&[bill(false)]);
+        let abn = &unpaid.accounts[0];
+        assert_eq!(abn.keep, d("1048.50"));
+        assert!(
+            abn.keep_parts
+                .contains(&("NS (predicted)".to_owned(), d("28.50")))
+        );
+        let savings = unpaid.savings.unwrap();
+        assert_eq!(
+            savings.expected,
+            vec![("Unplanned spending (estimate)".to_owned(), d("150"))]
+        );
+        // 1200 + 771.50 incoming − 150 estimate.
+        assert_eq!(savings.wiggle_room, d("1821.50"));
+        assert_eq!(unpaid.predicted_bills.len(), 1);
+        let paid = make(&[bill(true)]);
+        assert_eq!(paid.accounts[0].keep, d("1020"));
     }
 
     #[test]
