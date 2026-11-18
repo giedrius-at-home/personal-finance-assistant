@@ -1,11 +1,11 @@
 //! Wishes: planned purchases the owner saves toward, drops or buys.
 
 use finance_types::gateway::{
-    BillCreateRequest, BillEditRequest, BillRef, BudgetPlan, CardCharge, Repeat, Wish, WishDraft,
-    WishKind, WishPurchase, WishSettings, WishSource, WishStatus,
+    BillCreateRequest, BillEditRequest, BillRef, BudgetPlan, CardCharge, Direction, PlannedPayment,
+    Repeat, Wish, WishDraft, WishKind, WishPurchase, WishSettings, WishSource, WishStatus,
 };
-use finance_types::report::Currency;
 use finance_types::report::wishes::Cut;
+use finance_types::report::{Currency, UnitMoney};
 use jiff::civil::Date;
 use rust_decimal::Decimal;
 
@@ -13,6 +13,8 @@ use super::bills::{Checks, archive_bill, create_bill, edit_bill};
 use super::budget::save_budget_plan;
 use super::{Writer, invalid};
 use crate::budget::default_budget;
+use crate::model::Kind;
+use crate::plans::WISH_PLAN_PREFIX;
 use crate::wishes::baseline::ranking;
 use crate::wishes::store::{load_wish_settings, load_wishes};
 use crate::{Ctx, Result, Snapshot};
@@ -359,6 +361,7 @@ pub fn mark_bought(
         ..wish
     };
     store(w, &bought)?;
+    store_purchase_plan(w, snap, &bought, &purchase, on)?;
     if purchase.source == WishSource::Card {
         let mut changed = false;
         for charge in &purchase.cards {
@@ -396,6 +399,63 @@ pub fn mark_bought(
     }
     write_cuts(w, snap, ctx.current_month(), &bought.currency, cuts)?;
     Ok(bought)
+}
+
+/// Category a plan for a bought wish names when its payment is not imported yet.
+const WISH_PLAN_CATEGORY: &str = "Wishes";
+
+/// Record a bought wish as a one-off plan for the day it was bought, so its
+/// payment counts as planned spending rather than unplanned. The plan matches
+/// the payment by account (none for a card), amount and date; it takes the
+/// category of a payment already imported, if one fits.
+fn store_purchase_plan(
+    w: &Writer<'_>,
+    snap: &Snapshot,
+    wish: &Wish,
+    purchase: &WishPurchase,
+    on: Date,
+) -> Result<()> {
+    let account_id = match &purchase.source {
+        WishSource::Account { account_id } => Some(account_id.clone()),
+        WishSource::Card => None,
+    };
+    let near = |d: Date| (d - on).get_days().abs() <= 7;
+    let category = snap
+        .raw_transactions
+        .iter()
+        .filter(|t| {
+            t.kind == Kind::Outflow
+                && t.amount == purchase.amount
+                && t.currency == wish.currency
+                && account_id.as_ref().is_none_or(|a| &t.account_id == a)
+                && near(t.effective_on())
+        })
+        .min_by_key(|t| (t.effective_on() - on).get_days().abs())
+        .and_then(|t| t.category.clone())
+        .filter(|c| !c.trim().is_empty())
+        .unwrap_or_else(|| WISH_PLAN_CATEGORY.to_owned());
+    let plan = PlannedPayment {
+        plan_id: format!("{WISH_PLAN_PREFIX}{}", wish.wish_id),
+        name: wish.name.clone(),
+        match_category: category,
+        direction: Direction::Outflow,
+        amount: UnitMoney {
+            amount: purchase.amount,
+            currency: wish.currency.clone(),
+        },
+        due_on: purchase.on.clone(),
+        created_at: w.stamp(),
+        reimbursement_for: None,
+        pending: false,
+        account_id,
+        match_description: None,
+    };
+    w.put_json(
+        "INSERT INTO planned_payments (plan_id, payload_json) VALUES (?2, ?1) \
+         ON CONFLICT(plan_id) DO UPDATE SET payload_json = excluded.payload_json",
+        &plan,
+        &[&plan.plan_id],
+    )
 }
 
 /// Lower `month`'s budget groups by what each cut takes (`from − to`), so
@@ -930,6 +990,40 @@ mod tests {
             card_id: id.into(),
             amount: amount.parse().unwrap(),
         }
+    }
+
+    #[test]
+    fn buying_a_wish_plans_its_payment() {
+        let mut db = db();
+        let wish = db.write(|w, s| save_wish(w, s, draft("Zoo"))).unwrap();
+        db.write(|w, s| {
+            mark_bought(
+                w,
+                s,
+                &wish.wish_id,
+                purchase(114, "2026-10-26", WishSource::Card),
+                &[],
+            )
+        })
+        .unwrap();
+        let plans: Vec<PlannedPayment> = db
+            .store
+            .connection()
+            .prepare("SELECT payload_json FROM planned_payments")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .map(|json| serde_json::from_str(&json.unwrap()).unwrap())
+            .collect();
+        assert_eq!(plans.len(), 1);
+        let plan = &plans[0];
+        assert_eq!(plan.plan_id, format!("wish-{}", wish.wish_id));
+        assert_eq!(plan.name, "Zoo");
+        assert_eq!(plan.amount.amount, Decimal::from(114));
+        assert_eq!(plan.due_on, "2026-10-26");
+        assert_eq!(plan.direction, Direction::Outflow);
+        assert_eq!(plan.account_id, None);
+        assert_eq!(plan.match_category, "Wishes");
     }
 
     #[test]
