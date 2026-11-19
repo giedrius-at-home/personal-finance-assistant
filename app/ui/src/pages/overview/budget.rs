@@ -616,6 +616,9 @@ fn budget_row(budget: &MonthlyBudget, row: &BudgetRow, kind: Kind, s: PanelState
     let subtitle = match kind {
         Kind::Fixed => "Bills & recurring payments".to_owned(),
         Kind::Extras => "One-off payments outside group allowances".into(),
+        Kind::Unplanned if !row.expected.is_empty() => {
+            "Outside your planned groups · planned is spent so far plus the expected rest".into()
+        }
         Kind::Unplanned => "Outside your planned groups".into(),
         Kind::Group => match &group {
             Some(g) if g.source_groups.iter().any(|n| *n != row.name) => {
@@ -625,12 +628,14 @@ fn budget_row(budget: &MonthlyBudget, row: &BudgetRow, kind: Kind, s: PanelState
         },
     };
     let cell = "sm:text-right sm:tabular-nums before:mb-1 before:block before:text-xs before:font-normal before:text-fg-muted before:content-[attr(data-label)] sm:before:hidden";
-    let planned = if kind == Kind::Unplanned {
+    // The unplanned row has a plan only when the outlook estimates one.
+    let no_plan = kind == Kind::Unplanned && row.expected.is_empty();
+    let planned = if no_plan {
         "—".to_owned()
     } else {
         m(row.planned)
     };
-    let remaining = if kind == Kind::Unplanned {
+    let remaining = if no_plan {
         "—".to_owned()
     } else if over {
         format!("{} over", m(row.remaining.abs()))
@@ -718,6 +723,27 @@ fn budget_row(budget: &MonthlyBudget, row: &BudgetRow, kind: Kind, s: PanelState
         }
         .into_any()
     };
+    let expected = (!row.expected.is_empty()).then(|| {
+        view! {
+            <ul class="mb-3 mt-2 list-none p-0" aria-label="Estimates still to pay">
+                {row
+                    .expected
+                    .iter()
+                    .map(|(label, amount)| {
+                        view! {
+                            <li class="flex justify-between gap-5 border-b border-border py-2.5 text-sm last:border-b-0">
+                                <span>
+                                    {label.clone()}
+                                    <small class="mt-1 block text-xs text-fg-muted">"Estimate from past months"</small>
+                                </span>
+                                <strong class="whitespace-nowrap font-medium tabular-nums">{m(*amount)}</strong>
+                            </li>
+                        }
+                    })
+                    .collect_view()}
+            </ul>
+        }
+    });
     let bills_link = (kind == Kind::Fixed).then(|| {
         view! {
             <a
@@ -791,6 +817,7 @@ fn budget_row(budget: &MonthlyBudget, row: &BudgetRow, kind: Kind, s: PanelState
                 {edit}
                 {used}
                 {categories}
+                {expected}
                 {bills_link}
                 {purchase_list}
                 <details class="mt-3">

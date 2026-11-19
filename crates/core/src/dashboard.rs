@@ -44,8 +44,11 @@ pub fn dashboard(
     let payments = plans::planned_payment_views(&ctx);
     let spending = budget::spending_transactions(&ctx, &payments);
 
-    let fixed_categories =
+    let mut fixed_categories =
         groups::fixed_category_names(&snap.bills, &snap.group_mappings, &snap.subscription_rules);
+    fixed_categories.extend(groups::predicted_category_names(
+        &snap.settings.predicted_bill_categories,
+    ));
     let fixed_ids = groups::non_variable_ids(txs, &fixed_categories);
     let time_trends =
         trends::time_trends(&spending, &snap.group_mappings, &ctx.now, &HashSet::new());
@@ -78,7 +81,7 @@ pub fn dashboard(
         .and_then(|p| p.received_on.as_deref())
         .is_some_and(|received| received >= period_start.as_str());
 
-    let budgets = budget::monthly_budgets(
+    let mut budgets = budget::monthly_budgets(
         &ctx,
         &spending,
         &payments,
@@ -177,6 +180,18 @@ pub fn dashboard(
         current_month,
         |t| ctx.resolver.month_of(t),
         forecaster,
+    );
+    budget::apply_estimates(
+        &mut budgets,
+        current_month,
+        |currency| {
+            savings_outlooks
+                .iter()
+                .find(|o| o.currency == *currency)
+                .map_or(rust_decimal::Decimal::ZERO, |o| o.expected_unplanned_month)
+        },
+        &predicted_bills,
+        "EUR",
     );
     let money_plan = monthly_allocation
         .currencies

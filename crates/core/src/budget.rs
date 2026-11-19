@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use finance_types::gateway::{BudgetGroup, BudgetPlan, Direction, GroupMapping};
 use finance_types::report::Currency;
 use finance_types::report::budget::{BudgetCategory, BudgetPurchase, BudgetRow, MonthlyBudget};
+use finance_types::report::closure::PredictedBill;
 use finance_types::report::plans::{PlanStatus, PlannedPaymentView};
 use finance_types::report::subscriptions::SubscriptionReport;
 use jiff::Zoned;
@@ -16,7 +17,8 @@ use rust_decimal::Decimal;
 
 use crate::Ctx;
 use crate::groups::{
-    fixed_category_names, fixed_transaction_ids, group_index, without_settlements,
+    fixed_category_names, fixed_transaction_ids, group_index, predicted_category_names,
+    without_settlements,
 };
 use crate::model::{Kind, Tx};
 use crate::period::{PeriodResolver, shift_month};
@@ -38,8 +40,11 @@ pub fn spending_transactions(ctx: &Ctx, payments: &[PlannedPaymentView]) -> Vec<
 /// Transactions the budget counts as fixed spending (Python `budget_fixed_ids`).
 pub fn budget_fixed_ids(ctx: &Ctx, spending: &[Tx]) -> HashSet<String> {
     let snap = ctx.snap;
-    let categories =
+    let mut categories =
         fixed_category_names(&snap.bills, &snap.group_mappings, &snap.subscription_rules);
+    categories.extend(predicted_category_names(
+        &snap.settings.predicted_bill_categories,
+    ));
     fixed_transaction_ids(spending, &categories)
 }
 
@@ -332,6 +337,7 @@ pub fn monthly_budget(
                 .unwrap_or_else(|| vec![Decimal::ZERO; history_months.len()]),
             daily_spending: daily,
             elapsed_days,
+            expected: Vec::new(),
         }
     };
 
@@ -445,6 +451,48 @@ pub fn monthly_budgets(
         })
     })
     .collect()
+}
+
+/// Label of the unplanned row's estimate.
+pub const EXPECTED_UNPLANNED: &str = "Expected for the rest of the month";
+
+/// Add the estimates to the budgets: each predicted bill joins the fixed
+/// expenses of the month it is due in, and the running month's unplanned row
+/// plans what was spent plus what the outlook still expects.
+pub fn apply_estimates(
+    budgets: &mut [MonthlyBudget],
+    current_month: Date,
+    expected_unplanned: impl Fn(&Currency) -> Decimal,
+    predicted_bills: &[PredictedBill],
+    bill_currency: &str,
+) {
+    for budget in budgets {
+        let Some(month) = parse_date(&budget.plan.month) else {
+            continue;
+        };
+        if budget.plan.currency.code == bill_currency {
+            for bill in predicted_bills.iter().filter(|b| {
+                b.amount > Decimal::ZERO
+                    && parse_date(&b.due_on).is_some_and(|d| d.first_of_month() == month)
+            }) {
+                budget.fixed.planned += bill.amount;
+                budget.fixed.remaining += bill.amount;
+                budget.fixed.expected.push((
+                    format!("{} (predicted, due {})", bill.category, bill.due_on),
+                    bill.amount,
+                ));
+                budget.planned += bill.amount;
+            }
+        }
+        let expected = expected_unplanned(&budget.plan.currency);
+        if month == current_month && expected > Decimal::ZERO {
+            let row = &mut budget.unplanned;
+            row.planned = row.spent + expected;
+            row.remaining = expected;
+            row.expected.push((EXPECTED_UNPLANNED.to_owned(), expected));
+            budget.planned += row.planned;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -752,6 +800,45 @@ mod tests {
                 assert_eq!(budget.groups[0].daily_spending, [d(5)]);
             }
         }
+    }
+
+    #[test]
+    fn estimates_join_the_fixed_and_unplanned_rows() {
+        let mut budgets = [
+            report(None, &[with_category(tx("odd", "7"), None)], &[], &[]),
+            report(
+                Some(default_budget(date(2026, 10, 1), &Currency::eur())),
+                &[],
+                &[],
+                &[],
+            ),
+        ];
+        let bill = |due_on: &str, paid_this_month| PredictedBill {
+            category: "NS".into(),
+            account_id: "daily".into(),
+            amount: d(40),
+            due_on: due_on.into(),
+            paid_this_month,
+            method: "Average of the last 3 months".into(),
+            history: Vec::new(),
+        };
+        apply_estimates(
+            &mut budgets,
+            month(),
+            |_| d(60),
+            &[bill("2026-09-20", false), bill("2026-10-20", true)],
+            "EUR",
+        );
+        let [september, october] = &budgets;
+        assert_eq!(september.fixed.planned, d(40));
+        assert_eq!(september.fixed.remaining, d(40));
+        assert_eq!(september.fixed.expected.len(), 1);
+        assert_eq!(september.unplanned.planned, d(67));
+        assert_eq!(september.unplanned.remaining, d(60));
+        assert_eq!(september.planned, d(400 + 40 + 67));
+        assert_eq!(october.fixed.planned, d(40));
+        assert_eq!(october.unplanned.planned, d(0));
+        assert!(october.unplanned.expected.is_empty());
     }
 
     #[test]

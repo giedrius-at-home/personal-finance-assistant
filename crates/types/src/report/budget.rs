@@ -35,6 +35,11 @@ pub struct BudgetRow {
     pub daily_spending: Vec<Decimal>,
     #[serde(default)]
     pub elapsed_days: usize,
+    /// `(label, amount)` estimates inside `planned` that are still to be
+    /// spent: predicted bills, or the unplanned spending expected for the
+    /// rest of the month.
+    #[serde(default)]
+    pub expected: Vec<(String, Decimal)>,
 }
 
 /// A non-fixed purchase of the month and the envelope it counts in.
