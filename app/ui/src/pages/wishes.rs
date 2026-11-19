@@ -988,6 +988,7 @@ fn page(ui: Ui, view: &WishesView, ctx: &Context) -> impl IntoView + use<> {
         }
     });
     let strip = card_strip(ui, view, &ctx.get_value());
+    let fund = fund_block(ui, view);
     let form = add_form(
         ui,
         &ctx.get_value(),
@@ -998,6 +999,7 @@ fn page(ui: Ui, view: &WishesView, ctx: &Context) -> impl IntoView + use<> {
     view! {
         <div class="grid gap-4">
             {strip}
+            {fund}
             <Card>
                 <Eyebrow>"NEW WISH"</Eyebrow>
                 <h2 class="mt-2 text-lg font-semibold">"Add a wish"</h2>
@@ -1228,6 +1230,94 @@ fn card_strip(ui: Ui, view: &WishesView, ctx: &Context) -> impl IntoView + use<>
                 </div>
             </form>
             {feedback(ui, "card".into())}
+        </Card>
+    }
+}
+
+/// The emergency fund: how many months of bare living costs to hold and
+/// which spending groups are bare living. It takes what the wishes leave.
+fn fund_block(ui: Ui, view: &WishesView) -> impl IntoView + use<> {
+    let settings = StoredValue::new(view.settings.clone());
+    let months = RwSignal::new(view.settings.emergency_months.to_string());
+    let groups = RwSignal::new(view.settings.essential_groups.join(", "));
+    let unit = view.currency.clone();
+    let money = move |value: Decimal| format::money_dp(value, &unit.code, 0);
+    let summary = match view.goals.as_ref().and_then(|g| g.fund.as_ref()) {
+        Some(fund) => format!(
+            "Bills {} + essentials {} = {} a month of bare living. Target {}; the savings pot holds {} beyond what is saved for wishes.",
+            money(fund.fixed_monthly),
+            money(fund.essentials_monthly),
+            money(fund.fixed_monthly + fund.essentials_monthly),
+            money(fund.target),
+            money(fund.balance),
+        ),
+        None if view.settings.emergency_months == 0 => "Switched off.".to_owned(),
+        None => "Needs a few months of spending history before it can be sized.".to_owned(),
+    };
+    let submit = move |ev: SubmitEvent| {
+        ev.prevent_default();
+        let Some(emergency_months) = crate::pages::goals::parse_months(&months.get_untracked())
+        else {
+            ui.set_message("fund", "Months must be a whole number from 0 to 36.", true);
+            return;
+        };
+        ui.write(
+            "fund".into(),
+            "save_wish_settings",
+            SettingsArgs {
+                settings: WishSettings {
+                    emergency_months,
+                    essential_groups: crate::pages::goals::parse_groups(&groups.get_untracked()),
+                    ..settings.get_value()
+                },
+            },
+            "Emergency fund saved.",
+            || {},
+        );
+    };
+    view! {
+        <Card>
+            <Eyebrow>"EMERGENCY FUND"</Eyebrow>
+            <h2 class="mt-2 text-lg font-semibold">"Months of bare living to hold"</h2>
+            <p class="mt-1 text-sm text-fg-muted">
+                "A savings goal without a date: it takes what the wishes leave. Rent changes and new subscriptions planned as wishes move its target."
+            </p>
+            <p class="mt-2 text-sm tabular-nums">{summary}</p>
+            <form class="mt-4 grid items-start gap-3 sm:grid-cols-[8rem_1fr_auto]" on:submit=submit>
+                <Field label="Months" id="fund-months" hint="0 switches it off.">
+                    <input
+                        id="fund-months"
+                        type="text"
+                        inputmode="numeric"
+                        pattern="[0-9]{1,2}"
+                        required
+                        class=CONTROL
+                        prop:value=move || months.get()
+                        on:input=move |e| months.set(event_target_value(&e))
+                    />
+                </Field>
+                <Field
+                    label="Bare living groups"
+                    id="fund-groups"
+                    hint="Spending groups, separated by commas. Bills always count."
+                >
+                    <input
+                        id="fund-groups"
+                        type="text"
+                        class=CONTROL
+                        prop:value=move || groups.get()
+                        on:input=move |e| groups.set(event_target_value(&e))
+                    />
+                </Field>
+                <Button
+                    submit=true
+                    class=LABEL_OFFSET
+                    disabled=Signal::derive(move || ui.busy.get())
+                >
+                    "Save fund"
+                </Button>
+            </form>
+            {feedback(ui, "fund".into())}
         </Card>
     }
 }

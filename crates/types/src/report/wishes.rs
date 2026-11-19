@@ -140,7 +140,8 @@ pub struct WishesView {
 /// does and nothing is cut.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GoalOutlook {
-    /// What the planned wishes ask to put away each month.
+    /// What the coming months ask: each later purchase spread over the
+    /// months until it is due, plus the planned repeating costs that stay.
     pub needed_monthly: Decimal,
     /// A later month's free money when spending stays as usual.
     pub habit_free: Decimal,

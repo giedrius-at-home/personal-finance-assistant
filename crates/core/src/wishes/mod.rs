@@ -303,15 +303,17 @@ impl Inputs<'_> {
                     .map_or(Decimal::ZERO, |r| r.short),
             })
             .collect();
-        // Each later purchase spread over the months left until it is due.
-        let needed_monthly: Decimal = items
+        // Each later purchase spread over the months left until it is due,
+        // plus the repeating costs that are planned to stay.
+        let ongoing = goals::ongoing_monthly(&items);
+        let purchases: Decimal = items
             .iter()
             .filter(|i| i.per_month.is_none() && i.remaining > Decimal::ZERO)
             // What is due this month is this month's business.
             .filter(|i| i.months_from(month0) >= 1)
             .map(|i| i.remaining / Decimal::from(i.months_from(month0)))
-            .sum::<Decimal>()
-            .round_dp(2);
+            .sum();
+        let needed_monthly = (purchases + ongoing).max(Decimal::ZERO).round_dp(2);
         let plan_free = plan_bases.get(1)?.free.round_dp(2);
         let habit_free = habit_bases.get(1)?.free.round_dp(2);
         let coverage = (needed_monthly > Decimal::ZERO).then(|| {
@@ -320,7 +322,7 @@ impl Inputs<'_> {
                 .min(Decimal::ONE_HUNDRED);
             u32::try_from(share.mantissa()).unwrap_or(0)
         });
-        let steady = habit_free - goals::ongoing_monthly(&items);
+        let steady = habit_free - ongoing;
         let gap = (needed_monthly - habit_free).max(Decimal::ZERO);
         let (cuts, uncovered) = goals::advice(gap, &self.habits, &self.plans);
         Some(GoalOutlook {
@@ -1354,5 +1356,25 @@ mod tests {
         let fund = goals.fund.unwrap();
         assert_eq!(fund.target, d("1980"));
         assert_eq!(fund.eta.as_deref(), Some("2027-06-01"));
+    }
+
+    #[test]
+    fn a_planned_repeating_cost_is_part_of_what_the_goals_need() {
+        // A new subscription from December, no dated purchase.
+        let a = alloc("0", "500", vec![], vec![]);
+        let mut gym = wish("gym", None, "100", "2026-12-01");
+        gym.kind = WishKind::Recurring {
+            every: Repeat::Monthly,
+            ends_on: None,
+        };
+        let goals = with_habits(&a, vec![habit("Food", "570", "100", false)], &[gym])
+            .goals
+            .unwrap();
+        assert_eq!(
+            (goals.needed_monthly, goals.habit_free, goals.gap),
+            (d("100"), d("30"), d("70"))
+        );
+        assert_eq!(goals.coverage, Some(30));
+        assert_eq!(goals.cuts[0].monthly, d("70"));
     }
 }
