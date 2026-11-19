@@ -26,7 +26,7 @@ use crate::personal::apply_personal_spending;
 use crate::plans::net_spending_transactions;
 
 /// The months a budget's history covers: five before it and the month itself.
-const HISTORY_MONTHS: i32 = 6;
+pub(crate) const HISTORY_MONTHS: i32 = 6;
 
 /// The spending every budget reads: bulk-payment settlements removed, linked
 /// reimbursements netted, then owner-marked shared spending applied (the
@@ -231,7 +231,7 @@ pub fn month_of(t: &Tx, inputs: &BudgetInputs) -> Date {
     }
 }
 
-fn signed(t: &Tx) -> Decimal {
+pub(crate) fn signed(t: &Tx) -> Decimal {
     if t.kind == Kind::Refund {
         -t.amount
     } else {
@@ -243,7 +243,7 @@ fn days_between(from: Date, to: Date) -> i64 {
     i64::from((to - from).get_days())
 }
 
-fn parse_date(text: &str) -> Option<Date> {
+pub(crate) fn parse_date(text: &str) -> Option<Date> {
     text.get(..10)?.parse().ok()
 }
 
@@ -456,6 +456,24 @@ pub fn monthly_budget(
     }
 }
 
+/// Every currency the owner holds or spends, by code.
+pub(crate) fn held_currencies<'c>(
+    ctx: &Ctx<'c>,
+    spending: &'c [Tx],
+) -> BTreeMap<&'c str, &'c Currency> {
+    let mut currencies: BTreeMap<&str, &Currency> = BTreeMap::new();
+    for currency in ctx
+        .snap
+        .accounts
+        .iter()
+        .map(|a| a.currency())
+        .chain(spending.iter().map(|t| &t.currency))
+    {
+        currencies.entry(currency.code.as_str()).or_insert(currency);
+    }
+    currencies
+}
+
 /// The current and next budget month for every currency the owner holds or
 /// spends, from the saved plan or the default one (the dashboard's
 /// `monthly_budgets`). The subscription reports are the calendar months that
@@ -468,15 +486,7 @@ pub fn monthly_budgets(
     next_subscriptions: &SubscriptionReport,
 ) -> Vec<MonthlyBudget> {
     let snap = ctx.snap;
-    let mut currencies: BTreeMap<&str, &Currency> = BTreeMap::new();
-    for currency in snap
-        .accounts
-        .iter()
-        .map(|a| a.currency())
-        .chain(spending.iter().map(|t| &t.currency))
-    {
-        currencies.entry(currency.code.as_str()).or_insert(currency);
-    }
+    let currencies = held_currencies(ctx, spending);
     let fixed_ids = budget_fixed_ids(ctx, spending);
     let current_month = ctx.current_month();
     let inputs = BudgetInputs {
@@ -551,13 +561,13 @@ pub fn apply_estimates(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use finance_types::report::UnitMoney;
     use jiff::civil::date;
     use jiff::tz::TimeZone;
 
-    fn now() -> Zoned {
+    pub(crate) fn now() -> Zoned {
         "2026-09-10T12:00:00+00:00[UTC]".parse().unwrap()
     }
 
@@ -565,7 +575,7 @@ mod tests {
         date(2026, 9, 1)
     }
 
-    fn tx(id: &str, amount: &str) -> Tx {
+    pub(crate) fn tx(id: &str, amount: &str) -> Tx {
         Tx {
             transaction_id: id.into(),
             ledger_id: 1,
@@ -627,7 +637,7 @@ mod tests {
         }
     }
 
-    fn empty_subscriptions() -> SubscriptionReport {
+    pub(crate) fn empty_subscriptions() -> SubscriptionReport {
         SubscriptionReport {
             fetched_at: None,
             through_date: "2026-09-10".into(),
