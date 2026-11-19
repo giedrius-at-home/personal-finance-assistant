@@ -12,7 +12,7 @@ use crate::subscriptions::{BillWindow, budget_calendar_offset, subscription_repo
 use crate::{
     Ctx, Result, Snapshot, cash, catalog, forecast, groups, limits, plans, review, trends,
 };
-use crate::{allocation, budget, daily, outlook};
+use crate::{adjustments, allocation, budget, daily, outlook};
 
 /// `forecaster` (TimesFM) is the model the daily, group and outlook
 /// forecasts backtest against their fallbacks (none: the fallbacks alone).
@@ -88,6 +88,7 @@ pub fn dashboard(
         &current_subscriptions,
         &next_subscriptions,
     );
+    let adjustments = adjustments::all(&ctx, &spending, &payments, &current_subscriptions);
     let spending_nudges = limits::spending_nudges(&snap.spending_limits, &time_trends);
     let usage: Vec<allocation::GroupUsage> = spending_nudges
         .iter()
@@ -247,6 +248,7 @@ pub fn dashboard(
         ),
         spending_limits: snap.spending_limits.clone(),
         spending_nudges,
+        adjustments,
         monthly_budgets: budgets,
         savings_outlooks,
         daily_forecasts,

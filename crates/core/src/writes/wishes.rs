@@ -1,8 +1,8 @@
 //! Wishes: planned purchases the owner saves toward, drops or buys.
 
 use finance_types::gateway::{
-    BillCreateRequest, BillEditRequest, BillRef, BudgetPlan, CardCharge, Direction, PlannedPayment,
-    Repeat, Wish, WishDraft, WishKind, WishPurchase, WishSettings, WishSource, WishStatus,
+    BillCreateRequest, BillEditRequest, BillRef, CardCharge, Direction, PlannedPayment, Repeat,
+    Wish, WishDraft, WishKind, WishPurchase, WishSettings, WishSource, WishStatus,
 };
 use finance_types::report::wishes::Cut;
 use finance_types::report::{Currency, UnitMoney};
@@ -12,10 +12,9 @@ use rust_decimal::Decimal;
 use super::bills::{Checks, archive_bill, create_bill, edit_bill};
 use super::budget::save_budget_plan;
 use super::{Writer, invalid};
-use crate::budget::default_budget;
+use crate::budget::plan_for;
 use crate::model::Kind;
 use crate::plans::WISH_PLAN_PREFIX;
-use crate::wishes::baseline::ranking;
 use crate::wishes::store::{load_wish_settings, load_wishes};
 use crate::{Ctx, Result, Snapshot};
 
@@ -471,13 +470,7 @@ fn write_cuts(
     if cuts.is_empty() {
         return Ok(());
     }
-    let key = month.to_string();
-    let mut plan = snap
-        .budget_plans
-        .iter()
-        .find(|p| p.month == key && &p.currency == currency)
-        .cloned()
-        .unwrap_or_else(|| ranked_default(snap, month, currency));
+    let mut plan = plan_for(&snap.budget_plans, month, currency);
     for cut in cuts {
         if let Some(group) = plan.groups.iter_mut().find(|g| g.id == cut.group_id) {
             group.amount = (group.amount - (cut.from - cut.to)).max(Decimal::ZERO);
@@ -485,26 +478,6 @@ fn write_cuts(
     }
     save_budget_plan(w, snap, plan)?;
     Ok(())
-}
-
-/// The default plan for `month`, each group keeping the importance and
-/// floor the latest earlier plan gave a group of its name.
-fn ranked_default(snap: &Snapshot, month: Date, currency: &Currency) -> BudgetPlan {
-    let mut plan = default_budget(month, currency);
-    let key = month.to_string();
-    let mut earlier: Vec<&BudgetPlan> = snap
-        .budget_plans
-        .iter()
-        .filter(|p| &p.currency == currency && p.month < key)
-        .collect();
-    earlier.sort_by(|a, b| b.month.cmp(&a.month));
-    for group in &mut plan.groups {
-        if let Some(ranked) = ranking(earlier.iter().copied(), &group.name) {
-            group.importance = ranked.importance;
-            group.floor = ranked.floor;
-        }
-    }
-    plan
 }
 
 /// Start a planned recurring wish (it becomes a bill in `match_category`)
@@ -1305,20 +1278,17 @@ mod tests {
     }
 
     #[test]
-    fn cuts_into_a_default_budget_keep_importance() {
+    fn cuts_into_a_month_without_a_plan_keep_the_owners_last_one() {
         let mut db = db();
         let mut september = going_out("2026-09-01", 120);
-        september.groups[0].id = "groceries-old".into();
-        september.groups[0].name = "Groceries".into();
-        september.groups[0].importance = Some(1);
-        september.groups[0].floor = Some(Decimal::from(200));
+        september.groups[0].floor = Some(Decimal::from(40));
         db.write(|w, s| save_budget_plan(w, s, september)).unwrap();
         let wish = db.write(|w, s| save_wish(w, s, draft("Bike"))).unwrap();
         let cut = Cut {
-            group_id: "groceries".into(),
-            name: "Groceries".into(),
-            from: Decimal::from(300),
-            to: Decimal::from(250),
+            group_id: "going-out".into(),
+            name: "Going out".into(),
+            from: Decimal::from(120),
+            to: Decimal::from(70),
         };
         db.write(|w, s| {
             mark_bought(
@@ -1330,13 +1300,14 @@ mod tests {
             )
         })
         .unwrap();
+        // October had no plan: the cut lands in September's, not the default.
         let october = stored_plan(&db, "2026-10-01");
-        let groceries = october.groups.iter().find(|g| g.id == "groceries").unwrap();
-        assert_eq!(groceries.amount, Decimal::from(250));
-        assert_eq!(groceries.importance, Some(1));
-        assert_eq!(groceries.floor, Some(Decimal::from(200)));
-        let food = october.groups.iter().find(|g| g.id == "food-out").unwrap();
-        assert_eq!(food.importance, None);
+        assert_eq!(october.groups.len(), 1);
+        let going_out = &october.groups[0];
+        assert_eq!(going_out.id, "going-out");
+        assert_eq!(going_out.amount, Decimal::from(70));
+        assert_eq!(going_out.importance, Some(2));
+        assert_eq!(going_out.floor, Some(Decimal::from(40)));
     }
 
     #[test]

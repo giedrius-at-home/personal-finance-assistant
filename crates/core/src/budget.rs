@@ -26,7 +26,7 @@ use crate::personal::apply_personal_spending;
 use crate::plans::net_spending_transactions;
 
 /// The months a budget's history covers: five before it and the month itself.
-const HISTORY_MONTHS: i32 = 6;
+pub(crate) const HISTORY_MONTHS: i32 = 6;
 
 /// The spending every budget reads: bulk-payment settlements removed, linked
 /// reimbursements netted, then owner-marked shared spending applied (the
@@ -93,6 +93,27 @@ pub fn default_budget(month: Date, currency: &Currency) -> BudgetPlan {
     }
 }
 
+/// The plan a month runs on: its own saved plan, else the latest earlier
+/// saved plan of the currency carried over (unsaved, revision 0), else the
+/// default. A budget the owner set once stays until they change it.
+pub fn plan_for(saved: &[BudgetPlan], month: Date, currency: &Currency) -> BudgetPlan {
+    let earlier = saved
+        .iter()
+        .filter(|p| p.currency == *currency)
+        .filter_map(|p| Some((parse_date(&p.month)?, p)))
+        .filter(|(on, _)| *on <= month)
+        .max_by_key(|(on, _)| *on);
+    match earlier {
+        Some((on, plan)) if on == month => plan.clone(),
+        Some((_, plan)) => BudgetPlan {
+            month: month.to_string(),
+            revision: 0,
+            ..plan.clone()
+        },
+        None => default_budget(month, currency),
+    }
+}
+
 /// The plan group a purchase counts in: an explicit purchase overrides its
 /// category, which overrides a broad spending group.
 pub fn budget_owner<'p>(
@@ -125,7 +146,92 @@ pub struct BudgetInputs<'a> {
     pub current_month: Option<Date>,
 }
 
-fn signed(t: &Tx) -> Decimal {
+/// Which budget row a purchase counts in, shared by the budget and the
+/// adjustments pass.
+#[derive(Debug)]
+pub struct Ownership<'a> {
+    groups: &'a [BudgetGroup],
+    mapping: HashMap<&'a str, Option<&'a str>>,
+    fixed_ids: &'a HashSet<String>,
+    /// A paid reimbursement counts where the purchase it pays back counts.
+    reimbursement_origins: HashMap<&'a str, &'a str>,
+    paid_ids: HashSet<&'a str>,
+}
+
+impl<'a> Ownership<'a> {
+    pub fn new(plan: &'a BudgetPlan, inputs: &BudgetInputs<'a>) -> Self {
+        let paid = || {
+            inputs
+                .payments
+                .iter()
+                .filter(|p| p.status == PlanStatus::Paid)
+        };
+        Self {
+            groups: &plan.groups,
+            mapping: group_index(inputs.mappings),
+            fixed_ids: inputs.fixed_ids,
+            reimbursement_origins: paid()
+                .filter_map(|p| {
+                    Some((
+                        p.transaction_id.as_deref()?,
+                        p.reimbursement_for.as_deref()?,
+                    ))
+                })
+                .filter(|(_, origin)| !origin.is_empty())
+                .collect(),
+            paid_ids: paid()
+                .filter(|p| p.direction == Direction::Outflow)
+                .filter_map(|p| p.transaction_id.as_deref())
+                .collect(),
+        }
+    }
+
+    /// The reviewed group of a category.
+    pub fn source_group(&self, category: Option<&str>) -> Option<&'a str> {
+        self.mapping.get(category.unwrap_or("")).copied().flatten()
+    }
+
+    /// A plan group's id, or `"fixed"`, `"extras"` (a paid one-off plan) or
+    /// `"unplanned"`.
+    pub fn key(&self, t: &Tx) -> &'a str {
+        if self.fixed_ids.contains(&t.transaction_id) {
+            return "fixed";
+        }
+        let id = self
+            .reimbursement_origins
+            .get(t.transaction_id.as_str())
+            .copied()
+            .unwrap_or(&t.transaction_id);
+        budget_owner(
+            self.groups,
+            t.category.as_deref(),
+            self.source_group(t.category.as_deref()),
+            Some(id),
+        )
+        .unwrap_or(if self.paid_ids.contains(t.transaction_id.as_str()) {
+            "extras"
+        } else {
+            "unplanned"
+        })
+    }
+}
+
+/// True for the outflows and refunds of the plan's currency booked by `now`.
+pub fn counts(t: &Tx, plan: &BudgetPlan, now: &Zoned) -> bool {
+    matches!(t.kind, Kind::Outflow | Kind::Refund)
+        && t.currency == plan.currency
+        && t.occurred_at.timestamp() <= now.timestamp()
+}
+
+/// The budget month a purchase belongs to.
+pub fn month_of(t: &Tx, inputs: &BudgetInputs) -> Date {
+    match inputs.resolver {
+        Some(resolver) => resolver.month_of(t),
+        None => t.effective_on().first_of_month(),
+    }
+}
+
+pub(crate) fn signed(t: &Tx) -> Decimal {
     if t.kind == Kind::Refund {
         -t.amount
     } else {
@@ -137,7 +243,7 @@ fn days_between(from: Date, to: Date) -> i64 {
     i64::from((to - from).get_days())
 }
 
-fn parse_date(text: &str) -> Option<Date> {
+pub(crate) fn parse_date(text: &str) -> Option<Date> {
     text.get(..10)?.parse().ok()
 }
 
@@ -160,68 +266,24 @@ pub fn monthly_budget(
     let period_days = (days_between(start, month_end) + 1).max(0);
     let elapsed_days =
         usize::try_from(period_days.min((days_between(start, today) + 1).max(0))).unwrap_or(0);
-    let mapping = group_index(inputs.mappings);
-    let source_group = |category: Option<&str>| -> Option<&str> {
-        mapping.get(category.unwrap_or("")).copied().flatten()
-    };
+    let ownership = Ownership::new(plan, inputs);
+    let source_group = |category: Option<&str>| ownership.source_group(category);
     let history_months: Vec<Date> = (1 - HISTORY_MONTHS..=0)
         .map(|offset| shift_month(month, offset))
         .collect();
     let mut history: HashMap<String, Vec<Decimal>> = HashMap::new();
     let mut rows: HashMap<String, Vec<&Tx>> = HashMap::new();
     let mut purchases = Vec::new();
-    let reimbursement_origins: HashMap<&str, &str> = inputs
-        .payments
-        .iter()
-        .filter(|p| p.status == PlanStatus::Paid)
-        .filter_map(|p| {
-            Some((
-                p.transaction_id.as_deref()?,
-                p.reimbursement_for.as_deref()?,
-            ))
-        })
-        .filter(|(_, origin)| !origin.is_empty())
-        .collect();
-    let paid_ids: HashSet<Option<&str>> = inputs
-        .payments
-        .iter()
-        .filter(|p| p.direction == Direction::Outflow && p.status == PlanStatus::Paid)
-        .map(|p| p.transaction_id.as_deref())
-        .collect();
     for t in inputs.transactions {
-        if !matches!(t.kind, Kind::Outflow | Kind::Refund)
-            || t.currency != plan.currency
-            || t.occurred_at.timestamp() > now.timestamp()
-        {
+        if !counts(t, plan, now) {
             continue;
         }
         let on = t.effective_on();
-        let tx_month = match inputs.resolver {
-            Some(resolver) => resolver.month_of(t),
-            None => on.first_of_month(),
-        };
+        let tx_month = month_of(t, inputs);
         let Some(index) = history_months.iter().position(|m| *m == tx_month) else {
             continue;
         };
-        let owner = if inputs.fixed_ids.contains(&t.transaction_id) {
-            Some("fixed")
-        } else {
-            let id = reimbursement_origins
-                .get(t.transaction_id.as_str())
-                .copied()
-                .unwrap_or(&t.transaction_id);
-            budget_owner(
-                &plan.groups,
-                t.category.as_deref(),
-                source_group(t.category.as_deref()),
-                Some(id),
-            )
-        };
-        let key = owner.unwrap_or(if paid_ids.contains(&Some(t.transaction_id.as_str())) {
-            "extras"
-        } else {
-            "unplanned"
-        });
+        let key = ownership.key(t);
         let amount = signed(t);
         history
             .entry(key.to_owned())
@@ -394,6 +456,24 @@ pub fn monthly_budget(
     }
 }
 
+/// Every currency the owner holds or spends, by code.
+pub(crate) fn held_currencies<'c>(
+    ctx: &Ctx<'c>,
+    spending: &'c [Tx],
+) -> BTreeMap<&'c str, &'c Currency> {
+    let mut currencies: BTreeMap<&str, &Currency> = BTreeMap::new();
+    for currency in ctx
+        .snap
+        .accounts
+        .iter()
+        .map(|a| a.currency())
+        .chain(spending.iter().map(|t| &t.currency))
+    {
+        currencies.entry(currency.code.as_str()).or_insert(currency);
+    }
+    currencies
+}
+
 /// The current and next budget month for every currency the owner holds or
 /// spends, from the saved plan or the default one (the dashboard's
 /// `monthly_budgets`). The subscription reports are the calendar months that
@@ -406,20 +486,7 @@ pub fn monthly_budgets(
     next_subscriptions: &SubscriptionReport,
 ) -> Vec<MonthlyBudget> {
     let snap = ctx.snap;
-    let saved: HashMap<(Date, &Currency), &BudgetPlan> = snap
-        .budget_plans
-        .iter()
-        .filter_map(|p| Some(((parse_date(&p.month)?, &p.currency), p)))
-        .collect();
-    let mut currencies: BTreeMap<&str, &Currency> = BTreeMap::new();
-    for currency in snap
-        .accounts
-        .iter()
-        .map(|a| a.currency())
-        .chain(spending.iter().map(|t| &t.currency))
-    {
-        currencies.entry(currency.code.as_str()).or_insert(currency);
-    }
+    let currencies = held_currencies(ctx, spending);
     let fixed_ids = budget_fixed_ids(ctx, spending);
     let current_month = ctx.current_month();
     let inputs = BudgetInputs {
@@ -437,11 +504,9 @@ pub fn monthly_budgets(
     ]
     .into_iter()
     .flat_map(|(month, subscriptions)| {
-        let (inputs, saved) = (&inputs, &saved);
+        let inputs = &inputs;
         currencies.values().map(move |currency| {
-            let plan = saved
-                .get(&(month, *currency))
-                .map_or_else(|| default_budget(month, currency), |p| (*p).clone());
+            let plan = plan_for(&snap.budget_plans, month, currency);
             monthly_budget(
                 &plan,
                 subscriptions,
@@ -496,13 +561,13 @@ pub fn apply_estimates(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use finance_types::report::UnitMoney;
     use jiff::civil::date;
     use jiff::tz::TimeZone;
 
-    fn now() -> Zoned {
+    pub(crate) fn now() -> Zoned {
         "2026-09-10T12:00:00+00:00[UTC]".parse().unwrap()
     }
 
@@ -510,7 +575,7 @@ mod tests {
         date(2026, 9, 1)
     }
 
-    fn tx(id: &str, amount: &str) -> Tx {
+    pub(crate) fn tx(id: &str, amount: &str) -> Tx {
         Tx {
             transaction_id: id.into(),
             ledger_id: 1,
@@ -572,7 +637,7 @@ mod tests {
         }
     }
 
-    fn empty_subscriptions() -> SubscriptionReport {
+    pub(crate) fn empty_subscriptions() -> SubscriptionReport {
         SubscriptionReport {
             fetched_at: None,
             through_date: "2026-09-10".into(),
@@ -865,6 +930,52 @@ mod tests {
         assert_eq!(owner(Some("Lidl"), None, None), None);
         assert!(
             default_budget(month(), &Currency::new("USD"))
+                .groups
+                .is_empty()
+        );
+    }
+
+    fn saved(month: &str, amount: i64) -> BudgetPlan {
+        BudgetPlan {
+            month: month.into(),
+            currency: Currency::eur(),
+            revision: 3,
+            groups: vec![group(
+                "food-out",
+                "Food & drinks out",
+                amount,
+                &["Eating out"],
+            )],
+        }
+    }
+
+    #[test]
+    fn a_month_without_a_plan_uses_the_latest_earlier_one() {
+        let plans = [saved("2026-09-01", 250), saved("2026-11-01", 430)];
+        let dec = plan_for(&plans, date(2026, 12, 1), &Currency::eur());
+        assert_eq!((dec.month.as_str(), dec.revision), ("2026-12-01", 0));
+        assert_eq!(dec.groups[0].amount, Decimal::from(430));
+        // The month's own plan wins, untouched.
+        assert_eq!(
+            plan_for(&plans, date(2026, 11, 1), &Currency::eur()).revision,
+            3
+        );
+        // A later plan never flows backwards.
+        assert_eq!(
+            plan_for(&plans, date(2026, 10, 1), &Currency::eur()).groups[0].amount,
+            Decimal::from(250)
+        );
+    }
+
+    #[test]
+    fn no_earlier_plan_falls_back_to_the_default() {
+        let plans = [saved("2026-11-01", 430)];
+        assert_eq!(
+            plan_for(&plans, date(2026, 10, 1), &Currency::eur()),
+            default_budget(date(2026, 10, 1), &Currency::eur())
+        );
+        assert!(
+            plan_for(&plans, date(2026, 12, 1), &Currency::new("USD"))
                 .groups
                 .is_empty()
         );

@@ -2,6 +2,7 @@
 //! service's `DashboardView`. Field names match its JSON so the two can be
 //! compared field by field.
 
+pub mod adjustments;
 pub mod allocation;
 pub mod budget;
 pub mod cash;
@@ -87,6 +88,9 @@ pub struct Dashboard {
     /// Where the money should go now, from the current balances (EUR).
     #[serde(default)]
     pub money_plan: Option<closure::MoneyPlan>,
+    /// The running month's groups against the owner's own norm.
+    #[serde(default)]
+    pub adjustments: Vec<adjustments::Adjustments>,
 }
 
 /// The category review inbox (Transactions screen).
