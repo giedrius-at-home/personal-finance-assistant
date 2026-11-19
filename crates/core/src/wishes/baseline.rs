@@ -18,7 +18,7 @@ use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 /// Parse a `YYYY-MM-DD` or `YYYY-MM` month as its first day.
-fn parse_month(text: &str) -> Option<Date> {
+pub(crate) fn parse_month(text: &str) -> Option<Date> {
     text.parse::<Date>()
         .or_else(|_| format!("{text}-01").parse::<Date>())
         .ok()

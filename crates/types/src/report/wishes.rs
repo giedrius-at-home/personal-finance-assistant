@@ -169,6 +169,9 @@ pub struct GoalStatus {
     pub must: bool,
     /// What cannot be paid when spending stays as usual.
     pub short: Decimal,
+    /// What ends up on a credit card when spending stays as usual.
+    #[serde(default)]
+    pub on_card: Decimal,
     /// What cannot be paid even when the budgets are kept.
     pub plan_short: Decimal,
 }
