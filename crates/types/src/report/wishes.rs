@@ -130,4 +130,84 @@ pub struct WishesView {
     /// Σ saved of planned one-off wishes: what must stay in savings.
     #[serde(default)]
     pub savings_must_keep: Decimal,
+    /// The wishes and the emergency fund against current habits.
+    #[serde(default)]
+    pub goals: Option<GoalOutlook>,
+}
+
+/// What the goals need a month against what current habits leave, judged by
+/// the same ladder on a habit scenario: every group costs what it usually
+/// does and nothing is cut.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GoalOutlook {
+    /// What the coming months ask: each later purchase spread over the
+    /// months until it is due, plus the planned repeating costs that stay.
+    pub needed_monthly: Decimal,
+    /// A later month's free money when spending stays as usual.
+    pub habit_free: Decimal,
+    /// The same when the budgets are kept.
+    pub plan_free: Decimal,
+    pub gap: Decimal,
+    /// `habit_free / needed_monthly` in percent, 0 to 100; `None` when
+    /// nothing is needed.
+    pub coverage: Option<u32>,
+    /// The months judged, the running one included.
+    pub horizon_months: usize,
+    pub goals: Vec<GoalStatus>,
+    /// How the gap could be closed, each group giving the same share.
+    pub cuts: Vec<HabitCut>,
+    /// The part of the gap that cutting every group to its floor leaves.
+    #[serde(default)]
+    pub uncovered: Decimal,
+    /// `None` when the fund is switched off.
+    pub fund: Option<EmergencyFund>,
+}
+
+/// One planned wish at current habits.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GoalStatus {
+    pub wish_id: String,
+    pub name: String,
+    /// `YYYY-MM-DD`.
+    pub due_on: String,
+    pub amount: Decimal,
+    pub must: bool,
+    /// What cannot be paid when spending stays as usual.
+    pub short: Decimal,
+    /// What ends up on a credit card when spending stays as usual.
+    #[serde(default)]
+    pub on_card: Decimal,
+    /// What cannot be paid even when the budgets are kept.
+    pub plan_short: Decimal,
+}
+
+/// What one spending group would give a month to close the gap.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HabitCut {
+    pub group_id: String,
+    pub name: String,
+    /// What the group usually costs a month.
+    pub typical: Decimal,
+    pub monthly: Decimal,
+    /// The usual visits a month, when known.
+    pub typical_visits: Option<Decimal>,
+    /// What a visit usually costs, when known.
+    #[serde(default)]
+    pub ticket: Option<Decimal>,
+}
+
+/// Months of bare living costs to hold; it takes what the wishes leave.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EmergencyFund {
+    pub months: u32,
+    /// Bills a month, with the planned changes that do not end.
+    pub fixed_monthly: Decimal,
+    /// The typical month of the essential groups.
+    pub essentials_monthly: Decimal,
+    pub target: Decimal,
+    /// The savings pot that is not saved for a wish.
+    pub balance: Decimal,
+    /// The month (`YYYY-MM-01`) the fund is full at current habits; `None`
+    /// when nothing is left over to fill it.
+    pub eta: Option<String>,
 }

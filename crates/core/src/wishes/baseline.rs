@@ -18,7 +18,7 @@ use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 /// Parse a `YYYY-MM-DD` or `YYYY-MM` month as its first day.
-fn parse_month(text: &str) -> Option<Date> {
+pub(crate) fn parse_month(text: &str) -> Option<Date> {
     text.parse::<Date>()
         .or_else(|_| format!("{text}-01").parse::<Date>())
         .ok()
@@ -302,6 +302,7 @@ pub(crate) mod tests {
                 used_month: month.into(),
                 ..WishSettings::default().cards[0].clone()
             }],
+            ..WishSettings::default()
         }
     }
 
@@ -607,6 +608,7 @@ pub(crate) mod tests {
                 card("visa", "2026-10-01", "40", Some("b1")),
                 card("mc", "2026-09-01", "70", None),
             ],
+            ..WishSettings::default()
         };
         let a = alloc("0", "200", vec![], vec![]);
         let (months, stale) = baselines(

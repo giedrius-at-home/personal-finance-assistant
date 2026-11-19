@@ -1,6 +1,7 @@
 //! Planned purchases and whether the budget can afford them.
 
 pub mod baseline;
+pub mod goals;
 pub mod ladder;
 pub mod schedule;
 pub mod store;
@@ -9,7 +10,9 @@ use finance_types::gateway::{
     BudgetPlan, Repeat, Wish, WishKind, WishPurchase, WishSettings, WishSource, WishStatus,
 };
 use finance_types::report::allocation::CurrencyAllocation;
-use finance_types::report::wishes::{ChangeableBill, Cut, Verdict, WishMonth, WishRow, WishesView};
+use finance_types::report::wishes::{
+    ChangeableBill, Cut, GoalOutlook, GoalStatus, Verdict, WishMonth, WishRow, WishesView,
+};
 use finance_types::report::{Currency, Dashboard};
 use jiff::civil::Date;
 use rust_decimal::Decimal;
@@ -34,6 +37,11 @@ pub fn wishes_view(
         plans,
         card_bills,
         bills: &bills,
+        habits: goals::habit_rows(
+            &dashboard.adjustments,
+            &allocation(dashboard).map_or_else(Currency::eur, |a| a.currency.clone()),
+            &settings.essential_groups,
+        ),
     }
     .view(wishes, settings)
 }
@@ -56,6 +64,7 @@ pub fn purchase_cuts(
         plans,
         card_bills,
         bills: &bills,
+        habits: Vec::new(),
     }
     .purchase_cuts(wishes, settings, wish_id, purchase)
 }
@@ -176,29 +185,41 @@ pub struct Inputs<'a> {
     pub plans: Vec<BudgetPlan>,
     pub card_bills: Vec<(String, Decimal)>,
     pub bills: &'a HashMap<String, BillNow>,
+    /// The spending groups at their typical month; empty leaves the goals
+    /// unjudged against habits.
+    pub habits: Vec<goals::HabitRow>,
 }
 
 impl Inputs<'_> {
-    /// Judge `items` from month 0 on.
-    fn judge(
+    /// Each month's starting position on the plan, and the stale cards.
+    fn bases(
         &self,
         alloc: &CurrencyAllocation,
         month0: Date,
-        items: &[Planned],
         wishes: &[Wish],
         settings: &WishSettings,
-    ) -> (Vec<WishMonth>, Vec<String>) {
-        let today = self.today.unwrap_or(month0);
-        let months = schedule::horizon(items, month0);
-        let (bases, stale_cards) = baseline::baselines(
+        months: usize,
+    ) -> (Vec<ladder::MonthBaseline>, Vec<String>) {
+        baseline::baselines(
             alloc,
-            today,
+            self.today.unwrap_or(month0),
             &self.plans,
             &self.card_bills,
             settings,
             schedule::earmarked(wishes),
             months,
-        );
+        )
+    }
+
+    /// Run the ladder over `bases`.
+    fn run(
+        &self,
+        bases: &[ladder::MonthBaseline],
+        month0: Date,
+        items: &[Planned],
+    ) -> Vec<WishMonth> {
+        let today = self.today.unwrap_or(month0);
+        let months = bases.len();
         let mut saver = Saver::new(items, month0, months);
         let mut repeats = schedule::repeat_demands(items, month0, months);
         // A closed statement takes no more card costs: the repeats that fell
@@ -208,7 +229,146 @@ impl Inputs<'_> {
         {
             first.retain(|d| !d.on_card);
         }
-        (ladder::judge(&bases, &repeats, &mut saver), stale_cards)
+        ladder::judge(bases, &repeats, &mut saver)
+    }
+
+    /// Judge `items` from month 0 on.
+    fn judge(
+        &self,
+        alloc: &CurrencyAllocation,
+        month0: Date,
+        items: &[Planned],
+        wishes: &[Wish],
+        settings: &WishSettings,
+    ) -> (Vec<WishMonth>, Vec<String>) {
+        let months = schedule::horizon(items, month0);
+        let (bases, stale_cards) = self.bases(alloc, month0, wishes, settings, months);
+        (self.run(&bases, month0, items), stale_cards)
+    }
+
+    /// The same wishes judged with spending as usual, and the emergency
+    /// fund that takes what they leave. `plan_rows` are the view's rows.
+    fn goals(
+        &self,
+        wishes: &[Wish],
+        settings: &WishSettings,
+        plan_rows: &[WishRow],
+    ) -> Option<GoalOutlook> {
+        let alloc = self.alloc.filter(|_| !self.habits.is_empty())?;
+        let month0 = baseline::current_month(alloc)?;
+        let (mut items, families) = schedule::plan_items(wishes, month0, self.bills);
+        self.open_statement(&mut items, month0);
+        let months = schedule::horizon(&items, month0);
+        let (plan_bases, _) = self.bases(alloc, month0, wishes, settings, months);
+        let habits = goals::with_next_budgets(&self.habits, alloc);
+        let habit_bases = goals::habit_baselines(&plan_bases, &habits);
+        let habit_months = self.run(&habit_bases, month0, &items);
+        let ctx = RowContext {
+            wishes,
+            months: &habit_months,
+            families: &families,
+            bills: self.bills,
+        };
+        let mut tops: Vec<&Wish> = wishes
+            .iter()
+            .filter(|w| w.parent_id.is_none() && w.status == WishStatus::Planned)
+            .collect();
+        sort_by_due(&mut tops);
+        let statuses = tops
+            .into_iter()
+            .map(|w| GoalStatus {
+                wish_id: w.wish_id.clone(),
+                name: w.name.clone(),
+                due_on: w.due_on.clone(),
+                amount: w.amount,
+                must: w.must,
+                short: ctx.row(w).short.round_dp(2),
+                on_card: habit_months
+                    .iter()
+                    .flat_map(|m| &m.verdicts)
+                    .filter(|v| {
+                        // Only what lands on a card the owner did not choose.
+                        v.wish_id.as_deref().is_some_and(|id| {
+                            wishes.iter().any(|c| {
+                                c.wish_id == id
+                                    && c.source != WishSource::Card
+                                    && (id == w.wish_id
+                                        || c.parent_id.as_deref() == Some(&w.wish_id))
+                            })
+                        })
+                    })
+                    .map(|v| v.on_card)
+                    .sum::<Decimal>()
+                    .round_dp(2),
+                plan_short: plan_rows
+                    .iter()
+                    .find(|r| r.wish.wish_id == w.wish_id)
+                    .map_or(Decimal::ZERO, |r| r.short),
+            })
+            .collect();
+        // Each later purchase spread over the months left until it is due,
+        // plus the planned repeating costs.
+        let ongoing = goals::ongoing_monthly(&items);
+        // The savings pot pays the soonest purchases first; only what it
+        // cannot cover is asked of the coming months.
+        // (The pot as this month's own purchases leave it; this month's
+        // set-asides are savings for those same later purchases.)
+        let mut pot = habit_months.first().map_or(Decimal::ZERO, |m| {
+            let spent: Decimal = m
+                .verdicts
+                .iter()
+                .filter(|v| !v.set_aside)
+                .map(|v| v.from_savings)
+                .sum();
+            (m.savings_before - spent).max(Decimal::ZERO)
+        });
+        let mut later: Vec<&Planned> = items
+            .iter()
+            .filter(|i| i.per_month.is_none() && i.remaining > Decimal::ZERO)
+            // What is due this month is this month's business.
+            .filter(|i| i.months_from(month0) >= 1)
+            .collect();
+        later.sort_by_key(|i| i.due);
+        let purchases: Decimal = later
+            .into_iter()
+            .map(|i| {
+                let from_pot = pot.min(i.remaining);
+                pot -= from_pot;
+                (i.remaining - from_pot) / Decimal::from(i.months_from(month0))
+            })
+            .sum();
+        let needed_monthly = (purchases + goals::repeating_monthly(&items))
+            .max(Decimal::ZERO)
+            .round_dp(2);
+        let plan_free = plan_bases.get(1)?.free.round_dp(2);
+        let habit_free = habit_bases.get(1)?.free.round_dp(2);
+        let coverage = (needed_monthly > Decimal::ZERO).then(|| {
+            let share = (habit_free.max(Decimal::ZERO) / needed_monthly * Decimal::ONE_HUNDRED)
+                .floor()
+                .min(Decimal::ONE_HUNDRED);
+            u32::try_from(share.mantissa()).unwrap_or(0)
+        });
+        let steady = habit_free - ongoing;
+        let gap = (needed_monthly - habit_free).max(Decimal::ZERO);
+        let (cuts, uncovered) = goals::advice(gap, &habits, &self.plans);
+        Some(GoalOutlook {
+            needed_monthly,
+            habit_free,
+            plan_free,
+            gap,
+            coverage,
+            horizon_months: habit_months.len(),
+            goals: statuses,
+            cuts,
+            uncovered,
+            fund: goals::fund(
+                settings.emergency_months,
+                goals::fixed_monthly(alloc, &self.card_bills, &items),
+                &habits,
+                &habit_months,
+                steady,
+            ),
+        })
     }
 
     /// Card one-offs due before today go on the statement open today: a
@@ -262,12 +422,14 @@ impl Inputs<'_> {
             .iter()
             .map(|(_, v)| *v)
             .sum();
+        let rows: Vec<WishRow> = tops.into_iter().map(|w| ctx.row(w)).collect();
         WishesView {
+            goals: self.goals(wishes, settings, &rows),
             currency,
             settings: settings.clone(),
             card_stale: !stale_cards.is_empty(),
             stale_cards,
-            wishes: tops.into_iter().map(|w| ctx.row(w)).collect(),
+            wishes: rows,
             months,
             changeable_bills,
             savings_must_keep: must_keep,
@@ -349,6 +511,7 @@ pub fn view_from(
         plans: plans.to_vec(),
         card_bills,
         bills,
+        habits: Vec::new(),
     }
     .view(wishes, settings)
 }
@@ -720,6 +883,7 @@ mod tests {
                 named_card("visa", "50", "2026-10-01"),
                 named_card("mc", "10", "2026-09-01"),
             ],
+            ..WishSettings::default()
         };
         let view = view_from(Some(&a), &[], Vec::new(), &[tv], &settings, &HashMap::new());
         assert_eq!(view.stale_cards, vec!["mc".to_string()]);
@@ -737,6 +901,7 @@ mod tests {
                 limit: Decimal::ZERO,
                 ..WishSettings::default().cards[0].clone()
             }],
+            ..WishSettings::default()
         }
     }
 
@@ -775,6 +940,7 @@ mod tests {
             plans: going_out_plan(),
             card_bills: Vec::new(),
             bills: &bills,
+            habits: Vec::new(),
         };
         // While planned, month 0 only sets aside a third of the gap, and a
         // set-aside's cuts are not a purchase's.
@@ -829,6 +995,7 @@ mod tests {
             plans: Vec::new(),
             card_bills: Vec::new(),
             bills: &bills,
+            habits: Vec::new(),
         };
         let view = inputs.view(&[late, gym], &WishSettings::default());
         let paid = |m: usize, id: &str| {
@@ -860,6 +1027,7 @@ mod tests {
             plans: going_out_plan(),
             card_bills: Vec::new(),
             bills: &bills,
+            habits: Vec::new(),
         };
         let cuts = inputs.purchase_cuts(
             &wishes,
@@ -901,6 +1069,7 @@ mod tests {
             plans: going_out_plan(),
             card_bills: Vec::new(),
             bills: &bills,
+            habits: Vec::new(),
         };
         let view = inputs.view(&wishes, &no_card_room());
         let tv: Vec<_> = view.months[0]
@@ -1091,6 +1260,7 @@ mod tests {
             stale_cards: Vec::new(),
             changeable_bills: Vec::new(),
             savings_must_keep: Decimal::ZERO,
+            goals: None,
             months: vec![
                 month(vec![
                     verdict(
@@ -1107,5 +1277,184 @@ mod tests {
         let cuts = month_zero_cuts(&view, "tv");
         assert_eq!(cuts, vec![cut("g1", "120", "70"), cut("g2", "50", "40")]);
         assert!(month_zero_cuts(&view, "none").is_empty());
+    }
+
+    fn habit(id: &str, typical: &str, budget: &str, essential: bool) -> goals::HabitRow {
+        goals::HabitRow {
+            id: id.into(),
+            name: id.into(),
+            typical: d(typical),
+            budget: d(budget),
+            typical_visits: Some(d("30")),
+            ticket: None,
+            essential,
+        }
+    }
+
+    fn with_habits(
+        a: &CurrencyAllocation,
+        habits: Vec<goals::HabitRow>,
+        wishes: &[Wish],
+    ) -> WishesView {
+        Inputs {
+            alloc: Some(a),
+            today: None,
+            plans: Vec::new(),
+            card_bills: Vec::new(),
+            bills: &HashMap::new(),
+            habits,
+        }
+        .view(wishes, &WishSettings::default())
+    }
+
+    #[test]
+    fn habits_above_budget_put_an_affordable_wish_on_the_card() {
+        // The plan leaves 500 a month; food out runs 470 above its budget.
+        let a = alloc("0", "500", vec![], vec![]);
+        let trip = wish("trip", None, "900", "2026-12-20");
+        let view = with_habits(&a, vec![habit("Food", "570", "100", false)], &[trip]);
+        assert_eq!(view.wishes[0].short, Decimal::ZERO);
+        assert!(!view.wishes[0].tradeoffs);
+        let goals = view.goals.unwrap();
+        assert_eq!((goals.plan_free, goals.habit_free), (d("500"), d("30")));
+        // 900 over November and December.
+        assert_eq!((goals.needed_monthly, goals.gap), (d("450"), d("420")));
+        assert_eq!(goals.coverage, Some(6));
+        assert_eq!(goals.horizon_months, 3);
+        // Two months of 30 against 900: the rest lands on the card.
+        let trip = &goals.goals[0];
+        assert_eq!(
+            (trip.short, trip.on_card, trip.plan_short),
+            (d("0"), d("840"), d("0"))
+        );
+        let food = &goals.cuts[0];
+        assert_eq!((food.monthly, goals.uncovered), (d("420"), d("0")));
+    }
+
+    #[test]
+    fn essentials_are_not_cut_so_the_wish_is_short_on_habits() {
+        let a = alloc("0", "500", vec![], vec![]);
+        let trip = wish("trip", None, "900", "2026-12-20");
+        let view = with_habits(&a, vec![habit("Groceries", "330", "100", true)], &[trip]);
+        let goals = view.goals.unwrap();
+        assert!(goals.cuts.is_empty());
+        assert_eq!((goals.gap, goals.uncovered), (d("180"), d("180")));
+        // Two months of 270 against 900: the rest lands on the card.
+        let trip = &goals.goals[0];
+        assert_eq!(
+            (trip.short, trip.on_card, trip.plan_short),
+            (d("0"), d("360"), d("0"))
+        );
+        let fund = goals.fund.unwrap();
+        assert_eq!((fund.months, fund.essentials_monthly), (6, d("330")));
+    }
+
+    #[test]
+    fn a_wish_paid_from_savings_needs_no_cuts() {
+        let mut a = alloc("0", "500", vec![], vec![]);
+        a.savings_balance = d("1000");
+        let tv = wish("tv", None, "300", "2026-10-20");
+        let view = with_habits(&a, vec![habit("Food", "570", "100", false)], &[tv]);
+        let goals = view.goals.unwrap();
+        assert!(goals.cuts.is_empty());
+        assert_eq!(goals.goals[0].short, Decimal::ZERO);
+        assert_eq!(goals.fund.unwrap().balance, d("1000"));
+        // Due this month: not part of what the coming months need.
+        assert_eq!(
+            (goals.needed_monthly, goals.coverage),
+            (Decimal::ZERO, None)
+        );
+    }
+
+    #[test]
+    fn no_habits_or_no_wishes() {
+        let a = alloc("0", "500", vec![], vec![]);
+        let tv = wish("tv", None, "300", "2026-10-20");
+        assert!(with_habits(&a, Vec::new(), &[tv]).goals.is_none());
+        // Without wishes the fund still fills: 6 × 330 at 270 a month.
+        let goals = with_habits(&a, vec![habit("Groceries", "330", "100", true)], &[])
+            .goals
+            .unwrap();
+        assert_eq!(
+            (goals.needed_monthly, goals.coverage),
+            (Decimal::ZERO, None)
+        );
+        assert!(goals.goals.is_empty());
+        let fund = goals.fund.unwrap();
+        assert_eq!(fund.target, d("1980"));
+        assert_eq!(fund.eta.as_deref(), Some("2027-06-01"));
+    }
+
+    #[test]
+    fn a_planned_repeating_cost_is_part_of_what_the_goals_need() {
+        // A new subscription from December, no dated purchase.
+        let a = alloc("0", "500", vec![], vec![]);
+        let mut gym = wish("gym", None, "100", "2026-12-01");
+        gym.kind = WishKind::Recurring {
+            every: Repeat::Monthly,
+            ends_on: None,
+        };
+        let goals = with_habits(&a, vec![habit("Food", "570", "100", false)], &[gym])
+            .goals
+            .unwrap();
+        assert_eq!(
+            (goals.needed_monthly, goals.habit_free, goals.gap),
+            (d("100"), d("30"), d("70"))
+        );
+        assert_eq!(goals.coverage, Some(30));
+        assert_eq!(goals.cuts[0].monthly, d("70"));
+    }
+
+    #[test]
+    fn savings_that_cover_a_later_wish_leave_no_gap() {
+        let mut a = alloc("0", "500", vec![], vec![]);
+        a.savings_balance = d("1000");
+        let tv = wish("tv", None, "300", "2026-12-20");
+        let bike = wish("bike", None, "900", "2027-01-20");
+        let habits = || vec![habit("Food", "570", "100", false)];
+        let covered = with_habits(&a, habits(), std::slice::from_ref(&tv))
+            .goals
+            .unwrap();
+        assert_eq!((covered.needed_monthly, covered.gap), (d("0"), d("0")));
+        assert!(covered.cuts.is_empty());
+        // The pot pays the TV and 700 of the bike; 200 is left over 3 months.
+        let both = with_habits(&a, habits(), &[tv, bike]).goals.unwrap();
+        assert_eq!(both.needed_monthly, d("66.67"));
+    }
+
+    #[test]
+    fn next_months_budget_is_the_one_habits_are_measured_against() {
+        // Food out is budgeted 300 this month and 200 the next; free money
+        // for next month already paid the 200.
+        let a = alloc("0", "500", vec![], vec![row("Food", "200", "0")]);
+        let goals = with_habits(&a, vec![habit("Food", "570", "300", false)], &[])
+            .goals
+            .unwrap();
+        assert_eq!(goals.habit_free, d("130"));
+    }
+
+    #[test]
+    fn a_wish_meant_for_the_card_is_not_a_card_warning() {
+        let a = alloc("0", "500", vec![], vec![]);
+        let mut trip = wish("trip", None, "900", "2026-12-20");
+        trip.source = WishSource::Card;
+        let goals = with_habits(&a, vec![habit("Food", "570", "100", false)], &[trip])
+            .goals
+            .unwrap();
+        assert_eq!(goals.goals[0].on_card, d("0"));
+    }
+
+    #[test]
+    fn a_repeating_cost_with_an_end_is_still_needed_while_it_runs() {
+        let a = alloc("0", "500", vec![], vec![]);
+        let mut course = wish("course", None, "100", "2026-12-01");
+        course.kind = WishKind::Recurring {
+            every: Repeat::Monthly,
+            ends_on: Some("2027-11-01".into()),
+        };
+        let goals = with_habits(&a, vec![habit("Food", "570", "100", false)], &[course])
+            .goals
+            .unwrap();
+        assert_eq!((goals.needed_monthly, goals.gap), (d("100"), d("70")));
     }
 }

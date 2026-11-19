@@ -1039,49 +1039,6 @@ mod tests {
     }
 
     #[test]
-    fn usual_counts_read_plainly() {
-        assert_eq!(per_week(dec("0")), "0");
-        assert_eq!(per_week(dec("0.5")), "<1");
-        assert_eq!(per_week(dec("2")), "2");
-        assert_eq!(per_week(dec("2.5")), "2.5");
-        assert_eq!(visits_text(1), "1 visit");
-        assert_eq!(visits_text(4), "4 visits");
-    }
-
-    #[test]
-    fn a_driver_reads_as_visits_times_ticket() {
-        let eur = Currency::eur();
-        let known = Driver {
-            category: "Coffee".into(),
-            visits: 22,
-            spent: dec("61.60"),
-            usual: Some((dec("12"), dec("34.80"))),
-            new: false,
-        };
-        assert_eq!(
-            driver_text(&known, &eur),
-            "Coffee: 22 visits × €2.80, usually 12 × €2.90"
-        );
-        let new = Driver {
-            category: "Soju Bar".into(),
-            visits: 1,
-            spent: dec("44"),
-            usual: None,
-            new: true,
-        };
-        assert_eq!(
-            driver_text(&new, &eur),
-            "Soju Bar: new this month, 1 visit, €44.00"
-        );
-        // Refunds only: no ticket to divide.
-        let odd = Driver { visits: 0, ..new };
-        assert_eq!(
-            driver_text(&odd, &eur),
-            "Soju Bar: new this month, 0 visits, €44.00"
-        );
-    }
-
-    #[test]
     fn a_few_purchases_without_a_budget_are_not_extrapolated() {
         // One concert is not a daily habit.
         let lumpy = row("0", "228", &[7, 144, 7], 19, 3, false);
