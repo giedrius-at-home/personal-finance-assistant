@@ -271,6 +271,7 @@ impl Inputs<'_> {
             months,
             changeable_bills,
             savings_must_keep: must_keep,
+            goals: None,
         }
     }
 
@@ -720,6 +721,7 @@ mod tests {
                 named_card("visa", "50", "2026-10-01"),
                 named_card("mc", "10", "2026-09-01"),
             ],
+            ..WishSettings::default()
         };
         let view = view_from(Some(&a), &[], Vec::new(), &[tv], &settings, &HashMap::new());
         assert_eq!(view.stale_cards, vec!["mc".to_string()]);
@@ -737,6 +739,7 @@ mod tests {
                 limit: Decimal::ZERO,
                 ..WishSettings::default().cards[0].clone()
             }],
+            ..WishSettings::default()
         }
     }
 
@@ -1091,6 +1094,7 @@ mod tests {
             stale_cards: Vec::new(),
             changeable_bills: Vec::new(),
             savings_must_keep: Decimal::ZERO,
+            goals: None,
             months: vec![
                 month(vec![
                     verdict(

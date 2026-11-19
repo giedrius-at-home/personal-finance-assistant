@@ -302,6 +302,7 @@ pub(crate) mod tests {
                 used_month: month.into(),
                 ..WishSettings::default().cards[0].clone()
             }],
+            ..WishSettings::default()
         }
     }
 
@@ -607,6 +608,7 @@ pub(crate) mod tests {
                 card("visa", "2026-10-01", "40", Some("b1")),
                 card("mc", "2026-09-01", "70", None),
             ],
+            ..WishSettings::default()
         };
         let a = alloc("0", "200", vec![], vec![]);
         let (months, stale) = baselines(

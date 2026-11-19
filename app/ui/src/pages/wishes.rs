@@ -1114,6 +1114,8 @@ fn card_strip(ui: Ui, view: &WishesView, ctx: &Context) -> impl IntoView + use<>
             .map(|(i, c)| CardRow::new(i, c))
             .collect::<Vec<_>>(),
     );
+    // Saving the cards keeps the emergency fund's settings.
+    let fund = StoredValue::new(view.settings.clone());
     let next_key = StoredValue::new(cards.len());
     let bills: StoredValue<Vec<(String, String)>> = StoredValue::new(
         std::iter::once((String::new(), "No card bill".to_owned()))
@@ -1138,7 +1140,10 @@ fn card_strip(ui: Ui, view: &WishesView, ctx: &Context) -> impl IntoView + use<>
             "card".into(),
             "save_wish_settings",
             SettingsArgs {
-                settings: WishSettings { cards },
+                settings: WishSettings {
+                    cards,
+                    ..fund.get_value()
+                },
             },
             "Cards saved.",
             || {},

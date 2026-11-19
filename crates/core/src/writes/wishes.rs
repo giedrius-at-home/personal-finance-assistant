@@ -593,6 +593,17 @@ pub fn save_wish_settings(w: &Writer<'_>, mut settings: WishSettings) -> Result<
     if ids.windows(2).any(|pair| pair[0] == pair[1]) {
         return Err(invalid("card ids must be unique"));
     }
+    if settings.emergency_months > WishSettings::MAX_EMERGENCY_MONTHS {
+        return Err(invalid("the emergency fund covers at most 36 months"));
+    }
+    let mut seen = std::collections::HashSet::new();
+    settings.essential_groups = settings
+        .essential_groups
+        .iter()
+        .map(|g| g.trim().to_owned())
+        .filter(|g| !g.is_empty() && g.chars().count() <= 64 && seen.insert(g.to_lowercase()))
+        .take(20)
+        .collect();
     put_settings(w, &settings)?;
     Ok(settings)
 }
@@ -761,13 +772,30 @@ mod tests {
     #[test]
     fn settings_need_valid_cards_and_mint_ids() {
         let mut db = db();
-        let bad = WishSettings { cards: vec![] };
+        let bad = WishSettings {
+            cards: vec![],
+            ..WishSettings::default()
+        };
         assert!(db.write(|w, _| save_wish_settings(w, bad)).is_err());
+        let long = WishSettings {
+            cards: vec![card("a", "A", "10", "0", "2026-10-01")],
+            emergency_months: 37,
+            ..WishSettings::default()
+        };
+        assert!(db.write(|w, _| save_wish_settings(w, long)).is_err());
+        let untidy = WishSettings {
+            cards: vec![card("a", "A", "10", "0", "2026-10-01")],
+            essential_groups: vec![" Groceries ".into(), "".into(), "groceries".into()],
+            ..WishSettings::default()
+        };
+        let saved = db.write(|w, _| save_wish_settings(w, untidy)).unwrap();
+        assert_eq!(saved.essential_groups, ["Groceries"]);
         let two = WishSettings {
             cards: vec![
                 card("", "Visa", "1000", "0", "2026-10-01"),
                 card("mc", "MC", "500", "20", "2026-10-01"),
             ],
+            ..WishSettings::default()
         };
         let saved = db.write(|w, _| save_wish_settings(w, two)).unwrap();
         assert!(saved.cards[0].card_id.starts_with("card-") && saved.cards[0].card_id.len() > 5);
@@ -779,7 +807,10 @@ mod tests {
             card("x", "A", "10", "-1", "2026-10-01"),
             card("x", "A", "10", "0", "2026-10-15"),
         ] {
-            let s = WishSettings { cards: vec![bad] };
+            let s = WishSettings {
+                cards: vec![bad],
+                ..WishSettings::default()
+            };
             assert!(db.write(|w, _| save_wish_settings(w, s)).is_err());
         }
         let dup = WishSettings {
@@ -787,6 +818,7 @@ mod tests {
                 card("a", "A", "10", "0", "2026-10-01"),
                 card("a", "B", "10", "0", "2026-10-01"),
             ],
+            ..WishSettings::default()
         };
         assert!(db.write(|w, _| save_wish_settings(w, dup)).is_err());
     }
@@ -937,6 +969,7 @@ mod tests {
                 used_month: month.into(),
                 bill_id: None,
             }],
+            ..WishSettings::default()
         }
     }
 
@@ -953,8 +986,16 @@ mod tests {
                 bill_id: None,
             })
             .collect();
-        db.write(|w, _| save_wish_settings(w, WishSettings { cards }))
-            .unwrap();
+        db.write(|w, _| {
+            save_wish_settings(
+                w,
+                WishSettings {
+                    cards,
+                    ..WishSettings::default()
+                },
+            )
+        })
+        .unwrap();
         db
     }
 
@@ -1048,8 +1089,16 @@ mod tests {
             card("visa", "visa", "1000", "30", "2026-10-01"),
             card("mc", "mc", "1000", "70", "2026-09-01"),
         ];
-        db.write(|w, _| save_wish_settings(w, WishSettings { cards }))
-            .unwrap();
+        db.write(|w, _| {
+            save_wish_settings(
+                w,
+                WishSettings {
+                    cards,
+                    ..WishSettings::default()
+                },
+            )
+        })
+        .unwrap();
         let wish = db.write(|w, s| save_wish(w, s, draft("Bike"))).unwrap();
         let mut p = purchase(150, "2026-10-26", WishSource::Card);
         p.cards = vec![charge("visa", "150"), charge("mc", "0")];

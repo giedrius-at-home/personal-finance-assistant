@@ -121,6 +121,7 @@ mod tests {
                     bill_id: None,
                 },
             ],
+            ..WishSettings::default()
         };
         conn.execute(
             "INSERT INTO wishes (wish_id, payload_json) VALUES ('w1', ?1)",

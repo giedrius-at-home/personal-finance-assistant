@@ -556,6 +556,26 @@ impl CardSettings {
 #[serde(from = "WishSettingsJson")]
 pub struct WishSettings {
     pub cards: Vec<CardSettings>,
+    /// The emergency fund: this many months of bare living costs; 0 is off.
+    pub emergency_months: u32,
+    /// The spending groups that are bare living costs (never advised to cut).
+    pub essential_groups: Vec<String>,
+}
+
+impl WishSettings {
+    pub const EMERGENCY_MONTHS: u32 = 6;
+    pub const MAX_EMERGENCY_MONTHS: u32 = 36;
+
+    pub fn default_essentials() -> Vec<String> {
+        [
+            "Groceries",
+            "Transport",
+            "Health & personal care",
+            "Housing & utilities",
+        ]
+        .map(str::to_owned)
+        .to_vec()
+    }
 }
 
 /// The stored shape: `cards`, or the single-card fields older rows have.
@@ -567,24 +587,31 @@ struct WishSettingsJson {
     card_used: Option<Decimal>,
     card_used_month: Option<String>,
     card_bill_id: Option<String>,
+    emergency_months: Option<u32>,
+    essential_groups: Option<Vec<String>>,
 }
 
 impl From<WishSettingsJson> for WishSettings {
     fn from(json: WishSettingsJson) -> Self {
-        if !json.cards.is_empty() {
-            return Self { cards: json.cards };
-        }
-        match json.card_limit {
-            Some(limit) => Self {
-                cards: vec![CardSettings {
-                    limit,
-                    used: json.card_used.unwrap_or_default(),
-                    used_month: json.card_used_month.unwrap_or_default(),
-                    bill_id: json.card_bill_id,
-                    ..CardSettings::default_card()
-                }],
-            },
-            None => Self::default(),
+        let cards = if !json.cards.is_empty() {
+            json.cards
+        } else if let Some(limit) = json.card_limit {
+            vec![CardSettings {
+                limit,
+                used: json.card_used.unwrap_or_default(),
+                used_month: json.card_used_month.unwrap_or_default(),
+                bill_id: json.card_bill_id,
+                ..CardSettings::default_card()
+            }]
+        } else {
+            vec![CardSettings::default_card()]
+        };
+        Self {
+            cards,
+            emergency_months: json.emergency_months.unwrap_or(Self::EMERGENCY_MONTHS),
+            essential_groups: json
+                .essential_groups
+                .unwrap_or_else(Self::default_essentials),
         }
     }
 }
@@ -593,6 +620,8 @@ impl Default for WishSettings {
     fn default() -> Self {
         Self {
             cards: vec![CardSettings::default_card()],
+            emergency_months: Self::EMERGENCY_MONTHS,
+            essential_groups: Self::default_essentials(),
         }
     }
 }
@@ -650,5 +679,40 @@ mod tests {
                 .unwrap();
         assert!(p.cards.is_empty());
         assert_eq!(WishSettings::default().cards[0].limit, Decimal::from(2500));
+    }
+
+    #[test]
+    fn wish_settings_without_a_fund_get_the_defaults() {
+        for json in [
+            r#"{"cards":[{"card_id":"c","name":"Card","limit":"2500","used":"0","used_month":"2026-11-01","bill_id":null}]}"#,
+            r#"{"card_limit":"3000","card_used":"120","card_used_month":"2026-10-01","card_bill_id":"b1"}"#,
+            "{}",
+        ] {
+            let settings: WishSettings = serde_json::from_str(json).unwrap();
+            assert_eq!(settings.emergency_months, 6);
+            assert_eq!(
+                settings.essential_groups,
+                [
+                    "Groceries",
+                    "Transport",
+                    "Health & personal care",
+                    "Housing & utilities"
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn wish_settings_keep_a_stored_fund() {
+        let json = r#"{"cards":[],"emergency_months":3,"essential_groups":["Groceries"]}"#;
+        let settings: WishSettings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.emergency_months, 3);
+        assert_eq!(settings.essential_groups, ["Groceries"]);
+        let back: WishSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(back, settings);
+        // Switched off stays off.
+        let off: WishSettings = serde_json::from_str(r#"{"emergency_months":0}"#).unwrap();
+        assert_eq!(off.emergency_months, 0);
     }
 }
