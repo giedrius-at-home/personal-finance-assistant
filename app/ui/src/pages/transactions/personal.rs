@@ -14,7 +14,8 @@ use serde::Serialize;
 use super::{Choice, TextInput, clean_error, options, report_categories};
 use crate::api::invoke;
 use crate::ds::{
-    CardTone, Eyebrow, Field, Heading, Money, Size, Variant, button_class, card_class, cn,
+    CardTone, Eyebrow, FactsRow, Field, Heading, Help, Money, Size, Variant, button_class,
+    card_class, cn,
 };
 use crate::{format, state};
 
@@ -244,9 +245,7 @@ pub fn PersonalSpending() -> impl IntoView {
                 </Eyebrow>
                 <h2 class="mt-1 text-xl font-semibold">"Shared spending & money back"</h2>
             </div>
-            <p class="text-sm">
-                "Money back reduces the category you choose. Money sent adds to it. No purchase link needed; no AI decisions."
-            </p>
+            <Help text="Money back reduces the category you choose. Money sent adds to it. No purchase link needed; no AI decisions. Bank memo cues only; nothing is assigned automatically." />
             <form
                 class="flex flex-wrap items-end gap-2"
                 on:submit=move |e| {
@@ -289,12 +288,16 @@ pub fn PersonalSpending() -> impl IntoView {
                     )
                 };
                 view! {
-                    <p class="text-sm text-fg-muted">
-                        {format!("{p} to review · {r} reviewed. Bank memo cues only; nothing is assigned automatically.")}
-                    </p>
-                    {(shown_total > all).then(|| view! {
-                        <p class="text-sm">{format!("Showing the latest {all} of {shown_total}. Search a name to narrow the list.")}</p>
-                    })}
+                    <FactsRow rows={
+                        let mut rows = vec![
+                            ("To review".to_owned(), p.to_string()),
+                            ("Reviewed".to_owned(), r.to_string()),
+                        ];
+                        if shown_total > all {
+                            rows.push(("Showing latest".to_owned(), format!("{all} of {shown_total}")));
+                        }
+                        rows
+                    } />
                     <div class=PAYMENT_LIST>
                         <For
                             each=move || pending.get()
@@ -529,9 +532,7 @@ fn PersonalPayment(
                     </button>
                 })}
             </fieldset>
-            <p class="text-sm text-fg-muted">
-                "Applies to this transaction across spending, budgets and forecasts. Your bank amount stays unchanged."
-            </p>
+            <Help text="Applies to this transaction across spending, budgets and forecasts. Your bank amount stays unchanged." />
             {move || {
                 let e = error.get();
                 (!e.is_empty()).then(|| view! { <p role="alert" class="text-sm text-negative-fg">{e}</p> })

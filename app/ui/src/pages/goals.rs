@@ -4,12 +4,15 @@
 
 use finance_types::gateway::WishSettings;
 use finance_types::report::Currency;
-use finance_types::report::wishes::{EmergencyFund, GoalOutlook, GoalStatus, HabitCut, WishesView};
+use finance_types::report::wishes::{GoalStatus, HabitCut, WishesView};
 use leptos::prelude::*;
 use rust_decimal::{Decimal, RoundingStrategy};
 
 use crate::api::{NoArgs, load};
-use crate::ds::{Badge, Card, CardHeader, CardTitle, Eyebrow, Size, Tone, Variant, button_class};
+use crate::ds::{
+    Badge, Card, CardHeader, CardTitle, Eyebrow, METRIC_STRIP, Metric, Size, TABLE,
+    TABLE_CONTAINER, TCELL, TH, TH_NUM, TROW, Tone, Variant, button_class, cn,
+};
 use crate::{Tab, format, state};
 
 /// Whole units.
@@ -37,78 +40,15 @@ pub fn fewer_visits(cut: &HabitCut) -> Option<u32> {
     u32::try_from(fewer.mantissa()).ok().filter(|n| *n >= 1)
 }
 
-pub fn cut_text(cut: &HabitCut, unit: &Currency) -> String {
-    let base = format!(
-        "\u{2212}{} a month (usually {})",
-        whole(cut.monthly, unit),
-        whole(cut.typical, unit)
-    );
-    match fewer_visits(cut) {
-        Some(1) => format!("{base} · about 1 fewer visit"),
-        Some(n) => format!("{base} · about {n} fewer visits"),
-        None => base,
-    }
-}
-
-/// What happens to a wish when nothing changes, and whether that is bad.
-pub fn goal_text(goal: &GoalStatus, unit: &Currency) -> (String, bool) {
+/// A wish when nothing changes: the status word, the amount behind it and
+/// whether that is bad.
+pub fn goal_status(goal: &GoalStatus) -> (&'static str, Option<Decimal>, bool) {
     if goal.short > Decimal::ZERO {
-        let mut text = format!("{} short at current habits", whole(goal.short, unit));
-        if goal.plan_short > Decimal::ZERO {
-            text.push_str(&format!(
-                ", {} even on the budget",
-                whole(goal.plan_short, unit)
-            ));
-        }
-        (text, true)
+        ("Short", Some(goal.short), true)
     } else if goal.on_card > Decimal::ZERO {
-        (
-            format!("{} would go on the card", whole(goal.on_card, unit)),
-            true,
-        )
+        ("On the card", Some(goal.on_card), true)
     } else {
-        ("on track at current habits".to_owned(), false)
-    }
-}
-
-pub fn headline(outlook: &GoalOutlook, unit: &Currency) -> String {
-    let left = outlook.habit_free;
-    if outlook.needed_monthly <= Decimal::ZERO {
-        return format!(
-            "No dated goal needs money in the coming months. Your habits leave {} a month.",
-            whole(left, unit)
-        );
-    }
-    let need = format!(
-        "Your goals need about {} a month for now.",
-        whole(outlook.needed_monthly, unit)
-    );
-    if outlook.gap <= Decimal::ZERO {
-        return format!(
-            "{need} Your habits leave {}: they are covered.",
-            whole(left, unit)
-        );
-    }
-    let habits = if left < Decimal::ZERO {
-        format!("Your habits overspend by {}.", whole(-left, unit))
-    } else {
-        format!("Your habits leave {}.", whole(left, unit))
-    };
-    format!("{need} {habits} Gap: {} a month.", whole(outlook.gap, unit))
-}
-
-pub fn fund_text(fund: &EmergencyFund, unit: &Currency) -> String {
-    let holds = format!(
-        "holds {} of {}",
-        whole(fund.balance, unit),
-        whole(fund.target, unit)
-    );
-    if fund.balance >= fund.target {
-        return format!("full: {holds}");
-    }
-    match &fund.eta {
-        Some(month) => format!("{holds} · full by {} at current habits", month_year(month)),
-        None => format!("{holds} · nothing is left over to fill it at current habits"),
+        ("On track", None, false)
     }
 }
 
@@ -129,54 +69,93 @@ pub fn parse_months(text: &str) -> Option<u32> {
         .filter(|m| *m <= WishSettings::MAX_EMERGENCY_MONTHS)
 }
 
+const HABITS_NOTE: &str = "Current habits: every group costs what it usually does from next month on. \"Usually\" counts months without spending. The need falls as wishes are paid. Bills, rent changes and new subscriptions planned as wishes are counted.";
+const CUTS_NOTE: &str = "Each group gives the same share of its room: what it usually costs, down to any floor you set. Essentials you have not ranked give nothing. Any other split of the same total works.";
+
 fn card(view: &WishesView) -> Option<AnyView> {
     let outlook = view.goals.as_ref()?;
     let unit = &view.currency;
     let app = state();
-    let coverage = outlook.coverage.map(|percent| {
-        let tone = if percent >= 100 {
-            Tone::Positive
-        } else {
-            Tone::Warning
-        };
-        view! { <Badge tone=tone>{format!("habits cover {percent}%")}</Badge> }
+    let zero = Decimal::ZERO;
+    let dash = || "—".to_owned();
+
+    // The headline as fields: need, what habits leave, the gap, what stays open.
+    let gap_chip = match outlook.coverage {
+        Some(percent) if percent >= 100 => (Tone::Positive, "Covered".to_owned()),
+        Some(percent) => (Tone::Warning, format!("{percent}% covered")),
+        None => (Tone::Neutral, "Nothing due".to_owned()),
+    };
+    let need = whole(outlook.needed_monthly.max(zero), unit);
+    let left = whole(outlook.habit_free, unit);
+    let left_class = if outlook.habit_free < zero {
+        "text-negative-fg"
+    } else {
+        ""
+    };
+    let gap = whole(outlook.gap.max(zero), unit);
+    let gap_class = if outlook.gap > zero {
+        "text-warning-fg"
+    } else {
+        "text-positive-fg"
+    };
+    let budget_left = vec![("On budget".to_owned(), whole(outlook.plan_free, unit))];
+    let open = (outlook.uncovered > zero).then(|| {
+        let value = whole(outlook.uncovered, unit);
+        view! {
+            <div title="Cutting every flexible group to its floor still leaves this: move a date or lower a wish.">
+                <Metric label="Still open a month" chip=(Tone::Warning, "Move a date".to_owned())>
+                    <span class="text-warning-fg">{value}</span>
+                </Metric>
+            </div>
+        }
     });
+
+    let num = cn([TCELL, "text-right tabular-nums whitespace-nowrap"]);
     let goals = outlook
         .goals
         .iter()
         .map(|goal| {
-            let (text, bad) = goal_text(goal, unit);
-            let class = if bad { "text-sm text-warning-fg" } else { "text-sm text-fg-muted" };
-            let must = goal.must.then_some(" · must");
+            let (word, amount, bad) = goal_status(goal);
+            let tone = if bad { Tone::Warning } else { Tone::Positive };
             view! {
-                <li class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2">
-                    <span>
-                        <strong class="font-semibold">{goal.name.clone()}</strong>
-                        <span class="text-sm tabular-nums text-fg-muted">
-                            {format!(" {} · {}", whole(goal.amount, unit), month_year(&goal.due_on))}
-                            {must}
-                        </span>
-                    </span>
-                    <span class=class>{text}</span>
-                </li>
+                <tr class=TROW>
+                    <th scope="row" class=cn([TCELL, "text-left font-medium"])>
+                        {goal.name.clone()}
+                        {goal.must.then(|| view! { <Badge tone=Tone::Outline class="ml-2">"Must"</Badge> })}
+                    </th>
+                    <td class=num.clone()>{whole(goal.amount, unit)}</td>
+                    <td class=num.clone()>{month_year(&goal.due_on)}</td>
+                    <td class=num.clone()>{amount.map_or_else(dash, |a| whole(a, unit))}</td>
+                    <td class=num.clone()>
+                        {if goal.plan_short > zero { whole(goal.plan_short, unit) } else { dash() }}
+                    </td>
+                    <td class=cn([TCELL, "text-right"])><Badge tone=tone>{word}</Badge></td>
+                </tr>
             }
         })
         .collect_view();
     let fund = outlook.fund.as_ref().map(|fund| {
+        let full = fund.balance >= fund.target;
+        let (tone, word) = if full {
+            (Tone::Positive, "Full")
+        } else if fund.eta.is_some() {
+            (Tone::Neutral, "Filling")
+        } else {
+            (Tone::Warning, "Nothing left over")
+        };
+        let bare = whole(fund.fixed_monthly + fund.essentials_monthly, unit);
         view! {
-            <li class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2">
-                <span>
-                    <strong class="font-semibold">"Emergency fund"</strong>
-                    <span class="text-sm tabular-nums text-fg-muted">
-                        {format!(
-                            " {} months × {} bare living",
-                            fund.months,
-                            whole(fund.fixed_monthly + fund.essentials_monthly, unit),
-                        )}
-                    </span>
-                </span>
-                <span class="text-sm tabular-nums text-fg-muted">{fund_text(fund, unit)}</span>
-            </li>
+            <tr class=TROW>
+                <th scope="row" class=cn([TCELL, "text-left font-medium"])>
+                    "Emergency fund"
+                    <small class="ml-2 font-normal tabular-nums text-fg-muted">{format!("{} × {bare}", fund.months)}</small>
+                </th>
+                <td class=num.clone()>{whole(fund.target, unit)}</td>
+                <td class=num.clone()>{fund.eta.as_deref().map_or_else(dash, month_year)}</td>
+                <td class=num.clone()>{whole((fund.target - fund.balance).max(zero), unit)}</td>
+                <td class=num.clone()>{dash()}</td>
+                <td class=cn([TCELL, "text-right"])><Badge tone=tone>{word}</Badge></td>
+            </tr>
         }
     });
     let cuts = (!outlook.cuts.is_empty()).then(|| {
@@ -185,69 +164,81 @@ fn card(view: &WishesView) -> Option<AnyView> {
             .iter()
             .map(|cut| {
                 view! {
-                    <li class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-1.5">
-                        <span>{cut.name.clone()}</span>
-                        <span class="text-sm tabular-nums text-fg-muted">{cut_text(cut, unit)}</span>
-                    </li>
+                    <tr class=TROW>
+                        <th scope="row" class=cn([TCELL, "text-left font-medium"])>{cut.name.clone()}</th>
+                        <td class=num.clone()>{whole(cut.typical, unit)}</td>
+                        <td class=num.clone()>{format!("\u{2212}{}", whole(cut.monthly, unit))}</td>
+                        <td class=num.clone()>{fewer_visits(cut).map_or_else(dash, |n| n.to_string())}</td>
+                    </tr>
                 }
             })
             .collect_view();
-        let open = (outlook.uncovered > Decimal::ZERO).then(|| {
-            let text = format!(
-                "Even that leaves {} a month open: move a date or lower a wish.",
-                whole(outlook.uncovered, unit)
-            );
-            view! { <p class="mt-2 text-sm text-warning-fg">{text}</p> }
-        });
         view! {
-            <section class="mt-4" aria-label="Where to spend less">
-                <Eyebrow>"TO CLOSE THE GAP, A MONTH"</Eyebrow>
-                <ul class="mt-1 divide-y divide-border">{rows}</ul>
-                {open}
-                <p class="mt-2 text-xs text-fg-muted">
-                    "Each group gives the same share of its room: what it usually costs, down to any floor you set. Essentials you have not ranked give nothing. "
-                    "Any other split of the same total works."
-                </p>
+            <section class="min-w-0" aria-label="Where to spend less">
+                <Eyebrow><span title=CUTS_NOTE>"TO CLOSE THE GAP, A MONTH"</span></Eyebrow>
+                <div class=cn([TABLE_CONTAINER, "mt-3"])>
+                    <table class=TABLE>
+                        <thead>
+                            <tr>
+                                <th class=cn([TH, "text-left"])>"Group"</th>
+                                <th class=TH_NUM>"Usually"</th>
+                                <th class=TH_NUM>"Spend less"</th>
+                                <th class=TH_NUM>"Fewer visits"</th>
+                            </tr>
+                        </thead>
+                        <tbody>{rows}</tbody>
+                    </table>
+                </div>
             </section>
         }
     });
-    let stuck = (outlook.cuts.is_empty() && outlook.uncovered > Decimal::ZERO).then(|| {
-        let text = format!(
-            "{} a month is open and nothing flexible is left to cut: move a date or lower a wish.",
-            whole(outlook.uncovered, unit)
-        );
-        view! { <p class="mt-2 text-sm text-warning-fg">{text}</p> }
-    });
-    let lead = headline(outlook, unit);
     Some(
         view! {
-            <section class="my-4 w-full min-w-0" aria-label="Goals against habits">
+            <section class="w-full min-w-0" aria-label="Goals against habits">
                 <Card>
                     <CardHeader>
                         <div class="grid gap-1">
-                            <Eyebrow>"WHAT YOUR GOALS ASK OF YOUR SPENDING"</Eyebrow>
+                            <Eyebrow><span title=HABITS_NOTE>"WHAT YOUR GOALS ASK OF YOUR SPENDING"</span></Eyebrow>
                             <CardTitle>"Goals"</CardTitle>
                         </div>
-                        {coverage}
-                    </CardHeader>
-                    <p class="tabular-nums">{lead}</p>
-                    <ul class="mt-3 divide-y divide-border">{goals}{fund}</ul>
-                    {cuts}
-                    {stuck}
-                    <div class="mt-3 flex flex-wrap items-center justify-between gap-2">
-                        <p class="text-xs text-fg-muted">
-                            "Current habits: every group costs what it usually does from next month on. "
-                            "\"Usually\" counts months without spending, so it can be lower than a typical month in Adjustments. "
-                            "The need falls as wishes are paid. "
-                            "Bills, rent changes and new subscriptions planned as wishes are counted."
-                        </p>
                         <button
                             type="button"
-                            class=button_class(Variant::Link, Size::Inline)
+                            class=button_class(Variant::Ghost, Size::Sm)
                             on:click=move |_| app.go(Tab::Wishes)
                         >
                             "Edit wishes and the fund →"
                         </button>
+                    </CardHeader>
+                    <div class=cn([METRIC_STRIP, "md:grid-cols-4"])>
+                        <Metric label="Goals need a month">{need}</Metric>
+                        <Metric label="Habits leave a month" facts=budget_left>
+                            <span class=left_class>{left}</span>
+                        </Metric>
+                        <Metric label="Gap a month" chip=gap_chip>
+                            <span class=gap_class>{gap}</span>
+                        </Metric>
+                        {open}
+                    </div>
+                    <div class="mt-8 grid gap-x-12 gap-y-8 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+                        <section class="min-w-0" aria-label="Goals at current habits">
+                            <Eyebrow>"AT CURRENT HABITS"</Eyebrow>
+                            <div class=cn([TABLE_CONTAINER, "mt-3"])>
+                                <table class=TABLE>
+                                    <thead>
+                                        <tr>
+                                            <th class=cn([TH, "text-left"])>"Goal"</th>
+                                            <th class=TH_NUM>"Amount"</th>
+                                            <th class=TH_NUM>"Due"</th>
+                                            <th class=TH_NUM>"Short"</th>
+                                            <th class=TH_NUM>"Short on budget"</th>
+                                            <th class=TH_NUM>"Status"</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>{goals}{fund}</tbody>
+                                </table>
+                            </div>
+                        </section>
+                        {cuts}
                     </div>
                 </Card>
             </section>

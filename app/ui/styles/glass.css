@@ -33,7 +33,7 @@
 html.glass {
   /* More of the desktop's glass shows through: thinner page tint and more
      translucent surfaces, with the blur doing the separating. */
-  --glass-page: color-mix(in oklab, var(--ds-page) 34%, transparent);
+  --glass-page: color-mix(in oklab, var(--ds-page) 62%, transparent);
   --ds-card-strong: light-dark(oklch(1 0 0 / 0.46), oklch(0.2947 0.0072 118.26 / 0.44));
   --ds-card: light-dark(oklch(0.985 0.0041 91.45 / 0.42), oklch(0.2743 0.0074 118.3 / 0.42));
   --ds-card-muted: light-dark(oklch(0.9301 0.0081 98.88 / 0.4), oklch(0.3223 0.0088 116.08 / 0.4));
@@ -62,6 +62,18 @@ html.glass {
 .page-stack > * {
   margin-top: 0;
   margin-bottom: 0;
+}
+
+/* A section sits on the page itself: a rule above it and no box, so the
+   design fills the window instead of floating in cards. */
+.flat-section {
+  border-top: 1px solid var(--ds-line);
+  padding-top: 1.5rem;
+}
+/* Fields in a row: a rule on the left of each. */
+.metric-strip > * {
+  border-left: 1px solid var(--ds-line);
+  padding-left: 1rem;
 }
 
 /* Popups are solid (unlayered: their bg-card-strong utility would win): text on glass behind them would show through and

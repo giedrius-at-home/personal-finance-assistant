@@ -7,8 +7,8 @@ use leptos::prelude::*;
 
 use crate::ds::charts::ProgressBar;
 use crate::ds::{
-    Badge, Card, CardHeader, CardTitle, Eyebrow, Heading, Icon, Lucide, Money, Size, Switch, Tone,
-    Variant, button_class, money,
+    Badge, Card, CardHeader, CardTitle, Eyebrow, Facts, Heading, Help, Icon, Lucide, Money, Size,
+    Switch, Tone, Variant, button_class, money,
 };
 use crate::pages::category_trends::CategoryTrends;
 use crate::pages::{f, with_report};
@@ -95,10 +95,10 @@ fn SpendingAnalysis(trend: CurrencyTrends, variable_only: bool) -> impl IntoView
                             })
                             .collect_view()}
                     </div>
-                    <p class="px-4 pb-4 text-xs text-fg-muted">
-                        "Average purchases per active spending day across six months. "
-                        {if variable_only { "The variable filter is applied." } else { "All spending is included." }}
-                    </p>
+                    <div class="flex items-center gap-2 px-4 pb-4">
+                        <Badge tone=Tone::Outline>{if variable_only { "Variable only" } else { "All spending" }}</Badge>
+                        <Help text="Average purchases per active spending day across six months." />
+                    </div>
                 </details>
             </Card>
         </section>
@@ -116,7 +116,7 @@ pub fn Organise() -> impl IntoView {
 pub fn History() -> impl IntoView {
     with_report(|report| {
         let ms = report.monthly_spending.clone();
-        let period = format!("{} — {} · Current month is partial", ms.start, ms.through);
+        let period = format!("{} — {}", ms.start, ms.through);
         let cards = ms
             .currencies
             .clone()
@@ -125,17 +125,19 @@ pub fn History() -> impl IntoView {
                 let unit = row.currency.clone();
                 let period = period.clone();
                 let eyebrow = format!("Monthly spending · {}", unit.code);
-                let refunds = format!(
-                    "Refunds: {} · Previous comparison: {}",
-                    money(row.refunds, &unit),
-                    row.previous_spending.map_or("—".to_owned(), |p| money(p, &unit)),
-                );
+                let facts = vec![
+                    ("Period, partial month".to_owned(), period),
+                    ("Refunds".to_owned(), money(row.refunds, &unit)),
+                    (
+                        "Previous comparison".to_owned(),
+                        row.previous_spending.map_or("—".to_owned(), |p| money(p, &unit)),
+                    ),
+                ];
                 view! {
                     <Card>
                         <Eyebrow level=Heading::H2>{eyebrow}</Eyebrow>
                         <Money value=row.spending unit=unit.clone() neutral=true class="mb-2 mt-3 block text-2xl font-semibold tracking-tight" />
-                        <p class="text-xs text-fg-muted">{period}</p>
-                        <p class="mt-1 text-xs text-fg-muted">{refunds}</p>
+                        <Facts rows=facts />
                         <div class="mt-4">
                             {row
                                 .groups

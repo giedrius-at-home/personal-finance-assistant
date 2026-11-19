@@ -7,7 +7,7 @@ use leptos::task::spawn_local;
 use serde::Serialize;
 
 use crate::api::{NoArgs, invoke};
-use crate::ds::{Button, Field, Input, Variant};
+use crate::ds::{Button, Field, Help, Input, Variant};
 use crate::state;
 
 #[derive(Serialize)]
@@ -91,7 +91,7 @@ pub fn MerchantResearch(#[prop(into)] id: String) -> impl IntoView {
                                 </article>
                             }
                         }).collect_view()}
-                        <p>"Research is advisory; your category stays unchanged until you save a review."</p>
+                        <Help text="Research is advisory; your category stays unchanged until you save a review." />
                     </div>
                 }
             })}

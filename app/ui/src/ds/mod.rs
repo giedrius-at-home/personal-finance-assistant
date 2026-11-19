@@ -102,12 +102,10 @@ pub enum CardTone {
 
 pub fn card_class(tone: CardTone) -> &'static str {
     match tone {
-        CardTone::Default => {
-            "glass-card rounded-xl border border-border bg-card-strong p-6 text-fg sm:p-7"
-        }
-        CardTone::Muted => {
-            "glass-card rounded-xl border border-border bg-card-muted p-6 text-fg sm:p-7"
-        }
+        // A section of the page itself: a rule above it, no box.
+        CardTone::Default => "flat-section min-w-0 text-fg",
+        // A quiet panel inside a section.
+        CardTone::Muted => "rounded-lg bg-card-muted p-5 text-fg sm:p-6",
         CardTone::Contrast => {
             "rounded-xl border border-transparent bg-contrast p-5 text-fg-on-contrast sm:p-6"
         }
@@ -269,6 +267,84 @@ pub fn Stat(
     }
 }
 
+/// One dashboard field: a label, its value, an optional status chip and
+/// labelled facts under it. Replaces a sentence that carried numbers.
+#[component]
+pub fn Metric(
+    #[prop(into)] label: String,
+    children: Children,
+    #[prop(optional, into)] chip: Option<(Tone, String)>,
+    #[prop(optional)] facts: Vec<(String, String)>,
+    /// The headline size (`text-2xl` unless given).
+    #[prop(optional, into)]
+    size: Option<&'static str>,
+    #[prop(optional, into)] class: String,
+) -> impl IntoView {
+    view! {
+        <div class=cn(["grid min-w-0 content-start gap-1.5", class.as_str()])>
+            <span class="text-eyebrow font-bold uppercase tracking-eyebrow text-fg-muted">{label}</span>
+            <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                <strong class=cn(["font-semibold tabular-nums tracking-tight", size.unwrap_or("text-2xl")])>
+                    {children()}
+                </strong>
+                {chip.map(|(tone, text)| view! { <Badge tone=tone>{text}</Badge> })}
+            </div>
+            <Facts rows=facts />
+        </div>
+    }
+}
+
+/// Small label/value rows: the numbers a sentence used to string together.
+#[component]
+pub fn Facts(rows: Vec<(String, String)>, #[prop(optional, into)] class: String) -> impl IntoView {
+    (!rows.is_empty()).then(|| {
+        view! {
+            <dl class=cn(["grid max-w-72 gap-1 text-xs", class.as_str()])>
+                {rows
+                    .into_iter()
+                    .map(|(label, value)| {
+                        view! {
+                            <div class="flex items-baseline justify-between gap-4">
+                                <dt class="min-w-0 truncate text-fg-muted">{label}</dt>
+                                <dd class="whitespace-nowrap font-medium tabular-nums">{value}</dd>
+                            </div>
+                        }
+                    })
+                    .collect_view()}
+            </dl>
+        }
+    })
+}
+
+/// The same label/value pairs laid in a line: a row's details as fields
+/// instead of one string joined with dots.
+#[component]
+pub fn FactsRow(
+    rows: Vec<(String, String)>,
+    #[prop(optional, into)] class: String,
+) -> impl IntoView {
+    (!rows.is_empty()).then(|| {
+        view! {
+            <dl class=cn(["flex flex-wrap gap-x-6 gap-y-2 text-sm", class.as_str()])>
+                {rows
+                    .into_iter()
+                    .map(|(label, value)| {
+                        view! {
+                            <div class="grid gap-0.5">
+                                <dt class="text-eyebrow font-semibold uppercase tracking-eyebrow text-fg-muted">{label}</dt>
+                                <dd class="tabular-nums">{value}</dd>
+                            </div>
+                        }
+                    })
+                    .collect_view()}
+            </dl>
+        }
+    })
+}
+
+/// Fields side by side across the page, a rule between neighbours.
+pub const METRIC_STRIP: &str = "metric-strip grid grid-cols-2 gap-x-6 gap-y-6 md:grid-cols-3";
+
 #[component]
 pub fn EmptyState(
     #[prop(into)] title: String,
@@ -412,6 +488,26 @@ pub fn Select(
     }
 }
 
+/// An explanation kept off the page: an info mark that shows `text` on
+/// hover or focus, in place of a sentence under a control or a heading.
+#[component]
+pub fn Help(#[prop(into)] text: String, #[prop(optional, into)] class: String) -> impl IntoView {
+    view! {
+        <span
+            tabindex="0"
+            role="note"
+            title=text.clone()
+            aria-label=text
+            class=cn([
+                "inline-flex shrink-0 cursor-help rounded-pill text-fg-muted hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                class.as_str(),
+            ])
+        >
+            <Lucide icon=Icon::Info size=13 />
+        </span>
+    }
+}
+
 #[component]
 pub fn Field(
     #[prop(into)] label: String,
@@ -423,9 +519,11 @@ pub fn Field(
 ) -> impl IntoView {
     view! {
         <div class=cn(["grid gap-1.5", class.as_str()])>
-            <label for=id class="text-sm font-medium text-fg">{label}</label>
+            <span class="flex items-center gap-1.5">
+                <label for=id class="text-sm font-medium text-fg">{label}</label>
+                {hint.map(|h| view! { <Help text=h /> })}
+            </span>
             {children()}
-            {hint.map(|h| view! { <p class="text-xs text-fg-muted">{h}</p> })}
             {move || error.get().map(|e| view! { <p class="text-xs text-negative-fg">{e}</p> })}
         </div>
     }

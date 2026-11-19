@@ -15,7 +15,8 @@ use crate::api::invoke;
 use crate::ds::charts::{BarTone, ProgressBar};
 use crate::ds::sync_value;
 use crate::ds::{
-    CONTROL, Eyebrow, Heading, Icon, Lucide, Money, Size, Variant, button_class, cn, money,
+    CONTROL, Eyebrow, Facts, Heading, Icon, Lucide, Metric, Money, Size, Variant, button_class, cn,
+    money,
 };
 use crate::format;
 use crate::pages::f;
@@ -238,15 +239,10 @@ pub fn BudgetExtras(
                         max=f(total)
                         tone=if inflow { BarTone::Positive } else { BarTone::Warning }
                     />
-                    <small class="text-xs text-fg-muted">
-                        {format!(
-                            "{} {} · {} {}",
-                            m(completed),
-                            if inflow { "received" } else { "paid" },
-                            m(outstanding),
-                            if inflow { "expected" } else { "remaining" },
-                        )}
-                    </small>
+                    <Facts rows=vec![
+                        (if inflow { "Received" } else { "Paid" }.to_owned(), m(completed)),
+                        (if inflow { "Expected" } else { "Remaining" }.to_owned(), m(outstanding)),
+                    ] />
                 </div>
             }
         })
@@ -256,19 +252,11 @@ pub fn BudgetExtras(
         .then_some(available)
         .flatten()
         .map(|a| {
+            let unit = unit.clone();
             view! {
-                <div class="my-3 grid gap-4 rounded-md bg-card-muted p-4 text-xs text-fg-muted sm:grid-cols-3">
-                    <span>
-                        "Projected available in this plan"
-                        <Money
-                            value=a.round_dp(u32::from(unit.minor_unit))
-                            unit=unit.clone()
-                            neutral=true
-                            class="mt-1.5 block text-base font-medium text-fg"
-                        />
-                    </span>
-                    <span>"Upcoming extra income is already included in the allocation above."</span>
-                </div>
+                <Metric label="Projected available in this plan" size="text-xl" class="my-4">
+                    <Money value=a.round_dp(u32::from(unit.minor_unit)) unit=unit neutral=true />
+                </Metric>
             }
         });
 
@@ -499,7 +487,7 @@ pub fn BudgetExtras(
     };
     let locked = move || s.busy.get() || s.direction.with(Option::is_some);
     view! {
-        <section class="border-b border-border p-5 sm:px-7 sm:py-6" aria-label="Extra income and payments">
+        <section class="border-b border-border py-6" aria-label="Extra income and payments">
             <header class="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
                 <div>
                     <Eyebrow level=Heading::P>"THIS MONTH ONLY"</Eyebrow>

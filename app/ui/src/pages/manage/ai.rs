@@ -10,8 +10,8 @@ use serde::Serialize;
 use super::ui::{ERROR, FEEDBACK, Ops};
 use crate::api::{NoArgs, load};
 use crate::ds::{
-    Button, CONTROL, Card, CardTitle, Checkbox, Eyebrow, Field, Heading, Input, Select, Size,
-    Variant, cn,
+    Button, CONTROL, Card, CardTitle, Checkbox, Eyebrow, FactsRow, Field, Heading, Help, Input,
+    Select, Size, Variant, cn,
 };
 use crate::format;
 
@@ -218,23 +218,26 @@ pub fn AiSuggestions() -> impl IntoView {
     });
     let last_run = move || {
         status.data.get().and_then(Result::ok).map(|s| {
-            let line = if s.running {
-                "A suggestion pass is running…".to_owned()
+            let rows = if s.running {
+                vec![("Suggestion pass".to_owned(), "Running…".to_owned())]
             } else if let Some(r) = s.last_run {
                 let when = format::date(r.finished_at.get(..10).unwrap_or(""));
                 match r.error {
-                    Some(e) => format!("Last pass {when}: {e}"),
-                    None => format!(
-                        "Last pass {when}: {} suggested, {} saved automatically, {:.1} s",
-                        r.suggested,
-                        r.applied,
-                        r.millis as f64 / 1000.0
-                    ),
+                    Some(e) => vec![("Last pass".to_owned(), when), ("Error".to_owned(), e)],
+                    None => vec![
+                        ("Last pass".to_owned(), when),
+                        ("Suggested".to_owned(), r.suggested.to_string()),
+                        ("Saved automatically".to_owned(), r.applied.to_string()),
+                        (
+                            "Took".to_owned(),
+                            format!("{:.1} s", r.millis as f64 / 1000.0),
+                        ),
+                    ],
                 }
             } else {
-                "No pass yet in this session.".to_owned()
+                vec![("Last pass".to_owned(), "None this session".to_owned())]
             };
-            view! { <p class="text-xs text-fg-muted">{line}</p> }
+            view! { <FactsRow rows=rows /> }
         })
     };
     let key_set = move || {
@@ -249,9 +252,7 @@ pub fn AiSuggestions() -> impl IntoView {
         <Card>
             <Eyebrow level=Heading::P>"CATEGORIES"</Eyebrow>
             <CardTitle level=Heading::H2 class="mt-1">"AI suggestions"</CardTitle>
-            <p class="mt-2 text-sm text-fg-muted">
-                "Suggestions only fill the review inbox; nothing changes a category until you approve it, unless automatic approval is on."
-            </p>
+            <Help text="Suggestions only fill the review inbox; nothing changes a category until you approve it, unless automatic approval is on." />
             <div class="my-5 grid gap-5 md:grid-cols-3">
                 <Field label="Classifier" id="ai-classifier">
                     <Select
@@ -287,7 +288,7 @@ pub fn AiSuggestions() -> impl IntoView {
                 {move || if key_set() {
                     view! {
                         <div class="mb-5 flex flex-wrap items-center gap-2">
-                            <p class="text-sm text-fg-muted">"TypeSafe key is saved privately on this Mac."</p>
+                            <Help text="TypeSafe key is saved privately on this Mac." />
                             <Button variant=Variant::Ghost size=Size::Sm disabled=Signal::derive(move || busy.get()) on_click=Callback::new(forget_key)>
                                 "Remove key"
                             </Button>

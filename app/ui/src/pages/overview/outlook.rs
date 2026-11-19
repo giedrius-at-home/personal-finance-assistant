@@ -6,8 +6,8 @@ use rust_decimal::{Decimal, RoundingStrategy};
 
 use crate::ds::charts::{LineChart, Series, fmt, series_color};
 use crate::ds::{
-    Card, CardDescription, CardHeader, CardTitle, Eyebrow, Heading, Money, Stat, TABLE,
-    TABLE_CONTAINER, TCELL_NUM, TH, TH_NUM, TROW, Tone, cn, money,
+    Badge, Card, CardDescription, CardHeader, CardTitle, Eyebrow, Facts, Heading, METRIC_STRIP,
+    Metric, Money, TABLE, TABLE_CONTAINER, TCELL_NUM, TH, TH_NUM, TROW, Tone, cn, money,
 };
 use crate::format;
 use crate::pages::f;
@@ -42,8 +42,8 @@ pub fn chart_frame(
         <div class="min-w-0 text-fg">
             <CardHeader>
                 <div class="min-w-0">
-                    <CardTitle>{title}</CardTitle>
-                    <CardDescription>{description}</CardDescription>
+                    <CardTitle class="text-sm text-fg-muted">{title}</CardTitle>
+                    {(!description.is_empty()).then(|| view! { <CardDescription>{description}</CardDescription> })}
                 </div>
             </CardHeader>
             <div class="min-w-0" style:height=format!("{height}px")>{chart}</div>
@@ -67,7 +67,7 @@ pub fn SavingsOutlookPanel(report: Dashboard, currency_code: String) -> impl Int
         return view! {
             <Card class="grid gap-2">
                 <CardTitle>"Three-month outlook"</CardTitle>
-                <p class="text-sm text-fg-muted">"Forecast preparing in the background. Refresh shortly to see your savings outlook."</p>
+                <span title="Prepared in the background. Refresh shortly."><Badge tone=Tone::Outline>"Preparing"</Badge></span>
             </Card>
         }
         .into_any();
@@ -124,14 +124,14 @@ pub fn SavingsOutlookPanel(report: Dashboard, currency_code: String) -> impl Int
         },
     ];
 
-    let status = if !outlook.data_fresh {
-        "Waiting for fresh bank data".to_owned()
+    let (status_tone, status) = if !outlook.data_fresh {
+        (Tone::Neutral, "Waiting for bank data".to_owned())
     } else {
         match outlook.on_track_probability {
             None if outlook.expected_savings < outlook.planned_savings => {
-                "Current habits put your plan at risk · limited probability evidence".into()
+                (Tone::Warning, "Plan at risk".into())
             }
-            None => "Limited forecast evidence".into(),
+            None => (Tone::Neutral, "Limited evidence".into()),
             Some(p) => {
                 let text = if p < Decimal::new(1, 2) {
                     "<1".to_owned()
@@ -140,7 +140,12 @@ pub fn SavingsOutlookPanel(report: Dashboard, currency_code: String) -> impl Int
                 } else {
                     percent(p).to_string()
                 };
-                format!("{text}% modeled chance of staying on plan")
+                let tone = if p < Decimal::new(5, 1) {
+                    Tone::Warning
+                } else {
+                    Tone::Positive
+                };
+                (tone, format!("{text}% chance on plan"))
             }
         }
     };
@@ -150,12 +155,14 @@ pub fn SavingsOutlookPanel(report: Dashboard, currency_code: String) -> impl Int
             .get(8..10)
             .and_then(|d| d.parse().ok())
             .unwrap_or(1);
-        let text = format!("Monthly salary: {} around day {day}. ", m(s.amount.amount));
         view! {
-            <CardDescription class="mt-0">
-                {text}
+            <div class="grid gap-2 border-t border-line pt-4">
+                <Facts rows=vec![
+                    ("Monthly salary".to_owned(), m(s.amount.amount)),
+                    ("Pay day".to_owned(), day.to_string()),
+                ] />
                 <a
-                    class="underline underline-offset-2"
+                    class="text-xs text-fg-muted underline underline-offset-2"
                     href="?view=settings"
                     on:click=move |e| {
                         e.prevent_default();
@@ -164,16 +171,9 @@ pub fn SavingsOutlookPanel(report: Dashboard, currency_code: String) -> impl Int
                 >
                     "Edit salary"
                 </a>
-            </CardDescription>
+            </div>
         }
     });
-    let summary = format!(
-        "Following plan {}, current habits {}. Estimated range {} to {}.",
-        m(outlook.planned_final),
-        m(outlook.expected_final),
-        m(outlook.lower_final),
-        m(outlook.upper_final),
-    );
     let aria = format!(
         "Balance projection: following plan {}, current habits {}. Estimated range {} to {}.",
         m(outlook.planned_final),
@@ -184,7 +184,7 @@ pub fn SavingsOutlookPanel(report: Dashboard, currency_code: String) -> impl Int
     let code = unit.code.clone();
     let chart = view! {
         <LineChart
-            height=206
+            height=300
             categories=categories
             series=series
             label=aria
@@ -232,48 +232,75 @@ pub fn SavingsOutlookPanel(report: Dashboard, currency_code: String) -> impl Int
         "insufficient_history" => "Insufficient history",
         _ => "Weighted weekday baseline",
     };
-    let errors = outlook.baseline_error.map(|baseline| {
-        view! {
-            <p>{format!(
-                "Held-out 28-day error: baseline {}; TimesFM {}. {} three-month validation windows.",
-                m(baseline),
-                outlook.model_error.map_or("unavailable".to_owned(), &m),
-                outlook.horizon_validation_windows,
-            )}</p>
-        }
-    });
+    let mut model_facts = vec![
+        ("Model".to_owned(), method.to_owned()),
+        (
+            "Days of evidence".to_owned(),
+            outlook.training_days.to_string(),
+        ),
+        (
+            "Trained in".to_owned(),
+            format!("{}s", outlook.training_seconds),
+        ),
+    ];
+    if let Some(baseline) = outlook.baseline_error {
+        model_facts.push(("28-day error, baseline".into(), m(baseline)));
+        model_facts.push((
+            "28-day error, TimesFM".into(),
+            outlook.model_error.map_or("—".to_owned(), &m),
+        ));
+        model_facts.push((
+            "Three-month validation windows".into(),
+            outlook.horizon_validation_windows.to_string(),
+        ));
+    }
+    // The app sends no email; alerts would need a sender first.
+    model_facts.push(("Email alerts".into(), "Sender setup required".into()));
     let as_of_day: u32 = outlook
         .as_of
         .get(8..10)
         .and_then(|d| d.parse().ok())
         .unwrap_or(1);
     let title = format!("Your money by {}", format::day_month(&outlook.through));
-    let planned = amount(outlook.planned_savings, "text-2xl");
-    let planned_delta = format!("new savings · final balance {}", m(outlook.planned_final));
-    let expected = amount(outlook.expected_savings, "text-2xl");
-    let expected_delta = format!("new savings · final balance {}", m(outlook.expected_final));
-    let frame = chart_frame("Balance projection", summary, 240, chart);
-    let recent = amount(outlook.signal.spending, "text-xl");
-    let recent_delta = format!(
-        "previous three: {} · unplanned: {}",
-        m(outlook.signal.previous_spending),
-        m(outlook.signal.unplanned),
-    );
+    let planned = amount(outlook.planned_savings, "");
+    let planned_facts = vec![("Final balance".to_owned(), m(outlook.planned_final))];
+    let expected = amount(outlook.expected_savings, "");
+    let expected_facts = vec![
+        ("Final balance".to_owned(), m(outlook.expected_final)),
+        (
+            "Estimated range".to_owned(),
+            format!("{} – {}", m(outlook.lower_final), m(outlook.upper_final)),
+        ),
+    ];
+    let frame = chart_frame("Balance projection", String::new(), 340, chart);
+    let recent = amount(outlook.signal.spending, "");
+    let recent_facts = vec![
+        (
+            "Previous three".to_owned(),
+            m(outlook.signal.previous_spending),
+        ),
+        ("Unplanned".to_owned(), m(outlook.signal.unplanned)),
+    ];
     let alert = outlook.signal.alert;
     let score = outlook
         .behavior_score
         .map_or("Paused".to_owned(), |s| format!("{s}/100"));
-    let unplanned = amount(outlook.expected_unplanned, "text-xl");
-    let evidence = format!(
-        "Refunds received this month: {}. Expected income over the forecast: {}. Starting included cash: {}.",
-        m(outlook.received_refunds),
-        m(outlook.expected_income),
-        m(outlook.starting_balance),
-    );
-    let model = format!(
-        "* Reconstructed using the current plan. Selected model: {method}. {} days of evidence; trained in {}s.",
-        outlook.training_days, outlook.training_seconds,
-    );
+    let score_chip = alert.then(|| (Tone::Negative, "Needs attention".to_owned()));
+    let unplanned = amount(outlook.expected_unplanned, "");
+    let evidence = vec![
+        (
+            "Refunds received this month".to_owned(),
+            m(outlook.received_refunds),
+        ),
+        (
+            "Expected income over the forecast".to_owned(),
+            m(outlook.expected_income),
+        ),
+        (
+            "Starting included cash".to_owned(),
+            m(outlook.starting_balance),
+        ),
+    ];
     let assumptions = outlook
         .assumptions
         .iter()
@@ -281,33 +308,32 @@ pub fn SavingsOutlookPanel(report: Dashboard, currency_code: String) -> impl Int
         .collect_view();
     let content = view! {
         <div role="region" aria-label="Three-month savings forecast" class="contents">
-            <header class="flex flex-col items-start justify-between gap-3 sm:flex-row">
+            <header class="flex flex-wrap items-center justify-between gap-3">
                 <div>
                     <Eyebrow level=Heading::P>"LOOKING AHEAD"</Eyebrow>
                     <CardTitle>{title}</CardTitle>
                 </div>
-                <p class="max-w-60 text-sm text-fg-muted sm:text-right">{status}</p>
+                <Badge tone=status_tone>{status}</Badge>
             </header>
-            {salary_line}
-            <div class="grid gap-4 sm:grid-cols-2">
-                <Stat label="Following your plan" delta=planned_delta>{planned}</Stat>
-                <Stat label="Continuing current habits" delta=expected_delta>{expected}</Stat>
+            <div class="grid gap-x-10 gap-y-6 lg:grid-cols-[minmax(240px,.4fr)_minmax(0,1.6fr)]">
+                <div class="grid content-start gap-6">
+                    <Metric label="Following your plan" facts=planned_facts>{planned}</Metric>
+                    <Metric label="Continuing current habits" facts=expected_facts>{expected}</Metric>
+                    {salary_line}
+                </div>
+                {frame}
             </div>
-            {frame}
-            <div class="grid gap-4 border-t border-border pt-5 sm:grid-cols-3">
-                <Stat label="Last three complete days" delta=recent_delta>{recent}</Stat>
-                <Stat
-                    label="Behavior score"
-                    delta=if alert { "Spending needs attention" } else { "See the evidence below" }
-                    tone=if alert { Tone::Negative } else { Tone::Neutral }
-                >
-                    <span class="text-xl">{score}</span>
-                </Stat>
-                <Stat label="Expected unplanned spending" delta="over the next three months">{unplanned}</Stat>
+            <div class=cn([METRIC_STRIP, "border-t border-line pt-5"])>
+                <Metric label="Last three complete days" size="text-xl" facts=recent_facts>{recent}</Metric>
+                {match score_chip {
+                    Some(chip) => view! { <Metric label="Behavior score" size="text-xl" chip=chip>{score}</Metric> }.into_any(),
+                    None => view! { <Metric label="Behavior score" size="text-xl">{score}</Metric> }.into_any(),
+                }}
+                <Metric label="Expected unplanned · 3 months" size="text-xl">{unplanned}</Metric>
             </div>
             <details class="grid gap-3 text-sm leading-relaxed [&>*]:mt-3">
                 <summary class="cursor-pointer font-medium">"Unplanned spending, refunds & forecast evidence"</summary>
-                <p>{evidence}</p>
+                <Facts rows=evidence class="max-w-md" />
                 {deductions}
                 <div tabindex="0" role="region" aria-label="Unplanned spending by month" class=TABLE_CONTAINER>
                     <table class=TABLE data-density="md">
@@ -324,11 +350,8 @@ pub fn SavingsOutlookPanel(report: Dashboard, currency_code: String) -> impl Int
                         <tbody>{history}</tbody>
                     </table>
                 </div>
-                <p>{model}</p>
-                {errors}
-                <ul class="list-disc pl-5">{assumptions}</ul>
-                // The app sends no email; alerts would need a sender first.
-                <p>"Email alerts: Sender setup required."</p>
+                <Facts rows=model_facts class="max-w-md" />
+                <ul class="list-disc pl-5 text-xs text-fg-muted" title="* Reconstructed using the current plan.">{assumptions}</ul>
             </details>
         </div>
     }

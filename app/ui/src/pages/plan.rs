@@ -25,8 +25,8 @@ use crate::api::invoke;
 use crate::ds::money_plan::MoneyPlanFields;
 use crate::ds::sync_value;
 use crate::ds::{
-    Button, CONTROL, Card, CardTone, Eyebrow, Field, Icon, Lucide, Money, MonthSwitcher, Size,
-    Variant, card_class, cn,
+    Badge, Button, CONTROL, Card, CardTone, Eyebrow, Facts, FactsRow, Field, Help, Icon, Lucide,
+    Money, MonthSwitcher, Size, Tone, Variant, card_class, cn,
 };
 use crate::pages::with_report;
 use crate::{ManageSection, format, state};
@@ -338,11 +338,11 @@ fn page(ui: Ui, report: &Dashboard) -> impl IntoView + use<> {
                     .collect_view();
                 view! {
                     <strong class="mt-1 block text-2xl font-semibold">{amounts}</strong>
-                    <p class="mt-2 text-sm text-fg-muted">{format!("Received {day}.")}</p>
+                    <Facts class="mt-2" rows=vec![("Received".to_owned(), day.clone())] />
                 }
                 .into_any()
             }
-            None => view! { <p class="mt-2 text-sm text-fg-muted">{format!("Expected {}.", payday.due_on)}</p> }.into_any(),
+            None => view! { <Facts class="mt-2" rows=vec![("Expected".to_owned(), payday.due_on.clone())] /> }.into_any(),
         };
         let title = if payday.received_on.is_some() {
             "Salary received"
@@ -771,15 +771,22 @@ fn archive_plan(ui: Ui, plan_id: String, name: String) {
 
 fn plan_row(ui: Ui, plan: PlannedPaymentView) -> impl IntoView {
     let inflow = plan.direction == Direction::Inflow;
-    let detail = format!(
-        "{} · matches {} · {} {}",
-        if inflow { "Expected income" } else { "Payment" },
-        plan.match_description
-            .as_deref()
-            .unwrap_or(&plan.match_category),
-        if plan.pending { "card payment" } else { "due" },
-        plan.due_on
-    );
+    let detail = vec![
+        (
+            "Kind".to_owned(),
+            if inflow { "Expected income" } else { "Payment" }.to_owned(),
+        ),
+        (
+            "Matches".to_owned(),
+            plan.match_description
+                .clone()
+                .unwrap_or_else(|| plan.match_category.clone()),
+        ),
+        (
+            if plan.pending { "Card payment" } else { "Due" }.to_owned(),
+            plan.due_on.clone(),
+        ),
+    ];
     let status = match plan.status {
         PlanStatus::Paid => format!(
             "{} {}",
@@ -867,7 +874,7 @@ fn plan_row(ui: Ui, plan: PlannedPaymentView) -> impl IntoView {
         <div class="grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-2 border-b border-line py-3 text-sm md:grid-cols-[minmax(150px,1.5fr)_minmax(100px,auto)_minmax(150px,1fr)_auto]">
             <div class="grid gap-1">
                 <strong>{plan.name.clone()}</strong>
-                <small class="text-xs text-fg-muted">{detail}</small>
+                <FactsRow rows=detail />
             </div>
             <strong class="tabular-nums">
                 <Money value=plan.amount.amount unit=plan.amount.currency.clone() neutral=true />
@@ -895,15 +902,19 @@ fn BillCard(ui: Ui, bill: SubscriptionRow, shared: StoredValue<Shared>) -> impl 
         )
     });
     let id = bill.bill_id.clone();
-    let subtitle = format!(
-        "{}{}",
-        bill.frequency,
-        bill.last_recorded_on
-            .as_ref()
-            .map_or(" · No recorded payment yet".to_owned(), |d| format!(
-                " · Latest payment {d}"
-            ))
-    );
+    let mut subtitle = vec![
+        ("Frequency".to_owned(), bill.frequency.to_string()),
+        (
+            "Latest payment".to_owned(),
+            bill.last_recorded_on.clone().unwrap_or_else(|| "—".into()),
+        ),
+    ];
+    if !bill.expected_dates.is_empty() {
+        subtitle.push((
+            format!("Scheduled {active_month}"),
+            bill.expected_dates.join(", "),
+        ));
+    }
     let bill = StoredValue::new(bill);
     let editing_this = {
         let id = id.clone();
@@ -914,7 +925,6 @@ fn BillCard(ui: Ui, bill: SubscriptionRow, shared: StoredValue<Shared>) -> impl 
         move || ui.removing_bill.get().as_deref() == Some(id.as_str())
     };
     let remove_target = format!("bill:{id}:remove");
-    let expected = bill.with_value(|b| b.expected_dates.join(", "));
     let schedule = (!scheduled.is_empty()).then(|| {
         let lines = scheduled
             .into_iter()
@@ -1002,7 +1012,7 @@ fn BillCard(ui: Ui, bill: SubscriptionRow, shared: StoredValue<Shared>) -> impl 
             <div class="flex flex-col items-stretch justify-between gap-4 sm:flex-row sm:items-start">
                 <div>
                     <h3 class="text-lg font-semibold">{name}</h3>
-                    <p class="mt-1 text-sm text-fg-muted">{subtitle}</p>
+                    <FactsRow class="mt-2" rows=subtitle />
                 </div>
                 <strong class="whitespace-nowrap text-accent">
                     <Money value=amount_max unit=currency neutral=true />
@@ -1022,9 +1032,6 @@ fn BillCard(ui: Ui, bill: SubscriptionRow, shared: StoredValue<Shared>) -> impl 
             {editor}
             {feedback(ui, format!("bill:{id}:edit"))}
             {matching(ui, bill, shared)}
-            {(!expected.is_empty()).then(|| view! {
-                <p class="mt-3 text-sm text-fg-muted">{format!("Scheduled for {active_month}: {expected}")}</p>
-            })}
             {schedule}
             {feedback(ui, format!("bill:{id}:link"))}
             {candidates(ui, bill, stale)}
@@ -1186,9 +1193,6 @@ fn bill_editor(ui: Ui, bill: StoredValue<SubscriptionRow>) -> impl IntoView {
             <Button submit=true variant=Variant::Secondary disabled=Signal::derive(move || ui.edit_busy.get())>
                 {move || if ui.edit_busy.get() { "Saving…" } else { "Save bill" }}
             </Button>
-            <p class="text-sm text-fg-muted sm:col-span-2 lg:col-span-3">
-                "Leave the date blank to keep the current schedule."
-            </p>
         </form>
     }
 }
@@ -1326,20 +1330,15 @@ fn matching(
         <details class="mt-4 border-t border-line pt-3">
             <summary class="cursor-pointer text-sm font-semibold">{summary}</summary>
             <form class="grid gap-3 pt-3" on:submit=submit>
-                <p class="text-sm leading-normal text-fg-muted">
-                    "Choose the transaction categories that belong to this subscription. A matching amount in the billing window can then be marked paid automatically."
-                </p>
+                <Help text="Choose the transaction categories that belong to this subscription. A matching amount in the billing window can then be marked paid automatically. One category can belong to only one subscription." />
                 <div class="grid grid-cols-[repeat(auto-fit,minmax(145px,1fr))] gap-2">{boxes}</div>
                 {empty.then(|| view! {
-                    <p class="text-sm text-fg-muted">
-                        "Categorize a payment first to create matching options. You can still save this subscription with automatic category matching off."
-                    </p>
+                    <Help text="Categorize a payment first to create matching options. You can still save this subscription with automatic category matching off." />
                 })}
                 <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
                     <Button submit=true variant=Variant::Secondary size=Size::Sm disabled=Signal::derive(busy)>
                         {move || if busy_label() { "Saving…" } else { "Save matching" }}
                     </Button>
-                    <small class="text-xs text-fg-muted">"One category can belong to only one subscription."</small>
                 </div>
                 {feedback(ui, target)}
             </form>
@@ -1417,7 +1416,7 @@ fn candidates(ui: Ui, bill: StoredValue<SubscriptionRow>, stale: bool) -> impl I
                                     <Money value=candidate.amount unit=unit neutral=true />
                                 </b>
                                 <p class="my-1 break-words text-sm">{candidate.description.clone()}</p>
-                                {differs.then(|| view! { <small class="text-xs text-fg-muted">"Amount differs from the plan."</small> })}
+                                {differs.then(|| view! { <Badge tone=Tone::Warning>"Amount differs"</Badge> })}
                             </div>
                             <div role="group" aria-label=group_label class="inline-flex flex-wrap items-center gap-2">
                                 <Button

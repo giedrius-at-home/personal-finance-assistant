@@ -23,7 +23,7 @@ use wasm_bindgen::prelude::*;
 use super::ui::{ERROR, FEEDBACK, FILE_INPUT, Messages, Ops, local_date};
 use crate::api::{NoArgs, invoke, load};
 use crate::ds::{
-    Badge, Button, CONTROL, Card, CardDescription, CardHeader, CardTitle, Eyebrow, Field, Heading,
+    Badge, Button, CONTROL, Card, CardHeader, CardTitle, Eyebrow, FactsRow, Field, Heading, Help,
     Input, Select, Size, TABLE, TABLE_CONTAINER, TCELL, TCELL_NUM, TH, TH_NUM, TROW, Tone, Variant,
     cn, money,
 };
@@ -402,12 +402,7 @@ fn BankBox(
         .map(|until| {
             let ends = js_sys::Date::new(&JsValue::from_str(&until)).get_time();
             let soon = ends - js_sys::Date::now() < 14.0 * 86_400_000.0;
-            let text = if soon {
-                format!("Consent ends {}. Renew it below.", local_date(Some(&until)))
-            } else {
-                format!("Consent valid until {}.", local_date(Some(&until)))
-            };
-            (text, soon)
+            (local_date(Some(&until)), soon)
         });
     let sync_label = format!("Sync {name}");
     view! {
@@ -431,11 +426,22 @@ fn BankBox(
                     .collect_view()}
             </dl>
             {result.filter(|r| !r.is_empty()).map(|r| view! { <p class="text-sm text-fg-muted">{r}</p> })}
-            {linked.map(|l| view! { <p class="text-xs text-fg-muted">{format!("Fills {l}")}</p> })}
-            {consent.map(|(text, soon)| view! {
-                <p class=cn(["text-xs", if soon { "text-warning-fg" } else { "text-fg-muted" }])>{text}</p>
-            })}
-            {failure.map(|f| view! { <p class="text-xs text-fg-muted">{format!("The bank answered: {f}")}</p> })}
+            <div class="flex flex-wrap items-end gap-x-6 gap-y-2">
+                <FactsRow rows={
+                    let mut rows = Vec::new();
+                    if let Some(l) = linked {
+                        rows.push(("Fills".to_owned(), l));
+                    }
+                    if let Some((until, _)) = &consent {
+                        rows.push(("Consent until".to_owned(), until.clone()));
+                    }
+                    if let Some(f) = failure {
+                        rows.push(("Bank answered".to_owned(), f));
+                    }
+                    rows
+                } />
+                {consent.filter(|(_, soon)| *soon).map(|_| view! { <Badge tone=Tone::Warning>"Renew consent"</Badge> })}
+            </div>
             <BalanceCheck balances=compared bank=reconcile_bank disabled=disabled on_reconcile=on_reconcile />
             <AccountTable name=name accounts=accounts />
             <div>
@@ -796,10 +802,10 @@ fn ConsentCard(
                         </table>
                     </div>
                     {(!required.is_empty()).then(|| view! {
-                        <p class="text-xs text-fg-muted">{format!("Keep {} mapped: the previous connection filled them.", required.join(", "))}</p>
+                        <span title="The previous connection filled these accounts."><FactsRow rows=vec![("Keep mapped".to_owned(), required.join(", "))] /></span>
                     })}
                     {p.valid_until.as_deref().map(|u| view! {
-                        <p class="text-xs text-fg-muted">{format!("Access lasts until {}.", local_date(Some(u)))}</p>
+                        <FactsRow rows=vec![("Access until".to_owned(), local_date(Some(u)))] />
                     })}
                     <div>
                         <Button disabled=busy on_click=Callback::new(save)>"Save connection"</Button>
@@ -812,9 +818,7 @@ fn ConsentCard(
         <Card>
             <Eyebrow level=Heading::P>"BANK CONSENT"</Eyebrow>
             <CardTitle level=Heading::H2 class="mt-1">"Connect or renew"</CardTitle>
-            <CardDescription class="mb-4">
-                "Approve access at the bank in your browser. The bank then opens the redirect address registered with Enable Banking; that page may not load, its address is all the app needs."
-            </CardDescription>
+            <Help text="Approve access at the bank in your browser. The bank then opens the redirect address registered with Enable Banking; that page may not load, its address is all the app needs." />
             <div class="grid items-end gap-4 sm:grid-cols-[minmax(0,12rem)_minmax(0,1fr)_auto]">
                 <Field label="Bank" id="consent-bank">
                     <Select
@@ -844,9 +848,7 @@ fn ConsentCard(
                 </form>
             })}
             {mapping}
-            <p class="mt-3 text-xs text-fg-muted">
-                "Existing accounts must stay mapped to the same ledger accounts; new accounts may be added."
-            </p>
+            <Help text="Existing accounts must stay mapped to the same ledger accounts; new accounts may be added." />
             <details class=cn([super::ui::DETAILS, "mt-4 pb-0"])>
                 <summary class=super::ui::SUMMARY>"Renew from an importer configuration file"</summary>
                 <form class="mt-4 grid items-end gap-4 sm:grid-cols-[minmax(0,1fr)_auto]" on:submit=submit_file>
@@ -947,9 +949,7 @@ fn KeyCard(
         <Card>
             <Eyebrow level=Heading::P>"ENABLE BANKING"</Eyebrow>
             <CardTitle level=Heading::H2 class="mt-1">"Application key"</CardTitle>
-            <CardDescription class="mb-4">
-                "Every bank request is signed with your Enable Banking application key. The id and key stay in a private file on this Mac that only your user can read."
-            </CardDescription>
+            <Help text="Every bank request is signed with your Enable Banking application key. The id and key stay in a private file on this Mac that only your user can read." />
             {move || if stored() {
                 view! {
                     <div class="flex flex-wrap items-center justify-between gap-3">
@@ -991,9 +991,7 @@ fn KeyCard(
             }}
             {move || legacy().then(|| view! {
                 <div class="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
-                    <p class="text-sm text-fg-muted">
-                        "The old bank importer saved consents on this Mac. Take them over to sync those banks here."
-                    </p>
+                    <Help text="The old bank importer saved consents on this Mac. Take them over to sync those banks here." />
                     <Button variant=Variant::Secondary size=Size::Sm disabled=busy on_click=Callback::new(adopt)>
                         "Use saved consents"
                     </Button>

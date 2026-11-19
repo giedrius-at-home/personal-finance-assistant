@@ -9,7 +9,7 @@ use serde::Serialize;
 
 use super::{Choice, clean_error, options};
 use crate::api::invoke;
-use crate::ds::{Field, Size, Variant, button_class, cn};
+use crate::ds::{Field, Help, Size, Variant, button_class, cn};
 use crate::state;
 
 #[derive(Serialize)]
@@ -102,9 +102,7 @@ pub fn CategoryConsolidation(catalog: CategoryCatalog) -> impl IntoView {
         <details class="rounded-lg border border-border bg-card-muted px-4 py-3">
             <summary class="cursor-pointer text-sm font-semibold">{summary}</summary>
             <div class="mt-3 grid gap-4">
-                <p class="text-sm text-fg-muted">
-                    "Checked whenever reports refresh. Review meaning before merging similar names. Extra tags stay attached to their transactions."
-                </p>
+                <Help text="Checked whenever reports refresh. Review meaning before merging similar names. Extra tags stay attached to their transactions." />
                 {catalog
                     .similar
                     .into_iter()

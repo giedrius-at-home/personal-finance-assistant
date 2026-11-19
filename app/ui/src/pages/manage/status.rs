@@ -11,8 +11,8 @@ use leptos::prelude::*;
 use super::ui::{FEEDBACK, Ops, PREVIEW, frame, load_workspace, local_date};
 use crate::api::{NoArgs, load};
 use crate::ds::{
-    Badge, Button, Card, CardHeader, CardTitle, Eyebrow, Heading, Icon, Lucide, Size, Tone,
-    Variant, cn,
+    Badge, Button, Card, CardHeader, CardTitle, Eyebrow, FactsRow, Heading, Help, Icon, Lucide,
+    Size, Tone, Variant, cn,
 };
 use crate::pages::with_report;
 use crate::{ManageSection, state};
@@ -80,7 +80,7 @@ pub fn Status() -> impl IntoView {
                                 }
                             })
                             .collect_view()}
-                        <p class="text-xs text-fg-muted">"Record freshness is distinct from bank import completeness."</p>
+                        <Help text="Record freshness is distinct from bank import completeness." />
                     </Card>
                 }
             })}
@@ -206,7 +206,7 @@ fn Connections(ws: ManageWorkspace, ops: Ops) -> impl IntoView {
             </div>
             <div class=cn([PREVIEW, "mt-5 gap-1"])>
                 <strong class="font-semibold">"Last refresh"</strong>
-                <p class="text-sm">{format!("Import: {last_import} · Write: {last_write}")}</p>
+                <FactsRow rows=vec![("Import".to_owned(), last_import), ("Write".to_owned(), last_write)] />
             </div>
         </Card>
     }
@@ -275,7 +275,7 @@ fn CategoryReview(review: crate::api::Loaded<ReviewReport>) -> impl IntoView {
                                             </span>
                                         </summary>
                                         <p class="mt-3 text-sm leading-relaxed text-fg-muted">{item.reasons.join(" ")}</p>
-                                        <span class="mt-2 block text-xs text-fg-muted">{format!("Status: {}", status(item.status))}</span>
+                                        <FactsRow class="mt-2" rows=vec![("Status".to_owned(), status(item.status).to_string())] />
                                     </details>
                                 }
                             })
@@ -285,7 +285,7 @@ fn CategoryReview(review: crate::api::Loaded<ReviewReport>) -> impl IntoView {
                         .then(|| {
                             view! {
                                 <p class="border-t border-line pt-4 text-xs text-fg-muted">
-                                    {format!("Showing {SHOWN} of {count} proposals.")}
+                                    {format!("{SHOWN} / {count}")}
                                 </p>
                             }
                         })}
