@@ -21,6 +21,20 @@ pub fn series_color(index: usize, named: Option<&str>) -> String {
     }
 }
 
+/// How a line chart joins a series' points.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Line {
+    /// A smoothed curve: trends where the shape matters more than each point.
+    #[default]
+    Smooth,
+    /// Point to point, for values that really change linearly.
+    Straight,
+    /// Flat until the next point, then a jump: running totals.
+    Step,
+    /// Point to point and dashed: limits and other reference lines.
+    Dashed,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Series {
     pub key: String,
@@ -28,6 +42,7 @@ pub struct Series {
     pub color: String,
     /// One value per category; `None` leaves a gap.
     pub values: Vec<Option<f64>>,
+    pub line: Line,
 }
 
 impl Series {
@@ -37,11 +52,17 @@ impl Series {
             label: label.to_owned(),
             color: series_color(index, None),
             values,
+            line: Line::Smooth,
         }
     }
 
     pub fn colored(mut self, named: &str) -> Self {
         self.color = series_color(0, Some(named));
+        self
+    }
+
+    pub fn line(mut self, line: Line) -> Self {
+        self.line = line;
         self
     }
 }
@@ -115,18 +136,31 @@ fn pct(v: f64) -> String {
 }
 
 #[component]
-fn Legend(series: Vec<(String, String)>) -> impl IntoView {
+fn Legend(
+    series: Vec<(String, String)>,
+    /// Labels drawn as a dashed line instead of a swatch.
+    #[prop(optional)]
+    dashed: Vec<String>,
+) -> impl IntoView {
     view! {
         <div class="flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 pt-3 text-xs text-fg-muted">
             {series
                 .into_iter()
                 .map(|(label, color)| {
-                    view! {
-                        <div class="flex items-center gap-1.5">
-                            <div aria-hidden="true" class="h-2 w-2 shrink-0 rounded-[2px]" style:background-color=color></div>
-                            {label}
-                        </div>
-                    }
+                    let swatch = if dashed.contains(&label) {
+                        view! {
+                            <div
+                                aria-hidden="true"
+                                class="h-0 w-3.5 shrink-0 border-t-2 border-dashed"
+                                style:border-color=color
+                            ></div>
+                        }
+                        .into_any()
+                    } else {
+                        view! { <div aria-hidden="true" class="h-2 w-2 shrink-0 rounded-[2px]" style:background-color=color></div> }
+                            .into_any()
+                    };
+                    view! { <div class="flex items-center gap-1.5">{swatch}{label}</div> }
                 })
                 .collect_view()}
         </div>
@@ -354,6 +388,9 @@ pub fn LineChart(
     /// Show every n-th category label (long daily axes).
     #[prop(default = 1)]
     label_every: usize,
+    /// A labelled vertical line at one category, e.g. today.
+    #[prop(default = None)]
+    marker: Option<(usize, String)>,
 ) -> impl IntoView {
     let n = categories.len().max(1);
     let all: Vec<f64> = series
@@ -382,16 +419,19 @@ pub fn LineChart(
             let mut d = String::new();
             let mut fill = String::new();
             let mut segment: Vec<(f64, f64)> = Vec::new();
+            let line = s.line;
             let flush = |seg: &mut Vec<(f64, f64)>, d: &mut String, fill: &mut String| {
                 if seg.is_empty() {
                     return;
                 }
-                d.push_str(&smooth(seg));
+                let path = join(seg, line);
                 if area {
                     let first = seg[0].0;
                     let last = seg[seg.len() - 1].0;
-                    fill.push_str(&format!("{} L{last:.3},{:.3} L{first:.3},{:.3} Z ", smooth(seg), y(0.0), y(0.0)));
+                    fill.push_str(&format!("{path} L{last:.3},{:.3} L{first:.3},{:.3} Z ", y(0.0), y(0.0)));
                 }
+                d.push_str(&path);
+                d.push(' ');
                 seg.clear();
             };
             for (i, v) in s.values.iter().enumerate() {
@@ -404,10 +444,29 @@ pub fn LineChart(
             let color = s.color.clone();
             view! {
                 {area.then(|| view! { <path d=fill.clone() fill=color.clone() fill-opacity="0.15" stroke="none"></path> })}
-                <path d=d fill="none" stroke=color stroke-width="2" vector-effect="non-scaling-stroke"></path>
+                <path
+                    d=d
+                    fill="none"
+                    stroke=color
+                    stroke-width=if line == Line::Dashed { "1.5" } else { "2" }
+                    stroke-dasharray=(line == Line::Dashed).then_some("5 4")
+                    vector-effect="non-scaling-stroke"
+                ></path>
             }
         })
         .collect_view();
+    let marker = marker.filter(|(i, _)| *i < n).map(|(i, text)| {
+        let flip = x(i) > 85.0;
+        view! {
+            <div class="absolute inset-y-0 border-l border-dashed border-fg-muted/60" style:left=pct(x(i))>
+                <span class=if flip {
+                    "absolute -top-1.5 right-1.5 whitespace-nowrap text-[10px] leading-none text-fg-muted"
+                } else {
+                    "absolute -top-1.5 left-1.5 whitespace-nowrap text-[10px] leading-none text-fg-muted"
+                }>{text}</span>
+            </div>
+        }
+    });
     let tick_views = ticks
         .iter()
         .map(|t| {
@@ -425,7 +484,12 @@ pub fn LineChart(
         })
         .collect_view();
     let legend = (series.len() > 1).then(|| {
-        view! { <Legend series=series.iter().map(|s| (s.label.clone(), s.color.clone())).collect() /> }
+        let dashed = series
+            .iter()
+            .filter(|s| s.line == Line::Dashed)
+            .map(|s| s.label.clone())
+            .collect::<Vec<_>>();
+        view! { <Legend series=series.iter().map(|s| (s.label.clone(), s.color.clone())).collect() dashed=dashed /> }
     });
     let titles = titles.unwrap_or_else(|| categories.clone());
     let hover_series = series.clone();
@@ -437,6 +501,7 @@ pub fn LineChart(
                 <svg class="absolute inset-0 h-full w-full overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="none">
                     {paths}
                 </svg>
+                {marker}
                 {move || {
                     hovered
                         .get()
@@ -494,6 +559,27 @@ pub fn LineChart(
             </div>
             {legend}
         </div>
+    }
+}
+
+/// The path through one unbroken run of points in a series' line style.
+fn join(points: &[(f64, f64)], line: Line) -> String {
+    match line {
+        Line::Smooth => smooth(points),
+        Line::Straight | Line::Dashed => {
+            let mut d = format!("M{:.3},{:.3}", points[0].0, points[0].1);
+            for p in &points[1..] {
+                d.push_str(&format!(" L{:.3},{:.3}", p.0, p.1));
+            }
+            d
+        }
+        Line::Step => {
+            let mut d = format!("M{:.3},{:.3}", points[0].0, points[0].1);
+            for p in &points[1..] {
+                d.push_str(&format!(" H{:.3} V{:.3}", p.0, p.1));
+            }
+            d
+        }
     }
 }
 

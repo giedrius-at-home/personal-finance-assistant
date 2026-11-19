@@ -315,6 +315,7 @@ pub fn CategoryTrends(
                         label: name(row),
                         color: COLORS[*slot].into(),
                         values: plot_values(row, &months, &through.get_value(), m),
+                        line: Default::default(),
                     })
                     .collect();
                 let u = unit.get_value();

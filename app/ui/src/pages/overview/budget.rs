@@ -30,7 +30,7 @@ use super::extras::{BudgetExtras, ExtrasState};
 use super::forecast::DailyForecastPanel;
 use super::month_label;
 use super::outlook::SavingsOutlookPanel;
-use super::visuals::{BUDGET_COLORS, BudgetVisuals};
+use super::visuals::{BudgetVisuals, row_color};
 
 #[wasm_bindgen(inline_js = "
 export function random_uuid() {
@@ -500,6 +500,22 @@ fn panel(report: &Dashboard, selection: &str, s: PanelState) -> AnyView {
         rows
     };
 
+    // The same three numbers as the header and the on-track headline.
+    let net = budget.planned - budget.spent;
+    let totals_row = {
+        let cell = "sm:text-right before:mb-1 before:block before:text-xs before:font-normal before:text-fg-muted before:content-[attr(data-label)] sm:before:hidden";
+        view! {
+            <div class="grid grid-cols-3 gap-x-2 gap-y-4 border-b border-border bg-card-muted px-5 py-4 text-sm font-semibold tabular-nums sm:grid-cols-[minmax(0,1.8fr)_repeat(3,minmax(105px,1fr))] sm:items-center sm:gap-4 sm:px-7">
+                <span class="col-span-3 sm:col-span-1 sm:pl-[26px]">"Total"</span>
+                <span data-label="Planned" class=cell>{m(budget.planned)}</span>
+                <span data-label="Spent" class=cell>{m(budget.spent)}</span>
+                <span data-label="Remaining" class=cn([cell, if net < Decimal::ZERO { "text-negative-fg" } else { "" }])>
+                    {if net < Decimal::ZERO { format!("{} over", m(-net)) } else { m(net) }}
+                </span>
+            </div>
+        }
+    };
+
     let editor_form = editor_form(
         budget.purchases.clone(),
         groups.into_iter().collect(),
@@ -556,6 +572,7 @@ fn panel(report: &Dashboard, selection: &str, s: PanelState) -> AnyView {
                 <span>"Remaining"</span>
             </div>
             {rows}
+            {totals_row}
             <BudgetExtras report=report.clone() budget=budget.clone() available=savings state=s.extras />
             <footer class="px-5 py-4 text-xs leading-relaxed text-fg-muted sm:px-7">
                 "Budgets reserve money for the month. Spending includes refunds; transfers are excluded."
@@ -588,14 +605,7 @@ fn budget_row(budget: &MonthlyBudget, row: &BudgetRow, kind: Kind, s: PanelState
     } else {
         0.0
     };
-    let color = match kind {
-        Kind::Fixed => "var(--ds-chart-fixed)".to_owned(),
-        Kind::Unplanned => "var(--ds-chart-limit)".to_owned(),
-        _ => {
-            let index = plan.groups.iter().position(|g| g.id == row.id).unwrap_or(0);
-            BUDGET_COLORS[index % BUDGET_COLORS.len()].to_owned()
-        }
-    };
+    let color = row_color(budget, &row.id);
     let category_total = row
         .categories
         .iter()
@@ -615,9 +625,13 @@ fn budget_row(budget: &MonthlyBudget, row: &BudgetRow, kind: Kind, s: PanelState
         .collect();
     let subtitle = match kind {
         Kind::Fixed => "Bills & recurring payments".to_owned(),
-        Kind::Extras => "One-off payments outside group allowances".into(),
+        Kind::Extras if row.scheduled > Decimal::ZERO => {
+            format!("One-off payments · {} still due", m(row.scheduled))
+        }
+        Kind::Extras => "One-off payments · all paid".into(),
         Kind::Unplanned if !row.expected.is_empty() => {
-            "Outside your planned groups · planned is spent so far plus the expected rest".into()
+            "Outside your planned groups · an estimate: spent so far plus what past months suggest"
+                .into()
         }
         Kind::Unplanned => "Outside your planned groups".into(),
         Kind::Group => match &group {
@@ -630,19 +644,25 @@ fn budget_row(budget: &MonthlyBudget, row: &BudgetRow, kind: Kind, s: PanelState
     let cell = "sm:text-right sm:tabular-nums before:mb-1 before:block before:text-xs before:font-normal before:text-fg-muted before:content-[attr(data-label)] sm:before:hidden";
     // The unplanned row has a plan only when the outlook estimates one.
     let no_plan = kind == Kind::Unplanned && row.expected.is_empty();
+    // An estimate is marked as one, never shown as a firm plan.
+    let estimate = kind == Kind::Unplanned && !no_plan;
     let planned = if no_plan {
         "—".to_owned()
+    } else if estimate {
+        format!("≈ {}", m(row.planned))
     } else {
         m(row.planned)
     };
     let remaining = if no_plan {
         "—".to_owned()
+    } else if estimate {
+        format!("≈ {}", m(row.remaining))
     } else if over {
         format!("{} over", m(row.remaining.abs()))
     } else {
         m(row.remaining)
     };
-    let progress = (kind == Kind::Group).then(|| {
+    let progress = (row.planned > Decimal::ZERO && !no_plan).then(|| {
         let color = color.clone();
         view! {
             <span class="mt-2.5 block h-1 max-w-44 overflow-hidden rounded-pill bg-soft">
@@ -809,9 +829,9 @@ fn budget_row(budget: &MonthlyBudget, row: &BudgetRow, kind: Kind, s: PanelState
                         {progress}
                     </span>
                 </span>
-                <span data-label="Planned" class=cell>{planned}</span>
+                <span data-label=if estimate { "Expected" } else { "Planned" } class=cn([cell, if estimate { "text-fg-muted" } else { "" }])>{planned}</span>
                 <span data-label="Spent" class=cell>{m(row.spent)}</span>
-                <span data-label="Remaining" class=cn(["font-semibold", cell, if over { "text-negative-fg" } else { "" }])>{remaining}</span>
+                <span data-label="Remaining" class=cn([cell, if estimate { "text-fg-muted" } else { "font-semibold" }, if over { "text-negative-fg" } else { "" }])>{remaining}</span>
             </summary>
             <div class="px-5 pb-5 pt-1.5 sm:pl-[54px] sm:pr-7">
                 {edit}
