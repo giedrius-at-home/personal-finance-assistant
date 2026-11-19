@@ -167,13 +167,24 @@ pub fn apply(plan: &BudgetPlan, row: &AdjustmentRow, action: &Action) -> BudgetP
             let name = row.group.clone().unwrap_or_else(|| row.row.name.clone());
             let base = slug(&name);
             let taken = |id: &str| plan.groups.iter().any(|g| g.id == id);
+            // The plan refuses two groups of one name (case-folded).
+            let named = plan
+                .groups
+                .iter()
+                .any(|g| g.name.trim().to_lowercase() == name.to_lowercase());
+            let source = name.clone();
+            let name = if named {
+                format!("{name} (rest)")
+            } else {
+                name
+            };
             let id = std::iter::once(base.clone())
                 .chain((2..).map(|n| format!("{base}-{n}")))
                 .find(|id| !taken(id))
                 .unwrap_or(base);
             plan.groups.push(BudgetGroup {
                 id,
-                source_groups: vec![name.clone()],
+                source_groups: vec![source],
                 name,
                 amount: *amount,
                 categories: Vec::new(),
@@ -193,8 +204,11 @@ pub struct Driver {
     pub category: String,
     pub visits: usize,
     pub spent: Decimal,
-    /// The usual `(visits, spending)` of a month; `None` for a new store.
+    /// The usual `(visits, spending)` of a month, once two earlier months
+    /// had a visit.
     pub usual: Option<(Decimal, Decimal)>,
+    /// Never visited in the earlier months.
+    pub new: bool,
 }
 
 /// The up to three stores furthest above their usual spending for this
@@ -216,6 +230,7 @@ pub fn drivers(row: &AdjustmentRow, days: usize) -> Vec<Driver> {
                     visits: habit.visits,
                     spent: habit.spent,
                     usual,
+                    new: habit.history_month_count == 0,
                 },
             )
         })
@@ -285,6 +300,7 @@ pub fn driver_text(driver: &Driver, unit: &Currency) -> String {
         visits,
         spent,
         usual,
+        new,
     } = driver;
     match usual {
         Some((usual_visits, usual_spent)) if *visits > 0 && *usual_visits > Decimal::ZERO => {
@@ -296,12 +312,12 @@ pub fn driver_text(driver: &Driver, unit: &Currency) -> String {
                 money(*usual_spent / *usual_visits, unit),
             )
         }
-        Some(_) => format!(
+        _ if !new => format!(
             "{category}: {}, {}",
             visits_text(*visits),
             money(*spent, unit)
         ),
-        None => format!(
+        _ => format!(
             "{category}: new this month, {}, {}",
             visits_text(*visits),
             money(*spent, unit)
@@ -1040,6 +1056,7 @@ mod tests {
             visits: 22,
             spent: dec("61.60"),
             usual: Some((dec("12"), dec("34.80"))),
+            new: false,
         };
         assert_eq!(
             driver_text(&known, &eur),
@@ -1050,6 +1067,7 @@ mod tests {
             visits: 1,
             spent: dec("44"),
             usual: None,
+            new: true,
         };
         assert_eq!(
             driver_text(&new, &eur),
@@ -1078,5 +1096,34 @@ mod tests {
     fn a_budget_too_small_to_matter_is_not_offered() {
         let lumpy = row("0", "228", &[7, 144, 7], 19, 3, false);
         assert_eq!(action(&lumpy, DAYS), None);
+    }
+
+    #[test]
+    fn an_added_group_avoids_a_taken_name() {
+        // A real "Shopping" group that claims by category leaves the rest of
+        // the group uncovered; the plan rejects two groups of one name.
+        let mut plan = plan();
+        plan.groups[0].name = "shopping".into();
+        let shopping = row("0", "200", &[150, 150, 150], 15, 5, false);
+        let added = apply(&plan, &shopping, &Action::Add(dec("150")));
+        let new = &added.groups[2];
+        assert_eq!(new.name, "Shopping (rest)");
+        assert_eq!(new.source_groups, ["Shopping"]);
+    }
+
+    #[test]
+    fn a_store_seen_once_before_is_not_called_new() {
+        let mut hot = row("0", "170", &[150, 150, 150], 15, 6, false);
+        let mut once = store("Zara", 2, 80, None);
+        once.habit.history_month_count = 1;
+        hot.stores = vec![once];
+        let found = drivers(&hot, DAYS);
+        assert!(!found[0].new);
+        assert_eq!(
+            driver_text(&found[0], &Currency::eur()),
+            "Zara: 2 visits, €80.00"
+        );
+        hot.stores = vec![store("Zara", 2, 80, None)];
+        assert!(drivers(&hot, DAYS)[0].new);
     }
 }

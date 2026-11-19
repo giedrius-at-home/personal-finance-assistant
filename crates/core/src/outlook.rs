@@ -29,7 +29,7 @@ use jiff::civil::Date;
 use jiff::{Timestamp, ToSpan, Zoned};
 use rust_decimal::Decimal;
 
-use crate::budget::{budget_owner, default_budget};
+use crate::budget::{budget_owner, plan_for};
 use crate::daily::SeriesForecaster;
 use crate::groups::group_index;
 use crate::model::{Account, Kind, Tx};
@@ -173,7 +173,7 @@ pub fn savings_outlooks(input: &OutlookInputs) -> Vec<SavingsOutlook> {
 
     let mut results = Vec::new();
     for currency in currencies {
-        let fallback = default_budget(this_month, currency);
+        let fallback = plan_for(input.plans, this_month, currency);
         let current = saved
             .get(&(this_month, currency.clone()))
             .copied()
@@ -1228,6 +1228,7 @@ pub(crate) mod np {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::budget::default_budget;
     use finance_types::report::UnitMoney;
     use jiff::civil::date;
 

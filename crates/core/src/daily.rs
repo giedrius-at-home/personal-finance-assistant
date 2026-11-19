@@ -28,7 +28,7 @@ use jiff::Zoned;
 use jiff::civil::Date;
 use rust_decimal::Decimal;
 
-use crate::budget::{budget_owner, default_budget};
+use crate::budget::{budget_owner, plan_for};
 use crate::groups::{group_index, is_recurring_debit};
 use crate::model::{Kind, Tx};
 use crate::outlook::{add_days, days_between, np, plans_by_month};
@@ -109,29 +109,19 @@ pub struct HabitOutflow {
     pub owners: Vec<(Date, String)>,
 }
 
-/// Each budget month's plan for the forecast, else the month before's (as
-/// month closure does), else the default plan.
+/// Each budget month's plan for the forecast: its own, else the last one
+/// saved before it, else the default plan (`budget::plan_for`).
 pub fn forecast_plans(
     saved: &[BudgetPlan],
     current_month: Date,
     currencies: &[Currency],
 ) -> Vec<BudgetPlan> {
-    let by_month = plans_by_month(saved);
     let mut currencies = currencies.to_vec();
     currencies.sort_by(|a, b| a.code.cmp(&b.code));
     [current_month, shift_month(current_month, 1)]
         .into_iter()
         .flat_map(|month| currencies.iter().map(move |c| (month, c)))
-        .map(|(month, currency)| {
-            if let Some(plan) = by_month.get(&(month, currency.clone())) {
-                return (*plan).clone();
-            }
-            let mut plan = by_month
-                .get(&(shift_month(month, -1), currency.clone()))
-                .map_or_else(|| default_budget(month, currency), |p| (*p).clone());
-            plan.month = month.to_string();
-            plan
-        })
+        .map(|(month, currency)| plan_for(saved, month, currency))
         .collect()
 }
 
@@ -954,6 +944,7 @@ fn weekday_habits(values: &[f64], spend_days: &[bool], first_weekday: usize) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::budget::default_budget;
     use finance_types::report::UnitMoney;
     use finance_types::report::subscriptions::ScheduledBillPayment;
     use jiff::civil::Weekday;
@@ -1422,5 +1413,20 @@ mod tests {
         assert_eq!(plans.len(), 2);
         assert_eq!(plans[1].month, "2026-10-01");
         assert_eq!(plans[1].groups.len(), 1);
+    }
+
+    #[test]
+    fn forecast_plans_carry_the_last_saved_plan_over_a_gap() {
+        let mut september = default_budget(date(2026, 9, 1), &Currency::eur());
+        september.groups.truncate(1);
+        let plans = forecast_plans(&[september], date(2026, 11, 1), &[Currency::eur()]);
+        assert_eq!(
+            (plans[0].month.as_str(), plans[0].groups.len()),
+            ("2026-11-01", 1)
+        );
+        assert_eq!(
+            (plans[1].month.as_str(), plans[1].groups.len()),
+            ("2026-12-01", 1)
+        );
     }
 }

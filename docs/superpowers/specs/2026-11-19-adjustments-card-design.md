@@ -1,7 +1,7 @@
 # Adjustments: where spending runs above the owner's own norm
 
 Date: 2026-11-19
-Status: draft, awaiting the owner's approval. Approach chosen by the owner
+Status: approved by the owner in chat (2026-11-19) and built. Approach chosen by the owner
 in chat ("A + drivers"), then widened: "it should track how often I go
 somewhere like to groceries, eat out, ah to go and at what times, it should
 nudge me also". The owner agreed to three steps, one PR each: **(1) this
@@ -215,8 +215,9 @@ Today a month without a saved plan falls back to the built-in default
 budget set in November would be gone on 1 December and the same finding
 would return. Change: a month without a saved plan uses the latest earlier
 saved plan of that currency (its groups, with the new month), and only
-then the default. `daily::forecast_plans` and `outlook` already fall back
-this way. Effect outside the card: Overview's budget for future months
+then the default. The daily forecast, the savings outlook and wish cuts
+use the same rule (`budget::plan_for`), so no screen plans with a different
+budget. Effect outside the card: Overview's budget for future months
 follows the last plan the owner saved instead of the default.
 
 ### Actions
