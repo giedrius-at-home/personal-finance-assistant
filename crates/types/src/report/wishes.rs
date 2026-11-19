@@ -191,6 +191,9 @@ pub struct HabitCut {
     pub monthly: Decimal,
     /// The usual visits a month, when known.
     pub typical_visits: Option<Decimal>,
+    /// What a visit usually costs, when known.
+    #[serde(default)]
+    pub ticket: Option<Decimal>,
 }
 
 /// Months of bare living costs to hold; it takes what the wishes leave.

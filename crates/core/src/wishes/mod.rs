@@ -258,8 +258,7 @@ impl Inputs<'_> {
         let month0 = baseline::current_month(alloc)?;
         let (mut items, families) = schedule::plan_items(wishes, month0, self.bills);
         self.open_statement(&mut items, month0);
-        // The fund needs a later month even when no wish reaches that far.
-        let months = schedule::horizon(&items, month0).max(2);
+        let months = schedule::horizon(&items, month0);
         let (plan_bases, _) = self.bases(alloc, month0, wishes, settings, months);
         let habits = goals::with_next_budgets(&self.habits, alloc);
         let habit_bases = goals::habit_baselines(&plan_bases, &habits);
@@ -288,11 +287,14 @@ impl Inputs<'_> {
                     .iter()
                     .flat_map(|m| &m.verdicts)
                     .filter(|v| {
+                        // Only what lands on a card the owner did not choose.
                         v.wish_id.as_deref().is_some_and(|id| {
-                            id == w.wish_id
-                                || wishes.iter().any(|c| {
-                                    c.wish_id == id && c.parent_id.as_deref() == Some(&w.wish_id)
-                                })
+                            wishes.iter().any(|c| {
+                                c.wish_id == id
+                                    && c.source != WishSource::Card
+                                    && (id == w.wish_id
+                                        || c.parent_id.as_deref() == Some(&w.wish_id))
+                            })
                         })
                     })
                     .map(|v| v.on_card)
@@ -305,7 +307,7 @@ impl Inputs<'_> {
             })
             .collect();
         // Each later purchase spread over the months left until it is due,
-        // plus the repeating costs that are planned to stay.
+        // plus the planned repeating costs.
         let ongoing = goals::ongoing_monthly(&items);
         // The savings pot pays the soonest purchases first; only what it
         // cannot cover is asked of the coming months.
@@ -335,7 +337,9 @@ impl Inputs<'_> {
                 (i.remaining - from_pot) / Decimal::from(i.months_from(month0))
             })
             .sum();
-        let needed_monthly = (purchases + ongoing).max(Decimal::ZERO).round_dp(2);
+        let needed_monthly = (purchases + goals::repeating_monthly(&items))
+            .max(Decimal::ZERO)
+            .round_dp(2);
         let plan_free = plan_bases.get(1)?.free.round_dp(2);
         let habit_free = habit_bases.get(1)?.free.round_dp(2);
         let coverage = (needed_monthly > Decimal::ZERO).then(|| {
@@ -1282,6 +1286,7 @@ mod tests {
             typical: d(typical),
             budget: d(budget),
             typical_visits: Some(d("30")),
+            ticket: None,
             essential,
         }
     }
@@ -1426,5 +1431,30 @@ mod tests {
             .goals
             .unwrap();
         assert_eq!(goals.habit_free, d("130"));
+    }
+
+    #[test]
+    fn a_wish_meant_for_the_card_is_not_a_card_warning() {
+        let a = alloc("0", "500", vec![], vec![]);
+        let mut trip = wish("trip", None, "900", "2026-12-20");
+        trip.source = WishSource::Card;
+        let goals = with_habits(&a, vec![habit("Food", "570", "100", false)], &[trip])
+            .goals
+            .unwrap();
+        assert_eq!(goals.goals[0].on_card, d("0"));
+    }
+
+    #[test]
+    fn a_repeating_cost_with_an_end_is_still_needed_while_it_runs() {
+        let a = alloc("0", "500", vec![], vec![]);
+        let mut course = wish("course", None, "100", "2026-12-01");
+        course.kind = WishKind::Recurring {
+            every: Repeat::Monthly,
+            ends_on: Some("2027-11-01".into()),
+        };
+        let goals = with_habits(&a, vec![habit("Food", "570", "100", false)], &[course])
+            .goals
+            .unwrap();
+        assert_eq!((goals.needed_monthly, goals.gap), (d("100"), d("70")));
     }
 }

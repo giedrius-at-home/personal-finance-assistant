@@ -987,8 +987,16 @@ fn page(ui: Ui, view: &WishesView, ctx: &Context) -> impl IntoView + use<> {
             </div>
         }
     });
-    let strip = card_strip(ui, view, &ctx.get_value());
-    let fund = fund_block(ui, view);
+    // The cards and the fund are one stored record: each form saves what is
+    // typed in the other too, so neither discards the other's edits.
+    let shared = SettingsForms {
+        rows: RwSignal::new(card_rows(view)),
+        months: RwSignal::new(view.settings.emergency_months.to_string()),
+        groups: RwSignal::new(view.settings.essential_groups.join(", ")),
+        stored: StoredValue::new(view.settings.clone()),
+    };
+    let strip = card_strip(ui, view, &ctx.get_value(), shared);
+    let fund = fund_block(ui, view, shared);
     let form = add_form(
         ui,
         &ctx.get_value(),
@@ -1103,22 +1111,54 @@ fn stale_notice(view: &WishesView) -> Option<String> {
     ))
 }
 
-fn card_strip(ui: Ui, view: &WishesView, ctx: &Context) -> impl IntoView + use<> {
+/// The card rows of the stored settings (one default card when none).
+fn card_rows(view: &WishesView) -> Vec<CardRow> {
     let cards = if view.settings.cards.is_empty() {
         WishSettings::default().cards
     } else {
         view.settings.cards.clone()
     };
-    let rows = RwSignal::new(
-        cards
-            .iter()
-            .enumerate()
-            .map(|(i, c)| CardRow::new(i, c))
-            .collect::<Vec<_>>(),
-    );
-    // Saving the cards keeps the emergency fund's settings.
-    let fund = StoredValue::new(view.settings.clone());
-    let next_key = StoredValue::new(cards.len());
+    cards
+        .iter()
+        .enumerate()
+        .map(|(i, c)| CardRow::new(i, c))
+        .collect()
+}
+
+/// What the cards form and the fund form have typed, and what is stored.
+#[derive(Clone, Copy)]
+struct SettingsForms {
+    rows: RwSignal<Vec<CardRow>>,
+    months: RwSignal<String>,
+    groups: RwSignal<String>,
+    stored: StoredValue<WishSettings>,
+}
+
+impl SettingsForms {
+    /// The cards as typed for `statement`, or `None` while a row is invalid.
+    fn cards(self, statement: &str) -> Option<Vec<CardSettings>> {
+        self.rows
+            .with_untracked(|rows| rows.iter().map(|r| r.settings(statement)).collect())
+    }
+
+    /// The fund's months as typed, or `None` while they are invalid.
+    fn months(self) -> Option<u32> {
+        crate::pages::goals::parse_months(&self.months.get_untracked())
+    }
+
+    fn groups(self) -> Vec<String> {
+        crate::pages::goals::parse_groups(&self.groups.get_untracked())
+    }
+}
+
+fn card_strip(
+    ui: Ui,
+    view: &WishesView,
+    ctx: &Context,
+    shared: SettingsForms,
+) -> impl IntoView + use<> {
+    let rows = shared.rows;
+    let next_key = StoredValue::new(rows.with_untracked(Vec::len));
     let bills: StoredValue<Vec<(String, String)>> = StoredValue::new(
         std::iter::once((String::new(), "No card bill".to_owned()))
             .chain(ctx.bills.iter().map(|b| (b.id.clone(), b.name.clone())))
@@ -1132,9 +1172,7 @@ fn card_strip(ui: Ui, view: &WishesView, ctx: &Context) -> impl IntoView + use<>
     let period = StoredValue::new(statement_period(&statement));
     let submit = move |ev: SubmitEvent| {
         ev.prevent_default();
-        let cards: Option<Vec<CardSettings>> =
-            rows.with_untracked(|rows| rows.iter().map(|r| r.settings(&statement)).collect());
-        let Some(cards) = cards else {
+        let Some(cards) = shared.cards(&statement) else {
             ui.set_message("card", "Enter each card's limit and the amount used.", true);
             return;
         };
@@ -1144,7 +1182,11 @@ fn card_strip(ui: Ui, view: &WishesView, ctx: &Context) -> impl IntoView + use<>
             SettingsArgs {
                 settings: WishSettings {
                     cards,
-                    ..fund.get_value()
+                    // A half-typed fund field keeps the stored value.
+                    emergency_months: shared
+                        .months()
+                        .unwrap_or_else(|| shared.stored.with_value(|s| s.emergency_months)),
+                    essential_groups: shared.groups(),
                 },
             },
             "Cards saved.",
@@ -1236,10 +1278,9 @@ fn card_strip(ui: Ui, view: &WishesView, ctx: &Context) -> impl IntoView + use<>
 
 /// The emergency fund: how many months of bare living costs to hold and
 /// which spending groups are bare living. It takes what the wishes leave.
-fn fund_block(ui: Ui, view: &WishesView) -> impl IntoView + use<> {
-    let settings = StoredValue::new(view.settings.clone());
-    let months = RwSignal::new(view.settings.emergency_months.to_string());
-    let groups = RwSignal::new(view.settings.essential_groups.join(", "));
+fn fund_block(ui: Ui, view: &WishesView, shared: SettingsForms) -> impl IntoView + use<> {
+    let (months, groups) = (shared.months, shared.groups);
+    let statement = statement_month(&today());
     let unit = view.currency.clone();
     let money = move |value: Decimal| format::money_dp(value, &unit.code, 0);
     let summary = match view.goals.as_ref().and_then(|g| g.fund.as_ref()) {
@@ -1252,12 +1293,12 @@ fn fund_block(ui: Ui, view: &WishesView) -> impl IntoView + use<> {
             money(fund.balance),
         ),
         None if view.settings.emergency_months == 0 => "Switched off.".to_owned(),
-        None => "Needs a few months of spending history before it can be sized.".to_owned(),
+        None => "Sized once this month's money plan and a few months of spending history exist."
+            .to_owned(),
     };
     let submit = move |ev: SubmitEvent| {
         ev.prevent_default();
-        let Some(emergency_months) = crate::pages::goals::parse_months(&months.get_untracked())
-        else {
+        let Some(emergency_months) = shared.months() else {
             ui.set_message("fund", "Months must be a whole number from 0 to 36.", true);
             return;
         };
@@ -1266,9 +1307,12 @@ fn fund_block(ui: Ui, view: &WishesView) -> impl IntoView + use<> {
             "save_wish_settings",
             SettingsArgs {
                 settings: WishSettings {
+                    // Half-typed card rows keep the stored cards.
+                    cards: shared
+                        .cards(&statement)
+                        .unwrap_or_else(|| shared.stored.with_value(|s| s.cards.clone())),
                     emergency_months,
-                    essential_groups: crate::pages::goals::parse_groups(&groups.get_untracked()),
-                    ..settings.get_value()
+                    essential_groups: shared.groups(),
                 },
             },
             "Emergency fund saved.",

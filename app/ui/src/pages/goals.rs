@@ -26,16 +26,14 @@ fn month_year(date: &str) -> String {
     }
 }
 
-/// How many visits a month the cut is, at the group's usual ticket; `None`
-/// when that is unknown or less than one.
+/// How many visits a month the cut is, at what a visit usually costs;
+/// `None` when that is unknown, the place is visited only a few times a
+/// month, or the cut is less than one visit.
 pub fn fewer_visits(cut: &HabitCut) -> Option<u32> {
-    // A place visited a few times a month is not counted in visits.
-    let visits = cut.typical_visits.filter(|v| *v >= Decimal::from(4))?;
-    if cut.typical <= Decimal::ZERO {
-        return None;
-    }
-    let fewer = (cut.monthly * visits / cut.typical)
-        .round_dp_with_strategy(0, RoundingStrategy::MidpointAwayFromZero);
+    cut.typical_visits.filter(|v| *v >= Decimal::from(4))?;
+    let ticket = cut.ticket.filter(|t| *t > Decimal::ZERO)?;
+    let fewer =
+        (cut.monthly / ticket).round_dp_with_strategy(0, RoundingStrategy::MidpointAwayFromZero);
     u32::try_from(fewer.mantissa()).ok().filter(|n| *n >= 1)
 }
 
@@ -82,7 +80,7 @@ pub fn headline(outlook: &GoalOutlook, unit: &Currency) -> String {
         );
     }
     let need = format!(
-        "Your goals need {} a month.",
+        "Your goals need about {} a month for now.",
         whole(outlook.needed_monthly, unit)
     );
     if outlook.gap <= Decimal::ZERO {
@@ -203,7 +201,7 @@ fn card(view: &WishesView) -> Option<AnyView> {
         });
         view! {
             <section class="mt-4" aria-label="Where to spend less">
-                <Eyebrow>"TO CLOSE THE GAP, EVERY MONTH"</Eyebrow>
+                <Eyebrow>"TO CLOSE THE GAP, A MONTH"</Eyebrow>
                 <ul class="mt-1 divide-y divide-border">{rows}</ul>
                 {open}
                 <p class="mt-2 text-xs text-fg-muted">
@@ -239,6 +237,8 @@ fn card(view: &WishesView) -> Option<AnyView> {
                     <div class="mt-3 flex flex-wrap items-center justify-between gap-2">
                         <p class="text-xs text-fg-muted">
                             "Current habits: every group costs what it usually does from next month on. "
+                            "\"Usually\" counts months without spending, so it can be lower than a typical month in Adjustments. "
+                            "The need falls as wishes are paid. "
                             "Bills, rent changes and new subscriptions planned as wishes are counted."
                         </p>
                         <button
@@ -282,25 +282,29 @@ mod tests {
         text.parse().unwrap()
     }
 
-    fn cut(monthly: &str, typical: &str, visits: Option<&str>) -> HabitCut {
+    fn cut(monthly: &str, visits: Option<&str>, ticket: Option<&str>) -> HabitCut {
         HabitCut {
             group_id: "food-out".into(),
             name: "Food & drinks out".into(),
-            typical: dec(typical),
+            typical: dec("572"),
             monthly: dec(monthly),
             typical_visits: visits.map(dec),
+            ticket: ticket.map(dec),
         }
     }
 
     #[test]
     fn a_cut_reads_as_fewer_visits() {
-        // €572 over 49 visits is about €11.70 a visit.
-        assert_eq!(fewer_visits(&cut("416", "572", Some("49"))), Some(36));
-        assert_eq!(fewer_visits(&cut("5", "572", Some("49"))), None);
-        assert_eq!(fewer_visits(&cut("416", "572", None)), None);
-        assert_eq!(fewer_visits(&cut("416", "0", Some("49"))), None);
+        assert_eq!(
+            fewer_visits(&cut("416", Some("49"), Some("11.70"))),
+            Some(36)
+        );
+        assert_eq!(fewer_visits(&cut("5", Some("49"), Some("11.70"))), None);
+        assert_eq!(fewer_visits(&cut("416", None, Some("11.70"))), None);
+        assert_eq!(fewer_visits(&cut("416", Some("49"), None)), None);
+        assert_eq!(fewer_visits(&cut("416", Some("49"), Some("0"))), None);
         // Twice a month is not a habit of visiting.
-        assert_eq!(fewer_visits(&cut("327", "450", Some("2"))), None);
+        assert_eq!(fewer_visits(&cut("327", Some("2"), Some("225"))), None);
     }
 
     #[test]

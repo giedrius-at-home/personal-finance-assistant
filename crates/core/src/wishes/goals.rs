@@ -29,17 +29,23 @@ pub struct HabitRow {
     /// What the plan gives it; zero without a budget.
     pub budget: Decimal,
     pub typical_visits: Option<Decimal>,
+    /// What a visit usually costs.
+    pub ticket: Option<Decimal>,
     /// A bare living cost.
     pub essential: bool,
 }
 
 /// What a month usually costs: the median of the earlier entries of
 /// `history` (all but the last, the running month), months without spending
-/// included, once there are three. Lessons paid every other month count for
+/// included, counted from the group's first month with spending, once
+/// there are three. Lessons paid every other month count for
 /// what they cost a month; a one-off counts for nothing. `None` when that
 /// is zero.
 pub fn usual(history: &[Decimal]) -> Option<Decimal> {
     let earlier = &history[..history.len().saturating_sub(1)];
+    // Months before the group's first spending are not part of its record.
+    let first = earlier.iter().position(|v| *v > Decimal::ZERO)?;
+    let earlier = &earlier[first..];
     if earlier.len() < USUAL_MONTHS {
         return None;
     }
@@ -68,6 +74,12 @@ pub fn habit_rows(
                     Decimal::ZERO
                 },
                 typical_visits: row.habit.typical_visits,
+                ticket: row
+                    .habit
+                    .typical_spent
+                    .zip(row.habit.typical_visits)
+                    .filter(|(_, visits)| *visits > Decimal::ZERO)
+                    .map(|(spent, visits)| (spent / visits).round_dp(2)),
                 essential: essentials.contains(&casefold(&row.row.name)),
             })
         })
@@ -112,20 +124,33 @@ pub fn habit_baselines(plan: &[MonthBaseline], rows: &[HabitRow]) -> Vec<MonthBa
         .collect()
 }
 
+fn monthly(every: Repeat, each: Decimal) -> Decimal {
+    match every {
+        Repeat::Weekly => each * Decimal::from(52) / Decimal::from(12),
+        Repeat::Biweekly => each * Decimal::from(26) / Decimal::from(12),
+        Repeat::Monthly => each,
+        Repeat::Yearly => each / Decimal::from(12),
+    }
+}
+
 /// What the repeating costs that never end add to a month: bill changes and
 /// recurring wishes, at their monthly equivalent.
 pub fn ongoing_monthly(items: &[Planned]) -> Decimal {
     items
         .iter()
         .filter_map(|item| match item.per_month {
-            Some((every, None, each)) => Some(match every {
-                Repeat::Weekly => each * Decimal::from(52) / Decimal::from(12),
-                Repeat::Biweekly => each * Decimal::from(26) / Decimal::from(12),
-                Repeat::Monthly => each,
-                Repeat::Yearly => each / Decimal::from(12),
-            }),
+            Some((every, None, each)) => Some(monthly(every, each)),
             _ => None,
         })
+        .sum()
+}
+
+/// Every planned repeating cost a month, those with an end included: what
+/// the coming months must carry while they run.
+pub fn repeating_monthly(items: &[Planned]) -> Decimal {
+    items
+        .iter()
+        .filter_map(|item| item.per_month.map(|(every, _, each)| monthly(every, each)))
         .sum()
 }
 
@@ -176,6 +201,7 @@ pub fn advice(gap: Decimal, rows: &[HabitRow], plans: &[BudgetPlan]) -> (Vec<Hab
             typical: row.typical.round_dp(2),
             monthly: (closed * *r / room).round_dp(2),
             typical_visits: row.typical_visits,
+            ticket: row.ticket,
         })
         .collect();
     cuts.sort_by(|a, b| (b.monthly, &a.name).cmp(&(a.monthly, &b.name)));
@@ -260,6 +286,7 @@ mod tests {
             typical: d(typical),
             budget: d(budget),
             typical_visits: None,
+            ticket: None,
             essential,
         }
     }
@@ -381,6 +408,7 @@ mod tests {
             group: (!budgeted).then(|| name.to_owned()),
             habit: Habit {
                 typical_visits: Some(d("30")),
+                typical_spent: Some(d("360")),
                 ..Habit::default()
             },
             stores: Vec::new(),
@@ -411,6 +439,14 @@ mod tests {
                 ),
                 adjustment("shadow:Lumpy", "Lumpy", "0", &[0, 0, 900, 0, 0, 1], false),
                 adjustment("shadow:New", "New", "0", &[40, 40, 5], false),
+                adjustment(
+                    "shadow:Recent",
+                    "Recent",
+                    "0",
+                    &[0, 0, 300, 320, 310, 9],
+                    false,
+                ),
+                adjustment("shadow:Once", "Once", "0", &[0, 900, 0, 0, 0, 9], false),
             ],
             unsorted: Decimal::ZERO,
         };
@@ -435,11 +471,13 @@ mod tests {
             [
                 ("food-out", d("467.5"), d("100"), false),
                 ("groceries", d("330"), d("300"), true),
-                ("shadow:Tech", d("60"), d("0"), false),
                 ("shadow:Education", d("450"), d("0"), false),
+                // Three months of record: the months before it do not count.
+                ("shadow:Recent", d("310"), d("0"), false),
             ]
         );
         assert_eq!(rows[0].typical_visits, Some(d("30")));
+        assert_eq!(rows[0].ticket, Some(d("12")));
     }
 
     fn repeating(every: Repeat, each: &str, ends: Option<jiff::civil::Date>) -> Planned {
@@ -475,6 +513,8 @@ mod tests {
         // 1100 − 50 + 250 + 10 × 52 / 12 + 120 / 12.
         assert_eq!(fixed.round_dp(2), d("1353.33"));
         assert_eq!(ongoing_monthly(&items).round_dp(2), d("303.33"));
+        // While it runs, the ending one must be carried too.
+        assert_eq!(repeating_monthly(&items).round_dp(2), d("402.33"));
     }
 
     fn month(month: &str, free_left: &str, savings: (&str, &str)) -> WishMonth {
