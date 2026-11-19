@@ -1,12 +1,15 @@
-//! The money split donut and the spending trajectory (`budget-visuals.tsx`).
+//! How the month is going (or next month's money split) and the spending
+//! trajectory (`budget-visuals.tsx`).
 
 use finance_types::report::allocation::CurrencyAllocation;
 use finance_types::report::budget::{BudgetRow, MonthlyBudget};
 use leptos::prelude::*;
 use rust_decimal::Decimal;
 
-use crate::ds::charts::{Donut, LineChart, Series, Slice, fmt, series_color};
-use crate::ds::{CardHeader, CardTitle, Eyebrow, Heading, Money, Select, Stat, cn, money};
+use crate::ds::charts::{Donut, Line, LineChart, Series, Slice, fmt, series_color};
+use crate::ds::{
+    Badge, CardHeader, CardTitle, Eyebrow, Heading, Money, Select, Stat, Tone, cn, money,
+};
 use crate::format;
 use crate::pages::f;
 
@@ -14,14 +17,206 @@ use crate::pages::f;
 /// inside the budget panel).
 const PLAIN_CARD: &str = "rounded-xl border border-border bg-card-strong p-5 text-fg sm:p-6";
 
-pub const BUDGET_COLORS: [&str; 6] = [
+/// Budget groups cycle through these; the other rows keep colours of their own.
+const GROUP_COLORS: [&str; 4] = [
     "var(--ds-chart-1)",
     "var(--ds-chart-2)",
     "var(--ds-chart-3)",
     "var(--ds-chart-4)",
-    "var(--ds-chart-5)",
-    "var(--ds-chart-6)",
 ];
+
+/// One colour per budget row, the same in the bars, the donut and the table.
+pub fn row_color(budget: &MonthlyBudget, id: &str) -> String {
+    match budget.groups.iter().position(|g| g.id == id) {
+        Some(index) => GROUP_COLORS[index % GROUP_COLORS.len()].to_owned(),
+        None => match id {
+            "fixed" => "var(--ds-chart-fixed)",
+            "extras" => "var(--ds-chart-5)",
+            _ => "var(--ds-chart-6)",
+        }
+        .to_owned(),
+    }
+}
+
+/// How a row's spending runs through the month.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Pace {
+    /// A little most days: the daily average carries on to month end.
+    Daily,
+    /// One-off payments: counted once, when paid or due, never extrapolated.
+    Lump,
+}
+
+/// What a row will have cost by month end, `None` before the month starts.
+pub fn month_end(row: &BudgetRow, pace: Pace, days: usize) -> Option<Decimal> {
+    if row.elapsed_days == 0 {
+        return None;
+    }
+    let known = (row.spent + row.scheduled).max(Decimal::ZERO);
+    Some(match pace {
+        Pace::Lump => known,
+        Pace::Daily => {
+            let days = days.max(row.elapsed_days);
+            (row.spent / Decimal::from(row.elapsed_days) * Decimal::from(days)).max(known)
+        }
+    })
+}
+
+/// The whole month's estimate: bills and estimates as planned, budget groups
+/// at their daily pace, one-off payments once.
+pub fn month_end_total(budget: &MonthlyBudget, days: usize) -> Option<Decimal> {
+    let unplanned = &budget.unplanned;
+    let unplanned_end = if unplanned.expected.is_empty() {
+        month_end(unplanned, Pace::Daily, days)?
+    } else {
+        unplanned.planned.max(unplanned.spent)
+    };
+    let mut total = budget.fixed.planned.max(budget.fixed.spent)
+        + month_end(&budget.extras, Pace::Lump, days)?.max(budget.extras.planned)
+        + unplanned_end;
+    for group in &budget.groups {
+        total += month_end(group, Pace::Daily, days)?;
+    }
+    Some(total)
+}
+
+/// The plan's running total at the end of each day (index 0 is day 1):
+/// budgets spread evenly, one-off payments where they fell and the unpaid
+/// rest spread over the days left.
+pub fn plan_pace(rows: &[(&BudgetRow, Pace)], days: usize) -> Vec<f64> {
+    (1..=days)
+        .map(|day| {
+            rows.iter()
+                .map(|(row, pace)| {
+                    let planned = f(row.planned);
+                    let elapsed = row.elapsed_days.min(days);
+                    match pace {
+                        Pace::Daily => planned * day as f64 / days as f64,
+                        Pace::Lump if day <= elapsed => {
+                            f(row.daily_spending.iter().take(day).copied().sum())
+                        }
+                        Pace::Lump => {
+                            let spent = f(row.spent);
+                            spent
+                                + (planned - spent) * (day - elapsed) as f64
+                                    / (days - elapsed) as f64
+                        }
+                    }
+                })
+                .sum()
+        })
+        .collect()
+}
+
+/// The current month: one verdict, then every row's spent, left and over.
+fn on_track(budget: &MonthlyBudget, days: usize) -> AnyView {
+    let unit = budget.plan.currency.clone();
+    let m = {
+        let unit = unit.clone();
+        move |v: Decimal| money(v, &unit)
+    };
+    let net = budget.planned - budget.spent;
+    let ahead = month_end_total(budget, days).map(|total| total - budget.planned);
+    let (tone, verdict) = if net < Decimal::ZERO {
+        (Tone::Negative, "Over plan")
+    } else if ahead.is_some_and(|a| a > Decimal::ZERO) {
+        (Tone::Warning, "Over pace")
+    } else {
+        (Tone::Positive, "On track")
+    };
+    let headline = if net < Decimal::ZERO {
+        "over this month's plan"
+    } else {
+        "left in this month's plan"
+    };
+    let pace_note = ahead.map(|a| {
+        if a > Decimal::ZERO {
+            format!("At this pace you finish {} over plan.", m(a))
+        } else {
+            format!("At this pace you finish {} under plan.", m(-a))
+        }
+    });
+
+    let mut rows: Vec<(&BudgetRow, &str)> = vec![(&budget.fixed, "to pay")];
+    rows.extend(budget.groups.iter().map(|g| (g, "left")));
+    rows.push((&budget.extras, "still due"));
+    rows.push((
+        &budget.unplanned,
+        if budget.unplanned.expected.is_empty() {
+            "left"
+        } else {
+            "expected"
+        },
+    ));
+    rows.retain(|(r, _)| r.planned > Decimal::ZERO || r.spent > Decimal::ZERO);
+    let mut left_total = Decimal::ZERO;
+    let mut over_total = Decimal::ZERO;
+    let bars = rows
+        .iter()
+        .map(|(row, word)| {
+            let left = (row.planned - row.spent).max(Decimal::ZERO);
+            let over = (row.spent - row.planned).max(Decimal::ZERO);
+            left_total += left;
+            over_total += over;
+            let scale = f(row.planned.max(row.spent)).max(f64::EPSILON);
+            let within = (f(row.spent.min(row.planned)).max(0.0) / scale * 100.0).clamp(0.0, 100.0);
+            let beyond = (f(over) / scale * 100.0).clamp(0.0, 100.0);
+            let status = if over > Decimal::ZERO {
+                format!("{} over", m(over))
+            } else if left.is_zero() {
+                if row.id == "extras" { "all paid" } else { "all spent" }.to_owned()
+            } else {
+                format!("{} {word}", m(left))
+            };
+            let label = format!(
+                "{}: {} spent of {} planned, {status}",
+                row.name,
+                m(row.spent),
+                m(row.planned)
+            );
+            view! {
+                <li class="grid gap-1.5">
+                    <div class="flex items-baseline justify-between gap-3 text-sm">
+                        <span class="min-w-0 truncate">{row.name.clone()}</span>
+                        <span class=cn([
+                            "whitespace-nowrap tabular-nums",
+                            if over > Decimal::ZERO { "font-medium text-negative-fg" } else { "text-fg-muted" },
+                        ])>{status}</span>
+                    </div>
+                    <div role="img" aria-label=label class="flex h-2 overflow-hidden rounded-pill bg-soft">
+                        <i class="block h-full" style:width=format!("{within:.2}%") style:background=row_color(budget, &row.id)></i>
+                        <i class="block h-full bg-negative" style:width=format!("{beyond:.2}%")></i>
+                    </div>
+                </li>
+            }
+        })
+        .collect_view();
+    let sum_note = if over_total > Decimal::ZERO {
+        format!(
+            "{} still planned, less {} already overspent.",
+            m(left_total),
+            m(over_total)
+        )
+    } else {
+        format!("{} still planned across these rows.", m(left_total))
+    };
+    view! {
+        <div class="grid gap-1">
+            <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <Money value=net.abs() unit=unit neutral=true class=cn([
+                    "text-3xl font-semibold tracking-tight",
+                    if net < Decimal::ZERO { "text-negative-fg" } else { "" },
+                ]) />
+                <Badge tone=tone>{verdict}</Badge>
+            </div>
+            <p class="text-sm text-fg-muted">{headline}</p>
+            {pace_note.map(|note| view! { <p class="text-sm">{note}</p> })}
+        </div>
+        <ul class="mt-5 grid list-none gap-3.5 p-0">{bars}</ul>
+        <p class="mt-4 text-xs leading-relaxed text-fg-muted">{sum_note}</p>
+    }
+    .into_any()
+}
 
 #[component]
 pub fn BudgetVisuals(
@@ -38,113 +233,110 @@ pub fn BudgetVisuals(
         move |v: Decimal| money(v, &unit)
     };
 
-    // Money split.
-    let mut pieces: Vec<(String, f64, String)> = vec![(
-        "Bills left".into(),
-        f(budget.fixed.remaining),
-        series_color(0, Some("fixed")),
-    )];
-    pieces.extend(budget.groups.iter().enumerate().map(|(i, g)| {
-        (
-            g.name.clone(),
-            f(g.reserved),
-            BUDGET_COLORS[i % BUDGET_COLORS.len()].to_owned(),
-        )
-    }));
-    if let Some(a) = &allocation {
-        pieces.push((
-            "Extra payments".into(),
-            f(if current {
-                a.current_plans_remaining
-            } else {
-                a.next_plans
-            }),
-            "var(--ds-chart-5)".into(),
-        ));
-        if !current {
+    let month = budget.plan.month.clone();
+    let days = format::days_in_month(&month) as usize;
+
+    // This month: how it is going. Next month: where the money goes.
+    let split = if current {
+        on_track(&budget, days)
+    } else {
+        let mut pieces: Vec<(String, f64, String)> = vec![(
+            budget.fixed.name.clone(),
+            f(budget.fixed.remaining),
+            row_color(&budget, "fixed"),
+        )];
+        pieces.extend(
+            budget
+                .groups
+                .iter()
+                .map(|g| (g.name.clone(), f(g.reserved), row_color(&budget, &g.id))),
+        );
+        if let Some(a) = &allocation {
+            pieces.push((
+                budget.extras.name.clone(),
+                f(a.next_plans),
+                row_color(&budget, "extras"),
+            ));
             pieces.push((
                 "Savings goals".into(),
                 f(a.next_goals),
                 "var(--ds-chart-6)".into(),
             ));
+            pieces.push((
+                "Unallocated".into(),
+                f(a.next_wiggle_room).max(0.0),
+                series_color(0, Some("free")),
+            ));
         }
-        pieces.push((
-            "Projected savings".into(),
-            f(if current {
-                a.current_planned_wiggle_room
-            } else {
-                a.next_wiggle_room
-            })
-            .max(0.0),
-            series_color(0, Some("free")),
-        ));
-    }
-    pieces.retain(|p| p.1 > 0.0);
-    let total: f64 = pieces.iter().map(|p| p.1).sum();
-    let fmt_money = {
-        let unit = unit.clone();
-        fmt(move |n| money(Decimal::try_from(n).unwrap_or_default(), &unit))
-    };
-    let split = if pieces.is_empty() {
-        view! { <p role="img" aria-label="No money allocated" class="py-10 text-center text-sm text-fg-muted">"No money allocated"</p> }
-            .into_any()
-    } else {
-        let label = pieces
-            .iter()
-            .map(|(l, v, _)| format!("{l}: {}", fmt_money(*v)))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let slices = pieces
-            .iter()
-            .enumerate()
-            .map(|(i, (l, v, c))| Slice {
-                key: format!("piece-{i}"),
-                label: l.clone(),
-                value: *v,
-                color: c.clone(),
-            })
-            .collect();
-        let list = pieces
-            .iter()
-            .map(|(l, v, _)| {
-                view! {
-                    <li class="flex items-baseline justify-between gap-3">
-                        <span class="min-w-0 text-fg-muted">{l.clone()}</span>
-                        <strong class="font-medium tabular-nums">{fmt_money(*v)}</strong>
-                    </li>
-                }
-            })
-            .collect_view();
-        let center_unit = unit.clone();
-        let total_value = Decimal::try_from(total).unwrap_or_default();
-        view! {
-            <Donut
-                height=320
-                data=slices
-                format=fmt_money.clone()
-                label=label
-                center=Box::new(move || {
-                    view! {
-                        <span class="grid gap-0.5">
-                            <small class="text-[0.65rem] font-normal leading-tight text-fg-muted">
-                                {if current { "Remaining allocation" } else { "Planned allocation" }}
-                            </small>
-                            <Money value=total_value unit=center_unit.clone() neutral=true class="text-lg" />
-                        </span>
-                    }
-                    .into_any()
+        pieces.retain(|p| p.1 > 0.0);
+        let total: f64 = pieces.iter().map(|p| p.1).sum();
+        let fmt_money = {
+            let unit = unit.clone();
+            fmt(move |n| money(Decimal::try_from(n).unwrap_or_default(), &unit))
+        };
+        if pieces.is_empty() {
+            view! { <p role="img" aria-label="No money allocated" class="py-10 text-center text-sm text-fg-muted">"No money allocated"</p> }
+                .into_any()
+        } else {
+            let label = pieces
+                .iter()
+                .map(|(l, v, _)| format!("{l}: {}", fmt_money(*v)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let slices = pieces
+                .iter()
+                .enumerate()
+                .map(|(i, (l, v, c))| Slice {
+                    key: format!("piece-{i}"),
+                    label: l.clone(),
+                    value: *v,
+                    color: c.clone(),
                 })
-            />
-            <ul class="mt-4 grid gap-2 text-sm">{list}</ul>
+                .collect();
+            let list = pieces
+                .iter()
+                .map(|(l, v, _)| {
+                    view! {
+                        <li class="flex items-baseline justify-between gap-3">
+                            <span class="min-w-0 text-fg-muted">{l.clone()}</span>
+                            <strong class="font-medium tabular-nums">{fmt_money(*v)}</strong>
+                        </li>
+                    }
+                })
+                .collect_view();
+            let center_unit = unit.clone();
+            let total_value = Decimal::try_from(total).unwrap_or_default();
+            view! {
+                <Donut
+                    height=320
+                    data=slices
+                    format=fmt_money.clone()
+                    label=label
+                    center=Box::new(move || {
+                        view! {
+                            <span class="grid gap-0.5">
+                                <small class="text-[0.65rem] font-normal leading-tight text-fg-muted">"Planned allocation"</small>
+                                <Money value=total_value unit=center_unit.clone() neutral=true class="text-lg" />
+                            </span>
+                        }
+                        .into_any()
+                    })
+                />
+                <ul class="mt-4 grid gap-2 text-sm">{list}</ul>
+            }
+            .into_any()
         }
-        .into_any()
     };
 
     // Spending trajectory.
-    let mut plotted: Vec<BudgetRow> = budget.groups.clone();
+    let mut plotted: Vec<(BudgetRow, Pace)> = budget
+        .groups
+        .iter()
+        .map(|g| (g.clone(), Pace::Daily))
+        .collect();
     let has_extras = budget.extras.planned > Decimal::ZERO || budget.extras.spent > Decimal::ZERO;
     if has_extras {
-        plotted.push(budget.extras.clone());
+        plotted.push((budget.extras.clone(), Pace::Lump));
     }
     let all_label = if has_extras {
         "Budgets & extra payments"
@@ -152,91 +344,90 @@ pub fn BudgetVisuals(
         "All budget groups"
     };
     let mut options = vec![("all".to_owned(), all_label.to_owned())];
-    options.extend(plotted.iter().map(|g| (g.id.clone(), g.name.clone())));
+    options.extend(plotted.iter().map(|(g, _)| (g.id.clone(), g.name.clone())));
     let plotted = StoredValue::new(plotted);
-    let month = budget.plan.month.clone();
-    let days = format::days_in_month(&month) as usize;
     let trajectory = move || {
         let selected_id = selection.get();
         plotted.with_value(|plotted| {
-            let selected = plotted.iter().find(|g| g.id == selected_id);
-            let rows: Vec<&BudgetRow> = match selected {
-                Some(s) => vec![s],
-                None => plotted.iter().collect(),
+            let selected = plotted.iter().find(|(g, _)| g.id == selected_id);
+            let rows: Vec<(&BudgetRow, Pace)> = match selected {
+                Some((row, pace)) => vec![(row, *pace)],
+                None => plotted.iter().map(|(row, pace)| (row, *pace)).collect(),
             };
-            let planned: Decimal = rows.iter().map(|r| r.planned).sum();
-            let spent: Decimal = rows.iter().map(|r| r.spent).sum();
-            let elapsed = rows.iter().map(|r| r.elapsed_days).max().unwrap_or(0);
-            let scheduled: Decimal = rows.iter().map(|r| r.scheduled).sum();
-            let projected = (elapsed > 0).then(|| {
-                rows.iter()
-                    .map(|r| {
-                        let pace = r.spent / Decimal::from(elapsed) * Decimal::from(days);
-                        pace.max(r.spent + r.scheduled).max(Decimal::ZERO)
-                    })
-                    .sum::<Decimal>()
-            });
+            let selected = selected.map(|(row, _)| row);
+            let planned: Decimal = rows.iter().map(|(r, _)| r.planned).sum();
+            let spent: Decimal = rows.iter().map(|(r, _)| r.spent).sum();
+            let elapsed = rows.iter().map(|(r, _)| r.elapsed_days).max().unwrap_or(0);
+            // A closure can start the budget month before the calendar one.
+            let days = days.max(elapsed);
+            let scheduled: Decimal = rows.iter().map(|(r, _)| r.scheduled).sum();
+            let lumps = rows.iter().any(|(_, pace)| *pace == Pace::Lump);
+            let projected = rows
+                .iter()
+                .map(|(r, pace)| month_end(r, *pace, days))
+                .sum::<Option<Decimal>>()
+                .filter(|_| elapsed > 0);
             let over = projected.is_some_and(|p| p > planned);
-            let mut cumulative = vec![0.0_f64];
+            // Running total at the end of each day; index 0 is day 1.
+            let mut cumulative = Vec::with_capacity(elapsed);
             let mut running = Decimal::ZERO;
             for day in 0..elapsed {
                 running += rows
                     .iter()
-                    .map(|r| r.daily_spending.get(day).copied().unwrap_or_default())
+                    .map(|(r, _)| r.daily_spending.get(day).copied().unwrap_or_default())
                     .sum::<Decimal>();
                 cumulative.push(f(running));
             }
             let planned_n = f(planned);
             let spent_n = f(spent);
             let show_projection = elapsed > 0 && elapsed < days && projected.is_some();
-            let categories: Vec<String> = (0..=days).map(|d| d.to_string()).collect();
+            let categories: Vec<String> = (1..=days).map(|d| d.to_string()).collect();
+            let titles: Vec<String> = (1..=days).map(|d| format!("Day {d}")).collect();
             let mut series = vec![Series {
                 key: "spent".into(),
                 label: "Actual".into(),
                 color: "var(--ds-chart-1)".into(),
-                values: (0..=days)
-                    .map(|d| (d <= elapsed).then(|| cumulative[d]))
-                    .collect(),
+                values: (1..=days).map(|d| cumulative.get(d - 1).copied()).collect(),
+                line: Line::Step,
             }];
             if show_projection {
                 let p = projected.map(f).unwrap_or_default();
                 series.push(Series {
                     key: "projected".into(),
-                    label: "Projected pace".into(),
+                    label: "Projected".into(),
                     color: if over {
                         "var(--ds-negative)".into()
                     } else {
                         "var(--ds-positive)".into()
                     },
-                    values: (0..=days)
+                    values: (1..=days)
                         .map(|d| {
                             (d >= elapsed).then(|| {
-                                if d == elapsed {
-                                    spent_n
-                                } else {
-                                    spent_n
-                                        + (p - spent_n) * (d - elapsed) as f64
-                                            / (days - elapsed) as f64
-                                }
+                                spent_n
+                                    + (p - spent_n) * (d - elapsed) as f64
+                                        / (days - elapsed) as f64
                             })
                         })
                         .collect(),
+                    line: Line::Straight,
                 });
             }
             series.push(Series {
-                key: "limit".into(),
-                label: "Monthly limit".into(),
-                color: series_color(0, Some("limit")),
-                values: vec![Some(planned_n); days + 1],
+                key: "pace".into(),
+                label: "Budget pace".into(),
+                color: "var(--ds-chart-fixed)".into(),
+                values: plan_pace(&rows, days).into_iter().map(Some).collect(),
+                line: Line::Straight,
             });
             series.push(Series {
-                key: "even".into(),
-                label: "Even budget pace".into(),
-                color: "var(--ds-chart-fixed)".into(),
-                values: (0..=days)
-                    .map(|d| Some(planned_n * d as f64 / days as f64))
-                    .collect(),
+                key: "limit".into(),
+                label: "Budget".into(),
+                color: "var(--ds-fg-muted)".into(),
+                values: vec![Some(planned_n); days],
+                line: Line::Dashed,
             });
+            let today = (current && elapsed > 0 && elapsed < days)
+                .then(|| (elapsed - 1, "Today".to_owned()));
             let name = selected.map_or("Your planned spending".to_owned(), |s| s.name.clone());
             let aria = format!(
                 "{}: {} spent against {} planned. {}",
@@ -246,7 +437,7 @@ pub fn BudgetVisuals(
                 match projected {
                     None => "No spending trajectory yet.".to_owned(),
                     Some(p) => format!(
-                        "Projected {} using the daily average and scheduled payments. This is an estimate.",
+                        "Projected {} by month end from the daily average and scheduled payments. This is an estimate.",
                         m(p)
                     ),
                 }
@@ -260,8 +451,10 @@ pub fn BudgetVisuals(
                     <LineChart
                         height=240
                         categories=categories
+                        titles=titles
                         series=series
                         label=aria
+                        marker=today
                         format=fmt(move |n| format::money_dp(Decimal::try_from(n).unwrap_or_default(), &code, 0))
                     />
                 }
@@ -272,16 +465,22 @@ pub fn BudgetVisuals(
             } else {
                 ""
             };
+            let method = if lumps {
+                "Budgets continue at your daily average; one-off payments count once."
+            } else {
+                "The projection continues your daily average."
+            };
             let note = match projected {
                 _ if elapsed == 0 => "Ready for the coming month.".to_owned(),
-                Some(p) if over => format!("{} above budget at your current pace{scheduled_note}.", m(p - planned)),
-                Some(p) => format!("{} below budget at your current pace{scheduled_note}.", m(planned - p)),
+                Some(p) if over => format!(
+                    "{} above budget at this pace{scheduled_note}. {method}",
+                    m(p - planned)
+                ),
+                Some(p) => format!(
+                    "{} below budget at this pace{scheduled_note}. {method}",
+                    m(planned - p)
+                ),
                 None => String::new(),
-            };
-            let note = if elapsed > 0 {
-                format!("{note} Projection uses your daily average and scheduled payments.")
-            } else {
-                format!("{note} ")
             };
             let pace = match projected {
                 None => view! { "—" }.into_any(),
@@ -305,7 +504,7 @@ pub fn BudgetVisuals(
                 </CardHeader>
                 <div class="grid grid-cols-3 gap-4">
                     <Stat label="Spent">{spent_view}</Stat>
-                    <Stat label="Month-end pace">{pace}</Stat>
+                    <Stat label="Month-end estimate">{pace}</Stat>
                     <Stat label="Budget">{budget_view}</Stat>
                 </div>
                 <div class="mt-4">{chart}</div>
@@ -317,13 +516,74 @@ pub fn BudgetVisuals(
     view! {
         <div class="grid border-b border-border lg:grid-cols-[minmax(260px,.85fr)_minmax(0,1.25fr)]">
             <div class=cn([PLAIN_CARD, "min-w-0 rounded-none border-0 bg-transparent lg:border-r lg:border-border"])>
-                <CardHeader class="mb-2 block">
-                    <Eyebrow level=Heading::P>"MONEY SPLIT"</Eyebrow>
-                    <CardTitle>{if current { "What's left this month" } else { "Next month's allocation" }}</CardTitle>
+                <CardHeader class="mb-4 block">
+                    <Eyebrow level=Heading::P>{if current { "THIS MONTH" } else { "MONEY SPLIT" }}</Eyebrow>
+                    <CardTitle>{if current { "Are you on track?" } else { "Next month's allocation" }}</CardTitle>
                 </CardHeader>
                 {split}
             </div>
             <div class=cn([PLAIN_CARD, "min-w-0 rounded-none border-0 bg-transparent"])>{trajectory}</div>
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dec(text: &str) -> Decimal {
+        text.parse().unwrap()
+    }
+
+    fn row(id: &str, planned: &str, daily: &[&str], scheduled: &str) -> BudgetRow {
+        let daily: Vec<Decimal> = daily.iter().map(|d| dec(d)).collect();
+        let spent: Decimal = daily.iter().copied().sum();
+        BudgetRow {
+            id: id.into(),
+            name: id.into(),
+            planned: dec(planned),
+            spent,
+            remaining: dec(planned) - spent,
+            reserved: Decimal::ZERO,
+            scheduled: dec(scheduled),
+            categories: Vec::new(),
+            history: Vec::new(),
+            elapsed_days: daily.len(),
+            daily_spending: daily,
+            expected: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_one_off_payment_is_not_extrapolated() {
+        let extras = row("extras", "900", &["0", "600", "0"], "300");
+        assert_eq!(month_end(&extras, Pace::Lump, 30), Some(dec("900")));
+        // The daily average would have called it 6000.
+        assert_eq!(month_end(&extras, Pace::Daily, 30), Some(dec("6000")));
+    }
+
+    #[test]
+    fn a_budget_runs_on_at_its_daily_average() {
+        let food = row("food", "100", &["10", "0", "20"], "0");
+        assert_eq!(month_end(&food, Pace::Daily, 30), Some(dec("300")));
+        // Scheduled payments are a floor, not an addition.
+        let quiet = row("quiet", "100", &["1", "0", "0"], "50");
+        assert_eq!(month_end(&quiet, Pace::Daily, 30), Some(dec("51")));
+        assert_eq!(
+            month_end(&row("new", "100", &[], "0"), Pace::Daily, 30),
+            None
+        );
+    }
+
+    #[test]
+    fn the_plan_pace_steps_with_one_off_payments_and_ends_at_the_plan() {
+        let food = row("food", "300", &["10", "0", "20"], "0");
+        let extras = row("extras", "900", &["0", "600", "0"], "300");
+        let pace = plan_pace(&[(&food, Pace::Daily), (&extras, Pace::Lump)], 30);
+        assert_eq!(pace.len(), 30);
+        assert!((pace[0] - 10.0).abs() < 1e-9);
+        assert!((pace[1] - 620.0).abs() < 1e-9);
+        assert!((pace[2] - 630.0).abs() < 1e-9);
+        assert!((pace[29] - 1200.0).abs() < 1e-9);
     }
 }
