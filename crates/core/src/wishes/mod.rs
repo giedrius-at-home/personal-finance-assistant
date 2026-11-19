@@ -261,7 +261,8 @@ impl Inputs<'_> {
         // The fund needs a later month even when no wish reaches that far.
         let months = schedule::horizon(&items, month0).max(2);
         let (plan_bases, _) = self.bases(alloc, month0, wishes, settings, months);
-        let habit_bases = goals::habit_baselines(&plan_bases, &self.habits);
+        let habits = goals::with_next_budgets(&self.habits, alloc);
+        let habit_bases = goals::habit_baselines(&plan_bases, &habits);
         let habit_months = self.run(&habit_bases, month0, &items);
         let ctx = RowContext {
             wishes,
@@ -306,12 +307,33 @@ impl Inputs<'_> {
         // Each later purchase spread over the months left until it is due,
         // plus the repeating costs that are planned to stay.
         let ongoing = goals::ongoing_monthly(&items);
-        let purchases: Decimal = items
+        // The savings pot pays the soonest purchases first; only what it
+        // cannot cover is asked of the coming months.
+        // (The pot as this month's own purchases leave it; this month's
+        // set-asides are savings for those same later purchases.)
+        let mut pot = habit_months.first().map_or(Decimal::ZERO, |m| {
+            let spent: Decimal = m
+                .verdicts
+                .iter()
+                .filter(|v| !v.set_aside)
+                .map(|v| v.from_savings)
+                .sum();
+            (m.savings_before - spent).max(Decimal::ZERO)
+        });
+        let mut later: Vec<&Planned> = items
             .iter()
             .filter(|i| i.per_month.is_none() && i.remaining > Decimal::ZERO)
             // What is due this month is this month's business.
             .filter(|i| i.months_from(month0) >= 1)
-            .map(|i| i.remaining / Decimal::from(i.months_from(month0)))
+            .collect();
+        later.sort_by_key(|i| i.due);
+        let purchases: Decimal = later
+            .into_iter()
+            .map(|i| {
+                let from_pot = pot.min(i.remaining);
+                pot -= from_pot;
+                (i.remaining - from_pot) / Decimal::from(i.months_from(month0))
+            })
             .sum();
         let needed_monthly = (purchases + ongoing).max(Decimal::ZERO).round_dp(2);
         let plan_free = plan_bases.get(1)?.free.round_dp(2);
@@ -324,7 +346,7 @@ impl Inputs<'_> {
         });
         let steady = habit_free - ongoing;
         let gap = (needed_monthly - habit_free).max(Decimal::ZERO);
-        let (cuts, uncovered) = goals::advice(gap, &self.habits, &self.plans);
+        let (cuts, uncovered) = goals::advice(gap, &habits, &self.plans);
         Some(GoalOutlook {
             needed_monthly,
             habit_free,
@@ -338,7 +360,7 @@ impl Inputs<'_> {
             fund: goals::fund(
                 settings.emergency_months,
                 goals::fixed_monthly(alloc, &self.card_bills, &items),
-                &self.habits,
+                &habits,
                 &habit_months,
                 steady,
             ),
@@ -1376,5 +1398,33 @@ mod tests {
         );
         assert_eq!(goals.coverage, Some(30));
         assert_eq!(goals.cuts[0].monthly, d("70"));
+    }
+
+    #[test]
+    fn savings_that_cover_a_later_wish_leave_no_gap() {
+        let mut a = alloc("0", "500", vec![], vec![]);
+        a.savings_balance = d("1000");
+        let tv = wish("tv", None, "300", "2026-12-20");
+        let bike = wish("bike", None, "900", "2027-01-20");
+        let habits = || vec![habit("Food", "570", "100", false)];
+        let covered = with_habits(&a, habits(), std::slice::from_ref(&tv))
+            .goals
+            .unwrap();
+        assert_eq!((covered.needed_monthly, covered.gap), (d("0"), d("0")));
+        assert!(covered.cuts.is_empty());
+        // The pot pays the TV and 700 of the bike; 200 is left over 3 months.
+        let both = with_habits(&a, habits(), &[tv, bike]).goals.unwrap();
+        assert_eq!(both.needed_monthly, d("66.67"));
+    }
+
+    #[test]
+    fn next_months_budget_is_the_one_habits_are_measured_against() {
+        // Food out is budgeted 300 this month and 200 the next; free money
+        // for next month already paid the 200.
+        let a = alloc("0", "500", vec![], vec![row("Food", "200", "0")]);
+        let goals = with_habits(&a, vec![habit("Food", "570", "300", false)], &[])
+            .goals
+            .unwrap();
+        assert_eq!(goals.habit_free, d("130"));
     }
 }

@@ -74,6 +74,26 @@ pub fn habit_rows(
         .collect()
 }
 
+/// `rows` with the budgets the later months really run on: next month's
+/// plan, which is what the allocation's free money already paid for. A row
+/// without a budget there has none. Without next-month rows the running
+/// month's budgets stand.
+pub fn with_next_budgets(rows: &[HabitRow], alloc: &CurrencyAllocation) -> Vec<HabitRow> {
+    if alloc.next_group_rows.is_empty() {
+        return rows.to_vec();
+    }
+    rows.iter()
+        .map(|row| HabitRow {
+            budget: alloc
+                .next_group_rows
+                .iter()
+                .find(|next| casefold(&next.group) == casefold(&row.name))
+                .map_or(Decimal::ZERO, |next| next.limit),
+            ..row.clone()
+        })
+        .collect()
+}
+
 /// The plan's baselines with every month after the running one living as
 /// usual: free money pays what every group usually costs instead of its
 /// budget, and nothing is cut, since the owner changes nothing.
@@ -193,11 +213,19 @@ pub fn fund(
         })
     };
     let eta = reached.or_else(|| {
-        let last = parse_month(&habit_months.last()?.month)?;
+        let end = habit_months.last()?;
+        let last = parse_month(&end.month)?;
         if steady <= Decimal::ZERO {
             return None;
         }
-        let more = ((target - held) / steady).ceil();
+        // What the wishes left on the cards is charged after the judged
+        // months and paid before anything reaches the fund.
+        let owed: Decimal = end
+            .cards
+            .iter()
+            .map(|c| (c.used - c.regular).max(Decimal::ZERO))
+            .sum();
+        let more = ((target - held + owed) / steady).ceil();
         let more = i32::try_from(more.mantissa()).ok().filter(|m| *m <= 1200)?;
         Some(shift_month(last, more).to_string())
     });
@@ -217,7 +245,7 @@ mod tests {
     use finance_types::report::Currency;
     use finance_types::report::adjustments::{AdjustmentRow, Adjustments, Habit};
     use finance_types::report::budget::BudgetRow;
-    use finance_types::report::wishes::WishMonth;
+    use finance_types::report::wishes::{CardUsed, WishMonth};
     use jiff::civil::date;
 
     use super::*;
@@ -501,6 +529,15 @@ mod tests {
             month("2026-12-01", "0", ("100", "100")),
         ];
         assert_eq!(fill(&after, "500").as_deref(), Some("2027-03-01"));
+        // 900 still on the card when the judged months end is paid first.
+        let mut owing = after.clone();
+        owing[1].cards = vec![CardUsed {
+            card_id: "c".into(),
+            name: "Card".into(),
+            used: d("950"),
+            regular: d("50"),
+        }];
+        assert_eq!(fill(&owing, "500").as_deref(), Some("2027-04-01"));
         // Nothing left over: no date.
         assert_eq!(fill(&after, "0"), None);
         assert_eq!(fill(&after, "-50"), None);

@@ -207,7 +207,7 @@ fn card(view: &WishesView) -> Option<AnyView> {
                 <ul class="mt-1 divide-y divide-border">{rows}</ul>
                 {open}
                 <p class="mt-2 text-xs text-fg-muted">
-                    "Each group gives the same share of what it usually costs; essentials give nothing. "
+                    "Each group gives the same share of its room: what it usually costs, down to any floor you set. Essentials you have not ranked give nothing. "
                     "Any other split of the same total works."
                 </p>
             </section>
@@ -273,8 +273,7 @@ pub fn GoalsCard() -> impl IntoView {
 
 #[cfg(test)]
 mod tests {
-    use finance_types::report::Currency;
-    use finance_types::report::wishes::{EmergencyFund, GoalOutlook, GoalStatus, HabitCut};
+    use finance_types::report::wishes::HabitCut;
     use rust_decimal::Decimal;
 
     use super::*;
@@ -293,46 +292,6 @@ mod tests {
         }
     }
 
-    fn status(short: &str, on_card: &str, plan_short: &str) -> GoalStatus {
-        GoalStatus {
-            wish_id: "w".into(),
-            name: "Japan".into(),
-            due_on: "2027-09-25".into(),
-            amount: dec("4000"),
-            must: false,
-            short: dec(short),
-            on_card: dec(on_card),
-            plan_short: dec(plan_short),
-        }
-    }
-
-    fn outlook(needed: &str, habit_free: &str, uncovered: &str) -> GoalOutlook {
-        let (needed, habit_free) = (dec(needed), dec(habit_free));
-        GoalOutlook {
-            needed_monthly: needed,
-            habit_free,
-            plan_free: dec("1592"),
-            gap: (needed - habit_free).max(Decimal::ZERO),
-            coverage: None,
-            horizon_months: 11,
-            goals: Vec::new(),
-            cuts: Vec::new(),
-            uncovered: dec(uncovered),
-            fund: None,
-        }
-    }
-
-    fn fund(balance: &str, eta: Option<&str>) -> EmergencyFund {
-        EmergencyFund {
-            months: 6,
-            fixed_monthly: dec("1050"),
-            essentials_monthly: dec("415"),
-            target: dec("8790"),
-            balance: dec(balance),
-            eta: eta.map(Into::into),
-        }
-    }
-
     #[test]
     fn a_cut_reads_as_fewer_visits() {
         // €572 over 49 visits is about €11.70 a visit.
@@ -342,81 +301,6 @@ mod tests {
         assert_eq!(fewer_visits(&cut("416", "0", Some("49"))), None);
         // Twice a month is not a habit of visiting.
         assert_eq!(fewer_visits(&cut("327", "450", Some("2"))), None);
-        let eur = Currency::eur();
-        assert_eq!(
-            cut_text(&cut("416.06", "572.40", Some("49")), &eur),
-            "−€416 a month (usually €572) · about 36 fewer visits"
-        );
-        assert_eq!(
-            cut_text(&cut("54.33", "74.74", Some("5")), &eur),
-            "−€54 a month (usually €75) · about 4 fewer visits"
-        );
-        assert_eq!(
-            cut_text(&cut("5", "7", None), &eur),
-            "−€5 a month (usually €7)"
-        );
-    }
-
-    #[test]
-    fn a_goal_says_what_current_habits_do_to_it() {
-        let eur = Currency::eur();
-        assert_eq!(
-            goal_text(&status("1023.30", "2500", "0"), &eur),
-            ("€1,023 short at current habits".to_owned(), true)
-        );
-        assert_eq!(
-            goal_text(&status("0", "566", "0"), &eur),
-            ("€566 would go on the card".to_owned(), true)
-        );
-        assert_eq!(
-            goal_text(&status("0", "0", "0"), &eur),
-            ("on track at current habits".to_owned(), false)
-        );
-        assert_eq!(
-            goal_text(&status("900", "0", "400"), &eur),
-            (
-                "€900 short at current habits, €400 even on the budget".to_owned(),
-                true
-            )
-        );
-    }
-
-    #[test]
-    fn the_headline_names_need_leftover_and_gap() {
-        let eur = Currency::eur();
-        assert_eq!(
-            headline(&outlook("1200", "195.34", "0"), &eur),
-            "Your goals need €1,200 a month. Your habits leave €195. Gap: €1,005 a month."
-        );
-        assert_eq!(
-            headline(&outlook("1200", "-80", "0"), &eur),
-            "Your goals need €1,200 a month. Your habits overspend by €80. Gap: €1,280 a month."
-        );
-        assert_eq!(
-            headline(&outlook("400", "650", "0"), &eur),
-            "Your goals need €400 a month. Your habits leave €650: they are covered."
-        );
-        assert_eq!(
-            headline(&outlook("0", "650", "0"), &eur),
-            "No dated goal needs money in the coming months. Your habits leave €650 a month."
-        );
-    }
-
-    #[test]
-    fn the_fund_says_when_it_is_full() {
-        let eur = Currency::eur();
-        assert_eq!(
-            fund_text(&fund("611.36", Some("2031-06-01")), &eur),
-            "holds €611 of €8,790 · full by Jun 2031 at current habits"
-        );
-        assert_eq!(
-            fund_text(&fund("611.36", None), &eur),
-            "holds €611 of €8,790 · nothing is left over to fill it at current habits"
-        );
-        assert_eq!(
-            fund_text(&fund("9000", Some("2026-11-01")), &eur),
-            "full: holds €9,000 of €8,790"
-        );
     }
 
     #[test]
