@@ -27,6 +27,7 @@ pub fn PlanPatterns() -> impl IntoView {
         >
             "Review shared spending & money back →"
         </button>
+        <crate::pages::adjustments::AdjustmentsCard />
         {with_report(move |report| {
             let has_variable = !report.variable_time_trends.currencies.is_empty();
             let trends = if variable.get() && has_variable {
