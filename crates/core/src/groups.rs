@@ -91,6 +91,12 @@ pub fn fixed_category_names(
         .collect()
 }
 
+/// Case-folded categories the owner has predicted like bills; the budget
+/// counts their payments as fixed spending.
+pub fn predicted_category_names(categories: &[String]) -> impl Iterator<Item = String> + '_ {
+    categories.iter().map(|c| fold_key(c))
+}
+
 fn in_fixed_category(t: &Tx, fixed_categories: &HashSet<String>) -> bool {
     t.category
         .as_deref()

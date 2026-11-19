@@ -583,6 +583,7 @@ mod tests {
             history: Vec::new(),
             daily_spending: Vec::new(),
             elapsed_days: 0,
+            expected: Vec::new(),
         };
         let budget = |month: &str, reserved: i64| MonthlyBudget {
             plan: crate::budget::default_budget(month.parse().unwrap(), &Currency::eur()),

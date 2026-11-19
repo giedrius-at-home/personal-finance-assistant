@@ -1,5 +1,5 @@
-//! "All transactions": search with filters, totals, paging and an inline
-//! category editor (personal-site `transaction-search.tsx`).
+//! "All transactions": search with filters, totals, the newest hundred rows
+//! with more loaded on scroll, and an inline category editor (personal-site `transaction-search.tsx`).
 
 use std::str::FromStr;
 use std::time::Duration;
@@ -12,6 +12,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use wasm_bindgen::prelude::*;
 
 use super::{
     Choice, TextInput, clean_error, debounce, options, report_categories, storage_get, storage_set,
@@ -24,6 +25,47 @@ use crate::ds::{
 use crate::state;
 
 const STORAGE_KEY: &str = "finance.transaction-search";
+/// Rows fetched at a time; more load as the end of the list nears.
+const PAGE_SIZE: u32 = 100;
+/// The element after the list whose approach loads the next rows.
+const MORE_ID: &str = "tx-search-more";
+
+#[wasm_bindgen(inline_js = "
+export function watch_near(id, callback) {
+  const e = document.getElementById(id);
+  if (!e) return;
+  if (callback) e.__near = callback;
+  if (!e.__near) return;
+  const check = () => {
+    const r = e.getBoundingClientRect();
+    const shown = r.width > 0 || r.height > 0 || e.getClientRects().length > 0;
+    if (shown && r.top < window.innerHeight + 800) e.__near();
+  };
+  if (!e.__scroll) {
+    e.__scroll = () => {
+      if (!e.isConnected) { window.removeEventListener('scroll', e.__scroll, true); return; }
+      check();
+    };
+    window.addEventListener('scroll', e.__scroll, { capture: true, passive: true });
+  }
+  if (typeof IntersectionObserver !== 'undefined') {
+    if (e.__observer) e.__observer.disconnect();
+    e.__observer = new IntersectionObserver(
+      (entries) => { if (entries.some((x) => x.isIntersecting)) check(); },
+      { rootMargin: '800px 0px' },
+    );
+    e.__observer.observe(e);
+  }
+  // After the new rows are in the page.
+  setTimeout(check, 0);
+}
+")]
+extern "C" {
+    /// Call `callback` whenever element `id` is within reach of the viewport
+    /// (on scroll and when it comes into view); without a callback, check
+    /// again with the one already set.
+    fn watch_near(id: &str, callback: Option<&js_sys::Function>);
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -35,8 +77,6 @@ struct Filters {
     direction: String,
     min: String,
     max: String,
-    #[serde(skip)]
-    page: u32,
 }
 
 impl Filters {
@@ -47,7 +87,7 @@ impl Filters {
             .unwrap_or_default()
     }
 
-    fn query(&self) -> Result<TransactionSearchQuery, String> {
+    fn query(&self, page: u32) -> Result<TransactionSearchQuery, String> {
         let amount = |value: &str, key: &str| -> Result<Option<Decimal>, String> {
             if value.is_empty() {
                 return Ok(None);
@@ -70,8 +110,8 @@ impl Filters {
             },
             min: amount(&self.min, "min")?,
             max: amount(&self.max, "max")?,
-            page: self.page.max(1),
-            page_size: 50,
+            page: page.max(1),
+            page_size: PAGE_SIZE,
         })
     }
 
@@ -119,10 +159,7 @@ fn sign(direction: SearchDirection) -> &'static str {
 pub fn TransactionSearch() -> impl IntoView {
     let app = state();
     let start = Filters::saved();
-    let filters = RwSignal::new(Filters {
-        page: 1,
-        ..start.clone()
-    });
+    let filters = RwSignal::new(start.clone());
     let query = RwSignal::new(start.q.clone());
     let min = RwSignal::new(start.min.clone());
     let max = RwSignal::new(start.max.clone());
@@ -132,15 +169,14 @@ pub fn TransactionSearch() -> impl IntoView {
     let loading = RwSignal::new(true);
     let retry = RwSignal::new(0_u32);
     let generation = StoredValue::new(0_u64);
+    // Pages of `PAGE_SIZE` rows on screen.
+    let loaded = StoredValue::new(1_u32);
     let categories = report_categories(&[]);
 
     debounce(query, Duration::from_millis(300), move |q: String| {
         let q = q.trim().to_owned();
         if filters.with_untracked(|f| f.q != q) {
-            filters.update(|f| {
-                f.q = q;
-                f.page = 1;
-            });
+            filters.update(|f| f.q = q);
         }
     });
     let range = move |_: String| {
@@ -152,14 +188,22 @@ pub fn TransactionSearch() -> impl IntoView {
             filters.update(|f| {
                 f.min = low;
                 f.max = high;
-                f.page = 1;
             });
         }
     };
     debounce(min, Duration::from_millis(300), range);
     debounce(max, Duration::from_millis(300), range);
 
-    Effect::new(move |_| {
+    let failed = move |e: String| {
+        let e = clean_error(e);
+        error.set(if e.is_empty() {
+            "Could not search transactions.".into()
+        } else {
+            e
+        });
+    };
+    // New filters start from the newest rows; a refresh reloads what is shown.
+    Effect::new(move |previous: Option<Filters>| {
         let current = filters.get();
         retry.track();
         app.revision.track();
@@ -170,18 +214,73 @@ pub fn TransactionSearch() -> impl IntoView {
         {
             storage_set(STORAGE_KEY, &json);
         }
+        if previous.as_ref() != Some(&current) {
+            loaded.set_value(1);
+        }
+        let pages = loaded.get_value();
         generation.update_value(|g| *g += 1);
         let mine = generation.get_value();
         loading.set(true);
         error.set(String::new());
-        let query = match current.query() {
+        let queries: Result<Vec<_>, _> = (1..=pages).map(|page| current.query(page)).collect();
+        let queries = match queries {
             Ok(q) => q,
             Err(e) => {
                 error.set(e);
                 loading.set(false);
-                return;
+                return current;
             }
         };
+        spawn_local(async move {
+            let mut merged = None::<TransactionSearchResult>;
+            for query in queries {
+                let found =
+                    invoke::<TransactionSearchResult>("search_transactions", &SearchArgs { query })
+                        .await;
+                if generation.get_value() != mine {
+                    return;
+                }
+                match found {
+                    Ok(next) => {
+                        let last = next.items.len() < PAGE_SIZE as usize;
+                        match &mut merged {
+                            Some(all) => append(all, next),
+                            None => merged = Some(next),
+                        }
+                        if last {
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        failed(e);
+                        loading.set(false);
+                        return;
+                    }
+                }
+            }
+            if let Some(all) = merged {
+                loaded.set_value((all.items.len().div_ceil(PAGE_SIZE as usize)).max(1) as u32);
+                result.set(Some(all));
+            }
+            loading.set(false);
+            watch_near(MORE_ID, None);
+        });
+        current
+    });
+    let load_more = move || {
+        if loading.get_untracked() {
+            return;
+        }
+        let more =
+            result.with_untracked(|r| r.as_ref().is_some_and(|r| r.items.len() < r.total_count));
+        if !more {
+            return;
+        }
+        let Ok(query) = filters.with_untracked(|f| f.query(loaded.get_value() + 1)) else {
+            return;
+        };
+        let mine = generation.get_value();
+        loading.set(true);
         spawn_local(async move {
             let found =
                 invoke::<TransactionSearchResult>("search_transactions", &SearchArgs { query })
@@ -190,44 +289,43 @@ pub fn TransactionSearch() -> impl IntoView {
                 return;
             }
             match found {
-                Ok(page) if page.items.is_empty() && page.total_count > 0 && page.page > 1 => {
-                    filters.update(|f| f.page = 1);
-                    return;
-                }
-                Ok(page) => result.set(Some(page)),
-                Err(e) => {
-                    let e = clean_error(e);
-                    error.set(if e.is_empty() {
-                        "Could not search transactions.".into()
-                    } else {
-                        e
+                Ok(next) => {
+                    loaded.update_value(|n| *n += 1);
+                    result.update(|r| {
+                        if let Some(all) = r {
+                            let none = next.items.is_empty();
+                            append(all, next);
+                            if none {
+                                all.total_count = all.items.len();
+                            }
+                        }
                     });
                 }
+                Err(e) => failed(e),
             }
             loading.set(false);
+            watch_near(MORE_ID, None);
         });
+    };
+    Effect::new(move |_| {
+        let near = Closure::<dyn Fn()>::new(load_more).into_js_value();
+        watch_near(MORE_ID, Some(near.unchecked_ref()));
     });
 
     let set = move |key: &'static str, value: String| {
-        filters.update(|f| {
-            match key {
-                "account" => f.account = value,
-                "from" => f.from = value,
-                "to" => f.to = value,
-                "direction" => f.direction = value,
-                _ => {}
-            }
-            f.page = 1;
+        filters.update(|f| match key {
+            "account" => f.account = value,
+            "from" => f.from = value,
+            "to" => f.to = value,
+            "direction" => f.direction = value,
+            _ => {}
         });
     };
     let clear = move || {
         query.set(String::new());
         min.set(String::new());
         max.set(String::new());
-        filters.set(Filters {
-            page: 1,
-            ..Filters::default()
-        });
+        filters.set(Filters::default());
     };
     let accounts = Signal::derive(move || {
         let mut list = options([("", "All accounts")]);
@@ -399,8 +497,7 @@ pub fn TransactionSearch() -> impl IntoView {
                     }
                     .into_any(),
                     Some(r) => {
-                        let pages = r.total_count.div_ceil(r.page_size.max(1) as usize).max(1) as u32;
-                        let page = r.page;
+                        let (shown, total) = (r.items.len(), r.total_count);
                         let rows = r.items;
                         view! {
                             <div
@@ -484,33 +581,44 @@ pub fn TransactionSearch() -> impl IntoView {
                                     })
                                     .collect_view()}
                             </ul>
-                            {(pages > 1).then(|| view! {
-                                <nav class="flex items-center justify-between gap-2" aria-label="Pages">
+                            {(shown < total).then(|| view! {
+                                <div class="flex items-center justify-between gap-2">
+                                    <span class="text-sm text-fg-muted" role="status">
+                                        {if busy { "Loading more…".to_owned() } else { format!("Showing {shown} of {total}") }}
+                                    </span>
                                     <button
                                         type="button"
                                         class=button_class(Variant::Secondary, Size::Sm)
-                                        disabled={page <= 1 || busy}
-                                        on:click=move |_| filters.update(|f| f.page = page - 1)
+                                        disabled=busy
+                                        on:click=move |_| load_more()
                                     >
-                                        "Previous"
+                                        "Load more"
                                     </button>
-                                    <span class="text-sm text-fg-muted">{format!("Page {page} of {pages}")}</span>
-                                    <button
-                                        type="button"
-                                        class=button_class(Variant::Secondary, Size::Sm)
-                                        disabled={page >= pages || busy}
-                                        on:click=move |_| filters.update(|f| f.page = page + 1)
-                                    >
-                                        "Next"
-                                    </button>
-                                </nav>
+                                </div>
                             })}
                         }
                         .into_any()
                     }
                 }
             }}
+            <div id=MORE_ID aria-hidden="true"></div>
         </section>
+    }
+}
+
+/// Add the next page's rows to `all`, skipping any already shown (the list
+/// shifts when a transaction arrives between two loads).
+fn append(all: &mut TransactionSearchResult, next: TransactionSearchResult) {
+    all.total_count = next.total_count;
+    all.totals = next.totals;
+    for row in next.items {
+        if !all
+            .items
+            .iter()
+            .any(|r| r.transaction_id == row.transaction_id)
+        {
+            all.items.push(row);
+        }
     }
 }
 
