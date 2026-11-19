@@ -136,7 +136,8 @@ pub struct WishesView {
 }
 
 /// What the goals need a month against what current habits leave, judged by
-/// the same ladder on a habit scenario (every group at its typical month).
+/// the same ladder on a habit scenario: every group costs what it usually
+/// does and nothing is cut.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GoalOutlook {
     /// What the planned wishes ask to put away each month.
@@ -152,8 +153,11 @@ pub struct GoalOutlook {
     /// The months judged, the running one included.
     pub horizon_months: usize,
     pub goals: Vec<GoalStatus>,
-    /// The largest total first.
+    /// How the gap could be closed, each group giving the same share.
     pub cuts: Vec<HabitCut>,
+    /// The part of the gap that cutting every group to its floor leaves.
+    #[serde(default)]
+    pub uncovered: Decimal,
     /// `None` when the fund is switched off.
     pub fund: Option<EmergencyFund>,
 }
@@ -176,16 +180,14 @@ pub struct GoalStatus {
     pub plan_short: Decimal,
 }
 
-/// What the habit scenario takes from one spending group to pay the wishes.
+/// What one spending group would give a month to close the gap.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HabitCut {
     pub group_id: String,
     pub name: String,
+    /// What the group usually costs a month.
     pub typical: Decimal,
-    pub total: Decimal,
-    /// The months that need a cut, and the largest of them.
-    pub months: usize,
-    pub largest: Decimal,
+    pub monthly: Decimal,
     /// The usual visits a month, when known.
     pub typical_visits: Option<Decimal>,
 }

@@ -1,7 +1,7 @@
 # Goals against habits: what the wishes and an emergency fund ask of spending
 
 Date: 2026-11-19
-Status: approved by the owner in chat ("all good approved the design");
+Status: built; see "Changed while building" at the end. Approved by the owner in chat ("all good approved the design");
 how it is built is the author's call.
 
 ## Intent
@@ -144,3 +144,21 @@ equivalent, fund block parsing.
 
 Wording, layout, and how the essential groups are edited (a comma list is
 enough for now).
+
+## Changed while building (the real ledger decided)
+
+- **A usual month counts empty months.** The Adjustments card's "typical"
+  (median of months *with* spending) made driving lessons paid in three
+  months of five a €1,110 monthly habit. The scenario uses the median of
+  all earlier months, zeros included (`goals::usual`): €450 for the
+  lessons, nothing for a one-off.
+- **The habit run cuts nothing.** With every group cuttable the ladder
+  saved as fast as possible and emptied whole groups for months, and every
+  wish read "on track". The run now shows what happens when nothing
+  changes (what is short, what lands on the card); the advice comes from
+  the monthly gap, shared by the groups in proportion to their room
+  (usual month down to the owner's floor; an unranked essential group
+  gives nothing), with `uncovered` for what even that leaves.
+- **Needed a month** is each later purchase spread over the months until
+  it is due; what is due this month is left out.
+- `GoalStatus.on_card`: what the wish puts on a credit card at habits.

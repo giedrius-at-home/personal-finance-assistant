@@ -2,8 +2,6 @@
 //! baselines rewritten so every spending group costs its typical month, and
 //! what that judging says to cut. Pure arithmetic, nothing is saved.
 
-use std::collections::HashMap;
-
 use finance_types::gateway::{BudgetPlan, Repeat};
 use finance_types::report::Currency;
 use finance_types::report::adjustments::Adjustments;
@@ -12,27 +10,21 @@ use finance_types::report::wishes::{EmergencyFund, HabitCut, WishMonth};
 use rust_decimal::Decimal;
 
 use super::baseline::{parse_month, ranking};
-use super::ladder::{GroupRoom, MonthBaseline};
+use super::ladder::MonthBaseline;
 use super::schedule::Planned;
 use crate::period::shift_month;
 use crate::text::casefold;
 use crate::trends::median;
 
-/// Earlier months with spending a typical month needs (as the Adjustments
-/// card asks).
-const TYPICAL_MONTHS: usize = 3;
-/// An essential group nobody ranked: never cut.
-const ESSENTIAL: u8 = 1;
-/// Any other unranked group: cut before the essentials.
-const FLEXIBLE: u8 = 2;
-
+/// Earlier months a usual month needs.
+const USUAL_MONTHS: usize = 3;
 /// One spending group as the owner usually lives it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HabitRow {
     /// The budget group's id, or `shadow:<group>` without a budget.
     pub id: String,
     pub name: String,
-    /// The median of the earlier months with spending.
+    /// What a month usually costs ([`usual`]).
     pub typical: Decimal,
     /// What the plan gives it; zero without a budget.
     pub budget: Decimal,
@@ -41,18 +33,17 @@ pub struct HabitRow {
     pub essential: bool,
 }
 
-/// The median of the earlier entries of `history` (all but the last, the
-/// running month) that are above zero, once there are three.
-pub fn typical(history: &[Decimal]) -> Option<Decimal> {
-    let earlier = history.len().saturating_sub(1);
-    let spent: Vec<Decimal> = history[..earlier]
-        .iter()
-        .copied()
-        .filter(|v| *v > Decimal::ZERO)
-        .collect();
-    (spent.len() >= TYPICAL_MONTHS)
-        .then(|| median(&spent))
-        .flatten()
+/// What a month usually costs: the median of the earlier entries of
+/// `history` (all but the last, the running month), months without spending
+/// included, once there are three. Lessons paid every other month count for
+/// what they cost a month; a one-off counts for nothing. `None` when that
+/// is zero.
+pub fn usual(history: &[Decimal]) -> Option<Decimal> {
+    let earlier = &history[..history.len().saturating_sub(1)];
+    if earlier.len() < USUAL_MONTHS {
+        return None;
+    }
+    median(earlier).filter(|m| *m > Decimal::ZERO)
 }
 
 /// `currency`'s spending groups that have a typical month.
@@ -68,7 +59,7 @@ pub fn habit_rows(
         .flat_map(|a| &a.rows)
         .filter_map(|row| {
             Some(HabitRow {
-                typical: typical(&row.row.history)?,
+                typical: usual(&row.row.history)?,
                 id: row.row.id.clone(),
                 name: row.row.name.clone(),
                 budget: if row.budgeted {
@@ -84,42 +75,17 @@ pub fn habit_rows(
 }
 
 /// The plan's baselines with every month after the running one living as
-/// usual: free money pays the typical month of every group instead of its
-/// budget, and every group can be cut down from its typical month, an
-/// unranked essential one not at all.
-pub fn habit_baselines(
-    plan: &[MonthBaseline],
-    rows: &[HabitRow],
-    plans: &[BudgetPlan],
-) -> Vec<MonthBaseline> {
-    let mut latest: Vec<&BudgetPlan> = plans.iter().collect();
-    latest.sort_by(|a, b| b.month.cmp(&a.month));
+/// usual: free money pays what every group usually costs instead of its
+/// budget, and nothing is cut, since the owner changes nothing.
+pub fn habit_baselines(plan: &[MonthBaseline], rows: &[HabitRow]) -> Vec<MonthBaseline> {
     let above_budget: Decimal = rows.iter().map(|r| r.typical - r.budget).sum();
-    let rooms: Vec<GroupRoom> = rows
-        .iter()
-        .map(|row| {
-            let ranked = ranking(latest.iter().copied(), &row.name);
-            let (importance, min) = match ranked.and_then(|g| Some((g.importance?, g.floor))) {
-                Some((importance, floor)) => (importance, floor.unwrap_or_default()),
-                None if row.essential => (ESSENTIAL, row.typical),
-                None => (FLEXIBLE, Decimal::ZERO),
-            };
-            GroupRoom {
-                id: row.id.clone(),
-                name: row.name.clone(),
-                importance,
-                limit: row.typical,
-                min: min.min(row.typical),
-            }
-        })
-        .collect();
     plan.iter()
         .enumerate()
         .map(|(i, base)| match i {
             0 => base.clone(),
             _ => MonthBaseline {
                 free: base.free - above_budget,
-                groups: rooms.clone(),
+                groups: Vec::new(),
                 ..base.clone()
             },
         })
@@ -155,43 +121,45 @@ pub fn fixed_monthly(
     (alloc.next_fixed - cards + ongoing_monthly(items)).max(Decimal::ZERO)
 }
 
-/// What the habit scenario takes from each group after the running month,
-/// the largest total first.
-pub fn cuts(habit_months: &[WishMonth], rows: &[HabitRow]) -> Vec<HabitCut> {
-    let mut order: Vec<&str> = Vec::new();
-    let mut by_group: HashMap<&str, Vec<Decimal>> = HashMap::new();
-    for month in habit_months.iter().skip(1) {
-        let mut taken: HashMap<&str, Decimal> = HashMap::new();
-        for cut in month.verdicts.iter().flat_map(|v| &v.cuts) {
-            *taken.entry(cut.group_id.as_str()).or_default() += cut.from - cut.to;
-        }
-        for row in rows {
-            if let Some(amount) = taken.get(row.id.as_str()).filter(|a| **a > Decimal::ZERO) {
-                if !by_group.contains_key(row.id.as_str()) {
-                    order.push(&row.id);
-                }
-                by_group.entry(&row.id).or_default().push(*amount);
-            }
-        }
+/// How a monthly `gap` could be closed: every group gives in proportion to
+/// its room, and what even that leaves open. A group's room is its usual
+/// month down to the floor the owner set in a plan; an essential group the
+/// owner never ranked has none. Any split closes the gap; this one asks the
+/// same share of everything that can give.
+pub fn advice(gap: Decimal, rows: &[HabitRow], plans: &[BudgetPlan]) -> (Vec<HabitCut>, Decimal) {
+    if gap <= Decimal::ZERO {
+        return (Vec::new(), Decimal::ZERO);
     }
-    let mut found: Vec<HabitCut> = order
-        .into_iter()
-        .filter_map(|id| {
-            let row = rows.iter().find(|r| r.id == id)?;
-            let amounts = by_group.get(id)?;
-            Some(HabitCut {
-                group_id: row.id.clone(),
-                name: row.name.clone(),
-                typical: row.typical,
-                total: amounts.iter().sum(),
-                months: amounts.len(),
-                largest: amounts.iter().copied().max().unwrap_or_default(),
-                typical_visits: row.typical_visits,
-            })
+    let mut latest: Vec<&BudgetPlan> = plans.iter().collect();
+    latest.sort_by(|a, b| b.month.cmp(&a.month));
+    let rooms: Vec<Decimal> = rows
+        .iter()
+        .map(|row| {
+            let ranked = ranking(latest.iter().copied(), &row.name);
+            match ranked {
+                Some(group) => row.typical - group.floor.unwrap_or_default(),
+                None if row.essential => Decimal::ZERO,
+                None => row.typical,
+            }
+            .max(Decimal::ZERO)
         })
         .collect();
-    found.sort_by(|a, b| (b.total, &a.name).cmp(&(a.total, &b.name)));
-    found
+    let room: Decimal = rooms.iter().sum();
+    let closed = gap.min(room);
+    let mut cuts: Vec<HabitCut> = rows
+        .iter()
+        .zip(&rooms)
+        .filter(|(_, r)| **r > Decimal::ZERO)
+        .map(|(row, r)| HabitCut {
+            group_id: row.id.clone(),
+            name: row.name.clone(),
+            typical: row.typical.round_dp(2),
+            monthly: (closed * *r / room).round_dp(2),
+            typical_visits: row.typical_visits,
+        })
+        .collect();
+    cuts.sort_by(|a, b| (b.monthly, &a.name).cmp(&(a.monthly, &b.name)));
+    (cuts, (gap - room).max(Decimal::ZERO).round_dp(2))
 }
 
 /// The emergency fund: `months` of bills and essentials, filled by what the
@@ -208,6 +176,7 @@ pub fn fund(
         return None;
     }
     let essentials: Decimal = rows.iter().filter(|r| r.essential).map(|r| r.typical).sum();
+    let (fixed, essentials) = (fixed.round_dp(2), essentials.round_dp(2));
     let target = (fixed + essentials) * Decimal::from(months);
     let balance = habit_months
         .first()
@@ -248,7 +217,7 @@ mod tests {
     use finance_types::report::Currency;
     use finance_types::report::adjustments::{AdjustmentRow, Adjustments, Habit};
     use finance_types::report::budget::BudgetRow;
-    use finance_types::report::wishes::{Cut, Verdict, WishMonth};
+    use finance_types::report::wishes::WishMonth;
     use jiff::civil::date;
 
     use super::*;
@@ -294,28 +263,46 @@ mod tests {
     #[test]
     fn later_months_cost_the_typical_month_and_month_zero_is_the_plans() {
         let plan_bases = [base(10, "100"), base(11, "900"), base(12, "900")];
-        let habit = habit_baselines(&plan_bases, &rows(), &[]);
+        let habit = habit_baselines(&plan_bases, &rows());
         assert_eq!(habit[0].free, d("100"));
         assert_eq!(habit[0].groups[0].id, "planned");
-        // 900 − (470 + 30 + 75).
+        // 900 − (470 + 30 + 75), and nothing is cut: the owner changes nothing.
         assert_eq!((habit[1].free, habit[2].free), (d("325"), d("325")));
-        let rooms: Vec<(&str, u8, Decimal, Decimal)> = habit[1]
-            .groups
-            .iter()
-            .map(|g| (g.id.as_str(), g.importance, g.limit, g.min))
-            .collect();
-        assert_eq!(
-            rooms,
-            [
-                ("food-out", 2, d("570"), d("0")),
-                ("groceries", 1, d("330"), d("330")),
-                ("shadow:Shopping", 2, d("75"), d("0")),
-            ]
-        );
+        assert!(habit[1].groups.is_empty() && habit[2].groups.is_empty());
     }
 
     #[test]
-    fn the_owners_ranking_and_floor_win() {
+    fn a_gap_is_shared_by_the_flexible_groups() {
+        let seen = |gap: &str, plans: &[BudgetPlan]| {
+            let (cuts, uncovered) = advice(d(gap), &rows(), plans);
+            let cuts: Vec<(String, Decimal)> =
+                cuts.into_iter().map(|c| (c.group_id, c.monthly)).collect();
+            (cuts, uncovered)
+        };
+        let named = |pairs: &[(&str, &str)]| -> Vec<(String, Decimal)> {
+            pairs
+                .iter()
+                .map(|(id, v)| ((*id).to_owned(), d(v)))
+                .collect()
+        };
+        // 570 : 75; groceries are essential.
+        assert_eq!(
+            seen("300", &[]),
+            (
+                named(&[("food-out", "265.12"), ("shadow:Shopping", "34.88")]),
+                d("0")
+            )
+        );
+        // More than everything flexible: the rest stays open.
+        assert_eq!(
+            seen("1000", &[]),
+            (
+                named(&[("food-out", "570"), ("shadow:Shopping", "75")]),
+                d("355")
+            )
+        );
+        assert_eq!(seen("0", &[]), (Vec::new(), d("0")));
+        // The owner's floors hold, and a ranked essential group may give.
         let plans = [
             plan(
                 "2026-09-01",
@@ -326,15 +313,17 @@ mod tests {
                 vec![plan_group("f", "food & drinks out", Some(5), Some("200"))],
             ),
         ];
-        let habit = habit_baselines(&[base(10, "0"), base(11, "0")], &rows(), &plans);
-        let room = |id: &str| habit[1].groups.iter().find(|g| g.id == id).unwrap();
+        // Rooms 370, 80 and 75.
         assert_eq!(
-            (room("food-out").importance, room("food-out").min),
-            (5, d("200"))
-        );
-        assert_eq!(
-            (room("groceries").importance, room("groceries").min),
-            (3, d("250"))
+            seen("525", &plans),
+            (
+                named(&[
+                    ("food-out", "370"),
+                    ("groceries", "80"),
+                    ("shadow:Shopping", "75")
+                ]),
+                d("0")
+            )
         );
     }
 
@@ -385,6 +374,15 @@ mod tests {
                 ),
                 adjustment("groceries", "groceries", "300", &[340, 320, 330, 10], true),
                 adjustment("shadow:Tech", "Tech", "0", &[0, 200, 60, 5], false),
+                adjustment(
+                    "shadow:Education",
+                    "Education",
+                    "0",
+                    &[1712, 0, 0, 450, 1110, 0],
+                    false,
+                ),
+                adjustment("shadow:Lumpy", "Lumpy", "0", &[0, 0, 900, 0, 0, 1], false),
+                adjustment("shadow:New", "New", "0", &[40, 40, 5], false),
             ],
             unsorted: Decimal::ZERO,
         };
@@ -397,7 +395,9 @@ mod tests {
             &Currency::eur(),
             &["Groceries".to_owned()],
         );
-        // Tech has two earlier months with spending: not known well enough.
+        // A usual month counts the months without spending too: lessons
+        // paid in three months of five cost 450 a month, a one-off nothing.
+        // Two earlier months are too few to know.
         let seen: Vec<(&str, Decimal, Decimal, bool)> = rows
             .iter()
             .map(|r| (r.id.as_str(), r.typical, r.budget, r.essential))
@@ -405,8 +405,10 @@ mod tests {
         assert_eq!(
             seen,
             [
-                ("food-out", d("572"), d("100"), false),
+                ("food-out", d("467.5"), d("100"), false),
                 ("groceries", d("330"), d("300"), true),
+                ("shadow:Tech", d("60"), d("0"), false),
+                ("shadow:Education", d("450"), d("0"), false),
             ]
         );
         assert_eq!(rows[0].typical_visits, Some(d("30")));
@@ -447,16 +449,7 @@ mod tests {
         assert_eq!(ongoing_monthly(&items).round_dp(2), d("303.33"));
     }
 
-    fn cut(id: &str, from: &str, to: &str) -> Cut {
-        Cut {
-            group_id: id.into(),
-            name: id.into(),
-            from: d(from),
-            to: d(to),
-        }
-    }
-
-    fn month(month: &str, free_left: &str, savings: (&str, &str), cuts: Vec<Cut>) -> WishMonth {
+    fn month(month: &str, free_left: &str, savings: (&str, &str)) -> WishMonth {
         WishMonth {
             month: month.into(),
             free_before: Decimal::ZERO,
@@ -466,72 +459,13 @@ mod tests {
             card_charge_in: Decimal::ZERO,
             card_used: Decimal::ZERO,
             cards: Vec::new(),
-            verdicts: vec![Verdict {
-                wish_id: Some("w".into()),
-                label: "w".into(),
-                amount: Decimal::ZERO,
-                from_free: Decimal::ZERO,
-                from_savings: Decimal::ZERO,
-                cuts,
-                on_card: Decimal::ZERO,
-                short: Decimal::ZERO,
-                set_aside: false,
-                next_short: Decimal::ZERO,
-                next_cuts: Vec::new(),
-                must: false,
-                skipped: false,
-            }],
+            verdicts: Vec::new(),
         }
     }
 
     #[test]
-    fn cuts_add_up_per_group_the_largest_first() {
-        let months = [
-            month(
-                "2026-11-01",
-                "0",
-                ("0", "0"),
-                vec![cut("planned", "100", "50")],
-            ),
-            month(
-                "2026-12-01",
-                "0",
-                ("0", "0"),
-                vec![cut("food-out", "570", "420")],
-            ),
-            month(
-                "2027-01-01",
-                "0",
-                ("0", "0"),
-                vec![
-                    cut("food-out", "570", "540"),
-                    cut("food-out", "540", "500"),
-                    cut("shadow:Shopping", "75", "0"),
-                ],
-            ),
-        ];
-        let found = cuts(&months, &rows());
-        let seen: Vec<(&str, Decimal, usize, Decimal)> = found
-            .iter()
-            .map(|c| (c.group_id.as_str(), c.total, c.months, c.largest))
-            .collect();
-        // Month 0 is the plan's own judging, not a habit to change.
-        assert_eq!(
-            seen,
-            [
-                ("food-out", d("220"), 2, d("150")),
-                ("shadow:Shopping", d("75"), 1, d("75")),
-            ]
-        );
-        assert_eq!(
-            (found[0].name.as_str(), found[0].typical),
-            ("Food & drinks out", d("570"))
-        );
-    }
-
-    #[test]
     fn the_fund_is_months_of_bare_living() {
-        let months = [month("2026-11-01", "0", ("611", "611"), vec![])];
+        let months = [month("2026-11-01", "0", ("611", "611"))];
         let fund = fund(6, d("1050"), &rows(), &months, d("500")).unwrap();
         assert_eq!(
             (
@@ -556,22 +490,22 @@ mod tests {
         };
         // Inside the horizon: 500 + 300 + 400 reaches 1200 in December.
         let inside = [
-            month("2026-11-01", "300", ("500", "500"), vec![]),
-            month("2026-12-01", "400", ("500", "500"), vec![]),
-            month("2027-01-01", "400", ("500", "500"), vec![]),
+            month("2026-11-01", "300", ("500", "500")),
+            month("2026-12-01", "400", ("500", "500")),
+            month("2027-01-01", "400", ("500", "500")),
         ];
         assert_eq!(fill(&inside, "400").as_deref(), Some("2026-12-01"));
         // After it: 100 held, 1100 to go at 500 a month is three more months.
         let after = [
-            month("2026-11-01", "0", ("500", "100"), vec![]),
-            month("2026-12-01", "0", ("100", "100"), vec![]),
+            month("2026-11-01", "0", ("500", "100")),
+            month("2026-12-01", "0", ("100", "100")),
         ];
         assert_eq!(fill(&after, "500").as_deref(), Some("2027-03-01"));
         // Nothing left over: no date.
         assert_eq!(fill(&after, "0"), None);
         assert_eq!(fill(&after, "-50"), None);
         // Already full.
-        let full = [month("2026-11-01", "0", ("1500", "1500"), vec![])];
+        let full = [month("2026-11-01", "0", ("1500", "1500"))];
         assert_eq!(fill(&full, "0").as_deref(), Some("2026-11-01"));
         assert_eq!(fill(&[], "500"), None);
     }

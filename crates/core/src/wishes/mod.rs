@@ -261,7 +261,7 @@ impl Inputs<'_> {
         // The fund needs a later month even when no wish reaches that far.
         let months = schedule::horizon(&items, month0).max(2);
         let (plan_bases, _) = self.bases(alloc, month0, wishes, settings, months);
-        let habit_bases = goals::habit_baselines(&plan_bases, &self.habits, &self.plans);
+        let habit_bases = goals::habit_baselines(&plan_bases, &self.habits);
         let habit_months = self.run(&habit_bases, month0, &items);
         let ctx = RowContext {
             wishes,
@@ -282,7 +282,7 @@ impl Inputs<'_> {
                 due_on: w.due_on.clone(),
                 amount: w.amount,
                 must: w.must,
-                short: ctx.row(w).short,
+                short: ctx.row(w).short.round_dp(2),
                 on_card: habit_months
                     .iter()
                     .flat_map(|m| &m.verdicts)
@@ -295,22 +295,25 @@ impl Inputs<'_> {
                         })
                     })
                     .map(|v| v.on_card)
-                    .sum(),
+                    .sum::<Decimal>()
+                    .round_dp(2),
                 plan_short: plan_rows
                     .iter()
                     .find(|r| r.wish.wish_id == w.wish_id)
                     .map_or(Decimal::ZERO, |r| r.short),
             })
             .collect();
-        // Each purchase spread over the months left until it is due.
+        // Each later purchase spread over the months left until it is due.
         let needed_monthly: Decimal = items
             .iter()
             .filter(|i| i.per_month.is_none() && i.remaining > Decimal::ZERO)
-            .map(|i| i.remaining / Decimal::from(i.months_from(month0).max(1)))
+            // What is due this month is this month's business.
+            .filter(|i| i.months_from(month0) >= 1)
+            .map(|i| i.remaining / Decimal::from(i.months_from(month0)))
             .sum::<Decimal>()
             .round_dp(2);
-        let plan_free = plan_bases.get(1)?.free;
-        let habit_free = habit_bases.get(1)?.free;
+        let plan_free = plan_bases.get(1)?.free.round_dp(2);
+        let habit_free = habit_bases.get(1)?.free.round_dp(2);
         let coverage = (needed_monthly > Decimal::ZERO).then(|| {
             let share = (habit_free.max(Decimal::ZERO) / needed_monthly * Decimal::ONE_HUNDRED)
                 .floor()
@@ -318,15 +321,18 @@ impl Inputs<'_> {
             u32::try_from(share.mantissa()).unwrap_or(0)
         });
         let steady = habit_free - goals::ongoing_monthly(&items);
+        let gap = (needed_monthly - habit_free).max(Decimal::ZERO);
+        let (cuts, uncovered) = goals::advice(gap, &self.habits, &self.plans);
         Some(GoalOutlook {
             needed_monthly,
             habit_free,
             plan_free,
-            gap: (needed_monthly - habit_free).max(Decimal::ZERO),
+            gap,
             coverage,
             horizon_months: habit_months.len(),
             goals: statuses,
-            cuts: goals::cuts(&habit_months, &self.habits),
+            cuts,
+            uncovered,
             fund: goals::fund(
                 settings.emergency_months,
                 goals::fixed_monthly(alloc, &self.card_bills, &items),
@@ -1273,7 +1279,7 @@ mod tests {
     }
 
     #[test]
-    fn habits_above_budget_turn_an_affordable_wish_into_cuts() {
+    fn habits_above_budget_put_an_affordable_wish_on_the_card() {
         // The plan leaves 500 a month; food out runs 470 above its budget.
         let a = alloc("0", "500", vec![], vec![]);
         let trip = wish("trip", None, "900", "2026-12-20");
@@ -1286,16 +1292,14 @@ mod tests {
         assert_eq!((goals.needed_monthly, goals.gap), (d("450"), d("420")));
         assert_eq!(goals.coverage, Some(6));
         assert_eq!(goals.horizon_months, 3);
+        // Two months of 30 against 900: the rest lands on the card.
         let trip = &goals.goals[0];
         assert_eq!(
-            (trip.short, trip.plan_short),
-            (Decimal::ZERO, Decimal::ZERO)
+            (trip.short, trip.on_card, trip.plan_short),
+            (d("0"), d("840"), d("0"))
         );
         let food = &goals.cuts[0];
-        assert_eq!(
-            (food.total, food.months, food.largest),
-            (d("840"), 2, d("570"))
-        );
+        assert_eq!((food.monthly, goals.uncovered), (d("420"), d("0")));
     }
 
     #[test]
@@ -1305,6 +1309,7 @@ mod tests {
         let view = with_habits(&a, vec![habit("Groceries", "330", "100", true)], &[trip]);
         let goals = view.goals.unwrap();
         assert!(goals.cuts.is_empty());
+        assert_eq!((goals.gap, goals.uncovered), (d("180"), d("180")));
         // Two months of 270 against 900: the rest lands on the card.
         let trip = &goals.goals[0];
         assert_eq!(
@@ -1325,6 +1330,11 @@ mod tests {
         assert!(goals.cuts.is_empty());
         assert_eq!(goals.goals[0].short, Decimal::ZERO);
         assert_eq!(goals.fund.unwrap().balance, d("1000"));
+        // Due this month: not part of what the coming months need.
+        assert_eq!(
+            (goals.needed_monthly, goals.coverage),
+            (Decimal::ZERO, None)
+        );
     }
 
     #[test]
