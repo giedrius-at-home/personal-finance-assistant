@@ -7,8 +7,8 @@ use rust_decimal::Decimal;
 
 use crate::ds::charts::{BarChart, Series, fmt};
 use crate::ds::{
-    Badge, Card, CardTitle, Eyebrow, Heading, Money, Stat, TABLE, TABLE_CONTAINER, TCELL_NUM, TH,
-    TH_NUM, TROW, Tone, cn, money,
+    Badge, Card, CardTitle, Eyebrow, Facts, Heading, Metric, Money, TABLE, TABLE_CONTAINER,
+    TCELL_NUM, TH, TH_NUM, TROW, Tone, cn, money,
 };
 use crate::format;
 use crate::pages::f;
@@ -36,7 +36,7 @@ pub fn DailyForecastPanel(report: Dashboard, currency_code: String) -> impl Into
         return view! {
             <Card class="grid gap-2">
                 <CardTitle>"Daily forecast"</CardTitle>
-                <p class="text-sm text-fg-muted">"Forecast preparing in the background. It needs at least four weeks of spending history."</p>
+                <span title="Prepared in the background. It needs at least four weeks of spending history."><Badge tone=Tone::Outline>"Preparing"</Badge></span>
             </Card>
         }
         .into_any();
@@ -87,7 +87,7 @@ pub fn DailyForecastPanel(report: Dashboard, currency_code: String) -> impl Into
             categories=categories
             series=series
             stacked=true
-            height=186
+            height=260
             label="Forecast per day"
             format=fmt(move |n| format::money_dp(Decimal::try_from(n).unwrap_or_default(), &code, 0))
         />
@@ -108,7 +108,8 @@ pub fn DailyForecastPanel(report: Dashboard, currency_code: String) -> impl Into
         .collect_view();
     let upcoming = (!forecast.upcoming.is_empty()).then(|| {
         view! {
-            <ul class="grid" aria-label="Coming up">
+            <ul class="grid content-start" aria-label="Coming up">
+                <li class="pb-1 text-eyebrow font-bold uppercase tracking-eyebrow text-fg-muted">"Coming up"</li>
                 {forecast
                     .upcoming
                     .iter()
@@ -140,17 +141,39 @@ pub fn DailyForecastPanel(report: Dashboard, currency_code: String) -> impl Into
             }
         })
         .collect_view();
-    let errors = forecast.baseline_error.map(|baseline| {
-        let model = forecast
-            .model_error
-            .map(|e| format!("; TimesFM {}", m(e)))
-            .unwrap_or_default();
-        let planned = forecast
-            .planned_model_error
-            .map(|e| format!("; TimesFM with planned payments {}", m(e)))
-            .unwrap_or_default();
-        view! { <p>{format!("Average weekly miss in past weeks: weekday average {}{model}{planned}.", m(baseline))}</p> }
-    });
+    let mut evidence = vec![
+        (
+            "Habit spending this month".to_owned(),
+            m(forecast.habit_spent_this_month),
+        ),
+        (
+            "Bills and planned payments paid".to_owned(),
+            m(forecast.planned_paid_this_month),
+        ),
+        ("Model".to_owned(), forecast.model.clone()),
+        (
+            "Days of history".to_owned(),
+            forecast.training_days.to_string(),
+        ),
+    ];
+    if let Some(h) = &heaviest {
+        evidence.insert(
+            0,
+            (
+                "Heaviest habit day".into(),
+                format!("{} · {}", h.weekday, m(h.average)),
+            ),
+        );
+    }
+    if let Some(baseline) = forecast.baseline_error {
+        evidence.push(("Weekly miss, weekday average".into(), m(baseline)));
+        if let Some(e) = forecast.model_error {
+            evidence.push(("Weekly miss, TimesFM".into(), m(e)));
+        }
+        if let Some(e) = forecast.planned_model_error {
+            evidence.push(("Weekly miss, TimesFM with planned".into(), m(e)));
+        }
+    }
     let badge = format!(
         "{}{}",
         method_label(&forecast.method),
@@ -163,41 +186,39 @@ pub fn DailyForecastPanel(report: Dashboard, currency_code: String) -> impl Into
             String::new()
         }
     );
-    let next_week = amount(
-        forecast.next_week_habit + forecast.next_week_planned,
-        "text-2xl",
-    );
-    let next_week_delta = format!(
-        "habits {} (likely {}–{}) · planned {}",
-        m(forecast.next_week_habit),
-        m(forecast.next_week_lower),
-        m(forecast.next_week_upper),
-        m(forecast.next_week_planned),
-    );
-    let month_end = amount(forecast.month_end_habit, "text-2xl");
-    let month_end_delta = format!(
-        "likely {}–{} · {} still planned · {} income expected",
-        m(forecast.month_end_lower),
-        m(forecast.month_end_upper),
-        m(forecast.month_remaining_planned),
-        m(forecast.month_remaining_income),
-    );
-    let frame = chart_frame(
-        "Forecast per day",
-        "Habits and planned payments and bills for each of the next seven days".into(),
-        220,
-        chart,
-    );
-    let heaviest = heaviest.map(|h| {
-        view! { <p>{format!("Your heaviest habit day is {}, about {}.", h.weekday, m(h.average))}</p> }
-    });
-    let history = format!(
-        "Habit spending this month so far: {}. Bills and planned payments paid: {}. Model: {}, from {} days of history.",
-        m(forecast.habit_spent_this_month),
-        m(forecast.planned_paid_this_month),
-        forecast.model,
-        forecast.training_days,
-    );
+    let next_week = amount(forecast.next_week_habit + forecast.next_week_planned, "");
+    let next_week_facts = vec![
+        ("Habits".to_owned(), m(forecast.next_week_habit)),
+        (
+            "Likely range".to_owned(),
+            format!(
+                "{} – {}",
+                m(forecast.next_week_lower),
+                m(forecast.next_week_upper)
+            ),
+        ),
+        ("Planned".to_owned(), m(forecast.next_week_planned)),
+    ];
+    let month_end = amount(forecast.month_end_habit, "");
+    let month_end_facts = vec![
+        (
+            "Likely range".to_owned(),
+            format!(
+                "{} – {}",
+                m(forecast.month_end_lower),
+                m(forecast.month_end_upper)
+            ),
+        ),
+        (
+            "Still planned".to_owned(),
+            m(forecast.month_remaining_planned),
+        ),
+        (
+            "Income expected".to_owned(),
+            m(forecast.month_remaining_income),
+        ),
+    ];
+    let frame = chart_frame("Forecast per day", String::new(), 300, chart);
     let content = view! {
         <div role="region" aria-label="Daily spending forecast" class="contents">
             <header class="flex flex-col items-start justify-between gap-3 sm:flex-row">
@@ -207,16 +228,17 @@ pub fn DailyForecastPanel(report: Dashboard, currency_code: String) -> impl Into
                 </div>
                 <Badge tone=Tone::Outline class="h-auto whitespace-normal text-left">{badge}</Badge>
             </header>
-            <div class="grid gap-4 sm:grid-cols-2">
-                <Stat label="Next 7 days" delta=next_week_delta>{next_week}</Stat>
-                <Stat label="Habit spending by month end" delta=month_end_delta>{month_end}</Stat>
+            <div class="grid gap-x-10 gap-y-6 lg:grid-cols-[minmax(240px,.4fr)_minmax(0,1.1fr)_minmax(260px,.5fr)]">
+                <div class="grid content-start gap-6">
+                    <Metric label="Next 7 days" facts=next_week_facts>{next_week}</Metric>
+                    <Metric label="Habit spending by month end" facts=month_end_facts>{month_end}</Metric>
+                </div>
+                {frame}
+                {upcoming}
             </div>
-            {frame}
             <ol class="sr-only" aria-label="Forecast per day, as a list">{list}</ol>
-            {upcoming}
             <details class="grid gap-3 text-sm leading-relaxed [&>*]:mt-3">
                 <summary class="cursor-pointer font-medium">"Your weekday habits & forecast evidence"</summary>
-                {heaviest}
                 <div tabindex="0" role="region" aria-label="Last twelve weeks" class=TABLE_CONTAINER>
                     <table class=TABLE data-density="md">
                         <caption class=CAPTION>"Last twelve weeks"</caption>
@@ -230,8 +252,7 @@ pub fn DailyForecastPanel(report: Dashboard, currency_code: String) -> impl Into
                         <tbody>{habits}</tbody>
                     </table>
                 </div>
-                <p>{history}</p>
-                {errors}
+                <Facts rows=evidence class="max-w-md" />
             </details>
         </div>
     }

@@ -12,7 +12,10 @@ use rust_decimal::{Decimal, RoundingStrategy};
 use serde::Serialize;
 
 use crate::api::invoke;
-use crate::ds::{Card, CardHeader, CardTitle, Eyebrow, Size, Variant, button_class, money};
+use crate::ds::{
+    Badge, Card, CardHeader, CardTitle, Eyebrow, METRIC_STRIP, Metric, Size, Tone, Variant,
+    button_class, cn, money,
+};
 use crate::pages::overview::visuals::{Pace, month_end, row_color};
 use crate::pages::with_report;
 use crate::{Tab, format, state};
@@ -289,42 +292,6 @@ pub fn per_week(value: Decimal) -> String {
     }
 }
 
-pub fn visits_text(visits: usize) -> String {
-    format!("{visits} visit{}", if visits == 1 { "" } else { "s" })
-}
-
-/// "Coffee: 22 visits × €2.80, usually 12 × €2.90".
-pub fn driver_text(driver: &Driver, unit: &Currency) -> String {
-    let Driver {
-        category,
-        visits,
-        spent,
-        usual,
-        new,
-    } = driver;
-    match usual {
-        Some((usual_visits, usual_spent)) if *visits > 0 && *usual_visits > Decimal::ZERO => {
-            format!(
-                "{category}: {} × {}, usually {} × {}",
-                visits_text(*visits),
-                money(*spent / Decimal::from(*visits), unit),
-                one_decimal(*usual_visits),
-                money(*usual_spent / *usual_visits, unit),
-            )
-        }
-        _ if !new => format!(
-            "{category}: {}, {}",
-            visits_text(*visits),
-            money(*spent, unit)
-        ),
-        _ => format!(
-            "{category}: new this month, {}, {}",
-            visits_text(*visits),
-            money(*spent, unit)
-        ),
-    }
-}
-
 /// Whole units: budgets, typical months and month-end figures.
 fn whole(value: Decimal, unit: &Currency) -> String {
     format::money_dp(value, &unit.code, 0)
@@ -438,7 +405,7 @@ fn action_view(line: &Line, budget: &MonthlyBudget, state: CardState) -> AnyView
     let plan = apply(&budget.plan, &line.row, &action);
     let (shown_id, ask_id, save_id, error_id) = (id.clone(), id.clone(), id.clone(), id);
     view! {
-        <div class="flex flex-wrap items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2 pl-5">
             <Show
                 when=move || state.confirming.with(|c| c.as_deref() == Some(shown_id.as_str()))
                 fallback={
@@ -489,91 +456,106 @@ fn action_view(line: &Line, budget: &MonthlyBudget, state: CardState) -> AnyView
     .into_any()
 }
 
+const LINE_GRID: &str = "grid grid-cols-[minmax(10rem,1.4fr)_repeat(4,minmax(5rem,.6fr))_minmax(9rem,.9fr)] items-center gap-x-3";
+const DRIVER_GRID: &str =
+    "grid grid-cols-[minmax(9rem,1.4fr)_repeat(4,minmax(4.5rem,.6fr))_4rem] items-baseline gap-x-3";
+
 fn line_view(line: &Line, budget: &MonthlyBudget, days: usize, state: CardState) -> AnyView {
     let unit = &budget.plan.currency;
     let row = &line.row;
-    let app = crate::state();
     let dot = if row.budgeted {
         row_color(budget, &row.row.id)
     } else {
         "var(--color-fg-muted)".to_owned()
     };
+    let dash = || "—".to_owned();
     let budget_text = if row.budgeted {
-        format!("budget {}", whole(row.row.planned, unit))
+        whole(row.row.planned, unit)
     } else {
-        "no budget".to_owned()
+        dash()
     };
-    let heading_text = match line.heading {
-        Some(end) => format!("heading to {}", whole(end, unit)),
-        None => "too early to tell".to_owned(),
-    };
-    let norm = line.excess.zip(line.heading).map(|(excess, end)| {
-        let text = format!(
-            "Heading to {}, about {} above a typical month.",
-            whole(end, unit),
-            whole(excess, unit)
-        );
-        let link = row.budgeted.then(|| {
-            view! {
-                <button
-                    type="button"
-                    class=button_class(Variant::Link, Size::Inline)
-                    on:click=move |_| app.go(Tab::Overview)
-                >
-                    "See this month →"
-                </button>
-            }
+    let heading_text = line.heading.map_or_else(dash, |end| whole(end, unit));
+    let excess_text = line
+        .excess
+        .map_or_else(dash, |e| format!("+{}", whole(e, unit)));
+    let mut chips: Vec<(Tone, String)> = Vec::new();
+    if line.excess.is_some() {
+        chips.push((Tone::Warning, "Above norm".into()));
+    }
+    match line.fit {
+        Some(BudgetFit::Low) => chips.push((Tone::Warning, "Budget too low".into())),
+        Some(BudgetFit::High) => chips.push((
+            Tone::Accent,
+            format!("{} spare", whole(row.row.planned - line.typical, unit)),
+        )),
+        None => {}
+    }
+    if chips.is_empty() {
+        chips.push(if line.heading.is_none() {
+            (Tone::Neutral, "Too early".into())
+        } else {
+            (Tone::Positive, "Near norm".into())
         });
-        view! { <p class="flex flex-wrap items-baseline gap-x-3 text-sm">{text}{link}</p> }
-    });
-    let fit = line.fit.map(|fit| {
-        let text = match fit {
-            BudgetFit::Low => format!(
-                "The budget is {}; a typical month is {}.",
-                whole(row.row.planned, unit),
-                whole(line.typical, unit)
-            ),
-            BudgetFit::High => format!(
-                "You usually spend {}; {} of this budget is spare.",
-                whole(line.typical, unit),
-                whole(row.row.planned - line.typical, unit)
-            ),
-        };
-        view! { <p class="text-sm">{text}</p> }
-    });
+    }
+    let chips = chips
+        .into_iter()
+        .map(|(tone, text)| view! { <Badge tone=tone>{text}</Badge> })
+        .collect_view();
     let found = if line.excess.is_some() {
         drivers(row, days)
     } else {
         Vec::new()
     };
     let drivers = (!found.is_empty()).then(|| {
+        let rows = found
+            .iter()
+            .map(|driver| {
+                let ticket = if driver.visits > 0 {
+                    money(driver.spent / Decimal::from(driver.visits), unit)
+                } else {
+                    dash()
+                };
+                let usual = driver.usual.filter(|(visits, _)| *visits > Decimal::ZERO);
+                view! {
+                    <div class=format!("{DRIVER_GRID} pt-1.5")>
+                        <span class="pl-5 text-fg">{driver.category.clone()}</span>
+                        <span class="text-right">{driver.visits}</span>
+                        <span class="text-right">{ticket}</span>
+                        <span class="text-right text-fg-muted">{usual.map_or_else(dash, |(v, _)| one_decimal(v))}</span>
+                        <span class="text-right text-fg-muted">{usual.map_or_else(dash, |(v, s)| money(s / v, unit))}</span>
+                        <span class="text-right">{driver.new.then(|| view! { <Badge tone=Tone::Accent>"New"</Badge> })}</span>
+                    </div>
+                }
+            })
+            .collect_view();
         view! {
-            <details class="text-sm text-fg-muted">
-                <summary class="cursor-pointer">"What drives it"</summary>
-                <ul class="mt-1 grid gap-1 pl-4">
-                    {found
-                        .iter()
-                        .map(|driver| view! { <li class="tabular-nums">{driver_text(driver, unit)}</li> })
-                        .collect_view()}
-                </ul>
+            <details class="text-sm tabular-nums">
+                <summary class="cursor-pointer pl-5 text-xs text-fg-muted">"What drives it"</summary>
+                <div class=format!("{DRIVER_GRID} pt-2 text-xs text-fg-muted")>
+                    <span class="pl-5">"Store"</span>
+                    <span class="text-right">"visits"</span>
+                    <span class="text-right">"avg ticket"</span>
+                    <span class="text-right">"usual visits"</span>
+                    <span class="text-right">"usual ticket"</span>
+                    <span></span>
+                </div>
+                {rows}
             </details>
         }
     });
     view! {
-        <li class="grid gap-1.5 py-3">
-            <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                <span
-                    aria-hidden="true"
-                    class="size-2.5 shrink-0 self-center rounded-full"
-                    style=format!("background:{dot}")
-                />
-                <strong class="font-semibold">{row.row.name.clone()}</strong>
-                <span class="text-sm tabular-nums text-fg-muted">
-                    {format!("{budget_text} · typical {} · {heading_text}", whole(line.typical, unit))}
+        <li class="grid gap-2 py-3">
+            <div class=format!("{LINE_GRID} text-sm tabular-nums")>
+                <span class="flex min-w-0 items-center gap-2.5">
+                    <span aria-hidden="true" class="size-2.5 shrink-0 rounded-full" style=format!("background:{dot}") />
+                    <strong class="truncate font-semibold">{row.row.name.clone()}</strong>
                 </span>
+                <span class="text-right">{budget_text}</span>
+                <span class="text-right">{whole(line.typical, unit)}</span>
+                <span class="text-right">{heading_text}</span>
+                <span class=if line.excess.is_some() { "text-right font-medium text-warning-fg" } else { "text-right text-fg-muted" }>{excess_text}</span>
+                <span class="flex flex-wrap justify-end gap-1.5">{chips}</span>
             </div>
-            {norm}
-            {fit}
             {action_view(line, budget, state)}
             {drivers}
         </li>
@@ -643,7 +625,7 @@ fn habits_view(report: &Adjustments) -> Option<AnyView> {
         .collect_view();
     Some(
         view! {
-            <section class="mt-5" aria-label="Habits">
+            <section class="min-w-0" aria-label="Habits">
                 <Eyebrow>"HABITS · HOW OFTEN YOU GO"</Eyebrow>
                 <div class="mt-2 overflow-x-auto">
                     <div class="min-w-[44rem] text-sm tabular-nums">
@@ -660,13 +642,7 @@ fn habits_view(report: &Adjustments) -> Option<AnyView> {
                     </div>
                 </div>
                 {(!seldom.is_empty())
-                    .then(|| {
-                        view! {
-                            <p class="mt-2 text-xs text-fg-muted">
-                                {format!("Less often ({})", seldom.len())}
-                            </p>
-                        }
-                    })}
+                    .then(|| view! { <Badge tone=Tone::Outline class="mt-3">{format!("{} more, less often", seldom.len())}</Badge> })}
             </section>
         }
         .into_any(),
@@ -687,63 +663,74 @@ fn card(report: &Adjustments, dashboard: &Dashboard, state: CardState) -> Option
     }
     let app = crate::state();
     let above: Decimal = lines.iter().filter_map(|line| line.excess).sum();
-    let near: Vec<String> = lines
+    let flagged_count = lines.iter().filter(|line| line.flagged()).count();
+    let near_count = lines.len() - flagged_count;
+    let rows = lines
         .iter()
-        .filter(|line| !line.flagged())
-        .map(|line| line.row.row.name.clone())
-        .collect();
-    let flagged = lines
-        .iter()
-        .filter(|line| line.flagged())
         .map(|line| line_view(line, budget, days, state))
         .collect_view();
     let unsorted = (report.unsorted > Decimal::ZERO).then(|| {
+        let value = money(report.unsorted, unit);
         view! {
-            <li class="flex flex-wrap items-baseline gap-x-3 gap-y-1 py-3">
-                <strong class="font-semibold">"Unsorted"</strong>
-                <span class="text-sm tabular-nums text-fg-muted">
-                    {format!("{} not sorted yet", money(report.unsorted, unit))}
-                </span>
+            <Metric label="Unsorted">
+                {value}
                 <button
                     type="button"
-                    class=button_class(Variant::Link, Size::Inline)
+                    class=format!("{} ml-3 text-sm", button_class(Variant::Link, Size::Inline))
                     on:click=move |_| app.go(Tab::Transactions)
                 >
                     "Review"
                 </button>
-            </li>
-        }
-    });
-    let near = (!near.is_empty()).then(|| {
-        view! {
-            <li class="py-3 text-sm text-fg-muted">
-                {format!("Near your norm ({}): {}", near.len(), near.join(" · "))}
-            </li>
+            </Metric>
         }
     });
     let label = format!("{} adjustments", unit.code);
-    let above = (above > Decimal::ZERO).then(|| {
-        let text = format!("{} above your norm this month", whole(above, unit));
-        view! { <strong class="text-sm font-semibold tabular-nums text-warning-fg">{text}</strong> }
-    });
+    let above_text = whole(above, unit);
+    let above_class = if above > Decimal::ZERO {
+        "text-warning-fg"
+    } else {
+        ""
+    };
     let habits = habits_view(report);
     Some(
         view! {
-            <section class="my-4 w-full min-w-0" aria-label=label>
+            <section class="w-full min-w-0" aria-label=label>
                 <Card>
                     <CardHeader>
                         <div class="grid gap-1">
-                            <Eyebrow>"AGAINST YOUR OWN NORM"</Eyebrow>
+                            <Eyebrow>
+                                <span title="Typical is the median of your earlier months with spending. Bills and other fixed costs are left out.">
+                                    "AGAINST YOUR OWN NORM"
+                                </span>
+                            </Eyebrow>
                             <CardTitle>"Adjustments"</CardTitle>
                         </div>
-                        {above}
                     </CardHeader>
-                    <ul class="divide-y divide-border">{flagged}{unsorted}{near}</ul>
-                    {habits}
-                    <p class="mt-4 text-xs text-fg-muted">
-                        "Typical is the median of your earlier months with spending. "
-                        "Bills and other fixed costs are left out."
-                    </p>
+                    <div class=cn([METRIC_STRIP, "md:grid-cols-4"])>
+                        <Metric label="Above your norm this month">
+                            <span class=above_class>{above_text}</span>
+                        </Metric>
+                        <Metric label="Groups to adjust">{flagged_count}</Metric>
+                        <Metric label="No finding">{near_count}</Metric>
+                        {unsorted}
+                    </div>
+                    <div class="mt-8 grid gap-x-12 gap-y-8 2xl:grid-cols-2">
+                        <section class="min-w-0 overflow-x-auto" aria-label="Groups against their typical month">
+                            <Eyebrow>"GROUPS · THIS MONTH AGAINST TYPICAL"</Eyebrow>
+                            <div class="mt-2 min-w-[44rem]">
+                                <div class=format!("{LINE_GRID} pb-2 text-xs text-fg-muted")>
+                                    <span></span>
+                                    <span class="text-right">"budget"</span>
+                                    <span class="text-right">"typical"</span>
+                                    <span class="text-right">"heading to"</span>
+                                    <span class="text-right">"above norm"</span>
+                                    <span class="text-right">"status"</span>
+                                </div>
+                                <ul class="divide-y divide-border border-t border-border">{rows}</ul>
+                            </div>
+                        </section>
+                        {habits}
+                    </div>
                 </Card>
             </section>
         }
@@ -1076,10 +1063,6 @@ mod tests {
         hot.stores = vec![once];
         let found = drivers(&hot, DAYS);
         assert!(!found[0].new);
-        assert_eq!(
-            driver_text(&found[0], &Currency::eur()),
-            "Zara: 2 visits, €80.00"
-        );
         hot.stores = vec![store("Zara", 2, 80, None)];
         assert!(drivers(&hot, DAYS)[0].new);
     }

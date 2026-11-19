@@ -219,7 +219,7 @@ fn App() -> impl IntoView {
     view! {
         <div class="app-surface h-full overflow-y-auto font-sans text-fg">
             <div class="fixed inset-x-0 top-0 z-40 h-10" data-tauri-drag-region=""></div>
-            <div class="mx-auto w-full min-w-0 max-w-6xl px-4 pb-10 pt-12 sm:px-10 sm:pt-14">
+            <div class="w-full min-w-0 px-5 pb-12 pt-12 sm:px-8 sm:pt-14 xl:px-12">
                 <Header />
                 <Tabs />
                 <div role="tabpanel" class="page-stack mt-0 min-w-0">

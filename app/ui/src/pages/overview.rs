@@ -6,6 +6,7 @@
 mod budget;
 mod extras;
 mod forecast;
+mod kpis;
 mod monthly;
 mod outlook;
 mod trends;
@@ -25,6 +26,7 @@ fn month_closure_banner() -> impl IntoView {
 pub fn Overview() -> impl IntoView {
     view! {
         {month_closure_banner()}
+        <kpis::OverviewKpis />
         <monthly::OwnerMonthlyOverview />
         {budget_panel()}
         <trends::OverviewTrends />

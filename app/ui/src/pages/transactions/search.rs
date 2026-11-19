@@ -19,8 +19,9 @@ use super::{
 };
 use crate::api::invoke;
 use crate::ds::{
-    CardTone, EmptyState, Eyebrow, Field, Heading, Icon, Lucide, Money, Size, Skeleton, TABLE,
-    TABLE_CONTAINER, TCELL, TCELL_NUM, TH, TH_NUM, TROW, Variant, button_class, card_class, cn,
+    CardTone, EmptyState, Eyebrow, Field, Heading, Icon, Lucide, METRIC_STRIP, Metric, Money, Size,
+    Skeleton, TABLE, TABLE_CONTAINER, TCELL, TCELL_NUM, TH, TH_NUM, TROW, Variant, button_class,
+    card_class, cn,
 };
 use crate::state;
 
@@ -440,20 +441,22 @@ pub fn TransactionSearch() -> impl IntoView {
                 }
                 let n = r.total_count;
                 Some(view! {
-                    <div class="grid gap-1 text-sm" aria-live="polite">
-                        {r.totals.is_empty().then(|| view! { <p>{format!("{n} transactions")}</p> })}
+                    <div class=cn([METRIC_STRIP, "md:grid-cols-4"]) aria-live="polite">
+                        <Metric label="Transactions" size="text-xl">{n}</Metric>
                         {r.totals
                             .into_iter()
                             .map(|t| {
+                                let (unit_in, unit_out, unit_net) = (t.currency.clone(), t.currency.clone(), t.currency);
                                 view! {
-                                    <p>
-                                        {format!("{n} transactions · In ")}
-                                        <Money value=t.inflow unit=t.currency.clone() neutral=true />
-                                        " · Out "
-                                        <Money value=t.outflow unit=t.currency.clone() neutral=true />
-                                        " · Net "
-                                        <Money value=t.net unit=t.currency />
-                                    </p>
+                                    <Metric label="In" size="text-xl">
+                                        <Money value=t.inflow unit=unit_in neutral=true />
+                                    </Metric>
+                                    <Metric label="Out" size="text-xl">
+                                        <Money value=t.outflow unit=unit_out neutral=true />
+                                    </Metric>
+                                    <Metric label="Net" size="text-xl">
+                                        <Money value=t.net unit=unit_net />
+                                    </Metric>
                                 }
                             })
                             .collect_view()}

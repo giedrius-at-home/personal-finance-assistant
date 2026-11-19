@@ -329,10 +329,10 @@ fn OwnerCategoryGroups() -> impl IntoView {
                 <Input value=query kind="search" label="Search categories" placeholder="Find a category or group" />
                 <Select value=filter options=Signal::derive(move || filter_options.clone()) label="Filter category groups" />
             </div>
-            <p class="text-sm text-fg-muted">
+            <p class="text-xs tabular-nums text-fg-muted">
                 {move || {
                     let total = filtered.with(Vec::len);
-                    format!("Showing {} of {total} matching categories", limit.get().min(total))
+                    format!("{} / {total}", limit.get().min(total))
                 }}
             </p>
             <div>

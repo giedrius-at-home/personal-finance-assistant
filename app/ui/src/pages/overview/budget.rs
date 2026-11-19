@@ -19,8 +19,8 @@ use crate::api::invoke;
 use crate::ds::charts::{BudgetBar, ProgressBar, fmt};
 use crate::ds::sync_value;
 use crate::ds::{
-    CONTROL, Card, CardTone, Checkbox, Eyebrow, Heading, Icon, Lucide, Select, Size, Variant,
-    button_class, cn, money,
+    Badge, CONTROL, Card, CardTone, Checkbox, Eyebrow, Heading, Help, Icon, Lucide, METRIC_STRIP,
+    Metric, Select, Size, Tone, Variant, button_class, cn, money,
 };
 use crate::format;
 use crate::pages::{f, with_report};
@@ -320,7 +320,7 @@ fn panel(report: &Dashboard, selection: &str, s: PanelState) -> AnyView {
         return view! {
             <Card class="grid gap-2">
                 <h2 class="text-lg font-semibold">"Monthly budget"</h2>
-                <p class="text-sm text-fg-muted">"Monthly budgets are unavailable. Refresh after the finance service is updated."</p>
+                <span title="Refresh after the finance service is updated."><Badge tone=Tone::Outline>"Unavailable"</Badge></span>
             </Card>
         }
         .into_any();
@@ -414,58 +414,42 @@ fn panel(report: &Dashboard, selection: &str, s: PanelState) -> AnyView {
     } else {
         "Unallocated next month"
     };
-    let totals = [
-        ("Planned", m(budget.planned)),
-        ("Spent", m(budget.spent)),
-        (savings_label, savings.map_or("—".to_owned(), &m)),
-    ]
-    .into_iter()
-    .map(|(label, value)| {
-        view! {
-            <div class="grid gap-1.5">
-                <span class="text-xs text-fg-muted">{label}</span>
-                <strong class="text-base font-semibold tabular-nums sm:text-2xl">{value}</strong>
-            </div>
-        }
-    })
-    .collect_view();
-
-    // Expected income is shown apart so the headline never counts money that has not arrived.
-    let income_notes = allocation.as_ref().map(|a| {
+    // Expected income is its own field so the headline never counts money that has not arrived.
+    let mut totals = vec![
+        ("Planned", m(budget.planned), false),
+        ("Spent", m(budget.spent), false),
+        (
+            savings_label,
+            savings.map_or("—".to_owned(), &m),
+            savings.is_some_and(|v| v < Decimal::ZERO),
+        ),
+    ];
+    if let Some(a) = &allocation {
         if is_current {
-            let expected = (a.current_expected_income > Decimal::ZERO).then(|| {
-                view! {
-                    <p>{format!(
-                        "+{} if the expected extra income arrives, {} in total. Overdue income needs a new expected date.",
-                        m(a.current_expected_income),
-                        m(a.current_planned_wiggle_room),
-                    )}</p>
-                }
-            });
-            let by_month_end = a.current_wiggle_room.max(Decimal::ZERO) + a.savings_balance;
-            view! {
-                <div class="grid gap-1 px-5 pt-4 text-xs leading-relaxed text-fg-muted sm:px-7">
-                    {expected}
-                    <p>{format!(
-                        "{} already in savings; {} by month end if you save the rest and spend within plan.",
-                        m(a.savings_balance),
-                        m(by_month_end),
-                    )}</p>
-                </div>
+            totals.push(("In savings", m(a.savings_balance), false));
+            totals.push((
+                "Savings by month end",
+                m(a.current_wiggle_room.max(Decimal::ZERO) + a.savings_balance),
+                false,
+            ));
+            if a.current_expected_income > Decimal::ZERO {
+                totals.push(("Expected extra income", m(a.current_expected_income), false));
+                totals.push(("With that income", m(a.current_planned_wiggle_room), false));
             }
-            .into_any()
         } else {
-            view! {
-                <p class="px-5 pt-4 text-xs leading-relaxed text-fg-muted sm:px-7">
-                    {format!(
-                        "Includes {} expected extra income, including reimbursements. Received income is already in your bank balance. Overdue income needs a new expected date.",
-                        m(a.next_expected_income),
-                    )}
-                </p>
-            }
-            .into_any()
+            totals.push(("Expected extra income", m(a.next_expected_income), false));
         }
-    });
+    }
+    let totals = totals
+        .into_iter()
+        .map(|(label, value, negative)| {
+            view! {
+                <Metric label=label>
+                    <span class=if negative { "text-negative-fg" } else { "" }>{value}</span>
+                </Metric>
+            }
+        })
+        .collect_view();
 
     let code = unit.code.clone();
     let daily = is_current
@@ -505,7 +489,7 @@ fn panel(report: &Dashboard, selection: &str, s: PanelState) -> AnyView {
     let totals_row = {
         let cell = "sm:text-right before:mb-1 before:block before:text-xs before:font-normal before:text-fg-muted before:content-[attr(data-label)] sm:before:hidden";
         view! {
-            <div class="grid grid-cols-3 gap-x-2 gap-y-4 border-b border-border bg-card-muted px-5 py-4 text-sm font-semibold tabular-nums sm:grid-cols-[minmax(0,1.8fr)_repeat(3,minmax(105px,1fr))] sm:items-center sm:gap-4 sm:px-7">
+            <div class="grid grid-cols-3 gap-x-2 gap-y-4 border-b border-border bg-card-muted px-3 py-4 text-sm font-semibold tabular-nums sm:grid-cols-[minmax(0,1.8fr)_repeat(3,minmax(105px,1fr))] sm:items-center sm:gap-4">
                 <span class="col-span-3 sm:col-span-1 sm:pl-[26px]">"Total"</span>
                 <span data-label="Planned" class=cell>{m(budget.planned)}</span>
                 <span data-label="Spent" class=cell>{m(budget.spent)}</span>
@@ -525,8 +509,8 @@ fn panel(report: &Dashboard, selection: &str, s: PanelState) -> AnyView {
     );
 
     view! {
-        <section class="mb-6 overflow-hidden rounded-xl border border-border bg-card-strong text-fg glass-card" aria-label="Monthly budget">
-            <header class="flex flex-col items-start justify-between gap-5 p-5 sm:flex-row sm:items-center sm:px-7 sm:py-6">
+        <section class="flat-section min-w-0 text-fg" aria-label="Monthly budget">
+            <header class="flex flex-col items-start justify-between gap-5 pb-6 sm:flex-row sm:items-center">
                 <div>
                     <Eyebrow level=Heading::P>"YOUR PLAN"</Eyebrow>
                     <h2 class="mt-1 text-2xl font-semibold tracking-tight">"Monthly budget"</h2>
@@ -543,27 +527,26 @@ fn panel(report: &Dashboard, selection: &str, s: PanelState) -> AnyView {
                     {add_button}
                 </div>
             </header>
-            <div class="grid grid-cols-3 gap-3 border-y border-border bg-card-muted px-5 py-4 sm:gap-6 sm:px-7 sm:py-5">
+            <div class=cn([METRIC_STRIP, "xl:grid-cols-[repeat(auto-fit,minmax(11rem,1fr))]"])>
                 {totals}
             </div>
-            {income_notes}
-            <div class="grid gap-4 p-5 sm:px-7">
+            <div class="grid gap-8 py-8">
                 <SavingsOutlookPanel report=report.clone() currency_code=code.clone() />
                 {daily}
             </div>
             <BudgetVisuals budget=budget.clone() allocation=allocation.clone() current_month=current_month.clone() selection=s.trajectory />
             {move || {
                 let notice = s.notice.get();
-                (!notice.is_empty()).then(|| view! { <p class="mx-5 my-4 text-sm sm:mx-7" role="status">{notice}</p> })
+                (!notice.is_empty()).then(|| view! { <p class="my-4 text-sm" role="status">{notice}</p> })
             }}
             {move || {
                 let error = s.error.get();
                 (!error.is_empty())
-                    .then(|| view! { <p class="mx-5 my-4 text-sm text-negative-fg sm:mx-7" role="alert">{error}</p> })
+                    .then(|| view! { <p class="my-4 text-sm text-negative-fg" role="alert">{error}</p> })
             }}
             {editor_form}
             <div
-                class="hidden grid-cols-[minmax(0,1.8fr)_repeat(3,minmax(105px,1fr))] gap-4 border-b border-border px-7 py-4 text-xs text-fg-muted sm:grid [&>:not(:first-child)]:text-right"
+                class="hidden grid-cols-[minmax(0,1.8fr)_repeat(3,minmax(105px,1fr))] gap-4 border-b border-border px-3 py-4 text-xs text-fg-muted sm:grid [&>:not(:first-child)]:text-right"
                 aria-hidden="true"
             >
                 <span>"Budget group"</span>
@@ -574,9 +557,6 @@ fn panel(report: &Dashboard, selection: &str, s: PanelState) -> AnyView {
             {rows}
             {totals_row}
             <BudgetExtras report=report.clone() budget=budget.clone() available=savings state=s.extras />
-            <footer class="px-5 py-4 text-xs leading-relaxed text-fg-muted sm:px-7">
-                "Budgets reserve money for the month. Spending includes refunds; transfers are excluded."
-            </footer>
         </section>
     }
     .into_any()
@@ -629,10 +609,7 @@ fn budget_row(budget: &MonthlyBudget, row: &BudgetRow, kind: Kind, s: PanelState
             format!("One-off payments · {} still due", m(row.scheduled))
         }
         Kind::Extras => "One-off payments · all paid".into(),
-        Kind::Unplanned if !row.expected.is_empty() => {
-            "Outside your planned groups · an estimate: spent so far plus what past months suggest"
-                .into()
-        }
+        Kind::Unplanned if !row.expected.is_empty() => "Outside your groups · estimate".into(),
         Kind::Unplanned => "Outside your planned groups".into(),
         Kind::Group => match &group {
             Some(g) if g.source_groups.iter().any(|n| *n != row.name) => {
@@ -817,7 +794,7 @@ fn budget_row(budget: &MonthlyBudget, row: &BudgetRow, kind: Kind, s: PanelState
         .collect_view();
     view! {
         <details class="group border-b border-border">
-            <summary class="grid cursor-pointer list-none grid-cols-3 gap-x-2 gap-y-4 px-5 py-4 text-sm hover:bg-card-muted focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring sm:grid-cols-[minmax(0,1.8fr)_repeat(3,minmax(105px,1fr))] sm:items-center sm:gap-4 sm:px-7 [&::-webkit-details-marker]:hidden">
+            <summary class="grid cursor-pointer list-none grid-cols-3 gap-x-2 gap-y-4 px-3 py-4 text-sm hover:bg-card-muted focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring sm:grid-cols-[minmax(0,1.8fr)_repeat(3,minmax(105px,1fr))] sm:items-center sm:gap-4 sm:px-7 [&::-webkit-details-marker]:hidden">
                 <span class="col-span-3 flex min-w-0 items-center gap-2.5 sm:col-span-1">
                     <Lucide icon=Icon::ChevronDown size=16 class="-rotate-90 text-fg-muted group-open:rotate-0" />
                     <span class="min-w-0 flex-1">
@@ -833,7 +810,7 @@ fn budget_row(budget: &MonthlyBudget, row: &BudgetRow, kind: Kind, s: PanelState
                 <span data-label="Spent" class=cell>{m(row.spent)}</span>
                 <span data-label="Remaining" class=cn([cell, if estimate { "text-fg-muted" } else { "font-semibold" }, if over { "text-negative-fg" } else { "" }])>{remaining}</span>
             </summary>
-            <div class="px-5 pb-5 pt-1.5 sm:pl-[54px] sm:pr-7">
+            <div class="px-3 pb-5 pt-1.5 sm:pl-[38px]">
                 {edit}
                 {used}
                 {categories}
@@ -842,7 +819,7 @@ fn budget_row(budget: &MonthlyBudget, row: &BudgetRow, kind: Kind, s: PanelState
                 {purchase_list}
                 <details class="mt-3">
                     <summary class="cursor-pointer text-sm">"Spending history"</summary>
-                    <p class="mt-2 text-xs text-fg-muted">"Using this group's current category selection."</p>
+                    <Help text="Using this group's current category selection." />
                     <div class="mt-3.5 grid grid-cols-3 gap-3 sm:grid-cols-6">{history}</div>
                 </details>
             </div>
@@ -993,7 +970,7 @@ fn editor_form(
                     }
                 });
                 view! {
-                    <Card tone=CardTone::Muted class="mx-3 my-4 sm:mx-7 sm:my-5">
+                    <Card tone=CardTone::Muted class="my-4 sm:my-5">
                         <form
                             aria-label=title
                             on:submit=move |e| {
@@ -1118,16 +1095,16 @@ fn editor_form(
                                     <p role="alert" class="text-sm text-negative-fg">"That name is already used this month."</p>
                                 </Show>
                                 <span class="text-sm">"Include spending from"</span>
-                                <p class="text-xs text-fg-muted">"Bills stay under Fixed expenses."</p>
+                                <Help text="Bills stay under Fixed expenses." />
                                 <div class="my-3 grid max-h-60 grid-cols-2 gap-2.5 overflow-y-auto sm:grid-cols-3">{group_choices}</div>
                                 <details class="mt-4 text-sm">
                                     <summary class="cursor-pointer">"Choose individual categories"</summary>
-                                    <p class="text-fg-muted">"A selected category uses this budget instead of its broader group."</p>
+                                    <Help text="A selected category uses this budget instead of its broader group." />
                                     <div class="my-3 grid max-h-60 grid-cols-2 gap-2.5 overflow-y-auto sm:grid-cols-3">{category_choices}</div>
                                 </details>
                                 <details class="mt-4 text-sm">
                                     <summary class="cursor-pointer">"Choose specific purchases"</summary>
-                                    <p class="text-fg-muted">"Selected purchases use this budget instead of their category's budget."</p>
+                                    <Help text="Selected purchases use this budget instead of their category's budget." />
                                     {purchase_choices}
                                 </details>
                                 <div class="mt-5 flex flex-col items-start justify-between gap-3 border-t border-border pt-4 sm:flex-row sm:items-center">

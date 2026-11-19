@@ -10,8 +10,8 @@ use rust_decimal::Decimal;
 
 use crate::ds::charts::{BudgetBar, fmt};
 use crate::ds::{
-    Card, CardTitle, CardTone, EmptyState, Eyebrow, Heading, Icon, Lucide, Money, Size, TABLE,
-    TABLE_CONTAINER, TCELL, TH, TROW, Variant, button_class, cn, money,
+    Card, CardTitle, CardTone, EmptyState, Eyebrow, Facts, Heading, Icon, Lucide, Money, Size,
+    TABLE, TABLE_CONTAINER, TCELL, TH, TROW, Variant, button_class, cn, money,
 };
 use crate::pages::{f, with_report};
 use crate::{SpendingSection, Tab, state};
@@ -325,22 +325,6 @@ fn allocation_result(label: &str, value: Decimal, unit: &Currency, negative: boo
     .into_any()
 }
 
-fn monthly_status(warning: bool, title: String, detail: String) -> impl IntoView {
-    view! {
-        <div class=cn([
-            "grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1 rounded-xl border px-4 py-3 text-sm text-fg sm:flex sm:flex-wrap",
-            if warning { "border-warning/30 bg-warning/10" } else { "border-positive/30 bg-positive/10" },
-        ])>
-            <span class=cn(["shrink-0", if warning { "text-warning-fg" } else { "text-positive-fg" }])>
-                <Lucide icon=if warning { Icon::CircleAlert } else { Icon::ShieldCheck } size=18 />
-            </span>
-            <strong class="font-semibold">{title}</strong>
-            <span class="col-start-2 text-fg-muted">{detail}</span>
-        </div>
-    }
-    .into_any()
-}
-
 fn forecast_row(
     forecast: SpendingForecast,
     allocation: &CurrencyAllocation,
@@ -517,52 +501,15 @@ fn CurrencyOverview(
         rr.cmp(&lr)
     });
 
-    let status = if a.salary_at_risk > zero || next_negative {
-        let title = if a.salary_at_risk > zero {
-            format!(
-                "{} of next month’s salary is at risk.",
-                money(a.salary_at_risk, &unit)
-            )
-        } else {
-            format!(
-                "{} is missing from next month’s plan.",
-                money(a.next_shortfall, &unit)
-            )
-        };
-        monthly_status(
-            true,
-            title,
-            "Lower a variable group or adjust the plan.".into(),
-        )
-        .into_any()
-    } else if !next_funded {
-        monthly_status(
-            false,
-            "This month stays separate.".into(),
-            "Next month’s plan will lock when salary arrives.".into(),
-        )
-        .into_any()
-    } else {
-        monthly_status(
-            false,
-            "Next month’s plan is covered by booked and expected income.".into(),
-            format!(
-                "{} remains after this month’s plan.",
-                money(a.current_wiggle_room, &unit)
-            ),
-        )
-        .into_any()
-    };
-
     let expected_note = (a.current_expected_income > zero).then(|| {
         view! {
-            <p class="mt-3 text-xs leading-relaxed text-fg-muted">
-                {format!(
-                    "With {} expected extra income: {} projected after commitments.",
-                    money(a.current_expected_income, &unit),
-                    money(a.current_planned_wiggle_room, &unit),
-                )}
-            </p>
+            <Facts
+                class="mt-3 border-t border-line pt-3"
+                rows=vec![
+                    ("Expected extra income".to_owned(), money(a.current_expected_income, &unit)),
+                    ("Wiggle room with it".to_owned(), money(a.current_planned_wiggle_room, &unit)),
+                ]
+            />
         }
     });
     let next_label = if !next_funded {
@@ -643,28 +590,33 @@ fn CurrencyOverview(
     });
 
     let section_label = format!("{} monthly plan", unit.code);
-    let this_month = format!("THIS MONTH · {}", month_name(&a.current_month));
+    let this_month = format!("SPENDABLE · {}", month_name(&a.current_month));
     let funds = format!("FUNDS {}", month_name(&a.funded_month));
-    let bank = format!("Bank {}", money(a.bank_balance, &unit));
-    let savings = format!("− savings {}", money(a.protected_savings, &unit));
-    let salary = format!("− salary {}", money(a.salary_reserved, &unit));
+    let bank_facts = vec![
+        ("Bank".to_owned(), money(a.bank_balance, &unit)),
+        (
+            "Savings".to_owned(),
+            format!("− {}", money(a.protected_savings, &unit)),
+        ),
+        (
+            "Salary set aside".to_owned(),
+            format!("− {}", money(a.salary_reserved, &unit)),
+        ),
+    ];
     let next_funds = money(a.next_planned_funds, &unit);
-    let next_income = format!(
-        "Salary + {} expected extra income",
-        money(a.next_expected_income, &unit)
-    );
+    let next_facts = vec![
+        (
+            "Salary".to_owned(),
+            money(a.next_planned_funds - a.next_expected_income, &unit),
+        ),
+        (
+            "Expected extra income".to_owned(),
+            money(a.next_expected_income, &unit),
+        ),
+    ];
     let current_bar = allocation_bar(current_total, &current_parts, &unit);
     let current_legend = allocation_legend(&current_parts, &unit);
-    let current_result = allocation_result(
-        if wish_savings.is_some() {
-            "Wiggle room after bills, groups, plans and wishes"
-        } else {
-            "Spendable wiggle room"
-        },
-        wiggle_room,
-        &unit,
-        wiggle_room < zero,
-    );
+    let current_result = allocation_result("Wiggle room", wiggle_room, &unit, wiggle_room < zero);
     let next_bar = allocation_bar(next_total, &next_parts, &unit);
     let next_legend = allocation_legend(&next_parts, &unit);
     let next_result = allocation_result(next_label, next_value, &unit, next_negative);
@@ -672,20 +624,14 @@ fn CurrencyOverview(
 
     view! {
         <section class="flex flex-col gap-5 text-fg" aria-label=section_label>
-            {status}
-            <div class="grid grid-cols-1 gap-5 md:grid-cols-2">
+            <div class="grid grid-cols-1 gap-x-12 gap-y-8 md:grid-cols-2">
                 <Card class="min-w-0">
                     <header class="flex items-start justify-between gap-4">
                         <div class="min-w-0">
                             <Eyebrow level=Heading::P>{this_month}</Eyebrow>
                             {breakdown}
-                            <small class="text-xs text-fg-muted">"spendable after remaining commitments"</small>
                         </div>
-                        <div class="hidden gap-0.5 text-right text-xs tabular-nums text-fg-muted sm:grid">
-                            <span>{bank}</span>
-                            <span>{savings}</span>
-                            <span>{salary}</span>
-                        </div>
+                        <Facts rows=bank_facts class="hidden w-56 sm:grid" />
                     </header>
                     {current_bar}
                     {current_legend}
@@ -700,8 +646,8 @@ fn CurrencyOverview(
                             <h2 class="mt-1 text-2xl font-semibold tracking-tight tabular-nums sm:text-display">
                                 {next_funds}
                             </h2>
-                            <small class="text-xs text-fg-muted">{next_income}</small>
                         </div>
+                        <Facts rows=next_facts class="hidden w-56 sm:grid" />
                         <button
                             type="button"
                             class=cn([button_class(Variant::Ghost, Size::Sm).as_str(), "shrink-0 text-accent"])

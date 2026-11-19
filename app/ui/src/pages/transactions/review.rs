@@ -22,8 +22,8 @@ use super::research::{MerchantResearch, RequestSuggestions};
 use super::{Choice, clean_error, focus_id, options, region_name};
 use crate::api::{NoArgs, invoke, load};
 use crate::ds::{
-    Badge, CONTROL, CardTone, EmptyState, Eyebrow, Field, Heading, Money, Size, Skeleton, Tone,
-    Variant, button_class, card_class, cn,
+    Badge, CONTROL, CardTone, EmptyState, Eyebrow, FactsRow, Field, Heading, Money, Size, Skeleton,
+    Tone, Variant, button_class, card_class, cn,
 };
 use crate::pages::Problem;
 use crate::{AppState, state};
@@ -912,16 +912,13 @@ pub fn OwnerReview() -> impl IntoView {
                         proposal.as_ref().and_then(|p| p.proposed_category.as_deref()),
                     ])
                     .unwrap_or_else(|| "Unknown".into());
-                    let meta = format!(
-                        "{}{}",
-                        proposal.as_ref().and_then(|p| p.bank_name.clone()).unwrap_or_default(),
-                        proposal
-                            .as_ref()
-                            .and_then(|p| p.confidence)
-                            .filter(|c| !c.is_zero())
-                            .map(|c| format!(" · Jev category probability {}", percent(c)))
-                            .unwrap_or_default()
-                    );
+                    let mut meta = Vec::new();
+                    if let Some(bank) = proposal.as_ref().and_then(|p| p.bank_name.clone()) {
+                        meta.push(("Bank".to_owned(), bank));
+                    }
+                    if let Some(c) = proposal.as_ref().and_then(|p| p.confidence).filter(|c| !c.is_zero()) {
+                        meta.push(("Jev probability".to_owned(), percent(c)));
+                    }
                     let id = entry.entry.transaction_id.clone();
                     let id2 = id.clone();
                     let current = entry.current_category.clone();
@@ -935,7 +932,7 @@ pub fn OwnerReview() -> impl IntoView {
                                 <h3 class="mt-1 break-words text-xl font-semibold">{description.clone()}</h3>
                             </div>
                             <p><Badge tone=Tone::Accent class="text-sm"><strong>{category}</strong></Badge></p>
-                            <p class="text-sm text-fg-muted">{meta}</p>
+                            <FactsRow rows=meta />
                             <Field label="Current category" id="inventory-category" class="max-w-md">
                                 <Choice
                                     id="inventory-category"
@@ -967,9 +964,7 @@ pub fn OwnerReview() -> impl IntoView {
                 ("done", proposal) => view! {
                     <div class="grid gap-2">
                         <h3 class="break-words text-xl font-semibold">{description}</h3>
-                        <p class="text-sm text-fg-muted">
-                            {format!("Completed · {}", entry.entry.resolution.clone().unwrap_or_default())}
-                        </p>
+                        <FactsRow rows=vec![("Completed".to_owned(), entry.entry.resolution.clone().unwrap_or_default())] />
                         {proposal.map(|p| view! { <TransactionDetails item=p /> })}
                     </div>
                 }
@@ -1043,9 +1038,12 @@ pub fn OwnerReview() -> impl IntoView {
                 Some(Ok(_)) => None,
             }}
             <Show when=move || data.with(Option::is_some)>
-                <p class="text-sm text-fg-muted">
-                    {move || format!("{} pending Jev suggestions at 90%+ category probability.", view_model.with(|m| m.high_score))}
-                </p>
+                {move || view! {
+                    <FactsRow rows=vec![(
+                        "Pending Jev suggestions at 90%+".to_owned(),
+                        view_model.with(|m| m.high_score).to_string(),
+                    )] />
+                }}
                 <RequestSuggestions />
                 {move || catalog.get().map(|c| view! { <CategoryConsolidation catalog=c /> })}
                 <Show
@@ -1348,24 +1346,27 @@ fn ReviewRow(
         r.strip_prefix("TypeSafe Choice confidence ")
             .and_then(|v| v.parse::<Decimal>().ok())
     });
-    let method_line = format!(
-        "{}{}{}",
+    let mut method_line = vec![(
+        "Source".to_owned(),
         if jev {
             "Jev"
         } else if item.method == finance_types::report::review::CategorisationMethod::Baseline {
-            "Matched transaction history"
+            "Transaction history"
         } else {
-            "Category suggestion"
-        },
-        match (&proposed, &probability) {
-            (Some(_), Some(p)) => format!(" · {p} category probability"),
-            _ => " · No confident category suggestion".into(),
-        },
-        match (jev, model_confidence) {
-            (true, Some(c)) => format!(" · {} model confidence", percent(c)),
-            _ => String::new(),
+            "Suggestion"
         }
-    );
+        .to_owned(),
+    )];
+    method_line.push((
+        "Category probability".to_owned(),
+        match (&proposed, &probability) {
+            (Some(_), Some(p)) => p.to_string(),
+            _ => "Not confident".into(),
+        },
+    ));
+    if let (true, Some(c)) = (jev, model_confidence) {
+        method_line.push(("Model confidence".to_owned(), percent(c).to_string()));
+    }
     let possible = {
         let parts: Vec<String> = item
             .extras
@@ -1381,7 +1382,7 @@ fn ReviewRow(
             .filter(|p| !p.is_empty())
             .collect();
         (!item.extras.tags.is_empty() || item.extras.merchant_location.is_some())
-            .then(|| format!("Possible details: {}", parts.join(" · ")))
+            .then(|| vec![("Possible details".to_owned(), parts.join(" · "))])
     };
     let item = StoredValue::new(item);
 
@@ -1470,26 +1471,29 @@ fn ReviewRow(
         first(&[i.original_category.as_deref()]).unwrap_or_else(|| "Uncategorised".into());
     let suggestion =
         first(&[i.proposed_category.as_deref()]).unwrap_or_else(|| "No suggestion".into());
-    let date_line = format!(
-        "{}{}",
-        day(i.transaction_occurred_at.as_deref()).unwrap_or_else(|| "Date unavailable".into()),
-        i.bank_name
-            .as_ref()
-            .map(|b| format!(" · {b}"))
-            .unwrap_or_default()
-    );
+    let mut date_line = vec![(
+        "Date".to_owned(),
+        day(i.transaction_occurred_at.as_deref()).unwrap_or_else(|| "—".into()),
+    )];
+    if let Some(bank) = &i.bank_name {
+        date_line.push(("Bank".to_owned(), bank.clone()));
+    }
     let ranked = i.category_options.clone();
     let ranked2 = ranked.clone();
     let hint = i.description_country.as_ref().map(|c| {
-        format!(
-            "Description hint: {}{} · sender/recipient not confirmed",
-            country_label(&c.code),
-            match c.basis.as_str() {
-                "description_bic" => " · BIC bank code",
-                "description_iban" => " · IBAN in description",
-                _ => " · stated country code",
-            }
-        )
+        vec![
+            ("Country in description".to_owned(), country_label(&c.code)),
+            (
+                "From".to_owned(),
+                match c.basis.as_str() {
+                    "description_bic" => "BIC bank code",
+                    "description_iban" => "IBAN",
+                    _ => "Stated country code",
+                }
+                .to_owned(),
+            ),
+            ("Sender/recipient".to_owned(), "Not confirmed".to_owned()),
+        ]
     });
     let amount = i.transaction_amount.zip(i.transaction_currency.clone());
 
@@ -1507,7 +1511,7 @@ fn ReviewRow(
                     <Money class="whitespace-nowrap text-lg font-semibold" value=value unit=unit neutral=true />
                 })}
             </div>
-            <p class="text-sm text-fg-muted">{date_line}</p>
+            <FactsRow rows=date_line />
             <div class="rounded-lg border border-border bg-card-muted px-4 py-3">
                 <Eyebrow level=Heading::P>"BANK DESCRIPTION"</Eyebrow>
                 <p class="mt-1.5 whitespace-pre-wrap break-words text-sm leading-relaxed">
@@ -1519,7 +1523,7 @@ fn ReviewRow(
                 <span aria-hidden="true" class="text-fg-muted">"→"</span>
                 <Badge tone=Tone::Accent class="text-sm font-semibold"><strong>{suggestion}</strong></Badge>
             </div>
-            <p class="text-sm text-fg-muted">{method_line}</p>
+            <FactsRow rows=method_line />
             {(!ranked.is_empty()).then(|| view! {
                 <div class="flex flex-wrap gap-1.5" aria-label="Jev category probabilities">
                     {ranked
@@ -1528,14 +1532,14 @@ fn ReviewRow(
                         .collect_view()}
                 </div>
             })}
-            {possible.map(|p| view! { <p class="text-sm text-fg-muted">{p}</p> })}
+            {possible.map(|p| view! { <FactsRow rows=p /> })}
             {(i.source_country.is_some() || i.destination_country.is_some()).then(|| view! {
                 <div class="flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-fg-muted">
                     {i.source_country.as_ref().map(|c| view! { <span class="break-words">{format!("From {}", country_label(&c.code))}</span> })}
                     {i.destination_country.as_ref().map(|c| view! { <span class="break-words">{format!("To {}", country_label(&c.code))}</span> })}
                 </div>
             })}
-            {hint.map(|h| view! { <p class="text-sm text-fg-muted">{h}</p> })}
+            {hint.map(|h| view! { <FactsRow rows=h /> })}
             <TransactionDetails item=i.clone() on_editing=Callback::new(move |dirty| details_editing.set(dirty)) />
             <details class="text-sm">
                 <summary class="cursor-pointer text-sm font-medium text-fg-muted">"Unfamiliar merchant?"</summary>

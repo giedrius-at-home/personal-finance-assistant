@@ -12,7 +12,7 @@ use serde::Serialize;
 use super::ui::{DETAILS, FIELDSET, Ops, PREVIEW, SUMMARY, frame, load_workspace, local_date};
 use crate::api::{NoArgs, load};
 use crate::ds::{
-    Button, CONTROL, Card, CardTitle, Checkbox, Eyebrow, Field, Heading, Input, Select, Size,
+    Button, CONTROL, Card, CardTitle, Checkbox, Eyebrow, Field, Heading, Help, Input, Select, Size,
     TABLE, TABLE_CONTAINER, TCELL, TH, TROW, Variant, cn,
 };
 use crate::{format, state};
@@ -359,7 +359,7 @@ fn SettingsCard(
                                 })
                                 .collect_view()}
                         </div>
-                        <p class="text-sm text-fg-muted">"Higher-severity alerts use shorter cooldowns."</p>
+                        <Help text="Higher-severity alerts use shorter cooldowns." />
                     </details>
                     <Button submit=true variant=Variant::Secondary disabled=Signal::derive(move || busy.get())>
                         {move || if busy.get() { "Working…" } else { "Review changes" }}
@@ -544,9 +544,7 @@ fn LocalData(ws: ManageWorkspace) -> impl IntoView {
                     })
                     .collect_view()}
             </dl>
-            <p class="mt-4 text-xs text-fg-muted">
-                "Stored at ~/Library/Application Support/Finance/finance.sqlite3. Everything stays on this Mac; the app backs the file up before the first change of each session."
-            </p>
+            <Help text="Stored at ~/Library/Application Support/Finance/finance.sqlite3. Everything stays on this Mac; the app backs the file up before the first change of each session." />
         </Card>
     }
 }

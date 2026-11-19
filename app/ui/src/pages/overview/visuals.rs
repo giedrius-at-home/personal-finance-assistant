@@ -8,14 +8,15 @@ use rust_decimal::Decimal;
 
 use crate::ds::charts::{Donut, Line, LineChart, Series, Slice, fmt, series_color};
 use crate::ds::{
-    Badge, CardHeader, CardTitle, Eyebrow, Heading, Money, Select, Stat, Tone, cn, money,
+    CardHeader, CardTitle, Eyebrow, Facts, Heading, METRIC_STRIP, Metric, Money, Select, Stat,
+    Tone, cn, money,
 };
 use crate::format;
 use crate::pages::f;
 
 /// The site's `Card` classes without the app's glass layer (these sit flat
 /// inside the budget panel).
-const PLAIN_CARD: &str = "rounded-xl border border-border bg-card-strong p-5 text-fg sm:p-6";
+const PLAIN_CARD: &str = "text-fg";
 
 /// Budget groups cycle through these; the other rows keep colours of their own.
 const GROUP_COLORS: [&str; 4] = [
@@ -108,6 +109,43 @@ pub fn plan_pace(rows: &[(&BudgetRow, Pace)], days: usize) -> Vec<f64> {
         .collect()
 }
 
+/// The month's verdict in numbers.
+pub struct Verdict {
+    /// Planned less spent; negative once the plan is overspent.
+    pub net: Decimal,
+    /// The month-end estimate less the plan, `None` before the month starts.
+    pub ahead: Option<Decimal>,
+    pub tone: Tone,
+    pub word: &'static str,
+}
+
+pub fn verdict(budget: &MonthlyBudget, days: usize) -> Verdict {
+    let net = budget.planned - budget.spent;
+    let ahead = month_end_total(budget, days).map(|total| total - budget.planned);
+    let (tone, word) = if net < Decimal::ZERO {
+        (Tone::Negative, "Over plan")
+    } else if ahead.is_some_and(|a| a > Decimal::ZERO) {
+        (Tone::Warning, "Over pace")
+    } else {
+        (Tone::Positive, "On track")
+    };
+    Verdict {
+        net,
+        ahead,
+        tone,
+        word,
+    }
+}
+
+/// `+€5.00` over the plan, `−€5.00` under it.
+pub fn signed(value: Decimal, unit: &finance_types::report::Currency) -> String {
+    if value > Decimal::ZERO {
+        format!("+{}", money(value, unit))
+    } else {
+        money(value, unit)
+    }
+}
+
 /// The current month: one verdict, then every row's spent, left and over.
 fn on_track(budget: &MonthlyBudget, days: usize) -> AnyView {
     let unit = budget.plan.currency.clone();
@@ -115,25 +153,28 @@ fn on_track(budget: &MonthlyBudget, days: usize) -> AnyView {
         let unit = unit.clone();
         move |v: Decimal| money(v, &unit)
     };
-    let net = budget.planned - budget.spent;
-    let ahead = month_end_total(budget, days).map(|total| total - budget.planned);
-    let (tone, verdict) = if net < Decimal::ZERO {
-        (Tone::Negative, "Over plan")
-    } else if ahead.is_some_and(|a| a > Decimal::ZERO) {
-        (Tone::Warning, "Over pace")
-    } else {
-        (Tone::Positive, "On track")
-    };
+    let Verdict {
+        net,
+        ahead,
+        tone,
+        word,
+    } = verdict(budget, days);
     let headline = if net < Decimal::ZERO {
-        "over this month's plan"
+        "Over plan"
     } else {
-        "left in this month's plan"
+        "Left in plan"
     };
-    let pace_note = ahead.map(|a| {
-        if a > Decimal::ZERO {
-            format!("At this pace you finish {} over plan.", m(a))
+    let month_end = ahead.map(|a| {
+        let class = if a > Decimal::ZERO {
+            "text-negative-fg"
         } else {
-            format!("At this pace you finish {} under plan.", m(-a))
+            "text-positive-fg"
+        };
+        let text = signed(a, &unit);
+        view! {
+            <Metric label="Month end vs plan" size="text-3xl">
+                <span class=class>{text}</span>
+            </Metric>
         }
     });
 
@@ -191,29 +232,19 @@ fn on_track(budget: &MonthlyBudget, days: usize) -> AnyView {
             }
         })
         .collect_view();
-    let sum_note = if over_total > Decimal::ZERO {
-        format!(
-            "{} still planned, less {} already overspent.",
-            m(left_total),
-            m(over_total)
-        )
-    } else {
-        format!("{} still planned across these rows.", m(left_total))
-    };
+    let mut sums = vec![("Still planned".to_owned(), m(left_total))];
+    if over_total > Decimal::ZERO {
+        sums.push(("Already overspent".to_owned(), m(over_total)));
+    }
     view! {
-        <div class="grid gap-1">
-            <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                <Money value=net.abs() unit=unit neutral=true class=cn([
-                    "text-3xl font-semibold tracking-tight",
-                    if net < Decimal::ZERO { "text-negative-fg" } else { "" },
-                ]) />
-                <Badge tone=tone>{verdict}</Badge>
-            </div>
-            <p class="text-sm text-fg-muted">{headline}</p>
-            {pace_note.map(|note| view! { <p class="text-sm">{note}</p> })}
+        <div class="grid grid-cols-2 gap-x-6 gap-y-4">
+            <Metric label=headline chip=(tone, word.to_owned()) size="text-3xl">
+                <Money value=net.abs() unit=unit.clone() neutral=true class=if net < Decimal::ZERO { "text-negative-fg" } else { "" } />
+            </Metric>
+            {month_end}
         </div>
-        <ul class="mt-5 grid list-none gap-3.5 p-0">{bars}</ul>
-        <p class="mt-4 text-xs leading-relaxed text-fg-muted">{sum_note}</p>
+        <ul class="mt-6 grid list-none gap-3.5 p-0">{bars}</ul>
+        <Facts rows=sums class="mt-4 border-t border-line pt-3" />
     }
     .into_any()
 }
@@ -449,7 +480,7 @@ pub fn BudgetVisuals(
             } else {
                 view! {
                     <LineChart
-                        height=240
+                        height=300
                         categories=categories
                         titles=titles
                         series=series
@@ -460,28 +491,21 @@ pub fn BudgetVisuals(
                 }
                 .into_any()
             };
-            let scheduled_note = if scheduled > Decimal::ZERO {
-                ", including scheduled payments"
-            } else {
-                ""
+            // How the estimate is made stays a tooltip on its field.
+            let method = match (lumps, scheduled > Decimal::ZERO) {
+                (true, _) => "Budgets continue at your daily average; one-off payments count once.",
+                (false, true) => "Your daily average continues; scheduled payments are included.",
+                (false, false) => "Your daily average continues to month end.",
             };
-            let method = if lumps {
-                "Budgets continue at your daily average; one-off payments count once."
-            } else {
-                "The projection continues your daily average."
-            };
-            let note = match projected {
-                _ if elapsed == 0 => "Ready for the coming month.".to_owned(),
-                Some(p) if over => format!(
-                    "{} above budget at this pace{scheduled_note}. {method}",
-                    m(p - planned)
-                ),
-                Some(p) => format!(
-                    "{} below budget at this pace{scheduled_note}. {method}",
-                    m(planned - p)
-                ),
-                None => String::new(),
-            };
+            let gap = projected.filter(|_| elapsed > 0).map(|p| {
+                let class = if over { "text-negative-fg" } else { "text-positive-fg" };
+                let text = signed(p - planned, &unit);
+                view! {
+                    <Stat label="vs budget">
+                        <span class=class>{text}</span>
+                    </Stat>
+                }
+            });
             let pace = match projected {
                 None => view! { "—" }.into_any(),
                 Some(p) => view! {
@@ -502,27 +526,27 @@ pub fn BudgetVisuals(
                         <Select label="Spending trajectory group" class="h-9 text-xs" value=selection options=options />
                     </div>
                 </CardHeader>
-                <div class="grid grid-cols-3 gap-4">
+                <div class=cn([METRIC_STRIP, "md:grid-cols-4"])>
                     <Stat label="Spent">{spent_view}</Stat>
-                    <Stat label="Month-end estimate">{pace}</Stat>
+                    <div title=method><Stat label="Month-end estimate">{pace}</Stat></div>
                     <Stat label="Budget">{budget_view}</Stat>
+                    {gap}
                 </div>
-                <div class="mt-4">{chart}</div>
-                <p class="mt-4 text-xs leading-relaxed text-fg-muted">{note}</p>
+                <div class="mt-5">{chart}</div>
             }
         })
     };
 
     view! {
-        <div class="grid border-b border-border lg:grid-cols-[minmax(260px,.85fr)_minmax(0,1.25fr)]">
-            <div class=cn([PLAIN_CARD, "min-w-0 rounded-none border-0 bg-transparent lg:border-r lg:border-border"])>
+        <div class="grid gap-x-10 gap-y-8 border-y border-line py-6 lg:grid-cols-[minmax(280px,.55fr)_minmax(0,1.45fr)]">
+            <div class=cn([PLAIN_CARD, "min-w-0 lg:border-r lg:border-line lg:pr-10"])>
                 <CardHeader class="mb-4 block">
                     <Eyebrow level=Heading::P>{if current { "THIS MONTH" } else { "MONEY SPLIT" }}</Eyebrow>
                     <CardTitle>{if current { "Are you on track?" } else { "Next month's allocation" }}</CardTitle>
                 </CardHeader>
                 {split}
             </div>
-            <div class=cn([PLAIN_CARD, "min-w-0 rounded-none border-0 bg-transparent"])>{trajectory}</div>
+            <div class=cn([PLAIN_CARD, "min-w-0"])>{trajectory}</div>
         </div>
     }
 }

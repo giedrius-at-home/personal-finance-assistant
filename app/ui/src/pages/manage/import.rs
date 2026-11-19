@@ -11,8 +11,8 @@ use wasm_bindgen::prelude::*;
 
 use super::ui::{CONTROLS, FIELDSET, FILE_INPUT, Ops, frame, load_workspace};
 use crate::ds::{
-    Button, CONTROL, Card, CardDescription, CardTitle, CardTone, Checkbox, Eyebrow, Field, Heading,
-    Money, Select, TABLE, TABLE_CONTAINER, TCELL, TCELL_NUM, TH, TH_NUM, TROW, Variant, cn,
+    Button, CONTROL, Card, CardTitle, CardTone, Checkbox, Eyebrow, Field, Heading, Help, Money,
+    Select, TABLE, TABLE_CONTAINER, TCELL, TCELL_NUM, TH, TH_NUM, TROW, Variant, cn,
 };
 use crate::state;
 
@@ -171,7 +171,7 @@ fn ImportCard(
         <Card>
             <Eyebrow level=Heading::P>"BANK CSV IMPORT"</Eyebrow>
             <CardTitle level=Heading::H2 class="mt-1">"Import transactions"</CardTitle>
-            <CardDescription>"Choose a file, review the result, then confirm."</CardDescription>
+            <Help text="Choose a file, review the result, then confirm." />
             {if ws.csv_enabled {
                 view! {
                     <form class="mt-5" on:submit=submit>
@@ -199,7 +199,7 @@ fn ImportCard(
                             </Button>
                         </fieldset>
                     </form>
-                    <p class="mt-3 text-xs text-fg-muted">"CSV or text · maximum 5 MB · processed on this Mac"</p>
+                    <Help text="CSV or text · maximum 5 MB · processed on this Mac" />
                     {move || csv.get().map(|p| view! { <PreviewView p=p ops=ops skip=skip csv=csv confirm=Callback::new(confirm) /> })}
                 }
                     .into_any()

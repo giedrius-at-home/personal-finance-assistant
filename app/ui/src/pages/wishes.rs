@@ -19,8 +19,8 @@ use serde::de::IgnoredAny;
 
 use crate::api::{NoArgs, invoke, load};
 use crate::ds::{
-    Badge, Button, CONTROL, Card, CardTone, Checkbox, Eyebrow, Field, Icon, Lucide, Size, Skeleton,
-    Stat, Tone, Variant, cn,
+    Badge, Button, CONTROL, Card, CardTone, Checkbox, Eyebrow, Facts, FactsRow, Field, Help, Icon,
+    Lucide, Size, Skeleton, Stat, Tone, Variant, cn,
 };
 use crate::pages::Problem;
 use crate::{format, state};
@@ -480,7 +480,7 @@ fn savings_fields(months: &[WishMonth], must_keep: Decimal) -> Option<(Decimal, 
 /// the next month, per card when there are several; `None` when the
 /// wishes owe nothing. A card's regular spending (its bill) is left out:
 /// that is paid for outside the wishes.
-fn payback_line(month: &WishMonth, code: &str) -> Option<String> {
+fn payback(month: &WishMonth, code: &str) -> Option<Vec<(String, String)>> {
     let owed: Vec<(&str, Decimal)> = month
         .cards
         .iter()
@@ -492,19 +492,14 @@ fn payback_line(month: &WishMonth, code: &str) -> Option<String> {
         return None;
     }
     let next = month_name(&format::add_months(&month.month, 1));
-    let each = if owed.len() > 1 {
-        let parts: Vec<String> = owed
-            .iter()
-            .map(|(name, n)| format!("{name} {}", amount(*n, code)))
-            .collect();
-        format!(" ({})", parts.join(", "))
-    } else {
-        String::new()
-    };
-    Some(format!(
-        "Pay back {} on 1 {next}{each}.",
-        amount(total, code)
-    ))
+    let mut rows = vec![(format!("Pay back on 1 {next}"), amount(total, code))];
+    if owed.len() > 1 {
+        rows.extend(
+            owed.iter()
+                .map(|(name, n)| ((*name).to_owned(), amount(*n, code))),
+        );
+    }
+    Some(rows)
 }
 
 /// A card purchase split over the cards in list order: each takes up to
@@ -1261,8 +1256,7 @@ fn card_strip(
     view! {
         <Card>
             <Eyebrow>"CREDIT CARDS"</Eyebrow>
-            <h2 class="mt-2 text-lg font-semibold">"What the wishes may lean on"</h2>
-            <p class="mt-1 text-sm text-fg-muted">"Charges fill the cards in this order."</p>
+            <h2 class="mt-2 text-lg font-semibold flex items-center gap-2">"What the wishes may lean on"<Help text="Charges fill the cards in this order." /></h2>
             {stale}
             <form class="mt-4 grid gap-3" on:submit=submit>
                 <For each=move || rows.get() key=|r| r.key children=row_view />
@@ -1284,17 +1278,31 @@ fn fund_block(ui: Ui, view: &WishesView, shared: SettingsForms) -> impl IntoView
     let unit = view.currency.clone();
     let money = move |value: Decimal| format::money_dp(value, &unit.code, 0);
     let summary = match view.goals.as_ref().and_then(|g| g.fund.as_ref()) {
-        Some(fund) => format!(
-            "Bills {} + essentials {} = {} a month of bare living. Target {}; the savings pot holds {} beyond what is saved for wishes.",
-            money(fund.fixed_monthly),
-            money(fund.essentials_monthly),
-            money(fund.fixed_monthly + fund.essentials_monthly),
-            money(fund.target),
-            money(fund.balance),
-        ),
-        None if view.settings.emergency_months == 0 => "Switched off.".to_owned(),
-        None => "Sized once this month's money plan and a few months of spending history exist."
-            .to_owned(),
+        Some(fund) => view! {
+            <FactsRow
+                class="mt-3"
+                rows=vec![
+                    ("Bills".to_owned(), money(fund.fixed_monthly)),
+                    ("Essentials".to_owned(), money(fund.essentials_monthly)),
+                    (
+                        "Bare living a month".to_owned(),
+                        money(fund.fixed_monthly + fund.essentials_monthly),
+                    ),
+                    ("Target".to_owned(), money(fund.target)),
+                    ("Held".to_owned(), money(fund.balance)),
+                ]
+            />
+        }
+        .into_any(),
+        None if view.settings.emergency_months == 0 => {
+            view! { <Badge tone=Tone::Outline class="mt-3">"Switched off"</Badge> }.into_any()
+        }
+        None => view! {
+            <span title="Sized once this month's money plan and a few months of spending history exist.">
+                <Badge tone=Tone::Outline class="mt-3">"Not sized yet"</Badge>
+            </span>
+        }
+        .into_any(),
     };
     let submit = move |ev: SubmitEvent| {
         ev.prevent_default();
@@ -1322,11 +1330,8 @@ fn fund_block(ui: Ui, view: &WishesView, shared: SettingsForms) -> impl IntoView
     view! {
         <Card>
             <Eyebrow>"EMERGENCY FUND"</Eyebrow>
-            <h2 class="mt-2 text-lg font-semibold">"Months of bare living to hold"</h2>
-            <p class="mt-1 text-sm text-fg-muted">
-                "A savings goal without a date: it takes what the wishes leave. Rent changes and new subscriptions planned as wishes move its target."
-            </p>
-            <p class="mt-2 text-sm tabular-nums">{summary}</p>
+            <h2 class="mt-2 text-lg font-semibold flex items-center gap-2">"Months of bare living to hold"<Help text="A savings goal without a date: it takes what the wishes leave. Rent changes and new subscriptions planned as wishes move its target. The held amount is the savings pot beyond what is saved for wishes." /></h2>
+            {summary}
             <form class="mt-4 grid items-start gap-3 sm:grid-cols-[8rem_1fr_auto]" on:submit=submit>
                 <Field label="Months" id="fund-months" hint="0 switches it off.">
                     <input
@@ -1575,17 +1580,21 @@ fn wish_row(
     let code = row.wish.currency.code.clone();
     let parent = !row.children.is_empty();
     let parent_must = row.wish.must;
-    let family = parent.then(|| {
-        let over = row.over_cap.then(|| view! {
-            <p role="status" class="text-sm text-warning-fg">"The parts add up to more than the cap."</p>
+    let family =
+        parent.then(|| {
+            let over = row.over_cap.then(|| view! {
+            <span role="status"><Badge tone=Tone::Warning>"Parts exceed the cap"</Badge></span>
         });
-        view! {
-            <p class="text-sm text-fg-muted">
-                {format!("Cap {} · rest {}", amount(row.wish.amount, &code), amount(row.rest, &code))}
-            </p>
-            {over}
-        }
-    });
+            view! {
+                <div class="flex flex-wrap items-end gap-x-6 gap-y-2">
+                    <FactsRow rows=vec![
+                        ("Cap".to_owned(), amount(row.wish.amount, &code)),
+                        ("Rest".to_owned(), amount(row.rest, &code)),
+                    ] />
+                    {over}
+                </div>
+            }
+        });
     let set_aside = months.with_value(|m| saving(&row, m)).map(|s| {
         let unit = Currency::new(&code);
         let this_month = crate::ds::money(s.this_month, &unit);
@@ -1659,37 +1668,49 @@ fn wish_body(
     } else {
         "text-positive-fg"
     };
-    let until = |ends_on: &Option<String>| {
-        ends_on
-            .as_deref()
-            .map(|e| format!(" · until {}", format::date(e)))
-            .unwrap_or_default()
-    };
-    let detail = match &wish.kind {
-        WishKind::OneOff => format!(
-            "{} · by {} · {}",
-            amount(wish.amount, &code),
-            format::date(&wish.due_on),
-            ctx.with_value(|c| c.source_label(&wish.source))
-        ),
-        WishKind::Recurring { every, ends_on } => format!(
-            "{} per {} · from {}{} · {}",
-            amount(wish.amount, &code),
-            period(*every),
-            format::date(&wish.due_on),
-            until(ends_on),
-            ctx.with_value(|c| c.source_label(&wish.source))
-        ),
-        WishKind::BillChange { bill_id, ends_on } => {
-            let old = ctx.with_value(|c| c.bill(bill_id).map(|b| amount(b.amount, &code)));
-            format!(
-                "{}→ {} · from {}{}",
-                old.map(|o| format!("{o} ")).unwrap_or_default(),
+    let source = ctx.with_value(|c| c.source_label(&wish.source));
+    let mut detail = match &wish.kind {
+        WishKind::OneOff => vec![
+            ("Amount".to_owned(), amount(wish.amount, &code)),
+            ("By".to_owned(), format::date(&wish.due_on)),
+            ("Paid from".to_owned(), source),
+        ],
+        WishKind::Recurring { every, .. } => vec![
+            (
+                format!("Per {}", period(*every)),
                 amount(wish.amount, &code),
-                format::date(&wish.due_on),
-                until(ends_on)
-            )
+            ),
+            ("From".to_owned(), format::date(&wish.due_on)),
+            ("Paid from".to_owned(), source),
+        ],
+        WishKind::BillChange { bill_id, .. } => {
+            let old = ctx.with_value(|c| c.bill(bill_id).map(|b| amount(b.amount, &code)));
+            let mut rows = Vec::new();
+            if let Some(old) = old {
+                rows.push(("Now".to_owned(), old));
+            }
+            rows.push(("Becomes".to_owned(), amount(wish.amount, &code)));
+            rows.push(("From".to_owned(), format::date(&wish.due_on)));
+            rows
         }
+    };
+    if let WishKind::Recurring {
+        ends_on: Some(end), ..
+    }
+    | WishKind::BillChange {
+        ends_on: Some(end), ..
+    } = &wish.kind
+    {
+        detail.push(("Until".to_owned(), format::date(end)));
+    }
+    let (chip_tone, chip) = if row.not_judged.is_some() {
+        (Tone::Outline, "Not judged")
+    } else if row.short > Decimal::ZERO {
+        (Tone::Negative, "Not affordable")
+    } else if row.tradeoffs {
+        (Tone::Warning, "With trade-offs")
+    } else {
+        (Tone::Positive, "Affordable")
     };
     let one_off = wish.kind == WishKind::OneOff;
     let start_text = match &wish.kind {
@@ -1897,10 +1918,11 @@ fn wish_body(
                 <h3 class=cn(["flex items-center gap-2 font-semibold", if sub { "text-sm" } else { "text-base" }])>
                     {wish.name.clone()}
                     {(must || parent_must == Some(true)).then(|| view! { <Badge tone=Tone::Accent>"Must"</Badge> })}
+                    <Badge tone=chip_tone>{chip}</Badge>
                 </h3>
-                <span class="text-sm tabular-nums text-fg-muted">{detail}</span>
+                <FactsRow rows=detail />
             </div>
-            <p class=cn(["text-sm font-medium", tone])>{line}</p>
+            <p class=cn(["text-sm", tone])>{line}</p>
             <div class="flex flex-wrap items-end gap-2">
                 {one_off.then(move || view! {
                 <form class="flex items-end gap-2" on:submit=save_saved>
@@ -2160,14 +2182,12 @@ fn month_card(month: &WishMonth, code: &str) -> impl IntoView + use<> {
         money(month.card_used),
     );
     let (savings_before, savings_after) = (money(month.savings_before), money(month.savings_left));
-    let payback =
-        payback_line(month, code).map(|text| view! { <p class="text-sm text-fg-muted">{text}</p> });
+    let payback = payback(month, code)
+        .map(|rows| view! { <Facts rows=rows class="border-t border-line pt-3" /> });
     let short = month_short(month);
     let short = (short > Decimal::ZERO).then(|| {
         view! {
-            <p role="status" class="text-sm font-medium text-negative-fg">
-                {format!("Short by {}", amount(short, code))}
-            </p>
+            <span role="status"><Badge tone=Tone::Negative>{format!("Short {}", amount(short, code))}</Badge></span>
         }
     });
     view! {
@@ -2290,12 +2310,12 @@ mod tests {
             ..card_used("visa", "Visa", d(835, 2))
         }];
         m.card_used = d(835, 2);
-        assert_eq!(payback_line(&m, "EUR"), None);
+        assert_eq!(payback(&m, "EUR"), None);
         m.cards[0].used = d(5835, 2);
         m.card_used = d(5835, 2);
         assert_eq!(
-            payback_line(&m, "EUR").unwrap(),
-            "Pay back €50 on 1 February."
+            payback(&m, "EUR").unwrap(),
+            [("Pay back on 1 February".to_owned(), "€50".to_owned())]
         );
     }
 
@@ -2309,8 +2329,12 @@ mod tests {
         ];
         m.card_used = d(15000, 2);
         assert_eq!(
-            payback_line(&m, "EUR").unwrap(),
-            "Pay back €150 on 1 December (Visa €60, Mastercard €90)."
+            payback(&m, "EUR").unwrap(),
+            [
+                ("Pay back on 1 December".to_owned(), "€150".to_owned()),
+                ("Visa".to_owned(), "€60".to_owned()),
+                ("Mastercard".to_owned(), "€90".to_owned()),
+            ]
         );
         // Two cards, one used: no breakdown.
         m.cards = vec![
@@ -2319,17 +2343,17 @@ mod tests {
         ];
         m.card_used = d(6000, 2);
         assert_eq!(
-            payback_line(&m, "EUR").unwrap(),
-            "Pay back €60 on 1 December."
+            payback(&m, "EUR").unwrap(),
+            [("Pay back on 1 December".to_owned(), "€60".to_owned())]
         );
         m.cards.truncate(1);
         assert_eq!(
-            payback_line(&m, "EUR").unwrap(),
-            "Pay back €60 on 1 December."
+            payback(&m, "EUR").unwrap(),
+            [("Pay back on 1 December".to_owned(), "€60".to_owned())]
         );
         m.card_used = Decimal::ZERO;
         m.cards.clear();
-        assert!(payback_line(&m, "EUR").is_none());
+        assert!(payback(&m, "EUR").is_none());
     }
 
     fn settings_card(id: &str, limit: i64, used: i64, used_month: &str) -> CardSettings {
@@ -2384,8 +2408,12 @@ mod tests {
         ];
         m.card_used = d(1250, 2);
         assert_eq!(
-            payback_line(&m, "EUR").unwrap(),
-            "Pay back €12.50 on 1 January (Visa €10.50, Mastercard €2)."
+            payback(&m, "EUR").unwrap(),
+            [
+                ("Pay back on 1 January".to_owned(), "€12.50".to_owned()),
+                ("Visa".to_owned(), "€10.50".to_owned()),
+                ("Mastercard".to_owned(), "€2".to_owned()),
+            ]
         );
     }
 

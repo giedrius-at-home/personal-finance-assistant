@@ -11,7 +11,7 @@ use wasm_bindgen::JsValue;
 
 use super::{Choice, clean_error, options};
 use crate::api::invoke;
-use crate::ds::{Badge, CONTROL, Field, Size, Tone, Variant, button_class, cn};
+use crate::ds::{Badge, CONTROL, Field, Help, Size, Tone, Variant, button_class, cn};
 use crate::state;
 
 const OWNER_TAGS_LIMIT: usize = 20;
@@ -283,7 +283,7 @@ pub fn TransactionDetails(
             }
         >
             <summary class="cursor-pointer text-sm font-semibold">{format!("Details & tags{summary}")}</summary>
-            {(prefill_count > 0).then(|| view! { <p class="mt-2 text-sm text-fg-muted">"Check and save."</p> })}
+            {(prefill_count > 0).then(|| view! { <Badge tone=Tone::Accent class="mt-2">"Check and save"</Badge> })}
             <fieldset disabled=move || busy.get() class="mt-4 grid min-w-0 gap-4 border-0 p-0">
                 {FIELDS
                     .into_iter()
@@ -424,7 +424,7 @@ pub fn TransactionDetails(
                     {move || (!bulk_complete()).then(|| view! {
                         <p role="status" class="text-sm text-warning-fg">"Give this bulk payment a name before saving."</p>
                     })}
-                    <p class="text-sm text-fg-muted">"Use the same name for its purchases and final payment."</p>
+                    <Help text="Use the same name for its purchases and final payment." />
                 </div>
                 <Field label="Your notes" id=format!("{}-notes", id.get_value())>
                     <textarea
