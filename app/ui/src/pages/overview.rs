@@ -9,7 +9,7 @@ mod forecast;
 mod monthly;
 mod outlook;
 mod trends;
-mod visuals;
+pub mod visuals;
 
 use leptos::prelude::*;
 

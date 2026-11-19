@@ -1,5 +1,6 @@
 //! One module per primary section, plus what they share.
 
+pub mod adjustments;
 pub mod category_trends;
 pub mod closure;
 pub mod manage;
