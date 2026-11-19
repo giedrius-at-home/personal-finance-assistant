@@ -93,6 +93,27 @@ pub fn default_budget(month: Date, currency: &Currency) -> BudgetPlan {
     }
 }
 
+/// The plan a month runs on: its own saved plan, else the latest earlier
+/// saved plan of the currency carried over (unsaved, revision 0), else the
+/// default. A budget the owner set once stays until they change it.
+pub fn plan_for(saved: &[BudgetPlan], month: Date, currency: &Currency) -> BudgetPlan {
+    let earlier = saved
+        .iter()
+        .filter(|p| p.currency == *currency)
+        .filter_map(|p| Some((parse_date(&p.month)?, p)))
+        .filter(|(on, _)| *on <= month)
+        .max_by_key(|(on, _)| *on);
+    match earlier {
+        Some((on, plan)) if on == month => plan.clone(),
+        Some((_, plan)) => BudgetPlan {
+            month: month.to_string(),
+            revision: 0,
+            ..plan.clone()
+        },
+        None => default_budget(month, currency),
+    }
+}
+
 /// The plan group a purchase counts in: an explicit purchase overrides its
 /// category, which overrides a broad spending group.
 pub fn budget_owner<'p>(
@@ -406,11 +427,6 @@ pub fn monthly_budgets(
     next_subscriptions: &SubscriptionReport,
 ) -> Vec<MonthlyBudget> {
     let snap = ctx.snap;
-    let saved: HashMap<(Date, &Currency), &BudgetPlan> = snap
-        .budget_plans
-        .iter()
-        .filter_map(|p| Some(((parse_date(&p.month)?, &p.currency), p)))
-        .collect();
     let mut currencies: BTreeMap<&str, &Currency> = BTreeMap::new();
     for currency in snap
         .accounts
@@ -437,11 +453,9 @@ pub fn monthly_budgets(
     ]
     .into_iter()
     .flat_map(|(month, subscriptions)| {
-        let (inputs, saved) = (&inputs, &saved);
+        let inputs = &inputs;
         currencies.values().map(move |currency| {
-            let plan = saved
-                .get(&(month, *currency))
-                .map_or_else(|| default_budget(month, currency), |p| (*p).clone());
+            let plan = plan_for(&snap.budget_plans, month, currency);
             monthly_budget(
                 &plan,
                 subscriptions,
@@ -865,6 +879,52 @@ mod tests {
         assert_eq!(owner(Some("Lidl"), None, None), None);
         assert!(
             default_budget(month(), &Currency::new("USD"))
+                .groups
+                .is_empty()
+        );
+    }
+
+    fn saved(month: &str, amount: i64) -> BudgetPlan {
+        BudgetPlan {
+            month: month.into(),
+            currency: Currency::eur(),
+            revision: 3,
+            groups: vec![group(
+                "food-out",
+                "Food & drinks out",
+                amount,
+                &["Eating out"],
+            )],
+        }
+    }
+
+    #[test]
+    fn a_month_without_a_plan_uses_the_latest_earlier_one() {
+        let plans = [saved("2026-09-01", 250), saved("2026-11-01", 430)];
+        let dec = plan_for(&plans, date(2026, 12, 1), &Currency::eur());
+        assert_eq!((dec.month.as_str(), dec.revision), ("2026-12-01", 0));
+        assert_eq!(dec.groups[0].amount, Decimal::from(430));
+        // The month's own plan wins, untouched.
+        assert_eq!(
+            plan_for(&plans, date(2026, 11, 1), &Currency::eur()).revision,
+            3
+        );
+        // A later plan never flows backwards.
+        assert_eq!(
+            plan_for(&plans, date(2026, 10, 1), &Currency::eur()).groups[0].amount,
+            Decimal::from(250)
+        );
+    }
+
+    #[test]
+    fn no_earlier_plan_falls_back_to_the_default() {
+        let plans = [saved("2026-11-01", 430)];
+        assert_eq!(
+            plan_for(&plans, date(2026, 10, 1), &Currency::eur()),
+            default_budget(date(2026, 10, 1), &Currency::eur())
+        );
+        assert!(
+            plan_for(&plans, date(2026, 12, 1), &Currency::new("USD"))
                 .groups
                 .is_empty()
         );
