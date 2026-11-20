@@ -363,7 +363,11 @@ impl Inputs<'_> {
             uncovered,
             fund: goals::fund(
                 settings.emergency_months,
-                goals::fixed_monthly(alloc, &self.card_bills, &items),
+                goals::fixed_monthly(
+                    alloc,
+                    &baseline::counted_bills(&self.card_bills, settings, month0),
+                    &items,
+                ),
                 &habits,
                 &habit_months,
                 steady,

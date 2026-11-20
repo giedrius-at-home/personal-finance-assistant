@@ -429,7 +429,7 @@ fn panel(report: &Dashboard, selection: &str, s: PanelState) -> AnyView {
             totals.push(("In savings", m(a.savings_balance), false));
             totals.push((
                 "Savings by month end",
-                m(a.current_wiggle_room.max(Decimal::ZERO) + a.savings_balance),
+                m((a.current_wiggle_room + a.savings_balance).max(Decimal::ZERO)),
                 false,
             ));
             if a.current_expected_income > Decimal::ZERO {

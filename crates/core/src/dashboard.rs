@@ -69,8 +69,12 @@ pub fn dashboard(
     );
 
     let offset = budget_calendar_offset(&ctx);
-    let current_subscriptions = subscription_report(&ctx, BillWindow::CalendarMonth(offset))?;
-    let next_subscriptions = subscription_report(&ctx, BillWindow::CalendarMonth(offset + 1))?;
+    let mut current_subscriptions = subscription_report(&ctx, BillWindow::CalendarMonth(offset))?;
+    let mut next_subscriptions = subscription_report(&ctx, BillWindow::CalendarMonth(offset + 1))?;
+    // A card bill charges what was typed as used on its statement.
+    let cards = crate::wishes::store::load_wish_settings(store.connection())?.cards;
+    crate::subscriptions::apply_card_usage(&mut current_subscriptions, &cards);
+    crate::subscriptions::apply_card_usage(&mut next_subscriptions, &cards);
     let period_start = ctx
         .resolver
         .period_start_date(ctx.current_month())

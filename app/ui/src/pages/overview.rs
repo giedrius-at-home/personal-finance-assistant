@@ -8,6 +8,7 @@ mod extras;
 mod forecast;
 mod kpis;
 mod monthly;
+mod nudges;
 mod outlook;
 mod trends;
 pub mod visuals;
@@ -27,6 +28,7 @@ pub fn Overview() -> impl IntoView {
     view! {
         {month_closure_banner()}
         <kpis::OverviewKpis />
+        <nudges::OverviewNudges />
         <monthly::OwnerMonthlyOverview />
         {budget_panel()}
         <trends::OverviewTrends />

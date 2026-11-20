@@ -405,6 +405,10 @@ pub struct PlanMove {
     pub via_account_id: Option<String>,
     pub amount: Decimal,
     pub reason: String,
+    /// Covers an account that is short, from another account's spare
+    /// money or from savings (not part of handing out the salary).
+    #[serde(default)]
+    pub cover: bool,
 }
 
 /// The savings account: what sits there, what the wishes already saved
@@ -416,15 +420,21 @@ pub struct SavingsStanding {
     pub balance: Decimal,
     /// The plan's rest-to-savings move.
     pub incoming: Decimal,
+    /// What the plan takes back out to cover accounts that are short.
+    #[serde(default)]
+    pub outgoing: Decimal,
     /// Σ saved of planned one-off wishes.
     pub must_keep: Decimal,
     /// `(name, saved)` of every wish with money saved.
     pub wishes: Vec<(String, Decimal)>,
+    /// What the planned one-off wishes still need saved: Σ `amount − saved`.
+    #[serde(default)]
+    pub wishes_open: Decimal,
     /// `(label, amount)` estimates set aside this month: unplanned spending
     /// expected from past months.
     #[serde(default)]
     pub expected: Vec<(String, Decimal)>,
-    /// `balance + incoming − must_keep − Σ expected`; negative when the
+    /// `balance + incoming − outgoing − must_keep − Σ expected`; negative when the
     /// wishes and estimates need more.
     pub wiggle_room: Decimal,
 }
@@ -462,6 +472,10 @@ pub struct MoneyPlan {
     pub savings: Option<SavingsStanding>,
     #[serde(default)]
     pub predicted_bills: Vec<PredictedBill>,
+    /// `(group, spent − limit)` of every group over its budget this month,
+    /// largest first: why an account can be short of what it must keep.
+    #[serde(default)]
+    pub overspent: Vec<(String, Decimal)>,
 }
 
 /// One own-account bank transfer since the split (paired legs as one).

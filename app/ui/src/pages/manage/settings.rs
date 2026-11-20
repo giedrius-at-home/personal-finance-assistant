@@ -235,6 +235,16 @@ fn SettingsCard(
 ) -> impl IntoView {
     let app = state();
     let busy = ops.busy;
+    let categories = app.report.data.with_untracked(|report| {
+        let mut names: Vec<String> = report
+            .iter()
+            .filter_map(|r| r.as_ref().ok())
+            .flat_map(|r| r.category_catalog.entries.iter().map(|e| e.name.clone()))
+            .collect();
+        names.sort_by_key(|n| n.to_lowercase());
+        names
+    });
+    let (excluded_options, predicted_options) = (categories.clone(), categories);
     let notifications_available = ws.notifications_available;
     let mut accounts = vec![(String::new(), "Not set".to_owned())];
     accounts.extend(
@@ -303,16 +313,18 @@ fn SettingsCard(
                         <Field
                             label="Not part of everyday spending"
                             id="set-excluded"
-                            hint="Comma-separated categories of fixed or planned costs the everyday spending forecast leaves out."
+                            hint="Categories of fixed or planned costs the everyday spending forecast leaves out."
+                            class="col-span-full"
                         >
-                            <Input id="set-excluded" value=draft.excluded placeholder="e.g. Education, Flights" />
+                            <crate::ds::MultiSelect id="set-excluded" label="Not part of everyday spending" value=draft.excluded options=excluded_options />
                         </Field>
                         <Field
                             label="Bills predicted from past months"
                             id="set-predicted"
-                            hint="Comma-separated categories paid like a bill whose amount varies; the plan sets their next payment aside."
+                            hint="Categories paid like a bill whose amount varies; the plan sets their next payment aside."
+                            class="col-span-full"
                         >
-                            <Input id="set-predicted" value=draft.predicted placeholder="e.g. NS" />
+                            <crate::ds::MultiSelect id="set-predicted" label="Bills predicted from past months" value=draft.predicted options=predicted_options />
                         </Field>
                         <Field label="Salary account" id="set-salary-account" hint="The account your salary is paid into.">
                             <Select id="set-salary-account" value=draft.salary_account options=Signal::derive(move || accounts.clone()) />

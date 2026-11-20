@@ -266,6 +266,11 @@ pub fn savings_outlooks(input: &OutlookInputs) -> Vec<SavingsOutlook> {
             {
                 continue;
             }
+            // Like the monthly plan: a payment left unpaid in an earlier
+            // month is only still owed while it is a pending reservation.
+            if due_on < today.first_of_month() && !p.pending {
+                continue;
+            }
             let due = add_days(today, 1).max(due_on);
             if due > end {
                 continue;

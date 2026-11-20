@@ -552,6 +552,120 @@ pub fn Checkbox(
     }
 }
 
+/// The names in a comma list, trimmed, without blanks.
+pub fn list_names(text: &str) -> Vec<String> {
+    text.split(',')
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+/// `names` with `name` switched: removed when present (any letter case),
+/// added at the end otherwise.
+pub fn toggle_name(names: &[String], name: &str) -> Vec<String> {
+    let same = |n: &String| n.eq_ignore_ascii_case(name);
+    if names.iter().any(same) {
+        names.iter().filter(|n| !same(n)).cloned().collect()
+    } else {
+        names.iter().cloned().chain([name.to_owned()]).collect()
+    }
+}
+
+/// Pick several of `options` as chips. `value` stays the comma list the
+/// forms save; a saved name that is no longer an option keeps its chip.
+#[component]
+pub fn MultiSelect(
+    value: RwSignal<String>,
+    options: Vec<String>,
+    #[prop(into)] label: String,
+    #[prop(optional, into)] id: String,
+) -> impl IntoView {
+    // A long list shows what is chosen and a search box for the rest.
+    let long = options.len() > LONG_LIST;
+    let options = StoredValue::new(options);
+    let query = RwSignal::new(String::new());
+    let chips = move || {
+        let chosen = list_names(&value.get());
+        let mut all = options.get_value();
+        for name in &chosen {
+            if !all.iter().any(|o| o.eq_ignore_ascii_case(name)) {
+                all.push(name.clone());
+            }
+        }
+        let shown = shown_names(&all, &chosen, long.then(|| query.get()).as_deref());
+        shown
+            .into_iter()
+            .map(|name| {
+                let on = chosen.iter().any(|c| c.eq_ignore_ascii_case(&name));
+                let text = name.clone();
+                view! {
+                    <button
+                        type="button"
+                        aria-pressed=on.to_string()
+                        class=cn([
+                            "inline-flex items-center gap-1 rounded-pill border px-3 py-1 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                            if on { "border-contrast bg-contrast text-fg-on-contrast" } else { "border-border text-fg-muted hover:text-fg" },
+                        ])
+                        on:click=move |_| {
+                            let next = toggle_name(&list_names(&value.get_untracked()), &name);
+                            value.set(next.join(", "));
+                        }
+                    >
+                        {on.then(|| view! { <Lucide icon=Icon::Check size=12 stroke=3.0 /> })}
+                        {text}
+                    </button>
+                }
+            })
+            .collect_view()
+    };
+    let search = long.then(|| {
+        let placeholder = format!("Search {} to add", options.with_value(Vec::len));
+        view! {
+            <input
+                type="search"
+                class=cn([CONTROL, "h-8 max-w-xs basis-full"])
+                placeholder=placeholder
+                aria-label=format!("Search {label}")
+                prop:value=move || query.get()
+                on:input=move |ev| query.set(event_target_value(&ev))
+            />
+        }
+    });
+    view! {
+        <div id=id role="group" aria-label=label.clone() class="flex flex-wrap gap-1.5">
+            {search}
+            {chips}
+            {move || {
+                (options.with_value(Vec::is_empty) && list_names(&value.get()).is_empty())
+                    .then(|| view! { <p class="text-sm text-fg-muted">"Nothing to choose from yet."</p> })
+            }}
+        </div>
+    }
+}
+
+/// More options than this and [`MultiSelect`] searches instead of listing.
+const LONG_LIST: usize = 24;
+
+/// The chips to show: all of them for a short list (`query` is `None`);
+/// for a long one the chosen names, then the others matching `query`.
+pub fn shown_names(all: &[String], chosen: &[String], query: Option<&str>) -> Vec<String> {
+    let Some(query) = query else {
+        return all.to_vec();
+    };
+    let query = query.trim().to_lowercase();
+    let is_chosen = |n: &String| chosen.iter().any(|c| c.eq_ignore_ascii_case(n));
+    let mut out: Vec<String> = all.iter().filter(|n| is_chosen(n)).cloned().collect();
+    if !query.is_empty() {
+        out.extend(
+            all.iter()
+                .filter(|n| !is_chosen(n) && n.to_lowercase().contains(&query))
+                .cloned(),
+        );
+    }
+    out
+}
+
 /// The site's `SegmentedControl`: a pill of mutually exclusive options.
 #[component]
 pub fn SegmentedControl(

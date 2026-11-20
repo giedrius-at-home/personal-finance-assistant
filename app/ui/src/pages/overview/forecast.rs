@@ -16,15 +16,6 @@ use crate::pages::f;
 use super::outlook::{CAPTION, ROW_HEADER, chart_frame, percent};
 use super::weekday;
 
-fn method_label(method: &str) -> String {
-    match method {
-        "timesfm" => "TimesFM".into(),
-        "timesfm_planned" => "TimesFM with your planned payments".into(),
-        "weekday_baseline" => "Same-weekday average".into(),
-        other => other.into(),
-    }
-}
-
 #[component]
 pub fn DailyForecastPanel(report: Dashboard, currency_code: String) -> impl IntoView {
     let Some(forecast) = report
@@ -106,12 +97,18 @@ pub fn DailyForecastPanel(report: Dashboard, currency_code: String) -> impl Into
             view! { <li aria-label=aria>{format!("{}: {}", label(&d.day), m(d.habit_expected + d.planned))}</li> }
         })
         .collect_view();
-    let upcoming = (!forecast.upcoming.is_empty()).then(|| {
+    // A bill with nothing to pay (an unused card) is not worth a line.
+    let coming: Vec<_> = forecast
+        .upcoming
+        .iter()
+        .filter(|flow| !flow.amount.is_zero())
+        .cloned()
+        .collect();
+    let upcoming = (!coming.is_empty()).then(|| {
         view! {
             <ul class="grid content-start" aria-label="Coming up">
                 <li class="pb-1 text-eyebrow font-bold uppercase tracking-eyebrow text-fg-muted">"Coming up"</li>
-                {forecast
-                    .upcoming
+                {coming
                     .iter()
                     .map(|flow| {
                         view! {
@@ -150,11 +147,6 @@ pub fn DailyForecastPanel(report: Dashboard, currency_code: String) -> impl Into
             "Bills and planned payments paid".to_owned(),
             m(forecast.planned_paid_this_month),
         ),
-        ("Model".to_owned(), forecast.model.clone()),
-        (
-            "Days of history".to_owned(),
-            forecast.training_days.to_string(),
-        ),
     ];
     if let Some(h) = &heaviest {
         evidence.insert(
@@ -165,27 +157,6 @@ pub fn DailyForecastPanel(report: Dashboard, currency_code: String) -> impl Into
             ),
         );
     }
-    if let Some(baseline) = forecast.baseline_error {
-        evidence.push(("Weekly miss, weekday average".into(), m(baseline)));
-        if let Some(e) = forecast.model_error {
-            evidence.push(("Weekly miss, TimesFM".into(), m(e)));
-        }
-        if let Some(e) = forecast.planned_model_error {
-            evidence.push(("Weekly miss, TimesFM with planned".into(), m(e)));
-        }
-    }
-    let badge = format!(
-        "{}{}",
-        method_label(&forecast.method),
-        if forecast.backtest_windows > 0 {
-            format!(
-                " · checked against {} past weeks",
-                forecast.backtest_windows
-            )
-        } else {
-            String::new()
-        }
-    );
     let next_week = amount(forecast.next_week_habit + forecast.next_week_planned, "");
     let next_week_facts = vec![
         ("Habits".to_owned(), m(forecast.next_week_habit)),
@@ -221,12 +192,9 @@ pub fn DailyForecastPanel(report: Dashboard, currency_code: String) -> impl Into
     let frame = chart_frame("Forecast per day", String::new(), 300, chart);
     let content = view! {
         <div role="region" aria-label="Daily spending forecast" class="contents">
-            <header class="flex flex-col items-start justify-between gap-3 sm:flex-row">
-                <div>
-                    <Eyebrow level=Heading::P>"THE NEXT SEVEN DAYS"</Eyebrow>
-                    <CardTitle>"Daily spending forecast"</CardTitle>
-                </div>
-                <Badge tone=Tone::Outline class="h-auto whitespace-normal text-left">{badge}</Badge>
+            <header>
+                <Eyebrow level=Heading::P>"THE NEXT SEVEN DAYS"</Eyebrow>
+                <CardTitle>"Daily spending forecast"</CardTitle>
             </header>
             <div class="grid gap-x-10 gap-y-6 lg:grid-cols-[minmax(240px,.4fr)_minmax(0,1.1fr)_minmax(260px,.5fr)]">
                 <div class="grid content-start gap-6">

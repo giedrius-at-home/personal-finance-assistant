@@ -227,35 +227,6 @@ pub fn SavingsOutlookPanel(report: Dashboard, currency_code: String) -> impl Int
             }
         })
         .collect_view();
-    let method = match outlook.method.as_str() {
-        "timesfm" => "TimesFM",
-        "insufficient_history" => "Insufficient history",
-        _ => "Weighted weekday baseline",
-    };
-    let mut model_facts = vec![
-        ("Model".to_owned(), method.to_owned()),
-        (
-            "Days of evidence".to_owned(),
-            outlook.training_days.to_string(),
-        ),
-        (
-            "Trained in".to_owned(),
-            format!("{}s", outlook.training_seconds),
-        ),
-    ];
-    if let Some(baseline) = outlook.baseline_error {
-        model_facts.push(("28-day error, baseline".into(), m(baseline)));
-        model_facts.push((
-            "28-day error, TimesFM".into(),
-            outlook.model_error.map_or("—".to_owned(), &m),
-        ));
-        model_facts.push((
-            "Three-month validation windows".into(),
-            outlook.horizon_validation_windows.to_string(),
-        ));
-    }
-    // The app sends no email; alerts would need a sender first.
-    model_facts.push(("Email alerts".into(), "Sender setup required".into()));
     let as_of_day: u32 = outlook
         .as_of
         .get(8..10)
@@ -350,7 +321,6 @@ pub fn SavingsOutlookPanel(report: Dashboard, currency_code: String) -> impl Int
                         <tbody>{history}</tbody>
                     </table>
                 </div>
-                <Facts rows=model_facts class="max-w-md" />
                 <ul class="list-disc pl-5 text-xs text-fg-muted" title="* Reconstructed using the current plan.">{assumptions}</ul>
             </details>
         </div>

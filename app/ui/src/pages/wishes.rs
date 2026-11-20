@@ -472,8 +472,12 @@ pub fn saving(row: &WishRow, months: &[WishMonth]) -> Option<Saving> {
 /// the room above that. The pot the months start from already leaves the
 /// saved money out, so it is the wiggle room.
 fn savings_fields(months: &[WishMonth], must_keep: Decimal) -> Option<(Decimal, Decimal, Decimal)> {
-    let free = months.first()?.savings_before;
-    Some((free + must_keep, must_keep, free))
+    let first = months.first()?;
+    let free = first.savings_before;
+    // What the bank accounts are short this month comes out of the room
+    // first, as on the Overview.
+    let room = free + first.free_before.min(Decimal::ZERO);
+    Some((free + must_keep, must_keep, room))
 }
 
 /// What the wishes put on the cards this month, paid back on the 1st of
@@ -1274,6 +1278,22 @@ fn card_strip(
 /// which spending groups are bare living. It takes what the wishes leave.
 fn fund_block(ui: Ui, view: &WishesView, shared: SettingsForms) -> impl IntoView + use<> {
     let (months, groups) = (shared.months, shared.groups);
+    // Every group a budget plan or the owner named.
+    let group_options = state().report.data.with_untracked(|report| {
+        let mut names: Vec<String> = report
+            .iter()
+            .filter_map(|r| r.as_ref().ok())
+            .flat_map(|r| {
+                r.monthly_budgets
+                    .iter()
+                    .flat_map(|b| b.plan.groups.iter().map(|g| g.name.clone()))
+                    .chain(r.custom_spending_groups.iter().cloned())
+            })
+            .collect();
+        names.sort_by_key(|n| n.to_lowercase());
+        names.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+        names
+    });
     let statement = statement_month(&today());
     let unit = view.currency.clone();
     let money = move |value: Decimal| format::money_dp(value, &unit.code, 0);
@@ -1348,15 +1368,9 @@ fn fund_block(ui: Ui, view: &WishesView, shared: SettingsForms) -> impl IntoView
                 <Field
                     label="Bare living groups"
                     id="fund-groups"
-                    hint="Spending groups, separated by commas. Bills always count."
+                    hint="The spending groups you cannot live without. Bills always count."
                 >
-                    <input
-                        id="fund-groups"
-                        type="text"
-                        class=CONTROL
-                        prop:value=move || groups.get()
-                        on:input=move |e| groups.set(event_target_value(&e))
-                    />
+                    <crate::ds::MultiSelect id="fund-groups" label="Bare living groups" value=groups options=group_options />
                 </Field>
                 <Button
                     submit=true
@@ -3102,6 +3116,14 @@ mod tests {
         assert_eq!(
             savings_fields(&months, d(624, 0)),
             Some((d(1374, 0), d(624, 0), d(750, 0)))
+        );
+        let short = WishMonth {
+            free_before: d(-50, 0),
+            ..with_savings("2026-10-01", d(250, 0), Vec::new())
+        };
+        assert_eq!(
+            savings_fields(&[short], d(624, 0)),
+            Some((d(1374, 0), d(624, 0), d(700, 0)))
         );
         assert_eq!(savings_fields(&[], d(624, 0)), None);
     }

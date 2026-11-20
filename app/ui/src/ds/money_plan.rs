@@ -30,7 +30,8 @@ pub fn standing(account: &PlanAccount, salary: bool) -> (&'static str, Decimal, 
 /// that is short.
 pub fn salary_account(plan: &MoneyPlan) -> Option<String> {
     plan.moves
-        .first()
+        .iter()
+        .find(|m| !m.cover)
         .map(|m| m.from_account_id.clone())
         .or_else(|| {
             plan.accounts
@@ -49,9 +50,18 @@ pub fn transfer_rows(plan: &MoneyPlan, names: &HashMap<String, String>) -> Vec<(
         .moves
         .iter()
         .map(|m: &PlanMove| {
-            let label = match &m.via_account_id {
-                Some(hub) => format!("To {} via {}", name(&m.to_account_id), name(hub)),
-                None => format!("To {}", name(&m.to_account_id)),
+            // Money covering a short account says where it comes from.
+            let label = if m.cover {
+                format!(
+                    "From {} to {}",
+                    name(&m.from_account_id),
+                    name(&m.to_account_id)
+                )
+            } else {
+                match &m.via_account_id {
+                    Some(hub) => format!("To {} via {}", name(&m.to_account_id), name(hub)),
+                    None => format!("To {}", name(&m.to_account_id)),
+                }
             };
             (label, m.amount)
         })
@@ -68,7 +78,7 @@ pub fn transfer_rows(plan: &MoneyPlan, names: &HashMap<String, String>) -> Vec<(
         let through: Vec<&PlanMove> = plan
             .moves
             .iter()
-            .filter(|m| m.via_account_id.as_deref() == Some(hub))
+            .filter(|m| !m.cover && m.via_account_id.as_deref() == Some(hub))
             .collect();
         if through.len() > 1 {
             rows.push((
@@ -161,13 +171,18 @@ pub fn MoneyPlanFields(
             .into_any()
     };
     let savings = plan.savings.as_ref().map(|s| {
-        let negative = s.wiggle_room < Decimal::ZERO;
+        // The room before the unplanned estimate is the number Overview
+        // and Wishes call wiggle room; what the estimate leaves is below.
+        let set_aside: Decimal = s.expected.iter().map(|(_, v)| *v).sum();
+        let before_estimate = s.wiggle_room + set_aside;
+        let negative = before_estimate < Decimal::ZERO;
+        let after_estimate = money(s.wiggle_room, &unit);
         let (name, balance, incoming, must_keep, room) = (
             s.name.clone(),
             money(s.balance, &unit),
             money(s.incoming, &unit),
             money(s.must_keep, &unit),
-            money(s.wiggle_room, &unit),
+            money(before_estimate, &unit),
         );
         let wishes: Vec<(String, String)> = s
             .wishes
@@ -209,7 +224,15 @@ pub fn MoneyPlanFields(
                     <Stat label="Wiggle room" tone=if negative { Tone::Negative } else { Tone::Neutral }>{room}</Stat>
                 </div>
                 {has_wishes.then(|| view! { <div class="grid gap-0.5">{wish_rows}</div> })}
-                {has_estimates.then(|| view! { <div class="grid gap-0.5">{estimate_rows}</div> })}
+                {has_estimates.then(|| view! {
+                    <div class="grid gap-0.5">
+                        {estimate_rows}
+                        <div class="flex justify-between gap-4 text-xs text-fg-muted">
+                            <span>"Wiggle room after the estimate"</span>
+                            <span class="tabular-nums">{after_estimate}</span>
+                        </div>
+                    </div>
+                })}
             </div>
         }
     });
@@ -239,9 +262,66 @@ pub fn MoneyPlanFields(
             </div>
         }
     });
+    // Why an account holds less than it must keep, and what is still open
+    // after the savings covered what they could.
+    let short_total: Decimal = plan
+        .accounts
+        .iter()
+        .filter(|a| a.role == AccountRoleKind::Spending)
+        .map(|a| a.short)
+        .sum();
+    let covered: Decimal = plan.savings.as_ref().map_or(Decimal::ZERO, |s| s.outgoing);
+    let from_spare: Decimal = plan
+        .moves
+        .iter()
+        .filter(|m| m.cover)
+        .map(|m| m.amount)
+        .sum::<Decimal>()
+        - covered;
+    let why = (short_total > Decimal::ZERO).then(|| {
+        let over = if plan.overspent.is_empty() {
+            "The accounts hold less than the bills and budgets left need: spending outside the budget groups used the money.".to_owned()
+        } else {
+            let groups = plan
+                .overspent
+                .iter()
+                .map(|(group, by)| format!("{group} {}", money(*by, &unit)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("Over budget this month: {groups}. That money was meant for the bills and budgets left.")
+        };
+        let mut steps = Vec::new();
+        if from_spare > Decimal::ZERO {
+            steps.push(format!("{} from spare money on your other accounts", money(from_spare, &unit)));
+        }
+        if covered > Decimal::ZERO {
+            steps.push(format!("{} back from savings", money(covered, &unit)));
+        }
+        let open = short_total - from_spare - covered;
+        let mut fix = if steps.is_empty() {
+            String::new()
+        } else {
+            format!("Move {} as listed.", steps.join(" and "))
+        };
+        if open > Decimal::ZERO {
+            fix.push_str(&format!(
+                " {} stays uncovered: savings have no room above the wishes.",
+                money(open, &unit)
+            ));
+        }
+        view! {
+            <p class="text-sm text-fg-muted">
+                <strong class="font-medium text-fg">{format!("Short {}. ", money(short_total, &unit))}</strong>
+                {over}
+                " "
+                {fix}
+            </p>
+        }
+    });
     view! {
         <div class="grid gap-4">
             {table}
+            {why}
             <div class="grid gap-1">{transfer_rows_view}</div>
             {savings}
             {predicted}
@@ -267,6 +347,7 @@ mod tests {
             via_account_id: via.map(str::to_owned),
             amount: d(amount),
             reason: String::new(),
+            cover: false,
         }
     }
 
@@ -301,12 +382,15 @@ mod tests {
                 name: "Savings".into(),
                 balance: d("1200"),
                 incoming: d("800"),
+                outgoing: Decimal::ZERO,
                 must_keep: d("624"),
                 wishes: Vec::new(),
+                wishes_open: Decimal::ZERO,
                 expected: Vec::new(),
                 wiggle_room: d("1376"),
             }),
             predicted_bills: Vec::new(),
+            overspent: Vec::new(),
         }
     }
 

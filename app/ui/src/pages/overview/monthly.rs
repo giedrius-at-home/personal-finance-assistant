@@ -1,9 +1,9 @@
 //! This and next month's plan per currency (`owner-monthly-overview.tsx`).
 
 use finance_types::report::Currency;
-use finance_types::report::allocation::CurrencyAllocation;
+use finance_types::report::allocation::{CurrencyAllocation, carried_to_next};
 use finance_types::report::closure::MoneyPlan;
-use finance_types::report::trends::{ForecastMethod, SpendingForecast};
+use finance_types::report::trends::SpendingForecast;
 use leptos::ev;
 use leptos::prelude::*;
 use rust_decimal::Decimal;
@@ -344,11 +344,6 @@ fn forecast_row(
     } else {
         Decimal::ZERO
     };
-    let method = if forecast.method == ForecastMethod::Timesfm {
-        "TimesFM"
-    } else {
-        "History + pace"
-    };
     let bar_unit = unit.clone();
     let bar = if has_limit {
         view! {
@@ -389,7 +384,6 @@ fn forecast_row(
         <tr class=cn([TROW, "align-middle"])>
             <th scope="row" class="px-2 py-2.5 text-left align-middle">
                 <strong class="block text-sm font-semibold">{forecast.group.clone()}</strong>
-                <small class="block text-xs font-normal text-fg-muted">{method}</small>
             </th>
             <td class=cn([TCELL, "hidden align-middle md:table-cell"])>{bar}</td>
             <td class=cn([TCELL, "align-middle"])>
@@ -429,6 +423,16 @@ fn CurrencyOverview(
     let saved_for_wishes = wish_savings.as_ref().map_or(zero, |s| s.must_keep);
     let savings_balance = wish_savings.as_ref().map_or(zero, |s| s.balance);
     let wiggle_room = a.current_wiggle_room + savings_balance - saved_for_wishes;
+    // Room is not free until next month's plan is paid for: it fills that
+    // shortfall first (only once the salary funding next month is known).
+    let carried = if next_negative {
+        carried_to_next(wiggle_room, a.next_shortfall)
+    } else {
+        zero
+    };
+    let wiggle_room = wiggle_room - carried;
+    let next_shortfall = a.next_shortfall - carried;
+    let next_negative = next_negative && next_shortfall > zero;
     let current_total = (current_total + savings_balance).max(zero);
     let mut current_parts = vec![("Bills".to_owned(), a.current_fixed_remaining, Part::Fixed)];
     current_parts.extend(
@@ -439,6 +443,10 @@ fn CurrencyOverview(
     current_parts.push(("Plans".into(), a.current_plans_remaining, Part::Goals));
     if saved_for_wishes > zero {
         current_parts.push(("Saved for wishes".into(), saved_for_wishes, Part::Plans));
+    }
+    if carried > zero {
+        let label = format!("Held for {}", month_name(&a.funded_month));
+        current_parts.push((label, carried, Part::Plans));
     }
     current_parts.push(("Wiggle room".into(), wiggle_room.max(zero), Part::Free));
     let wish_rows = wish_savings
@@ -478,7 +486,17 @@ fn CurrencyOverview(
         next_parts.push(("Savings goals".into(), a.next_goals, Part::Goals));
     }
     next_parts.push(("Other plans".into(), a.next_plans, Part::Plans));
-    next_parts.push(("Unallocated".into(), a.next_wiggle_room, Part::Free));
+    // What the plan leaves goes to the wishes still to save for, then savings.
+    let wishes_open = wish_savings.as_ref().map_or(zero, |s| s.wishes_open);
+    let to_wishes = a.next_wiggle_room.min(wishes_open).max(zero);
+    if to_wishes > zero {
+        next_parts.push(("To wishes".into(), to_wishes, Part::Plans));
+    }
+    next_parts.push((
+        "To savings".into(),
+        a.next_wiggle_room - to_wishes,
+        Part::Free,
+    ));
 
     let limit_of = |group: &str| {
         a.groups
@@ -514,13 +532,17 @@ fn CurrencyOverview(
     });
     let next_label = if !next_funded {
         "Planned before salary"
-    } else if a.next_shortfall > zero {
+    } else if next_shortfall > zero {
         "Plan shortfall"
+    } else if carried > zero {
+        "Covered from this month"
     } else {
-        "Still unallocated"
+        "To wishes, then savings"
     };
-    let next_value = if !next_funded || a.next_shortfall > zero {
-        a.next_shortfall
+    let next_value = if !next_funded || next_shortfall > zero {
+        next_shortfall
+    } else if carried > zero {
+        carried
     } else {
         a.next_wiggle_room
     };
