@@ -503,6 +503,36 @@ pub fn horizon(items: &[Planned], current_month: Date) -> usize {
     latest.clamp(2, MAX_MONTHS)
 }
 
+/// [`earmarked`], an event holding only what it still asks.
+pub fn earmarked_with(wishes: &[Wish], needs: &[EventNeed]) -> Decimal {
+    // An event is never "bought", so what it has spent would stay held for
+    // good: release what is saved beyond its months' needs and its parts.
+    let released: Decimal = wishes
+        .iter()
+        .filter(|w| {
+            w.status == WishStatus::Planned && w.kind == WishKind::OneOff && w.parent_id.is_none()
+        })
+        .filter_map(|w| {
+            let need = w
+                .event
+                .as_ref()
+                .and_then(|_| needs.iter().find(|n| n.wish_id == w.wish_id))?;
+            let parts: Decimal = wishes
+                .iter()
+                .filter(|p| {
+                    p.parent_id.as_deref() == Some(&w.wish_id)
+                        && p.status == WishStatus::Planned
+                        && p.kind == WishKind::OneOff
+                })
+                .map(|p| (p.amount - p.saved).max(Decimal::ZERO))
+                .sum();
+            let asked = need.months.iter().map(|(_, n)| *n).sum::<Decimal>() + parts;
+            Some((w.saved - asked).max(Decimal::ZERO))
+        })
+        .sum();
+    earmarked(wishes) - released
+}
+
 /// Money already set aside for planned wishes. Parts of a parent that is no
 /// longer planned (or gone) are not judged, so their savings are not held.
 pub fn earmarked(wishes: &[Wish]) -> Decimal {
@@ -627,6 +657,20 @@ mod tests {
             vec![("zoo", d("18")), ("e#2026-12", d("300"))]
         );
         assert_eq!(fams[0].rest, d("382"));
+    }
+
+    #[test]
+    fn money_saved_for_an_event_is_held_only_for_what_it_still_asks() {
+        let zoo = wish("zoo", Some("e"), "18", "2026-12-02", false);
+        let wishes = [event_wish("400", "300"), zoo];
+        // Still asking 100 for its days and 18 for a part: 118 of 300 held.
+        let asking = need(&[("2026-12-01", "100")]);
+        assert_eq!(earmarked_with(&wishes, &asking), d("118"));
+        // Over and done: nothing asked, only the part still to buy.
+        let done = need(&[]);
+        assert_eq!(earmarked_with(&wishes, &done), d("18"));
+        // Without a reading of the event it is held like any wish.
+        assert_eq!(earmarked_with(&wishes, &[]), d("300"));
     }
 
     #[test]

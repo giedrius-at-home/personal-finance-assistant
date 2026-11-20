@@ -428,7 +428,7 @@ impl Inputs<'_> {
             &self.plans,
             &self.card_bills,
             settings,
-            schedule::earmarked(wishes),
+            schedule::earmarked_with(wishes, &self.events),
             months,
         )
     }

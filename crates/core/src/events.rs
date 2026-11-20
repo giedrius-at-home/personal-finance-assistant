@@ -149,18 +149,41 @@ fn month_day(text: &str) -> Option<Date> {
 
 /// The money for the days: the rest less what was picked in ahead.
 pub fn days_money(claim: &EventClaim, spend: Option<&EventSpend>) -> Decimal {
-    (claim.rest - spend.map_or(Decimal::ZERO, |s| s.picked_ahead)).max(Decimal::ZERO)
+    (claim.rest - picked_ahead(spend)).max(Decimal::ZERO)
 }
 
-/// What `spend` counts in the budget month starting on `month`.
-pub fn spent_in(spend: Option<&EventSpend>, month: Date) -> Decimal {
+/// What was picked in ahead; refunds never count for more than they undo.
+fn picked_ahead(spend: Option<&EventSpend>) -> Decimal {
+    spend
+        .map_or(Decimal::ZERO, |s| s.picked_ahead)
+        .max(Decimal::ZERO)
+}
+
+/// Everything spent on the days so far, month by month never below zero.
+fn spent_on_days(spend: Option<&EventSpend>) -> Decimal {
     spend.map_or(Decimal::ZERO, |s| {
         s.by_month
             .iter()
-            .filter(|(m, _)| month_day(m) == Some(month))
-            .map(|(_, n)| *n)
+            .filter_map(|(m, _)| month_day(m))
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .map(|month| spent_in(spend, month))
             .sum()
     })
+}
+
+/// What `spend` counts in the budget month starting on `month`; a month
+/// of refunds counts as nothing spent, not as money gained.
+pub fn spent_in(spend: Option<&EventSpend>, month: Date) -> Decimal {
+    spend
+        .map_or(Decimal::ZERO, |s| {
+            s.by_month
+                .iter()
+                .filter(|(m, _)| month_day(m) == Some(month))
+                .map(|(_, n)| *n)
+                .sum()
+        })
+        .max(Decimal::ZERO)
 }
 
 /// Each month's share less what is spent of it. The running month's groups
@@ -174,7 +197,7 @@ pub fn need(
     current_month: Date,
     today: Date,
 ) -> EventNeed {
-    let months = if today > claim.ends {
+    let mut months: Vec<(Date, Decimal)> = if today > claim.ends {
         Vec::new()
     } else {
         shares(claim, days_money(claim, spend))
@@ -191,6 +214,18 @@ pub fn need(
             })
             .collect()
     };
+    // All together never more than is left of the event: an overrun in
+    // one month comes off the months after it, the last one first.
+    let left = (days_money(claim, spend) - spent_on_days(spend)).max(Decimal::ZERO);
+    let mut over = months.iter().map(|(_, n)| *n).sum::<Decimal>() - left;
+    for (_, need) in months.iter_mut().rev() {
+        if over <= Decimal::ZERO {
+            break;
+        }
+        let cut = over.min(*need);
+        *need -= cut;
+        over -= cut;
+    }
     EventNeed {
         wish_id: claim.wish_id.clone(),
         months,
@@ -236,9 +271,8 @@ pub fn facts(
                 .sum(),
         })
         .collect();
-    let picked_ahead = spend.map_or(Decimal::ZERO, |s| s.picked_ahead);
-    let on_days: Decimal =
-        spend.map_or(Decimal::ZERO, |s| s.by_month.iter().map(|(_, n)| *n).sum());
+    let picked_ahead = picked_ahead(spend);
+    let on_days = spent_on_days(spend);
     let left = claim.rest - picked_ahead - on_days;
     let days = days(claim);
     let (phase, days_left, days_gone) = if today < claim.starts {
@@ -496,6 +530,32 @@ pub(crate) mod tests {
         let over = facts(&e, Some(&much), d("28"), &usual, date(2026, 12, 2));
         assert_eq!((over.pace, over.per_day), (Pace::Over, d("0")));
         assert_eq!(over.left, d("-146"));
+    }
+
+    #[test]
+    fn an_overrun_in_one_month_comes_off_what_the_next_is_asked() {
+        // €150 spent on 30 November against a €66.67 share: €250 is left,
+        // and December is asked for that, not for its whole €333.33.
+        let e = claim("2026-11-30", "2026-12-05");
+        let dec = date(2026, 12, 1);
+        let s = spend("0", &[("2026-11-01", "150")]);
+        assert_eq!(
+            need(&e, Some(&s), &[], dec, date(2026, 12, 1)).months,
+            vec![(dec, d("250"))]
+        );
+    }
+
+    #[test]
+    fn a_refund_never_makes_an_event_ask_for_more_than_its_share() {
+        let e = claim("2026-11-30", "2026-12-05");
+        let dec = date(2026, 12, 1);
+        let s = spend("-40", &[("2026-12-01", "-60")]);
+        assert_eq!(
+            need(&e, Some(&s), &[], dec, date(2026, 12, 2)).months,
+            vec![(dec, d("333.33"))]
+        );
+        let f = facts(&e, Some(&s), d("0"), &[], date(2026, 12, 2));
+        assert_eq!((f.left, f.spent), (d("400"), d("0")));
     }
 
     #[test]

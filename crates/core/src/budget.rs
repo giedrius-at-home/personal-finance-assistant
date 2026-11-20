@@ -305,6 +305,7 @@ pub fn monthly_budget(
     let mut rows: HashMap<String, Vec<&Tx>> = HashMap::new();
     let mut purchases = Vec::new();
     let mut picked_ahead: HashMap<&str, Decimal> = HashMap::new();
+    let mut outside_days: HashMap<&str, Decimal> = HashMap::new();
     for t in inputs.transactions {
         if !counts(t, plan, now) {
             continue;
@@ -329,6 +330,13 @@ pub fn monthly_budget(
             .or_insert_with(|| vec![Decimal::ZERO; history_months.len()])[index] += amount;
         if tx_month != month {
             continue;
+        }
+        // An event's payments of this month that are not its days': a
+        // bought part's, or one from before the first day.
+        if let Some(event) = ownership.event(t)
+            && (on < event.starts || event.tied.contains_key(&t.transaction_id))
+        {
+            *outside_days.entry(key).or_default() += amount;
         }
         rows.entry(key.to_owned()).or_default().push(t);
         if key != "fixed" {
@@ -474,10 +482,17 @@ pub fn monthly_budget(
         if share.is_none() && !rows.contains_key(&claim.key) {
             continue;
         }
+        // Planned: the month's share of the days, and what was paid
+        // outside them (that money was planned when it was paid).
+        let outside = outside_days
+            .get(claim.key.as_str())
+            .copied()
+            .unwrap_or_default()
+            .max(Decimal::ZERO);
         let mut event_row = row(
             &claim.key,
             &claim.name,
-            share.unwrap_or_default(),
+            share.unwrap_or_default() + outside,
             Decimal::ZERO,
         );
         event_row.reserved = Decimal::ZERO;
@@ -1011,6 +1026,19 @@ pub(crate) mod tests {
         assert_eq!(view.events[0].planned, d(300));
         assert!(view.events[0].spent.is_zero());
         assert_eq!(view.groups[0].history[4], d(0));
+    }
+
+    #[test]
+    fn a_payment_outside_the_days_is_planned_as_well_as_spent_on_the_events_row() {
+        // A flight picked in, paid this month before the first day.
+        let mut claim = parents();
+        claim.picked.insert("flight".into());
+        let transactions = [on(tx("flight", "100"), "2026-09-02")];
+        let view = report_with_events(None, &transactions, &[], &[], &[claim]);
+        let row = &view.events[0];
+        // €300 for the days plus the €100 already paid: not over.
+        assert_eq!((row.planned, row.spent), (d(400), d(100)));
+        assert_eq!(row.remaining, d(300));
     }
 
     fn extra_group(id: &str, amount: i64) -> BudgetGroup {
