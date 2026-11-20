@@ -19,7 +19,7 @@ use crate::ds::{
     button_class, cn,
 };
 
-/// The six primary sections (the site's top tabs).
+/// The seven primary sections (the site's top tabs).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tab {
     Overview,
@@ -27,16 +27,18 @@ pub enum Tab {
     Spending,
     Plan,
     Wishes,
+    Events,
     Manage,
 }
 
 impl Tab {
-    const ALL: [Self; 6] = [
+    const ALL: [Self; 7] = [
         Self::Overview,
         Self::Transactions,
         Self::Spending,
         Self::Plan,
         Self::Wishes,
+        Self::Events,
         Self::Manage,
     ];
 
@@ -47,6 +49,7 @@ impl Tab {
             Self::Spending => "Spending",
             Self::Plan => "Plan",
             Self::Wishes => "Wishes",
+            Self::Events => "Events",
             Self::Manage => "Manage",
         }
     }
@@ -229,6 +232,7 @@ fn App() -> impl IntoView {
                         Tab::Spending => view! { <SpendingTabs /> }.into_any(),
                         Tab::Plan => pages::plan::Plan().into_any(),
                         Tab::Wishes => pages::wishes::Wishes().into_any(),
+                        Tab::Events => pages::events::Events().into_any(),
                         Tab::Manage => view! { <ManageTabs /> }.into_any(),
                     }}
                 </div>
