@@ -518,7 +518,10 @@ pub fn monthly_budget(
     MonthlyBudget {
         plan: plan.clone(),
         reserved: groups.iter().map(|g| g.reserved).sum(),
-        planned: fixed.planned + extras.planned + groups_planned,
+        planned: fixed.planned
+            + extras.planned
+            + groups_planned
+            + event_rows.iter().map(|e| e.planned).sum::<Decimal>(),
         spent: fixed.spent + extras.spent + (unplanned.spent + groups_spent) + events_spent,
         fixed,
         groups,
@@ -946,7 +949,8 @@ pub(crate) mod tests {
             Some("event:e")
         );
         assert_eq!(view.spent, plain.spent);
-        assert_eq!(view.planned, plain.planned);
+        // What the owner planned for the days is part of the month's plan.
+        assert_eq!(view.planned, plain.planned + d(400));
         // A bill on those days stays a bill.
         let view = report_with_events(None, &transactions, &[], &["groceries"], &[parents()]);
         assert_eq!(view.fixed.spent, d(50));
