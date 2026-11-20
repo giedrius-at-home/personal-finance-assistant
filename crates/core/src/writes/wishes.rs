@@ -271,6 +271,68 @@ pub fn back_from_event(w: &Writer<'_>, wish_id: &str) -> Result<Wish> {
     Ok(back)
 }
 
+/// Put a planned or bought wish into an event as one of its parts, or
+/// (`None`) take a part of an event back out. Everything else about the
+/// wish is kept: a bought one counts as spent on the event.
+pub fn move_wish(w: &Writer<'_>, wish_id: &str, event_id: Option<&str>) -> Result<Wish> {
+    let wishes = load_wishes(&w.tx)?;
+    let wish = find(&wishes, wish_id)?;
+    let bought = wish.status == WishStatus::Bought;
+    if !bought && wish.status != WishStatus::Planned {
+        return Err(invalid("wish is not planned or bought"));
+    }
+    let moved = match event_id {
+        Some(event_id) => {
+            if wish.kind != WishKind::OneOff || wish.event.is_some() || wish.parent_id.is_some() {
+                return Err(invalid(MOVE_KIND));
+            }
+            if wishes
+                .iter()
+                .any(|x| x.parent_id.as_deref() == Some(wish_id))
+            {
+                return Err(invalid(MOVE_KIND));
+            }
+            let event = event_wish(&wishes, event_id)?;
+            if event.currency != wish.currency {
+                return Err(invalid("the event is in another currency"));
+            }
+            let over = event
+                .event
+                .as_ref()
+                .and_then(|e| e.ends_on.parse::<Date>().ok())
+                .is_none_or(|ends| ends < w.now.date());
+            // What was bought can still be put with an event that is over.
+            if over && !bought {
+                return Err(invalid("the event is over"));
+            }
+            Wish {
+                parent_id: Some(event.wish_id),
+                // A part is a must only inside a must.
+                must: wish.must && event.must,
+                ..wish
+            }
+        }
+        None => {
+            let in_event = wish.parent_id.as_deref().is_some_and(|parent| {
+                wishes
+                    .iter()
+                    .any(|x| x.wish_id == parent && x.event.is_some())
+            });
+            if !in_event {
+                return Err(invalid("wish is not part of an event"));
+            }
+            Wish {
+                parent_id: None,
+                ..wish
+            }
+        }
+    };
+    store(w, &moved)?;
+    Ok(moved)
+}
+
+const MOVE_KIND: &str = "only a one-off wish without parts can be put into an event";
+
 /// Pick a payment into an event, take it out, or leave it to its date.
 pub fn set_event_transaction(
     w: &Writer<'_>,
@@ -824,6 +886,93 @@ mod tests {
         db.write(|w, _| plan_as_event(w, &wish.wish_id, "2026-10-26", "2026-10-28"))
             .unwrap();
         assert!(db.write(|w, _| back_from_event(w, &wish.wish_id)).is_err());
+    }
+
+    #[test]
+    fn a_wish_moves_into_an_event_and_back_keeping_its_money() {
+        let mut db = db();
+        let event = WishDraft {
+            event: dates("2026-11-30", "2026-12-05"),
+            ..draft("Parents")
+        };
+        let event = db.write(|w, s| save_wish(w, s, event)).unwrap();
+        let zoo = WishDraft {
+            must: true,
+            ..draft("Zoo")
+        };
+        let zoo = db.write(|w, s| save_wish(w, s, zoo)).unwrap();
+        db.write(|w, s| record_saved(w, s, &zoo.wish_id, Decimal::from(40)))
+            .unwrap();
+        let moved = db
+            .write(|w, _| move_wish(w, &zoo.wish_id, Some(&event.wish_id)))
+            .unwrap();
+        assert_eq!(moved.parent_id.as_deref(), Some(event.wish_id.as_str()));
+        // The event is not a must, so its part is not one either.
+        assert_eq!((moved.saved, moved.must), (Decimal::from(40), false));
+        assert_eq!(moved.due_on, zoo.due_on);
+
+        // Not a part already, a wish with parts, an event, a repeating wish,
+        // another currency, or into a wish that is no event.
+        let plain = db.write(|w, s| save_wish(w, s, draft("Bike"))).unwrap();
+        let japan = db.write(|w, s| save_wish(w, s, draft("Japan"))).unwrap();
+        let flight = WishDraft {
+            parent_id: Some(japan.wish_id.clone()),
+            ..draft("Flight")
+        };
+        db.write(|w, s| save_wish(w, s, flight)).unwrap();
+        let gym = WishDraft {
+            kind: WishKind::Recurring {
+                every: Repeat::Monthly,
+                ends_on: None,
+            },
+            ..draft("Gym")
+        };
+        let gym = db.write(|w, s| save_wish(w, s, gym)).unwrap();
+        let dollars = WishDraft {
+            currency: Currency::new("USD"),
+            ..draft("Dollars")
+        };
+        let dollars = db.write(|w, s| save_wish(w, s, dollars)).unwrap();
+        for (id, into) in [
+            (&zoo.wish_id, &event.wish_id),
+            (&japan.wish_id, &event.wish_id),
+            (&event.wish_id, &event.wish_id),
+            (&gym.wish_id, &event.wish_id),
+            (&dollars.wish_id, &event.wish_id),
+            (&plain.wish_id, &japan.wish_id),
+        ] {
+            assert!(db.write(|w, _| move_wish(w, id, Some(into))).is_err());
+        }
+        // Only a part of an event comes back out.
+        assert!(db.write(|w, _| move_wish(w, &plain.wish_id, None)).is_err());
+        let back = db.write(|w, _| move_wish(w, &zoo.wish_id, None)).unwrap();
+        assert_eq!((back.parent_id, back.saved), (None, Decimal::from(40)));
+
+        // An event that is over (the fixture's today is 26 October) takes
+        // no more planned parts, but what was bought can still go with it.
+        db.write(|w, _| plan_as_event(w, &event.wish_id, "2026-10-20", "2026-10-25"))
+            .unwrap();
+        assert!(
+            db.write(|w, _| move_wish(w, &zoo.wish_id, Some(&event.wish_id)))
+                .is_err()
+        );
+        let paid = purchase(18, "2026-10-21", WishSource::Card);
+        db.write(|w, s| mark_bought(w, s, &zoo.wish_id, paid.clone(), &[]))
+            .unwrap();
+        let part = db
+            .write(|w, _| move_wish(w, &zoo.wish_id, Some(&event.wish_id)))
+            .unwrap();
+        assert_eq!(part.parent_id.as_deref(), Some(event.wish_id.as_str()));
+        assert_eq!(part.status, WishStatus::Bought);
+        assert_eq!(part.bought.map(|b| b.amount), Some(Decimal::from(18)));
+        let back = db.write(|w, _| move_wish(w, &zoo.wish_id, None)).unwrap();
+        assert_eq!((back.parent_id, back.status), (None, WishStatus::Bought));
+        // A dropped wish stays where it is.
+        db.write(|w, _| drop_wish(w, &plain.wish_id)).unwrap();
+        assert!(
+            db.write(|w, _| move_wish(w, &plain.wish_id, Some(&event.wish_id)))
+                .is_err()
+        );
     }
 
     #[test]
