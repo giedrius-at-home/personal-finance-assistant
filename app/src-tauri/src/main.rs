@@ -176,6 +176,18 @@ fn wish_back_from_event(service: State<'_, Service>, wish_id: String) -> Result<
 }
 
 #[tauri::command(async, rename_all = "snake_case")]
+fn move_wish(
+    service: State<'_, Service>,
+    wish_id: String,
+    event_id: Option<String>,
+) -> Result<Wish, String> {
+    traced(
+        "move_wish",
+        service.move_wish(&wish_id, event_id.as_deref()),
+    )
+}
+
+#[tauri::command(async, rename_all = "snake_case")]
 fn set_event_transaction(
     service: State<'_, Service>,
     wish_id: String,
@@ -547,6 +559,7 @@ fn main() {
             events,
             plan_wish_as_event,
             wish_back_from_event,
+            move_wish,
             set_event_transaction,
             drop_wish,
             mark_wish_bought,

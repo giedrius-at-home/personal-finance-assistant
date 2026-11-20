@@ -31,6 +31,7 @@ const COMMANDS: &[&str] = &[
     "events",
     "plan_wish_as_event",
     "wish_back_from_event",
+    "move_wish",
     "set_event_transaction",
     "mark_wish_bought",
     "start_wish",

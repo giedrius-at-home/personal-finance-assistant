@@ -427,6 +427,10 @@ impl Service {
         self.write(|w, _| crate::writes::wishes::back_from_event(w, wish_id))
     }
 
+    pub fn move_wish(&self, wish_id: &str, event_id: Option<&str>) -> Result<Wish, String> {
+        self.write(|w, _| crate::writes::wishes::move_wish(w, wish_id, event_id))
+    }
+
     pub fn set_event_transaction(
         &self,
         wish_id: &str,

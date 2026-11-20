@@ -11,7 +11,8 @@ use finance_types::gateway::{
 };
 use finance_types::report::allocation::CurrencyAllocation;
 use finance_types::report::wishes::{
-    ChangeableBill, Cut, GoalOutlook, GoalStatus, Verdict, WishMonth, WishRow, WishesView,
+    ChangeableBill, Cut, EventOption, GoalOutlook, GoalStatus, Verdict, WishMonth, WishRow,
+    WishesView,
 };
 use finance_types::report::{Currency, Dashboard};
 use jiff::civil::Date;
@@ -641,6 +642,21 @@ impl Inputs<'_> {
     /// The wishes screen: the events are on their own screen.
     pub fn view(&self, wishes: &[Wish], settings: &WishSettings) -> WishesView {
         let mut view = self.view_all(wishes, settings);
+        view.events = view
+            .wishes
+            .iter()
+            .map(|row| &row.wish)
+            .filter(|w| w.status == WishStatus::Planned)
+            .filter_map(|w| {
+                let ends = w.event.as_ref()?.ends_on.parse::<Date>().ok()?;
+                Some(EventOption {
+                    wish_id: w.wish_id.clone(),
+                    name: w.name.clone(),
+                    currency: w.currency.clone(),
+                    over: self.today.is_some_and(|today| ends < today),
+                })
+            })
+            .collect();
         view.wishes.retain(|row| row.wish.event.is_none());
         view
     }
@@ -707,6 +723,7 @@ impl Inputs<'_> {
             months,
             changeable_bills,
             savings_must_keep: must_keep,
+            events: Vec::new(),
         }
     }
 
@@ -1542,6 +1559,7 @@ mod tests {
             stale_cards: Vec::new(),
             changeable_bills: Vec::new(),
             savings_must_keep: Decimal::ZERO,
+            events: Vec::new(),
             goals: None,
             months: vec![
                 month(vec![

@@ -55,6 +55,13 @@ struct WishSavedArgs {
 }
 
 #[derive(Deserialize)]
+struct MoveWishArgs {
+    wish_id: String,
+    #[serde(default)]
+    event_id: Option<String>,
+}
+
+#[derive(Deserialize)]
 struct WishIdArgs {
     wish_id: String,
 }
@@ -260,6 +267,10 @@ fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
         "wish_back_from_event" => {
             let a: WishIdArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
             ok(service.wish_back_from_event(&a.wish_id))
+        }
+        "move_wish" => {
+            let a: MoveWishArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
+            ok(service.move_wish(&a.wish_id, a.event_id.as_deref()))
         }
         "set_event_transaction" => {
             let a: EventTransactionArgs =

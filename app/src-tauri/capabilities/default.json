@@ -17,6 +17,7 @@
     "allow-set-wish-must",
     "allow-events",
     "allow-plan-wish-as-event",
+    "allow-move-wish",
     "allow-wish-back-from-event",
     "allow-set-event-transaction",
     "allow-mark-wish-bought",

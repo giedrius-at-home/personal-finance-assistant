@@ -9,7 +9,9 @@ use finance_types::gateway::{
 };
 use finance_types::report::Currency;
 use finance_types::report::Dashboard;
-use finance_types::report::wishes::{ChangeableBill, Cut, Verdict, WishMonth, WishRow, WishesView};
+use finance_types::report::wishes::{
+    ChangeableBill, Cut, EventOption, Verdict, WishMonth, WishRow, WishesView,
+};
 use leptos::ev::SubmitEvent;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -542,6 +544,12 @@ pub(crate) struct WishIdArgs {
 }
 
 #[derive(Serialize)]
+struct MoveArgs {
+    wish_id: String,
+    event_id: Option<String>,
+}
+
+#[derive(Serialize)]
 struct EventDatesArgs {
     wish_id: String,
     starts_on: String,
@@ -650,9 +658,21 @@ pub(crate) struct Context {
     categories: Vec<String>,
     /// The credit cards, in fill order (from the wishes view).
     cards: Vec<CardSettings>,
+    /// The events a wish can be put into.
+    events: Vec<EventOption>,
 }
 
 impl Context {
+    /// The events in `code` a wish can go into: (id, name). One that is
+    /// over takes only what was already bought.
+    fn event_options(&self, code: &str, bought: bool) -> Vec<(String, String)> {
+        self.events
+            .iter()
+            .filter(|e| e.currency.code == code && (bought || !e.over))
+            .map(|e| (e.wish_id.clone(), e.name.clone()))
+            .collect()
+    }
+
     pub(crate) fn from(report: &Dashboard) -> Self {
         let mut accounts: Vec<(String, String)> = Vec::new();
         for bank in report
@@ -696,6 +716,7 @@ impl Context {
             bills,
             categories,
             cards: Vec::new(),
+            events: Vec::new(),
         }
     }
 
@@ -761,6 +782,9 @@ pub(crate) struct Ui {
     pub(crate) eventing: RwSignal<Option<String>>,
     pub(crate) event_starts: RwSignal<String>,
     pub(crate) event_ends: RwSignal<String>,
+    /// The wish whose "Add to event" form is open, and the event chosen.
+    pub(crate) joining: RwSignal<Option<String>>,
+    pub(crate) join_event: RwSignal<String>,
 }
 
 impl Ui {
@@ -790,6 +814,8 @@ impl Ui {
             eventing: RwSignal::new(None),
             event_starts: RwSignal::new(String::new()),
             event_ends: RwSignal::new(String::new()),
+            joining: RwSignal::new(None),
+            join_event: RwSignal::new(String::new()),
         }
     }
 
@@ -799,6 +825,7 @@ impl Ui {
         self.dropping.set(None);
         self.starting.set(None);
         self.eventing.set(None);
+        self.joining.set(None);
     }
 
     pub(crate) fn set_message(self, target: &str, text: impl Into<String>, error: bool) {
@@ -913,6 +940,7 @@ fn page(ui: Ui, view: &WishesView, ctx: &Context) -> impl IntoView + use<> {
     let months = StoredValue::new(view.months.clone());
     let ctx = StoredValue::new(Context {
         cards: view.settings.cards.clone(),
+        events: view.events.clone(),
         ..ctx.clone()
     });
     let currency = view.currency.clone();
@@ -925,6 +953,12 @@ fn page(ui: Ui, view: &WishesView, ctx: &Context) -> impl IntoView + use<> {
         .iter()
         .filter(|r| r.wish.parent_id.is_none() && r.wish.kind == WishKind::OneOff)
         .map(|r| (r.wish.wish_id.clone(), r.wish.name.clone()))
+        .chain(
+            view.events
+                .iter()
+                .filter(|e| e.currency == view.currency && !e.over)
+                .map(|e| (e.wish_id.clone(), e.name.clone())),
+        )
         .collect();
     let empty = open.is_empty();
     let rows = open
@@ -932,10 +966,7 @@ fn page(ui: Ui, view: &WishesView, ctx: &Context) -> impl IntoView + use<> {
         .map(|row| wish_row(ui, row, months, ctx))
         .collect_view();
     let done_count = done.len();
-    let done_rows = done
-        .into_iter()
-        .map(|row| done_row(&row, &ctx.get_value()))
-        .collect_view();
+    let done_rows = done_list(ui, done, ctx);
     let month_cards = view
         .months
         .iter()
@@ -993,7 +1024,7 @@ fn page(ui: Ui, view: &WishesView, ctx: &Context) -> impl IntoView + use<> {
                 {(done_count > 0).then(|| view! {
                     <details class="mt-4 border-t border-line pt-3 text-sm">
                         <summary class="cursor-pointer text-fg-muted">{format!("Done ({done_count})")}</summary>
-                        <div class="mt-2 grid gap-1 text-fg-muted">{done_rows}</div>
+                        <div class="mt-2">{done_rows}</div>
                     </details>
                 })}
             </Card>
@@ -1566,6 +1597,7 @@ pub(crate) fn wish_row(
     let code = row.wish.currency.code.clone();
     let parent = !row.children.is_empty();
     let parent_must = row.wish.must;
+    let in_event = row.wish.event.is_some();
     let family =
         parent.then(|| {
             let over = row.over_cap.then(|| view! {
@@ -1607,17 +1639,21 @@ pub(crate) fn wish_row(
             if child.wish.status == WishStatus::Planned {
                 view! {
                     <div class="border-t border-line pl-4 sm:pl-6">
-                        {wish_body(ui, child, months, ctx, Some(parent_must))}
+                        {wish_body(ui, child, months, ctx, Some(parent_must), in_event)}
                     </div>
                 }
                 .into_any()
             } else {
-                view! { <div class="border-t border-line py-2 pl-4 text-sm text-fg-muted sm:pl-6">{done_row(child, &ctx.get_value())}</div> }
-                    .into_any()
+                let leave = (in_event && child.wish.status == WishStatus::Bought).then(|| {
+                    view! { <div class="flex">{leave_button(ui, &child.wish.wish_id)}</div> }
+                        .into_any()
+                });
+                let body = ctx.with_value(|c| done_body(&child.wish, c, true, leave));
+                view! { <div class="border-t border-line pl-4 sm:pl-6">{body}</div> }.into_any()
             }
         })
         .collect_view();
-    let body = wish_body(ui, &row, months, ctx, None);
+    let body = wish_body(ui, &row, months, ctx, None, false);
     view! {
         <div class="border-t border-line first:border-t-0">
             {body}
@@ -1633,13 +1669,14 @@ pub(crate) fn wish_row(
 /// Name, amount, date, source, verdict and actions of one planned wish.
 /// `parent_must` is the parent's must flag for a sub-wish, `None` for a
 /// top-level wish: a sub-wish of a must wish is a must too, and only the
-/// parent's flag can be toggled.
+/// parent's flag can be toggled. `in_event`: the parent is an event.
 fn wish_body(
     ui: Ui,
     row: &WishRow,
     months: StoredValue<Vec<WishMonth>>,
     ctx: StoredValue<Context>,
     parent_must: Option<bool>,
+    in_event: bool,
 ) -> impl IntoView + use<> {
     let sub = parent_must.is_some();
     let wish = row.wish.clone();
@@ -1929,6 +1966,37 @@ fn wish_body(
             move || ui.eventing.set(None),
         );
     });
+    // The events this wish can become a part of: it has no parts itself.
+    let event_options: StoredValue<Vec<(String, String)>> =
+        StoredValue::new(if one_off && !sub && !is_event && row.children.is_empty() {
+            ctx.with_value(|c| c.event_options(&code, false))
+        } else {
+            Vec::new()
+        });
+    let can_join = event_options.with_value(|o| !o.is_empty());
+    let joining = move || ui.joining.get().as_deref() == Some(id.get_value().as_str());
+    let open_join = move |_| {
+        ui.close_forms();
+        ui.join_event.set(
+            event_options.with_value(|o| o.first().map(|(id, _)| id.clone()).unwrap_or_default()),
+        );
+        ui.joining.set(Some(id.get_value()));
+    };
+    let join_target = target.clone();
+    let join = StoredValue::new(move |ev: SubmitEvent| {
+        ev.prevent_default();
+        ui.write(
+            join_target.clone(),
+            "move_wish",
+            MoveArgs {
+                wish_id: id.get_value(),
+                event_id: Some(ui.join_event.get_untracked()),
+            },
+            "Added to the event.",
+            move || ui.joining.set(None),
+        );
+    });
+    let join_id = StoredValue::new(format!("join-event-{}", wish.wish_id));
     let event_starts_id = StoredValue::new(format!("event-starts-{}", wish.wish_id));
     let event_ends_id = StoredValue::new(format!("event-ends-{}", wish.wish_id));
     view! {
@@ -2008,7 +2076,24 @@ fn wish_body(
                     "Plan as event"
                 </Button>
                 })}
+                {can_join.then(move || view! {
+                <Button size=Size::Sm variant=Variant::Ghost on_click=Callback::new(open_join)>
+                    "Add to event"
+                </Button>
+                })}
+                {(sub && in_event).then(|| leave_button(ui, &id.get_value()))}
             </div>
+            <Show when=joining>
+                <form class="grid items-end gap-2 sm:grid-cols-4" on:submit=move |ev: SubmitEvent| join.with_value(|f| f(ev))>
+                    <Field label="Event" id=join_id.get_value()>
+                        {select(join_id.get_value(), ui.join_event, event_options.get_value())}
+                    </Field>
+                    <div class="flex gap-2">
+                        <Button submit=true size=Size::Sm disabled=Signal::derive(move || ui.busy.get())>"Add to event"</Button>
+                        <Button size=Size::Sm variant=Variant::Ghost on_click=Callback::new(move |_| ui.joining.set(None))>"Cancel"</Button>
+                    </div>
+                </form>
+            </Show>
             <Show when=eventing>
                 <form class="grid items-end gap-2 sm:grid-cols-4" on:submit=move |ev: SubmitEvent| plan_event.with_value(|f| f(ev))>
                     <Field label="First day" id=event_starts_id.get_value()>
@@ -2189,40 +2274,226 @@ fn start_confirm(
     }
 }
 
-/// A bought, started or dropped wish in one muted line, with its parts
-/// below it (they are no longer judged once the parent is settled).
-fn done_row(row: &WishRow, ctx: &Context) -> impl IntoView + use<> {
-    let parts = row
-        .children
-        .iter()
-        .map(|child| view! { <p class="py-1 pl-4 sm:pl-6">{done_text(&child.wish, ctx)}</p> })
-        .collect_view();
+/// A bought, started or dropped wish as the fields a planned one has:
+/// its name, a chip for how it ended, and what it cost. `action` sits
+/// under the fields.
+fn done_body(wish: &Wish, ctx: &Context, sub: bool, action: Option<AnyView>) -> AnyView {
+    let (tone, chip, facts) = done_facts(wish, ctx);
     view! {
-        <p class="py-1">{done_text(&row.wish, ctx)}</p>
-        {parts}
+        <div class="grid gap-2 py-3">
+            <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                <h3 class=cn(["flex items-center gap-2 font-semibold", if sub { "text-sm" } else { "text-base" }])>
+                    {wish.name.clone()}
+                    <Badge tone=tone>{chip}</Badge>
+                </h3>
+                <FactsRow rows=facts />
+            </div>
+            {action}
+        </div>
+    }
+    .into_any()
+}
+
+/// The parts of a done wish, below it (they are no longer judged once the
+/// parent is settled).
+fn done_parts(row: &WishRow, ctx: &Context) -> impl IntoView + use<> {
+    row.children
+        .iter()
+        .map(|child| {
+            view! {
+                <div class="border-t border-line pl-4 sm:pl-6">{done_body(&child.wish, ctx, true, None)}</div>
+            }
+        })
+        .collect_view()
+}
+
+/// "Back to wishes" for a part of an event.
+fn leave_button(ui: Ui, wish_id: &str) -> impl IntoView + use<> {
+    let id = StoredValue::new(wish_id.to_owned());
+    let leave = move |_| {
+        ui.write(
+            format!("wish:{}", id.get_value()),
+            "move_wish",
+            MoveArgs {
+                wish_id: id.get_value(),
+                event_id: None,
+            },
+            "Back on Wishes.",
+            || {},
+        );
+    };
+    view! {
+        <Button
+            size=Size::Sm
+            variant=Variant::Ghost
+            disabled=Signal::derive(move || ui.busy.get())
+            on_click=Callback::new(leave)
+        >
+            "Back to wishes"
+        </Button>
     }
 }
 
-fn done_text(wish: &Wish, ctx: &Context) -> String {
-    let code = &wish.currency.code;
-    match (&wish.status, &wish.bought) {
-        (WishStatus::Bought, Some(p)) => format!(
-            "{} · bought {} on {} · {}",
-            wish.name,
-            amount(p.amount, code),
-            format::date(&p.on),
-            ctx.source_label(&p.source)
-        ),
-        (WishStatus::Bought, None) => format!("{} · bought", wish.name),
-        (WishStatus::Started, _) => format!("{} · started", wish.name),
-        (WishStatus::Planned, _) => format!(
-            "{} · not bought · {} (no longer judged)",
-            wish.name,
-            amount(wish.amount, code)
-        ),
-        (WishStatus::Dropped, _) => {
-            format!("{} · dropped · {}", wish.name, amount(wish.amount, code))
+/// How many done wishes show at first, and how many each scroll adds.
+const DONE_PAGE: usize = 10;
+
+/// The done wishes, a page at a time: the next page loads when the end of
+/// the list scrolls into view.
+fn done_list(ui: Ui, done: Vec<WishRow>, ctx: StoredValue<Context>) -> impl IntoView + use<> {
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen::closure::Closure;
+    use web_sys::{IntersectionObserver, IntersectionObserverEntry};
+
+    let total = done.len();
+    let done = StoredValue::new(done);
+    let shown = RwSignal::new(DONE_PAGE.min(total));
+    let end = NodeRef::<leptos::html::Div>::new();
+    let seen = Closure::<dyn FnMut(js_sys::Array)>::new(move |entries: js_sys::Array| {
+        let visible = entries.iter().any(|e| {
+            e.unchecked_into::<IntersectionObserverEntry>()
+                .is_intersecting()
+        });
+        if visible {
+            shown.update(|n| *n = (*n + DONE_PAGE).min(total));
         }
+    });
+    // Kept with the list and dropped with it.
+    let watch = StoredValue::new_local(
+        IntersectionObserver::new(seen.as_ref().unchecked_ref())
+            .ok()
+            .map(|observer| (observer, seen)),
+    );
+    // Watched anew after every page: an end still in view loads the next.
+    Effect::new(move |_| {
+        shown.track();
+        if let Some(end) = end.get() {
+            watch.with_value(|w| {
+                if let Some((observer, _)) = w {
+                    observer.unobserve(&end);
+                    observer.observe(&end);
+                }
+            });
+        }
+    });
+    on_cleanup(move || {
+        watch.try_with_value(|w| {
+            if let Some((observer, _)) = w {
+                observer.disconnect();
+            }
+        });
+    });
+    view! {
+        {move || {
+            done.with_value(|rows| {
+                rows.iter()
+                    .take(shown.get())
+                    .map(|row| done_entry(ui, row, ctx))
+                    .collect_view()
+            })
+        }}
+        <Show when=move || shown.get() < total>
+            // The button is there for when the scroll is not seen.
+            <div node_ref=end class="border-t border-line pt-2">
+                <Button
+                    size=Size::Sm
+                    variant=Variant::Ghost
+                    on_click=Callback::new(move |_| shown.update(|n| *n = (*n + DONE_PAGE).min(total)))
+                >
+                    "Show more"
+                </Button>
+            </div>
+        </Show>
+    }
+}
+
+/// A done wish on the Wishes screen: one that was bought, and has no
+/// parts, can still be put into an event, where it counts as spent.
+fn done_entry(ui: Ui, row: &WishRow, ctx: StoredValue<Context>) -> impl IntoView + use<> {
+    let wish = &row.wish;
+    let options = if wish.status == WishStatus::Bought
+        && wish.kind == WishKind::OneOff
+        && row.children.is_empty()
+    {
+        ctx.with_value(|c| c.event_options(&wish.currency.code, true))
+    } else {
+        Vec::new()
+    };
+    let parts = ctx.with_value(|c| done_parts(row, c));
+    if options.is_empty() {
+        let body = ctx.with_value(|c| done_body(wish, c, false, None));
+        return view! { <div class="border-t border-line first:border-t-0">{body}{parts}</div> }
+            .into_any();
+    }
+    let options = StoredValue::new(options);
+    let id = StoredValue::new(wish.wish_id.clone());
+    let target = format!("wish:{}", wish.wish_id);
+    let joining = move || ui.joining.get().as_deref() == Some(id.get_value().as_str());
+    let open = move |_| {
+        ui.close_forms();
+        ui.join_event
+            .set(options.with_value(|o| o.first().map(|(id, _)| id.clone()).unwrap_or_default()));
+        ui.joining.set(Some(id.get_value()));
+    };
+    let join_target = target.clone();
+    let join = StoredValue::new(move |ev: SubmitEvent| {
+        ev.prevent_default();
+        ui.write(
+            join_target.clone(),
+            "move_wish",
+            MoveArgs {
+                wish_id: id.get_value(),
+                event_id: Some(ui.join_event.get_untracked()),
+            },
+            "Added to the event.",
+            move || ui.joining.set(None),
+        );
+    });
+    let select_id = StoredValue::new(format!("join-event-{}", wish.wish_id));
+    let action = view! {
+        <div class="flex flex-wrap items-end gap-2">
+            <Button size=Size::Sm variant=Variant::Ghost on_click=Callback::new(open)>"Add to event"</Button>
+        </div>
+        <Show when=joining>
+            <form class="grid items-end gap-2 sm:grid-cols-4" on:submit=move |ev: SubmitEvent| join.with_value(|f| f(ev))>
+                <Field label="Event" id=select_id.get_value()>
+                    {select(select_id.get_value(), ui.join_event, options.get_value())}
+                </Field>
+                <div class="flex gap-2">
+                    <Button submit=true size=Size::Sm disabled=Signal::derive(move || ui.busy.get())>"Add to event"</Button>
+                    <Button size=Size::Sm variant=Variant::Ghost on_click=Callback::new(move |_| ui.joining.set(None))>"Cancel"</Button>
+                </div>
+            </form>
+        </Show>
+        {feedback(ui, target)}
+    }
+    .into_any();
+    let body = ctx.with_value(|c| done_body(wish, c, false, Some(action)));
+    view! { <div class="border-t border-line first:border-t-0">{body}{parts}</div> }.into_any()
+}
+
+/// How a done wish ended, and its fields.
+fn done_facts(wish: &Wish, ctx: &Context) -> (Tone, &'static str, Vec<(String, String)>) {
+    let code = &wish.currency.code;
+    let planned = ("Amount".to_owned(), amount(wish.amount, code));
+    match (&wish.status, &wish.bought) {
+        (WishStatus::Bought, Some(p)) => (
+            Tone::Positive,
+            "Bought",
+            vec![
+                ("Cost".to_owned(), amount(p.amount, code)),
+                ("On".to_owned(), format::date(&p.on)),
+                ("Paid from".to_owned(), ctx.source_label(&p.source)),
+            ],
+        ),
+        (WishStatus::Bought, None) => (Tone::Positive, "Bought", vec![planned]),
+        (WishStatus::Started, _) => (
+            Tone::Positive,
+            "Started",
+            vec![planned, ("From".to_owned(), format::date(&wish.due_on))],
+        ),
+        // A planned part of a wish that is done: no longer judged.
+        (WishStatus::Planned, _) => (Tone::Outline, "Not bought", vec![planned]),
+        (WishStatus::Dropped, _) => (Tone::Outline, "Dropped", vec![planned]),
     }
 }
 

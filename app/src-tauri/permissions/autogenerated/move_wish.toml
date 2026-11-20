@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-move-wish"
+description = "Enables the move_wish command without any pre-configured scope."
+commands.allow = ["move_wish"]
+
+[[permission]]
+identifier = "deny-move-wish"
+description = "Denies the move_wish command without any pre-configured scope."
+commands.deny = ["move_wish"]

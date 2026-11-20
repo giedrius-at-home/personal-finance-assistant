@@ -112,6 +112,16 @@ pub struct ChangeableBill {
     pub every: Repeat,
 }
 
+/// An event a wish can be put into.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EventOption {
+    pub wish_id: String,
+    pub name: String,
+    pub currency: Currency,
+    /// Its last day has passed: only a bought wish can still go into it.
+    pub over: bool,
+}
+
 /// Everything the wishes screen shows.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WishesView {
@@ -133,6 +143,9 @@ pub struct WishesView {
     /// The wishes and the emergency fund against current habits.
     #[serde(default)]
     pub goals: Option<GoalOutlook>,
+    /// The events a wish can be put into.
+    #[serde(default)]
+    pub events: Vec<EventOption>,
 }
 
 /// What the goals need a month against what current habits leave, judged by
