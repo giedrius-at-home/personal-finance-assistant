@@ -424,6 +424,7 @@ mod tests {
             kind: WishKind::OneOff,
             must: false,
             created_at: String::new(),
+            event: None,
         }
     }
 

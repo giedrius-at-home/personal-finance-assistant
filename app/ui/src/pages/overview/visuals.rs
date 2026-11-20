@@ -575,6 +575,7 @@ mod tests {
             elapsed_days: daily.len(),
             daily_spending: daily,
             expected: Vec::new(),
+            to_events: Vec::new(),
         }
     }
 

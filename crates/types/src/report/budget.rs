@@ -40,6 +40,10 @@ pub struct BudgetRow {
     /// rest of the month.
     #[serde(default)]
     pub expected: Vec<(String, Decimal)>,
+    /// `(event, amount)`: the usual spending of an event's days, handed to
+    /// the event and no longer reserved here.
+    #[serde(default)]
+    pub to_events: Vec<(String, Decimal)>,
 }
 
 /// A non-fixed purchase of the month and the envelope it counts in.
@@ -64,6 +68,10 @@ pub struct MonthlyBudget {
     pub unplanned: BudgetRow,
     pub extras: BudgetRow,
     /// Newest first.
+    /// One row per event with a share or spending in the month: id
+    /// `event:<wish id>`, `planned` the month's share, nothing reserved.
+    #[serde(default)]
+    pub events: Vec<BudgetRow>,
     pub purchases: Vec<BudgetPurchase>,
     /// The six months `history` covers, oldest first.
     pub history_months: Vec<String>,

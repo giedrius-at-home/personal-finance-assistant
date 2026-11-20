@@ -267,6 +267,7 @@ pub fn dashboard(
         planned_payments: payments,
         weekly,
         cash_overview: cash,
+        events: Vec::new(),
     })
 }
 

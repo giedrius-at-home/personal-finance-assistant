@@ -734,6 +734,7 @@ mod tests {
             kind: WishKind::OneOff,
             must: false,
             created_at: format!("2026-01-01T00:00:{id}"),
+            event: None,
         }
     }
 
@@ -936,6 +937,7 @@ mod tests {
             on: on.into(),
             source,
             cards: Vec::new(),
+            transaction_id: None,
         }
     }
 

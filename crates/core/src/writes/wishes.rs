@@ -164,6 +164,7 @@ pub fn save_wish(w: &Writer<'_>, snap: &Snapshot, draft: WishDraft) -> Result<Wi
                 kind: draft.kind,
                 must: draft.must,
                 created_at: w.stamp(),
+                event: None,
             }
         }
     };
@@ -626,6 +627,7 @@ mod tests {
             source: WishSource::Card,
             kind: Default::default(),
             must: false,
+            event: None,
         }
     }
 
@@ -956,6 +958,7 @@ mod tests {
             on: on.into(),
             source,
             cards: Vec::new(),
+            transaction_id: None,
         }
     }
 

@@ -1834,6 +1834,7 @@ fn wish_body(
             on: ui.buy_on.get_untracked(),
             source,
             cards: charges,
+            transaction_id: None,
         };
         ui.write(
             buy_target.clone(),
@@ -2207,6 +2208,7 @@ mod tests {
                 kind: Default::default(),
                 must: false,
                 created_at: "2026-10-01T00:00:00Z".into(),
+                event: None,
             },
             children: Vec::new(),
             rest: Decimal::ZERO,

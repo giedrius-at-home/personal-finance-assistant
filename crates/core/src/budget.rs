@@ -400,6 +400,7 @@ pub fn monthly_budget(
             daily_spending: daily,
             elapsed_days,
             expected: Vec::new(),
+            to_events: Vec::new(),
         }
     };
 
@@ -453,6 +454,7 @@ pub fn monthly_budget(
         extras,
         purchases,
         history_months: history_months.iter().map(Date::to_string).collect(),
+        events: Vec::new(),
     }
 }
 

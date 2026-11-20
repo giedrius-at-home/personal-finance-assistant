@@ -840,6 +840,7 @@ fn wish_db(amount: &str) -> (crate::writes::fixture::Db, String) {
         source: WishSource::Card,
         kind: Default::default(),
         must: false,
+        event: None,
     };
     let wish = db
         .write(|w, snap| crate::writes::wishes::save_wish(w, snap, draft))
@@ -967,6 +968,7 @@ fn a_bought_wish_is_skipped_but_its_line_stays() {
                 account_id: "firefly:1".into(),
             },
             cards: Vec::new(),
+            transaction_id: None,
         };
         db.write(|w, snap| crate::writes::wishes::mark_bought(w, snap, &id, purchase, &[]))
             .unwrap();

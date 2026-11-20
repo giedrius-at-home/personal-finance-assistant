@@ -8,6 +8,7 @@ pub mod budget;
 pub mod cash;
 pub mod catalog;
 pub mod closure;
+pub mod events;
 pub mod outlook;
 pub mod plans;
 pub mod reporting;
@@ -91,6 +92,9 @@ pub struct Dashboard {
     /// The running month's groups against the owner's own norm.
     #[serde(default)]
     pub adjustments: Vec<adjustments::Adjustments>,
+    /// The running and upcoming events, for Overview and Plan.
+    #[serde(default)]
+    pub events: Vec<events::EventRow>,
 }
 
 /// The category review inbox (Transactions screen).
