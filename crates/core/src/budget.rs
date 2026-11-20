@@ -16,6 +16,7 @@ use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 use crate::Ctx;
+use crate::events::{self, EventClaim};
 use crate::groups::{
     fixed_category_names, fixed_transaction_ids, group_index, predicted_category_names,
     without_settlements,
@@ -144,7 +145,14 @@ pub struct BudgetInputs<'a> {
     pub resolver: Option<&'a PeriodResolver>,
     /// The running budget month; today's calendar month without it.
     pub current_month: Option<Date>,
+    /// The events, which own the spending of their days.
+    pub events: &'a [EventClaim],
 }
+
+/// Groups that are money moved, not spent: never an event's.
+const MOVED_GROUPS: [&str; 2] = ["Transfers", "Investments"];
+/// Label of what the groups handed an event, on the event's row.
+pub const USUAL_DAYS: &str = "Usual those days";
 
 /// Which budget row a purchase counts in, shared by the budget and the
 /// adjustments pass.
@@ -156,6 +164,7 @@ pub struct Ownership<'a> {
     /// A paid reimbursement counts where the purchase it pays back counts.
     reimbursement_origins: HashMap<&'a str, &'a str>,
     paid_ids: HashSet<&'a str>,
+    events: &'a [EventClaim],
 }
 
 impl<'a> Ownership<'a> {
@@ -183,7 +192,24 @@ impl<'a> Ownership<'a> {
                 .filter(|p| p.direction == Direction::Outflow)
                 .filter_map(|p| p.transaction_id.as_deref())
                 .collect(),
+            events: inputs.events,
         }
+    }
+
+    /// The event that owns `t`: one that picked it by hand, else one whose
+    /// days hold it when it is day-to-day spending (not a bill, not a paid
+    /// plan, not money moved).
+    pub fn event(&self, t: &Tx) -> Option<&'a EventClaim> {
+        if self.events.is_empty() {
+            return None;
+        }
+        let id = t.transaction_id.as_str();
+        let day_to_day = !self.fixed_ids.contains(id)
+            && !self.paid_ids.contains(id)
+            && self
+                .source_group(t.category.as_deref())
+                .is_none_or(|g| !MOVED_GROUPS.contains(&g));
+        events::owner(self.events, id, t.effective_on(), &t.currency, day_to_day)
     }
 
     /// The reviewed group of a category.
@@ -194,6 +220,9 @@ impl<'a> Ownership<'a> {
     /// A plan group's id, or `"fixed"`, `"extras"` (a paid one-off plan) or
     /// `"unplanned"`.
     pub fn key(&self, t: &Tx) -> &'a str {
+        if let Some(event) = self.event(t) {
+            return &event.key;
+        }
         if self.fixed_ids.contains(&t.transaction_id) {
             return "fixed";
         }
@@ -274,17 +303,26 @@ pub fn monthly_budget(
     let mut history: HashMap<String, Vec<Decimal>> = HashMap::new();
     let mut rows: HashMap<String, Vec<&Tx>> = HashMap::new();
     let mut purchases = Vec::new();
+    let mut picked_ahead: HashMap<&str, Decimal> = HashMap::new();
     for t in inputs.transactions {
         if !counts(t, plan, now) {
             continue;
         }
         let on = t.effective_on();
         let tx_month = month_of(t, inputs);
+        let key = ownership.key(t);
+        let amount = signed(t);
+        // Picked in from before the first day: money already gone, which
+        // comes off what the days themselves have.
+        if let Some(event) = ownership.event(t)
+            && on < event.starts
+            && !event.tied.contains_key(&t.transaction_id)
+        {
+            *picked_ahead.entry(key).or_default() += amount;
+        }
         let Some(index) = history_months.iter().position(|m| *m == tx_month) else {
             continue;
         };
-        let key = ownership.key(t);
-        let amount = signed(t);
         history
             .entry(key.to_owned())
             .or_insert_with(|| vec![Decimal::ZERO; history_months.len()])[index] += amount;
@@ -416,11 +454,43 @@ pub fn monthly_budget(
         last("fixed") + fixed_remaining,
         extra_pending,
     );
-    let groups: Vec<BudgetRow> = plan
+    let mut groups: Vec<BudgetRow> = plan
         .groups
         .iter()
         .map(|g| row(&g.id, &g.name, g.amount, extra_pending))
         .collect();
+    let mut event_rows = Vec::new();
+    for claim in inputs.events.iter().filter(|c| c.currency == plan.currency) {
+        let ahead = picked_ahead
+            .get(claim.key.as_str())
+            .copied()
+            .unwrap_or_default();
+        let days_money = (claim.rest - ahead).max(Decimal::ZERO);
+        let share = events::shares(claim, days_money)
+            .into_iter()
+            .find(|(m, _)| *m == month)
+            .map(|(_, share)| share);
+        if share.is_none() && !rows.contains_key(&claim.key) {
+            continue;
+        }
+        let mut event_row = row(
+            &claim.key,
+            &claim.name,
+            share.unwrap_or_default(),
+            Decimal::ZERO,
+        );
+        event_row.reserved = Decimal::ZERO;
+        event_row.scheduled = Decimal::ZERO;
+        // The running month's groups hand over what they usually spend on
+        // the event's days: those days are not theirs.
+        if let (Some(share), true) = (share, month == current_month) {
+            let released = release(claim, share, month, plan, &mut groups);
+            if released > Decimal::ZERO {
+                event_row.expected.push((USUAL_DAYS.to_owned(), released));
+            }
+        }
+        event_rows.push(event_row);
+    }
     extra_pending += groups
         .iter()
         .map(|g| {
@@ -443,19 +513,69 @@ pub fn monthly_budget(
     purchases.sort_by(|a, b| (&b.occurred_on, &b.id).cmp(&(&a.occurred_on, &a.id)));
     let groups_planned: Decimal = groups.iter().map(|g| g.planned).sum();
     let groups_spent: Decimal = groups.iter().map(|g| g.spent).sum();
+    let events_spent: Decimal = event_rows.iter().map(|e| e.spent).sum();
     MonthlyBudget {
         plan: plan.clone(),
         reserved: groups.iter().map(|g| g.reserved).sum(),
         planned: fixed.planned + extras.planned + groups_planned,
-        spent: fixed.spent + extras.spent + (unplanned.spent + groups_spent),
+        spent: fixed.spent + extras.spent + (unplanned.spent + groups_spent) + events_spent,
         fixed,
         groups,
         unplanned,
         extras,
         purchases,
         history_months: history_months.iter().map(Date::to_string).collect(),
-        events: Vec::new(),
+        events: event_rows,
     }
+}
+
+/// Lower each day-to-day group's reserve by its usual spending on the
+/// event's days in `month`, never below zero and never more in total than
+/// the event's `share` of the month. Returns what was handed over.
+fn release(
+    claim: &EventClaim,
+    share: Decimal,
+    month: Date,
+    plan: &BudgetPlan,
+    groups: &mut [BudgetRow],
+) -> Decimal {
+    let days = events::days_in(claim, month);
+    let mut asks: Vec<(usize, Decimal)> = groups
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| {
+            plan.groups
+                .iter()
+                .find(|g| g.id == row.id)
+                .is_some_and(|g| {
+                    !g.source_groups
+                        .iter()
+                        .any(|s| MOVED_GROUPS.contains(&s.as_str()))
+                })
+        })
+        .filter_map(|(i, row)| {
+            let usual = crate::wishes::goals::usual(&row.history)?;
+            let ask = events::usual_share(usual, month, days).min(row.reserved);
+            (ask > Decimal::ZERO).then_some((i, ask))
+        })
+        .collect();
+    let total: Decimal = asks.iter().map(|(_, ask)| *ask).sum();
+    if total > share {
+        let cap = share.max(Decimal::ZERO);
+        for (_, ask) in &mut asks {
+            *ask = (*ask * cap / total).round_dp(2);
+        }
+    }
+    let mut released = Decimal::ZERO;
+    for (i, ask) in asks {
+        if ask <= Decimal::ZERO {
+            continue;
+        }
+        groups[i].reserved -= ask;
+        groups[i].to_events.push((claim.name.clone(), ask));
+        released += ask;
+    }
+    released
 }
 
 /// Every currency the owner holds or spends, by code.
@@ -499,6 +619,7 @@ pub fn monthly_budgets(
         payments,
         resolver: Some(&ctx.resolver),
         current_month: Some(current_month),
+        events: &ctx.events,
     };
     [
         (current_month, current_subscriptions),
@@ -518,6 +639,36 @@ pub fn monthly_budgets(
         })
     })
     .collect()
+}
+
+/// The ids of every transaction an event owns, for the passes that must
+/// leave event days out of the groups' record (the spending forecasts).
+pub fn event_owned_ids(
+    ctx: &Ctx,
+    spending: &[Tx],
+    payments: &[PlannedPaymentView],
+) -> HashSet<String> {
+    if ctx.events.is_empty() {
+        return HashSet::new();
+    }
+    let fixed_ids = budget_fixed_ids(ctx, spending);
+    let inputs = BudgetInputs {
+        transactions: spending,
+        mappings: &ctx.snap.group_mappings,
+        now: &ctx.now,
+        fixed_ids: &fixed_ids,
+        payments,
+        resolver: Some(&ctx.resolver),
+        current_month: Some(ctx.current_month()),
+        events: &ctx.events,
+    };
+    let plan = default_budget(ctx.current_month(), &Currency::eur());
+    let ownership = Ownership::new(&plan, &inputs);
+    spending
+        .iter()
+        .filter(|t| ownership.event(t).is_some())
+        .map(|t| t.transaction_id.clone())
+        .collect()
 }
 
 /// Label of the unplanned row's estimate.
@@ -675,6 +826,16 @@ pub(crate) mod tests {
         payments: &[PlannedPaymentView],
         fixed: &[&str],
     ) -> MonthlyBudget {
+        report_with_events(plan, transactions, payments, fixed, &[])
+    }
+
+    fn report_with_events(
+        plan: Option<BudgetPlan>,
+        transactions: &[Tx],
+        payments: &[PlannedPaymentView],
+        fixed: &[&str],
+        events: &[EventClaim],
+    ) -> MonthlyBudget {
         let fixed_ids: HashSet<String> = fixed.iter().map(|s| (*s).to_owned()).collect();
         let mappings = mappings();
         let now = now();
@@ -691,8 +852,109 @@ pub(crate) mod tests {
                 payments,
                 resolver: None,
                 current_month: None,
+                events,
             },
         )
+    }
+
+    /// `t` booked on `day` (`YYYY-MM-DD`).
+    fn on(t: Tx, day: &str) -> Tx {
+        Tx {
+            occurred_at: format!("{day}T12:00:00+00:00[UTC]").parse().unwrap(),
+            ..t
+        }
+    }
+
+    /// Five days of September around the fixture's "today" (the 10th).
+    fn parents() -> EventClaim {
+        crate::events::tests::claim("2026-09-08", "2026-09-12")
+    }
+
+    /// €300 of groceries in each of the five months before September.
+    fn usual_groceries() -> Vec<Tx> {
+        ["04", "05", "06", "07", "08"]
+            .iter()
+            .map(|m| on(tx(&format!("g{m}"), "300"), &format!("2026-{m}-15")))
+            .collect()
+    }
+
+    #[test]
+    fn an_events_days_leave_the_groups_and_the_month_total_stays_whole() {
+        let transactions = [tx("groceries", "50")];
+        let plain = report(None, &transactions, &[], &[]);
+        let view = report_with_events(None, &transactions, &[], &[], &[parents()]);
+        assert_eq!(view.groups[0].spent, d(0));
+        assert_eq!(view.events.len(), 1);
+        assert_eq!(view.events[0].id, "event:e");
+        assert_eq!(view.events[0].spent, d(50));
+        assert_eq!(view.events[0].planned, d(400));
+        assert_eq!(view.events[0].reserved, d(0));
+        assert_eq!(
+            view.purchases[0].budget_group_id.as_deref(),
+            Some("event:e")
+        );
+        assert_eq!(view.spent, plain.spent);
+        assert_eq!(view.planned, plain.planned);
+        // A bill on those days stays a bill.
+        let view = report_with_events(None, &transactions, &[], &["groceries"], &[parents()]);
+        assert_eq!(view.fixed.spent, d(50));
+        assert!(view.events[0].spent.is_zero());
+        // A purchase outside the days stays in its group.
+        let late = [on(tx("groceries", "50"), "2026-09-02")];
+        let view = report_with_events(None, &late, &[], &[], &[parents()]);
+        assert_eq!(view.groups[0].spent, d(50));
+    }
+
+    #[test]
+    fn a_group_hands_the_event_its_usual_share_of_the_days() {
+        // Five days of thirty at €300 a usual month: €50.
+        let view = report_with_events(None, &usual_groceries(), &[], &[], &[parents()]);
+        let groceries = &view.groups[0];
+        assert_eq!(groceries.to_events, vec![("Parents".to_owned(), d(50))]);
+        assert_eq!(groceries.reserved, d(250));
+        assert_eq!(groceries.planned, d(300));
+        assert_eq!(view.reserved, d(350));
+        assert_eq!(
+            view.events[0].expected,
+            vec![(USUAL_DAYS.to_owned(), d(50))]
+        );
+        // A group without a usual month hands over nothing.
+        assert!(view.groups[1].to_events.is_empty());
+    }
+
+    #[test]
+    fn a_group_at_its_limit_has_nothing_to_hand_over() {
+        let mut transactions = usual_groceries();
+        transactions.push(on(tx("big", "300"), "2026-09-02"));
+        let view = report_with_events(None, &transactions, &[], &[], &[parents()]);
+        assert!(view.groups[0].to_events.is_empty());
+        assert_eq!(view.groups[0].reserved, d(0));
+    }
+
+    #[test]
+    fn the_groups_never_hand_over_more_than_the_event_plans_to_spend() {
+        let cheap = EventClaim {
+            rest: d(20),
+            ..parents()
+        };
+        let view = report_with_events(None, &usual_groceries(), &[], &[], &[cheap]);
+        assert_eq!(
+            view.groups[0].to_events,
+            vec![("Parents".to_owned(), d(20))]
+        );
+        assert_eq!(view.groups[0].reserved, d(280));
+    }
+
+    #[test]
+    fn a_payment_picked_in_ahead_comes_off_the_money_for_the_days() {
+        let mut claim = parents();
+        claim.picked.insert("flight".into());
+        let transactions = [on(tx("flight", "100"), "2026-08-01")];
+        let view = report_with_events(None, &transactions, &[], &[], &[claim]);
+        // Not this month's spending, but September's share is of €300.
+        assert_eq!(view.events[0].planned, d(300));
+        assert!(view.events[0].spent.is_zero());
+        assert_eq!(view.groups[0].history[4], d(0));
     }
 
     fn extra_group(id: &str, amount: i64) -> BudgetGroup {
@@ -859,6 +1121,7 @@ pub(crate) mod tests {
                     payments: &[],
                     resolver: Some(&resolver),
                     current_month: Some(october),
+                    events: &[],
                 },
             );
             assert_eq!(budget.groups[0].spent, d(5));

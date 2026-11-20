@@ -22,7 +22,9 @@ pub fn dashboard(
     now: &Zoned,
     forecaster: Option<&dyn daily::SeriesForecaster>,
 ) -> Result<Dashboard> {
-    let ctx = Ctx::new(snap, now);
+    let mut ctx = Ctx::new(snap, now);
+    let wishes = crate::wishes::store::load_wishes(store.connection())?;
+    ctx.events = crate::events::claims(&wishes);
     let inputs = ReportInputs::load(store.connection(), snap.sync_health.0)?;
     let txs = &snap.transactions;
     let assigned = reporting::assignments(txs, &inputs.approved_categories);
@@ -55,6 +57,7 @@ pub fn dashboard(
     let current_month = ctx.current_month();
     let mut forecast_excluded = fixed_ids.clone();
     forecast_excluded.extend(plans::paid_outflow_ids(&payments));
+    forecast_excluded.extend(budget::event_owned_ids(&ctx, &spending, &payments));
     let spending_forecasts = forecast::spending_forecasts(
         &spending,
         &snap.group_mappings,
@@ -210,7 +213,6 @@ pub fn dashboard(
                 .budget_plans
                 .iter()
                 .find(|p| p.month == allocation.current_month && p.currency.code == "EUR");
-            let wishes = crate::wishes::store::load_wishes(store.connection())?;
             Ok::<_, crate::Error>(crate::closure::plan::money_plan(
                 &crate::closure::plan::PlanInputs {
                     as_of: ctx.now.date(),
