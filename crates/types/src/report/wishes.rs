@@ -172,8 +172,12 @@ pub struct GoalStatus {
     pub due_on: String,
     pub amount: Decimal,
     pub must: bool,
-    /// What cannot be paid when spending stays as usual.
+    /// What cannot be paid when spending stays as usual, cards included.
     pub short: Decimal,
+    /// What the cards paid for it that the month after cannot pay back
+    /// when the card is charged: that month's problem, not the goal's.
+    #[serde(default)]
+    pub card_short: Decimal,
     /// What ends up on a credit card when spending stays as usual.
     #[serde(default)]
     pub on_card: Decimal,

@@ -45,6 +45,9 @@ pub fn fewer_visits(cut: &HabitCut) -> Option<u32> {
 pub fn goal_status(goal: &GoalStatus) -> (&'static str, Option<Decimal>, bool) {
     if goal.short > Decimal::ZERO {
         ("Short", Some(goal.short), true)
+    } else if goal.card_short > Decimal::ZERO {
+        // Paid by card: the card's charge the month after is what lacks.
+        ("Card bill short", Some(goal.card_short), true)
     } else if goal.on_card > Decimal::ZERO {
         ("On the card", Some(goal.on_card), true)
     } else {

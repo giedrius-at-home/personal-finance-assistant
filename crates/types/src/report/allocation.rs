@@ -83,9 +83,36 @@ pub fn carried_to_next(wiggle_room: Decimal, next_shortfall: Decimal) -> Decimal
     wiggle_room.min(next_shortfall).max(Decimal::ZERO)
 }
 
+/// This month's spare money, in the order it is spoken for: next month's
+/// plan shortfall, then the wishes still to save for, and only then free
+/// room: `(held for next month, to wishes, wiggle room)`. Room below zero
+/// stays whole in the last part.
+pub fn spare_split(
+    room: Decimal,
+    next_shortfall: Decimal,
+    wishes_open: Decimal,
+) -> (Decimal, Decimal, Decimal) {
+    let carried = carried_to_next(room, next_shortfall);
+    let to_wishes = carried_to_next(room - carried, wishes_open);
+    (carried, to_wishes, room - carried - to_wishes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spare_money_covers_next_month_then_wishes_before_it_is_free() {
+        let d = |n: i64| Decimal::from(n);
+        // Open wishes take all of it: no wiggle room.
+        assert_eq!(spare_split(d(600), d(0), d(1500)), (d(0), d(600), d(0)));
+        assert_eq!(
+            spare_split(d(600), d(100), d(200)),
+            (d(100), d(200), d(300))
+        );
+        assert_eq!(spare_split(d(600), d(0), d(0)), (d(0), d(0), d(600)));
+        assert_eq!(spare_split(d(-50), d(100), d(200)), (d(0), d(0), d(-50)));
+    }
 
     #[test]
     fn wiggle_room_fills_next_shortfall_first() {
