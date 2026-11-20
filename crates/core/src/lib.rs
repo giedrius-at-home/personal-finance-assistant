@@ -15,6 +15,7 @@ pub mod closure;
 pub mod context;
 pub mod daily;
 pub mod dashboard;
+pub mod events;
 pub mod forecast;
 pub mod forecast_model;
 pub mod goals;
