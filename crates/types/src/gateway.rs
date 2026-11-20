@@ -472,6 +472,18 @@ pub struct EventDetails {
     pub excluded_ids: Vec<String>,
 }
 
+/// What to do with a payment on an event.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EventPick {
+    /// Count it, whatever its date or group.
+    Pick,
+    /// Not part of the event, though it falls inside the dates.
+    Exclude,
+    /// Neither: its date decides.
+    Clear,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WishPurchase {
     pub amount: Decimal,

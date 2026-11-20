@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 
 use finance_types::gateway::{Wish, WishKind, WishStatus};
 use finance_types::report::Currency;
-use finance_types::report::events::{EventSpend, Pace};
+use finance_types::report::events::{EventMonth, EventPhase, EventSpend, Pace};
 use jiff::civil::Date;
 use rust_decimal::Decimal;
 
@@ -197,6 +197,82 @@ pub fn need(
     }
 }
 
+/// What an event comes to on `today`, apart from the ladder's verdict.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EventFacts {
+    pub phase: EventPhase,
+    pub usual: Decimal,
+    pub extra: Decimal,
+    pub paid_ahead: Decimal,
+    pub spent: Decimal,
+    pub left: Decimal,
+    pub days: u32,
+    pub days_left: u32,
+    pub per_day: Decimal,
+    pub pace: Pace,
+    pub months: Vec<EventMonth>,
+}
+
+/// `bought_parts` is what the event's bought parts cost; `usual` is what
+/// the groups hand over (or would) in each month.
+pub fn facts(
+    claim: &EventClaim,
+    spend: Option<&EventSpend>,
+    bought_parts: Decimal,
+    usual: &[(Date, Decimal)],
+    today: Date,
+) -> EventFacts {
+    let money = days_money(claim, spend);
+    let months: Vec<EventMonth> = shares(claim, money)
+        .into_iter()
+        .map(|(month, share)| EventMonth {
+            month: month.to_string(),
+            share,
+            spent: spent_in(spend, month),
+            usual: usual
+                .iter()
+                .filter(|(m, _)| *m == month)
+                .map(|(_, n)| *n)
+                .sum(),
+        })
+        .collect();
+    let picked_ahead = spend.map_or(Decimal::ZERO, |s| s.picked_ahead);
+    let on_days: Decimal =
+        spend.map_or(Decimal::ZERO, |s| s.by_month.iter().map(|(_, n)| *n).sum());
+    let left = claim.rest - picked_ahead - on_days;
+    let days = days(claim);
+    let (phase, days_left, days_gone) = if today < claim.starts {
+        (EventPhase::Upcoming, 0, 0)
+    } else if today > claim.ends {
+        (EventPhase::Past, 0, days)
+    } else {
+        (
+            EventPhase::Running,
+            span_days(today, claim.ends),
+            span_days(claim.starts, today),
+        )
+    };
+    let per_day = if days_left > 0 && left > Decimal::ZERO {
+        (left / Decimal::from(days_left)).round_dp(2)
+    } else {
+        Decimal::ZERO
+    };
+    let usual_total: Decimal = months.iter().map(|m| m.usual).sum();
+    EventFacts {
+        phase,
+        usual: usual_total,
+        extra: (money - usual_total).max(Decimal::ZERO),
+        paid_ahead: bought_parts + picked_ahead,
+        spent: bought_parts + picked_ahead + on_days,
+        left,
+        days,
+        days_left,
+        per_day,
+        pace: pace(money, on_days, days_gone, days, left < Decimal::ZERO),
+        months,
+    }
+}
+
 fn span_days(from: Date, to: Date) -> u32 {
     u32::try_from((to - from).get_days() + 1).unwrap_or(0)
 }
@@ -383,6 +459,43 @@ pub(crate) mod tests {
                 .months
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn a_running_event_knows_what_is_spent_left_and_allowed_a_day() {
+        // €400 with Zoo (18) still to buy and Naturalis bought for 28.
+        let e = EventClaim {
+            rest: d("354"),
+            ..claim("2026-11-30", "2026-12-05")
+        };
+        let s = spend("0", &[("2026-11-01", "100"), ("2026-12-01", "87.60")]);
+        let usual = [(date(2026, 12, 1), d("50"))];
+        let f = facts(&e, Some(&s), d("28"), &usual, date(2026, 12, 2));
+        assert_eq!(f.phase, EventPhase::Running);
+        assert_eq!((f.spent, f.left), (d("215.60"), d("166.40")));
+        assert_eq!((f.days, f.days_left, f.per_day), (6, 4, d("41.60")));
+        assert_eq!(
+            (f.usual, f.extra, f.paid_ahead),
+            (d("50"), d("304"), d("28"))
+        );
+        // Three days of six gone: €177 allowed, €187.60 spent.
+        assert_eq!(f.pace, Pace::Fast);
+        assert_eq!(f.months.len(), 2);
+        assert_eq!(
+            (f.months[1].share, f.months[1].spent),
+            (d("295"), d("87.60"))
+        );
+        // Before it starts and after it ends there is no day to spend on.
+        let before = facts(&e, None, d("28"), &usual, date(2026, 11, 20));
+        assert_eq!((before.phase, before.days_left), (EventPhase::Upcoming, 0));
+        assert_eq!(before.per_day, d("0"));
+        let after = facts(&e, Some(&s), d("28"), &usual, date(2026, 12, 6));
+        assert_eq!((after.phase, after.days_left), (EventPhase::Past, 0));
+        // Over the plan: nothing left a day, and it says so.
+        let much = spend("0", &[("2026-12-01", "500")]);
+        let over = facts(&e, Some(&much), d("28"), &usual, date(2026, 12, 2));
+        assert_eq!((over.pace, over.per_day), (Pace::Over, d("0")));
+        assert_eq!(over.left, d("-146"));
     }
 
     #[test]

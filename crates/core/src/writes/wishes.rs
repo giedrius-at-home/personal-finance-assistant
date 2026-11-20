@@ -1,8 +1,9 @@
 //! Wishes: planned purchases the owner saves toward, drops or buys.
 
 use finance_types::gateway::{
-    BillCreateRequest, BillEditRequest, BillRef, CardCharge, Direction, PlannedPayment, Repeat,
-    Wish, WishDraft, WishKind, WishPurchase, WishSettings, WishSource, WishStatus,
+    BillCreateRequest, BillEditRequest, BillRef, CardCharge, Direction, EventDetails, EventPick,
+    PlannedPayment, Repeat, Wish, WishDraft, WishKind, WishPurchase, WishSettings, WishSource,
+    WishStatus,
 };
 use finance_types::report::wishes::Cut;
 use finance_types::report::{Currency, UnitMoney};
@@ -75,8 +76,9 @@ fn check_kind(snap: &Snapshot, kind: &WishKind, due_on: Date) -> Result<()> {
 }
 
 /// Create a wish, or edit a planned one (keeping its progress).
-pub fn save_wish(w: &Writer<'_>, snap: &Snapshot, draft: WishDraft) -> Result<Wish> {
-    let name = draft.name.trim();
+pub fn save_wish(w: &Writer<'_>, snap: &Snapshot, mut draft: WishDraft) -> Result<Wish> {
+    let name = draft.name.trim().to_owned();
+    let name = name.as_str();
     if name.is_empty() || name.chars().count() > 128 {
         return Err(invalid("wish needs a name"));
     }
@@ -87,6 +89,14 @@ pub fn save_wish(w: &Writer<'_>, snap: &Snapshot, draft: WishDraft) -> Result<Wi
         }
     } else if draft.amount <= Decimal::ZERO {
         return Err(invalid("wish amount must be positive"));
+    }
+    if let Some(event) = &draft.event {
+        event_dates(&event.starts_on, &event.ends_on)?;
+        if draft.kind != WishKind::OneOff || draft.parent_id.is_some() {
+            return Err(invalid(EVENT_KIND));
+        }
+        // An event is due the day it starts.
+        draft.due_on = event.starts_on.clone();
     }
     let Ok(due_on) = draft.due_on.parse::<Date>() else {
         return Err(invalid("wish date is invalid"));
@@ -134,6 +144,16 @@ pub fn save_wish(w: &Writer<'_>, snap: &Snapshot, draft: WishDraft) -> Result<Wi
         Some(id) => {
             let old = planned(find(&wishes, id)?)?;
             Wish {
+                // New dates keep the payments picked in or taken out.
+                event: match (draft.event, old.event.clone()) {
+                    (Some(new), Some(kept)) => Some(EventDetails {
+                        starts_on: new.starts_on,
+                        ends_on: new.ends_on,
+                        ..kept
+                    }),
+                    (Some(new), None) => Some(new_event(&new.starts_on, &new.ends_on)),
+                    (None, kept) => kept,
+                },
                 must: draft.must,
                 parent_id: draft.parent_id,
                 name: name.to_owned(),
@@ -164,7 +184,7 @@ pub fn save_wish(w: &Writer<'_>, snap: &Snapshot, draft: WishDraft) -> Result<Wi
                 kind: draft.kind,
                 must: draft.must,
                 created_at: w.stamp(),
-                event: None,
+                event: draft.event.map(|e| new_event(&e.starts_on, &e.ends_on)),
             }
         }
     };
@@ -176,6 +196,115 @@ pub fn save_wish(w: &Writer<'_>, snap: &Snapshot, draft: WishDraft) -> Result<Wi
 }
 
 const MUST_PARENT: &str = "only parts of a must wish can be must";
+const EVENT_KIND: &str = "only a one-off wish that is not a part can be an event";
+
+fn event_dates(starts_on: &str, ends_on: &str) -> Result<(Date, Date)> {
+    let (Ok(starts), Ok(ends)) = (starts_on.parse::<Date>(), ends_on.parse::<Date>()) else {
+        return Err(invalid("event dates are invalid"));
+    };
+    if ends < starts {
+        return Err(invalid("an event cannot end before it starts"));
+    }
+    Ok((starts, ends))
+}
+
+fn new_event(starts_on: &str, ends_on: &str) -> EventDetails {
+    EventDetails {
+        starts_on: starts_on.to_owned(),
+        ends_on: ends_on.to_owned(),
+        ..EventDetails::default()
+    }
+}
+
+/// A planned event wish, or why it is not one.
+fn event_wish(wishes: &[Wish], wish_id: &str) -> Result<Wish> {
+    let wish = planned(find(wishes, wish_id)?)?;
+    if wish.event.is_none() {
+        return Err(invalid("wish is not an event"));
+    }
+    Ok(wish)
+}
+
+/// Give a planned wish its dates: it becomes an event, due the day it
+/// starts, and keeps its parts, saved money and source. An event gets new
+/// dates and keeps its payments.
+pub fn plan_as_event(
+    w: &Writer<'_>,
+    wish_id: &str,
+    starts_on: &str,
+    ends_on: &str,
+) -> Result<Wish> {
+    event_dates(starts_on, ends_on)?;
+    let wish = planned(find(&load_wishes(&w.tx)?, wish_id)?)?;
+    if wish.kind != WishKind::OneOff || wish.parent_id.is_some() {
+        return Err(invalid(EVENT_KIND));
+    }
+    let event = Wish {
+        due_on: starts_on.to_owned(),
+        event: Some(EventDetails {
+            starts_on: starts_on.to_owned(),
+            ends_on: ends_on.to_owned(),
+            ..wish.event.clone().unwrap_or_default()
+        }),
+        ..wish
+    };
+    store(w, &event)?;
+    Ok(event)
+}
+
+/// Make an event that has not started a plain wish again.
+pub fn back_from_event(w: &Writer<'_>, wish_id: &str) -> Result<Wish> {
+    let wish = event_wish(&load_wishes(&w.tx)?, wish_id)?;
+    let started = wish
+        .event
+        .as_ref()
+        .and_then(|e| e.starts_on.parse::<Date>().ok())
+        .is_none_or(|starts| starts <= w.now.date());
+    if started {
+        return Err(invalid("the event has already started"));
+    }
+    let back = Wish {
+        event: None,
+        ..wish
+    };
+    store(w, &back)?;
+    Ok(back)
+}
+
+/// Pick a payment into an event, take it out, or leave it to its date.
+pub fn set_event_transaction(
+    w: &Writer<'_>,
+    snap: &Snapshot,
+    wish_id: &str,
+    transaction_id: &str,
+    pick: EventPick,
+) -> Result<Wish> {
+    let mut wish = event_wish(&load_wishes(&w.tx)?, wish_id)?;
+    known_payment(snap, transaction_id, &wish.currency)?;
+    if let Some(event) = &mut wish.event {
+        event.transaction_ids.retain(|id| id != transaction_id);
+        event.excluded_ids.retain(|id| id != transaction_id);
+        match pick {
+            EventPick::Pick => event.transaction_ids.push(transaction_id.to_owned()),
+            EventPick::Exclude => event.excluded_ids.push(transaction_id.to_owned()),
+            EventPick::Clear => {}
+        }
+    }
+    store(w, &wish)?;
+    Ok(wish)
+}
+
+fn known_payment(snap: &Snapshot, transaction_id: &str, currency: &Currency) -> Result<()> {
+    if snap
+        .transactions
+        .iter()
+        .any(|t| t.transaction_id == transaction_id && t.currency == *currency)
+    {
+        Ok(())
+    } else {
+        Err(invalid("payment not found in this currency"))
+    }
+}
 
 /// Clear the must flag on every planned sub-wish of `parent_id`.
 fn unmust_children(w: &Writer<'_>, wishes: &[Wish], parent_id: &str) -> Result<()> {
@@ -346,7 +475,25 @@ pub fn mark_bought(
     {
         return Err(invalid("wish account is unknown"));
     }
-    let wish = planned(find(&load_wishes(&w.tx)?, wish_id)?)?;
+    let wishes = load_wishes(&w.tx)?;
+    let wish = planned(find(&wishes, wish_id)?)?;
+    // A purchase that names its payment hands it to the event it is part of.
+    if let Some(transaction_id) = &purchase.transaction_id {
+        known_payment(snap, transaction_id, &wish.currency)?;
+        let event = wish
+            .parent_id
+            .as_deref()
+            .and_then(|parent| event_wish(&wishes, parent).ok());
+        if let Some(mut event) = event {
+            if let Some(details) = &mut event.event {
+                details.excluded_ids.retain(|id| id != transaction_id);
+                if !details.transaction_ids.contains(transaction_id) {
+                    details.transaction_ids.push(transaction_id.clone());
+                }
+            }
+            store(w, &event)?;
+        }
+    }
     let month = ctx.resolver.period_for(on, None);
     let mut settings = load_wish_settings(&w.tx)?;
     let mut purchase = purchase;
@@ -613,7 +760,9 @@ pub fn save_wish_settings(w: &Writer<'_>, mut settings: WishSettings) -> Result<
 mod tests {
     use super::*;
     use crate::writes::fixture::{Db, db};
-    use finance_types::gateway::{BudgetGroup, BudgetPlan, CardSettings, Repeat, WishKind};
+    use finance_types::gateway::{
+        BudgetGroup, BudgetPlan, CardSettings, EventDetails, Repeat, WishKind,
+    };
     use finance_types::report::Currency;
 
     fn draft(name: &str) -> WishDraft {
@@ -629,6 +778,170 @@ mod tests {
             must: false,
             event: None,
         }
+    }
+
+    fn dates(starts: &str, ends: &str) -> Option<EventDetails> {
+        Some(EventDetails {
+            starts_on: starts.into(),
+            ends_on: ends.into(),
+            ..EventDetails::default()
+        })
+    }
+
+    #[test]
+    fn a_wish_becomes_an_event_and_back_keeping_everything_else() {
+        let mut db = db();
+        let wish = db.write(|w, s| save_wish(w, s, draft("Japan"))).unwrap();
+        db.write(|w, s| record_saved(w, s, &wish.wish_id, Decimal::from(300)))
+            .unwrap();
+        let part = WishDraft {
+            parent_id: Some(wish.wish_id.clone()),
+            ..draft("Flight")
+        };
+        let part = db.write(|w, s| save_wish(w, s, part)).unwrap();
+        let event = db
+            .write(|w, _| plan_as_event(w, &wish.wish_id, "2026-11-30", "2026-12-05"))
+            .unwrap();
+        assert_eq!(event.event, dates("2026-11-30", "2026-12-05"));
+        assert_eq!(event.due_on, "2026-11-30");
+        assert_eq!(
+            (event.saved, &event.source),
+            (Decimal::from(300), &wish.source)
+        );
+        // Only a planned top-level one-off, with dates the right way round.
+        for (id, starts, ends) in [
+            (part.wish_id.as_str(), "2026-11-30", "2026-12-05"),
+            (wish.wish_id.as_str(), "2026-12-05", "2026-11-30"),
+            (wish.wish_id.as_str(), "soon", "2026-11-30"),
+            ("nope", "2026-11-30", "2026-12-05"),
+        ] {
+            assert!(db.write(|w, _| plan_as_event(w, id, starts, ends)).is_err());
+        }
+        let back = db.write(|w, _| back_from_event(w, &wish.wish_id)).unwrap();
+        assert_eq!(back.event, None);
+        assert_eq!(back.saved, Decimal::from(300));
+        // Once it has started (the fixture's today is 26 October) it stays.
+        db.write(|w, _| plan_as_event(w, &wish.wish_id, "2026-10-26", "2026-10-28"))
+            .unwrap();
+        assert!(db.write(|w, _| back_from_event(w, &wish.wish_id)).is_err());
+    }
+
+    #[test]
+    fn an_event_is_saved_with_its_dates_and_keeps_its_picks_on_edit() {
+        let mut db = db();
+        let new = WishDraft {
+            event: dates("2026-11-30", "2026-12-05"),
+            ..draft("Parents")
+        };
+        let event = db.write(|w, s| save_wish(w, s, new.clone())).unwrap();
+        assert_eq!(event.due_on, "2026-11-30");
+        db.write(|w, s| set_event_transaction(w, s, &event.wish_id, "firefly:12", EventPick::Pick))
+            .unwrap();
+        let edit = WishDraft {
+            wish_id: Some(event.wish_id.clone()),
+            event: dates("2026-12-01", "2026-12-06"),
+            ..new.clone()
+        };
+        let edited = db.write(|w, s| save_wish(w, s, edit)).unwrap();
+        let details = edited.event.unwrap();
+        assert_eq!(details.starts_on, "2026-12-01");
+        assert_eq!(details.transaction_ids, vec!["firefly:12".to_owned()]);
+        assert_eq!(edited.due_on, "2026-12-01");
+        // A part cannot be an event, nor can the dates run backwards.
+        let part = WishDraft {
+            parent_id: Some(event.wish_id.clone()),
+            ..new.clone()
+        };
+        assert!(db.write(|w, s| save_wish(w, s, part)).is_err());
+        let backwards = WishDraft {
+            event: dates("2026-12-05", "2026-11-30"),
+            ..new
+        };
+        assert!(db.write(|w, s| save_wish(w, s, backwards)).is_err());
+    }
+
+    #[test]
+    fn a_payment_is_picked_into_an_event_taken_out_or_left_to_its_date() {
+        let mut db = db();
+        let new = WishDraft {
+            event: dates("2026-11-30", "2026-12-05"),
+            ..draft("Parents")
+        };
+        let id = db.write(|w, s| save_wish(w, s, new)).unwrap().wish_id;
+        let mut set = |tx: &str, pick| {
+            db.write(|w, s| set_event_transaction(w, s, &id, tx, pick))
+                .map(|w| w.event.unwrap())
+        };
+        let e = set("firefly:12", EventPick::Pick).unwrap();
+        assert_eq!((e.transaction_ids.len(), e.excluded_ids.len()), (1, 0));
+        let e = set("firefly:12", EventPick::Pick).unwrap();
+        assert_eq!(e.transaction_ids.len(), 1);
+        let e = set("firefly:12", EventPick::Exclude).unwrap();
+        assert_eq!((e.transaction_ids.len(), e.excluded_ids.len()), (0, 1));
+        let e = set("firefly:12", EventPick::Clear).unwrap();
+        assert_eq!((e.transaction_ids.len(), e.excluded_ids.len()), (0, 0));
+        assert!(set("no-such-payment", EventPick::Pick).is_err());
+        let plain = db.write(|w, s| save_wish(w, s, draft("Bike"))).unwrap();
+        assert!(
+            db.write(|w, s| set_event_transaction(
+                w,
+                s,
+                &plain.wish_id,
+                "firefly:12",
+                EventPick::Pick
+            ))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn a_part_bought_with_a_payment_ties_it_to_the_event() {
+        let mut db = db();
+        let new = WishDraft {
+            event: dates("2026-11-30", "2026-12-05"),
+            ..draft("Parents")
+        };
+        let event = db.write(|w, s| save_wish(w, s, new)).unwrap();
+        let part = WishDraft {
+            parent_id: Some(event.wish_id.clone()),
+            amount: Decimal::from(10),
+            ..draft("Zoo")
+        };
+        let part = db.write(|w, s| save_wish(w, s, part)).unwrap();
+        let paid = WishPurchase {
+            transaction_id: Some("firefly:13".into()),
+            ..purchase(7, "2026-10-23", WishSource::Card)
+        };
+        let bought = db
+            .write(|w, s| mark_bought(w, s, &part.wish_id, paid.clone(), &[]))
+            .unwrap();
+        assert_eq!(
+            bought.bought.unwrap().transaction_id.as_deref(),
+            Some("firefly:13")
+        );
+        let wishes = load_wishes(db.store.connection()).unwrap();
+        let event = wishes.iter().find(|w| w.wish_id == event.wish_id).unwrap();
+        assert_eq!(
+            event.event.as_ref().unwrap().transaction_ids,
+            vec!["firefly:13".to_owned()]
+        );
+        let claim = &crate::events::claims(&wishes)[0];
+        assert_eq!(claim.tied.get("firefly:13"), Some(&part.wish_id));
+        assert_eq!(claim.rest, Decimal::from(893));
+        // A payment that does not exist is refused.
+        let other = WishDraft {
+            parent_id: Some(event.wish_id.clone()),
+            ..draft("Museum")
+        };
+        let other = db.write(|w, s| save_wish(w, s, other)).unwrap();
+        let ghost = WishPurchase {
+            transaction_id: Some("ghost".into()),
+            ..paid
+        };
+        assert!(
+            db.write(|w, s| mark_bought(w, s, &other.wish_id, ghost, &[]))
+                .is_err()
+        );
     }
 
     fn message<T>(result: Result<T>) -> String {

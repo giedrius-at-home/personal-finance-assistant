@@ -13,10 +13,11 @@ mod update;
 
 use finance_core::service::Service;
 use finance_secrets::{Item, Secret};
-use finance_types::gateway::{BudgetPlan, Wish, WishDraft, WishPurchase, WishSettings};
+use finance_types::gateway::{BudgetPlan, EventPick, Wish, WishDraft, WishPurchase, WishSettings};
 use finance_types::report::closure::{
     AccountRoleDraft, ClosureAction, ClosureView, UnclassifiedAccounts,
 };
+use finance_types::report::events::EventsView;
 use finance_types::report::review::{TransactionSearchQuery, TransactionSearchResult};
 use finance_types::report::wishes::WishesView;
 use finance_types::report::{Dashboard, ReviewReport};
@@ -145,6 +146,45 @@ fn record_wish_saved(
     traced(
         "record_wish_saved",
         service.record_wish_saved(&wish_id, saved),
+    )
+}
+
+#[tauri::command(async, rename_all = "snake_case")]
+fn events(service: State<'_, Service>) -> Result<EventsView, String> {
+    traced("events", service.events())
+}
+
+#[tauri::command(async, rename_all = "snake_case")]
+fn plan_wish_as_event(
+    service: State<'_, Service>,
+    wish_id: String,
+    starts_on: String,
+    ends_on: String,
+) -> Result<Wish, String> {
+    traced(
+        "plan_wish_as_event",
+        service.plan_wish_as_event(&wish_id, &starts_on, &ends_on),
+    )
+}
+
+#[tauri::command(async, rename_all = "snake_case")]
+fn wish_back_from_event(service: State<'_, Service>, wish_id: String) -> Result<Wish, String> {
+    traced(
+        "wish_back_from_event",
+        service.wish_back_from_event(&wish_id),
+    )
+}
+
+#[tauri::command(async, rename_all = "snake_case")]
+fn set_event_transaction(
+    service: State<'_, Service>,
+    wish_id: String,
+    transaction_id: String,
+    pick: EventPick,
+) -> Result<Wish, String> {
+    traced(
+        "set_event_transaction",
+        service.set_event_transaction(&wish_id, &transaction_id, pick),
     )
 }
 
@@ -504,6 +544,10 @@ fn main() {
             save_wish,
             record_wish_saved,
             set_wish_must,
+            events,
+            plan_wish_as_event,
+            wish_back_from_event,
+            set_event_transaction,
             drop_wish,
             mark_wish_bought,
             start_wish,

@@ -248,7 +248,7 @@ pub fn dashboard(
         .iter()
         .map(|e| e.transaction_id.clone())
         .collect();
-    Ok(Dashboard {
+    let mut dashboard = Dashboard {
         generated_at: ctx.now.strftime("%Y-%m-%dT%H:%M:%S%:z").to_string(),
         settings: snap.settings.clone(),
         net_worth: reporting::net_worth_report(&snap.accounts, &ctx.now, inputs.refreshed_at),
@@ -285,7 +285,23 @@ pub fn dashboard(
         cash_overview: cash,
         events: Vec::new(),
         event_spends,
-    })
+    };
+    // The events still to come or running, judged like the Events screen.
+    if !ctx.events.is_empty() {
+        let settings = crate::wishes::store::load_wish_settings(store.connection())?;
+        dashboard.events = crate::wishes::events_view(
+            &dashboard,
+            &snap.budget_plans,
+            &snap.bills,
+            &wishes,
+            &settings,
+        )
+        .events
+        .into_iter()
+        .filter(|e| e.phase != finance_types::report::events::EventPhase::Past)
+        .collect();
+    }
+    Ok(dashboard)
 }
 
 /// The review inbox. Automatic categorisation runs in a later phase, so the

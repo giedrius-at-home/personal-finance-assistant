@@ -7,10 +7,11 @@ use std::sync::{Arc, Mutex};
 
 use finance_storage::Store;
 use finance_types::DataStatus;
-use finance_types::gateway::{Wish, WishDraft, WishPurchase, WishSettings};
+use finance_types::gateway::{EventPick, Wish, WishDraft, WishPurchase, WishSettings};
 use finance_types::report::closure::{
     AccountRoleDraft, ClosureAction, ClosureView, UnclassifiedAccounts,
 };
+use finance_types::report::events::EventsView;
 use finance_types::report::review::{self as rv, TransactionSearchQuery, TransactionSearchResult};
 use finance_types::report::wishes::WishesView;
 use finance_types::report::{Dashboard, ReviewReport};
@@ -395,6 +396,46 @@ impl Service {
 
     pub fn record_wish_saved(&self, wish_id: &str, saved: Decimal) -> Result<Wish, String> {
         self.write(|w, snap| crate::writes::wishes::record_saved(w, snap, wish_id, saved))
+    }
+
+    /// The events screen: wishes with dates, judged and tracked.
+    pub fn events(&self) -> Result<EventsView, String> {
+        self.read_forecast(|store, snap, now, model| {
+            let dash = dashboard::dashboard(store, snap, now, model)?;
+            let wishes = crate::wishes::store::load_wishes(store.connection())?;
+            let settings = crate::wishes::store::load_wish_settings(store.connection())?;
+            Ok(crate::wishes::events_view(
+                &dash,
+                &snap.budget_plans,
+                &snap.bills,
+                &wishes,
+                &settings,
+            ))
+        })
+    }
+
+    pub fn plan_wish_as_event(
+        &self,
+        wish_id: &str,
+        starts_on: &str,
+        ends_on: &str,
+    ) -> Result<Wish, String> {
+        self.write(|w, _| crate::writes::wishes::plan_as_event(w, wish_id, starts_on, ends_on))
+    }
+
+    pub fn wish_back_from_event(&self, wish_id: &str) -> Result<Wish, String> {
+        self.write(|w, _| crate::writes::wishes::back_from_event(w, wish_id))
+    }
+
+    pub fn set_event_transaction(
+        &self,
+        wish_id: &str,
+        transaction_id: &str,
+        pick: EventPick,
+    ) -> Result<Wish, String> {
+        self.write(|w, snap| {
+            crate::writes::wishes::set_event_transaction(w, snap, wish_id, transaction_id, pick)
+        })
     }
 
     pub fn set_wish_must(&self, wish_id: &str, must: bool) -> Result<Wish, String> {

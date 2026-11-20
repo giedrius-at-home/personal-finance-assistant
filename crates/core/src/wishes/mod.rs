@@ -20,7 +20,7 @@ use schedule::{BillNow, Family, Planned, Saver};
 
 use crate::events::{EventNeed, GroupUsual};
 use finance_types::report::adjustments::Adjustments;
-use finance_types::report::events::EventSpend;
+use finance_types::report::events::{EventPhase, EventRow, EventSpend, EventsView};
 use std::collections::HashMap;
 
 use crate::load::Bill;
@@ -65,6 +65,22 @@ pub fn event_needs(dashboard: &Dashboard, wishes: &[Wish]) -> Vec<EventNeed> {
     })
 }
 
+/// The budgeted groups as an event's later months see them.
+fn group_usuals(adjustments: &[Adjustments], currency: &Currency) -> Vec<GroupUsual> {
+    adjustments
+        .iter()
+        .filter(|a| a.currency == *currency)
+        .flat_map(|a| &a.rows)
+        .filter(|row| row.budgeted)
+        .filter_map(|row| {
+            Some(GroupUsual {
+                usual: goals::usual(&row.row.history)?,
+                limit: row.row.planned,
+            })
+        })
+        .collect()
+}
+
 /// [`event_needs`] from the dashboard's parts, for while it is being built.
 pub fn event_needs_for(
     alloc: &CurrencyAllocation,
@@ -76,19 +92,7 @@ pub fn event_needs_for(
     let Some(month0) = baseline::current_month(alloc) else {
         return Vec::new();
     };
-    // The budgeted groups as an event's later months see them.
-    let groups: Vec<GroupUsual> = adjustments
-        .iter()
-        .filter(|a| a.currency == alloc.currency)
-        .flat_map(|a| &a.rows)
-        .filter(|row| row.budgeted)
-        .filter_map(|row| {
-            Some(GroupUsual {
-                usual: goals::usual(&row.row.history)?,
-                limit: row.row.planned,
-            })
-        })
-        .collect();
+    let groups = group_usuals(adjustments, &alloc.currency);
     crate::events::claims(wishes)
         .iter()
         .filter(|c| c.currency == alloc.currency)
@@ -97,6 +101,167 @@ pub fn event_needs_for(
             crate::events::need(claim, spend, &groups, month0, today.unwrap_or(month0))
         })
         .collect()
+}
+
+/// The largest amount the event could plan without a trade-off: its amount
+/// plus the least free money any month up to its last is left with (money
+/// is saved for it ahead, so an earlier month counts too), or, when it already
+/// costs something, its amount less what cuts, savings, cards and a short
+/// had to find. `None` when it was not judged.
+pub fn fits_up_to(row: &WishRow, months: &[WishMonth], event_months: &[Date]) -> Option<Decimal> {
+    if row.not_judged.is_some() {
+        return None;
+    }
+    let id = row.wish.wish_id.as_str();
+    if row.short == Decimal::ZERO && !row.tradeoffs {
+        let spare = months
+            .iter()
+            .filter(|m| {
+                m.month
+                    .parse::<Date>()
+                    .is_ok_and(|month| event_months.last().is_some_and(|last| month <= *last))
+            })
+            .map(|m| m.free_left)
+            .min()
+            .unwrap_or_default();
+        return Some(row.wish.amount + spare.max(Decimal::ZERO));
+    }
+    let found: Decimal = months
+        .iter()
+        .flat_map(|m| &m.verdicts)
+        .filter(|v| v.wish_id.as_deref() == Some(id) && !v.set_aside)
+        .map(|v| {
+            let cuts: Decimal = v.cuts.iter().map(|c| c.from - c.to).sum();
+            cuts + v.from_savings + v.on_card + v.short
+        })
+        .sum();
+    Some((row.wish.amount - found).max(Decimal::ZERO))
+}
+
+/// The events screen, judged with the wishes against the dashboard.
+pub fn events_view(
+    dashboard: &Dashboard,
+    stored_plans: &[BudgetPlan],
+    bills: &[Bill],
+    wishes: &[Wish],
+    settings: &WishSettings,
+) -> EventsView {
+    let (plans, card_bills, bills) = dashboard_parts(dashboard, stored_plans, bills, settings);
+    let alloc = allocation(dashboard);
+    let currency = alloc.map_or_else(Currency::eur, |a| a.currency.clone());
+    let needs = event_needs(dashboard, wishes);
+    let (rows, months) = Inputs {
+        alloc,
+        today: today(dashboard),
+        plans,
+        card_bills,
+        bills: &bills,
+        habits: Vec::new(),
+        events: needs.clone(),
+    }
+    .event_rows(wishes, settings);
+    let claims = crate::events::claims(wishes);
+    let month0 = alloc.and_then(baseline::current_month);
+    let day = today(dashboard).or(month0);
+    let groups = alloc.map_or_else(Vec::new, |a| {
+        group_usuals(&dashboard.adjustments, &a.currency)
+    });
+    let mut events: Vec<EventRow> = rows
+        .into_iter()
+        .filter_map(|mut row| {
+            let claim = claims.iter().find(|c| c.wish_id == row.wish.wish_id)?;
+            let spend = dashboard
+                .event_spends
+                .iter()
+                .find(|s| s.wish_id == claim.wish_id);
+            // What the running month's groups handed over is on the budget's
+            // event row; later months are estimated from the groups' usual.
+            let money = crate::events::days_money(claim, spend);
+            let usual: Vec<(Date, Decimal)> = crate::events::shares(claim, money)
+                .into_iter()
+                .map(|(month, share)| {
+                    let handed = if Some(month) == month0 {
+                        dashboard
+                            .monthly_budgets
+                            .iter()
+                            .filter(|b| b.plan.currency == claim.currency)
+                            .filter(|b| b.plan.month.parse::<Date>().ok() == Some(month))
+                            .flat_map(|b| &b.events)
+                            .filter(|e| e.id == claim.key)
+                            .flat_map(|e| &e.expected)
+                            .map(|(_, n)| *n)
+                            .sum()
+                    } else if month0.is_some_and(|m| month > m) {
+                        crate::events::usual_estimate(
+                            &groups,
+                            month,
+                            crate::events::days_in(claim, month),
+                            share,
+                        )
+                    } else {
+                        Decimal::ZERO
+                    };
+                    (month, handed)
+                })
+                .collect();
+            let bought: Decimal = row
+                .children
+                .iter()
+                .filter(|c| c.wish.status == WishStatus::Bought)
+                .map(|c| c.wish.bought.as_ref().map_or(c.wish.amount, |b| b.amount))
+                .sum();
+            let facts = crate::events::facts(claim, spend, bought, &usual, day?);
+            let asks_nothing = needs
+                .iter()
+                .find(|n| n.wish_id == claim.wish_id)
+                .is_some_and(|n| n.months.iter().all(|(_, need)| need.is_zero()));
+            if facts.phase == EventPhase::Past || asks_nothing {
+                row.not_judged = None;
+            }
+            let event_months = crate::events::months(claim);
+            Some(EventRow {
+                fits_up_to: fits_up_to(&row, &months, &event_months),
+                row,
+                phase: facts.phase,
+                usual: facts.usual,
+                extra: facts.extra,
+                paid_ahead: facts.paid_ahead,
+                spent: facts.spent,
+                left: facts.left,
+                days: facts.days,
+                days_left: facts.days_left,
+                per_day: facts.per_day,
+                pace: facts.pace,
+                months: facts.months,
+                transactions: spend.map(|s| s.transactions.clone()).unwrap_or_default(),
+            })
+        })
+        .collect();
+    // Running first, then upcoming by start, then past, the newest first.
+    let starts = |e: &EventRow| {
+        e.row
+            .wish
+            .event
+            .as_ref()
+            .map(|d| d.starts_on.clone())
+            .unwrap_or_default()
+    };
+    let rank = |e: &EventRow| match e.phase {
+        EventPhase::Running => 0,
+        EventPhase::Upcoming => 1,
+        EventPhase::Past => 2,
+    };
+    events.sort_by(|a, b| {
+        rank(a).cmp(&rank(b)).then_with(|| match a.phase {
+            EventPhase::Past => starts(b).cmp(&starts(a)),
+            _ => starts(a).cmp(&starts(b)),
+        })
+    });
+    EventsView {
+        currency,
+        events,
+        months,
+    }
 }
 
 /// The cuts buying `wish_id` with `purchase` needs in month 0: the unsaved
@@ -473,8 +638,26 @@ impl Inputs<'_> {
         }
     }
 
-    /// The wishes screen.
+    /// The wishes screen: the events are on their own screen.
     pub fn view(&self, wishes: &[Wish], settings: &WishSettings) -> WishesView {
+        let mut view = self.view_all(wishes, settings);
+        view.wishes.retain(|row| row.wish.event.is_none());
+        view
+    }
+
+    /// The events' rows, soonest first, and the months they were judged in.
+    pub fn event_rows(
+        &self,
+        wishes: &[Wish],
+        settings: &WishSettings,
+    ) -> (Vec<WishRow>, Vec<WishMonth>) {
+        let mut view = self.view_all(wishes, settings);
+        view.wishes.retain(|row| row.wish.event.is_some());
+        (view.wishes, view.months)
+    }
+
+    /// Every top-level wish, events included, judged together.
+    fn view_all(&self, wishes: &[Wish], settings: &WishSettings) -> WishesView {
         let judged = self.alloc.and_then(|a| {
             let month0 = baseline::current_month(a)?;
             let (mut items, families) =
@@ -782,6 +965,7 @@ mod tests {
     use super::*;
     use finance_types::gateway::{CardSettings, WishPurchase, WishSource, WishStatus};
     use finance_types::report::Currency;
+    use jiff::civil::date;
 
     fn wish(id: &str, parent: Option<&str>, amount: &str, due: &str) -> Wish {
         Wish {
@@ -1404,6 +1588,65 @@ mod tests {
             events: Vec::new(),
         }
         .view(wishes, &WishSettings::default())
+    }
+
+    #[test]
+    fn an_event_is_judged_on_what_its_months_ask_and_is_not_a_wish_row() {
+        // 500 free now and each later month; the event asks 66.67 of
+        // November and 283.33 of December.
+        let a = alloc("500", "500", vec![], vec![]);
+        let parents = Wish {
+            event: Some(finance_types::gateway::EventDetails {
+                starts_on: "2026-11-30".into(),
+                ends_on: "2026-12-05".into(),
+                ..Default::default()
+            }),
+            ..wish("e", None, "400", "2026-11-30")
+        };
+        let bike = wish("bike", None, "100", "2026-12-20");
+        let inputs = Inputs {
+            alloc: Some(&a),
+            today: None,
+            plans: Vec::new(),
+            card_bills: Vec::new(),
+            bills: &HashMap::new(),
+            habits: Vec::new(),
+            events: vec![EventNeed {
+                wish_id: "e".into(),
+                months: vec![
+                    (date(2026, 11, 1), d("66.67")),
+                    (date(2026, 12, 1), d("283.33")),
+                ],
+            }],
+        };
+        let wishes = [parents, bike];
+        let view = inputs.view(&wishes, &WishSettings::default());
+        let ids: Vec<&str> = view
+            .wishes
+            .iter()
+            .map(|r| r.wish.wish_id.as_str())
+            .collect();
+        assert_eq!(ids, ["bike"]);
+        let (rows, months) = inputs.event_rows(&wishes, &WishSettings::default());
+        assert_eq!(rows.len(), 1);
+        assert_eq!((rows[0].short, rows[0].tradeoffs), (Decimal::ZERO, false));
+        // The event's verdicts carry its own id, and ask 350 in all.
+        let asked: Decimal = months
+            .iter()
+            .flat_map(|m| &m.verdicts)
+            .filter(|v| v.wish_id.as_deref() == Some("e"))
+            .map(|v| v.amount)
+            .sum();
+        assert_eq!(asked, d("350"));
+        assert_eq!(
+            fits_up_to(&rows[0], &months, &[date(2026, 11, 1), date(2026, 12, 1)]),
+            Some(d("400") + free_after(&months))
+        );
+    }
+
+    fn free_after(months: &[WishMonth]) -> Decimal {
+        // October (the fixture's running month) to December.
+        months[..3].iter().map(|m| m.free_left).min().unwrap()
     }
 
     #[test]
