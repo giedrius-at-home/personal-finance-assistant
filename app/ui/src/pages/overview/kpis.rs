@@ -9,6 +9,7 @@ use crate::ds::{METRIC_STRIP, Metric, Tone, cn, money};
 use crate::format;
 use crate::pages::with_report;
 
+use super::outlook::score_reasons;
 use super::visuals::{signed, verdict};
 
 #[component]
@@ -39,17 +40,25 @@ fn strip(report: &Dashboard) -> Option<AnyView> {
         .and_then(|p| p.savings.as_ref())
         .map_or(zero, |s| s.balance - s.must_keep);
     let (from_savings, at_risk) = bank_gap(a.current_wiggle_room, savings_room);
+    // Never a negative headline: a gap shows as what is short and who pays.
+    let gap = (-a.current_wiggle_room).max(zero);
     let (spend_tone, spend_word, spend_facts) = if at_risk > zero {
-        let mut facts = vec![("Of next month\u{2019}s salary".to_owned(), m(at_risk))];
+        let mut facts = vec![
+            ("Short".to_owned(), m(gap)),
+            ("Of next month\u{2019}s salary".to_owned(), m(at_risk)),
+        ];
         if from_savings > zero {
-            facts.insert(0, ("Take from savings".to_owned(), m(from_savings)));
+            facts.insert(1, ("Take from savings".to_owned(), m(from_savings)));
         }
-        (Tone::Warning, "Salary at risk", facts)
+        (Tone::Negative, "Salary at risk", facts)
     } else if from_savings > zero {
         (
             Tone::Warning,
             "Savings cover it",
-            vec![("Take from savings".to_owned(), m(from_savings))],
+            vec![
+                ("Short".to_owned(), m(gap)),
+                ("Take from savings".to_owned(), m(from_savings)),
+            ],
         )
     } else if next_short {
         (
@@ -60,15 +69,10 @@ fn strip(report: &Dashboard) -> Option<AnyView> {
     } else {
         (Tone::Positive, "Covered", Vec::new())
     };
-    let spend_value = m(a.current_wiggle_room);
-    let spend_class = if a.current_wiggle_room < zero {
-        "text-negative-fg"
-    } else {
-        ""
-    };
+    let spend_value = m(a.current_wiggle_room.max(zero));
     let spendable = view! {
         <Metric label="Spendable now" chip=(spend_tone, spend_word.to_owned()) facts=spend_facts>
-            <span class=spend_class>{spend_value}</span>
+            {spend_value}
         </Metric>
     }
     .into_any();
@@ -82,7 +86,7 @@ fn strip(report: &Dashboard) -> Option<AnyView> {
         let v = verdict(budget, days);
         let month_end = v.ahead.map(|ahead| {
             let class = if ahead > zero {
-                "text-negative-fg"
+                "text-over-fg"
             } else {
                 "text-positive-fg"
             };
@@ -97,7 +101,7 @@ fn strip(report: &Dashboard) -> Option<AnyView> {
             ("Planned".to_owned(), m(budget.planned)),
             ("Spent".to_owned(), m(budget.spent)),
         ];
-        let class = if v.net < zero { "text-negative-fg" } else { "" };
+        let class = if v.net < zero { "text-over-fg" } else { "" };
         let value = m(v.net.abs());
         view! {
             <Metric
@@ -111,6 +115,23 @@ fn strip(report: &Dashboard) -> Option<AnyView> {
         }
         .into_any()
     });
+
+    // Spending outside every group: what the month is expected to cost,
+    // what came so far, and what is still expected.
+    let unplanned = budget
+        .filter(|b| !b.unplanned.expected.is_empty())
+        .map(|b| {
+            let u = &b.unplanned;
+            let value = format!("\u{2248} {}", m(u.planned));
+            let facts = vec![
+                ("So far".to_owned(), m(u.spent)),
+                (
+                    "Still expected".to_owned(),
+                    m((u.planned - u.spent).max(zero)),
+                ),
+            ];
+            view! { <Metric label="Unplanned this month" facts=facts>{value}</Metric> }.into_any()
+        });
 
     let saved = m(a.savings_balance);
     let saved_facts = vec![(
@@ -141,16 +162,24 @@ fn strip(report: &Dashboard) -> Option<AnyView> {
             let value = o
                 .behavior_score
                 .map_or("Paused".to_owned(), |s| format!("{s}/100"));
-            let facts = vec![("Last three days".to_owned(), m(o.signal.spending))];
-            if o.signal.alert {
-                view! {
-                    <Metric label="Behavior score" chip=(Tone::Negative, "Needs attention".to_owned()) facts=facts>
-                        {value}
-                    </Metric>
+            // What costs points, heaviest first; the way back is in the
+            // outlook card.
+            let facts: Vec<(String, String)> = score_reasons(o)
+                .into_iter()
+                .map(|r| (r.why.to_owned(), format!("\u{2212}{}", r.points)))
+                .collect();
+            let chip = o
+                .signal
+                .alert
+                .then(|| (Tone::Warning, "Needs attention".to_owned()));
+            match chip {
+                Some(chip) => {
+                    view! { <Metric label="Habit score" chip=chip facts=facts>{value}</Metric> }
+                        .into_any()
                 }
-                .into_any()
-            } else {
-                view! { <Metric label="Behavior score" facts=facts>{value}</Metric> }.into_any()
+                None => {
+                    view! { <Metric label="Habit score" facts=facts>{value}</Metric> }.into_any()
+                }
             }
         });
 
@@ -162,6 +191,7 @@ fn strip(report: &Dashboard) -> Option<AnyView> {
             >
                 {spendable}
                 {plan}
+                {unplanned}
                 {savings}
                 {week}
                 {score}

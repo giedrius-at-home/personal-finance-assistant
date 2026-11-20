@@ -430,6 +430,10 @@ pub struct SavingsStanding {
     /// What the planned one-off wishes still need saved: Σ `amount − saved`.
     #[serde(default)]
     pub wishes_open: Decimal,
+    /// `(name, still to set aside)` per wish, in the order the wishes plan
+    /// hands spare money to them over the coming months.
+    #[serde(default)]
+    pub wishes_needs: Vec<(String, Decimal)>,
     /// `(label, amount)` estimates set aside this month: unplanned spending
     /// expected from past months.
     #[serde(default)]

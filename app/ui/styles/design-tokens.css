@@ -21,6 +21,8 @@
   --ds-positive: light-dark(oklch(0.5819 0.0828 159.1), oklch(0.741 0.0922 157.16));
   --ds-negative: light-dark(oklch(0.6683 0.183 35.3), oklch(0.7272 0.1714 35.7));
   --ds-warning: light-dark(oklch(0.5503 0.1128 84.58), oklch(0.6003 0.1231 84.74));
+  --ds-over: light-dark(oklch(0.56 0.13 262), oklch(0.72 0.12 262));
+  --ds-over-fg: light-dark(oklch(0.47 0.135 262), oklch(0.76 0.11 262));
   --ds-positive-fg: light-dark(oklch(0.5039 0.0828 159.1), oklch(0.741 0.0922 157.16));
   --ds-negative-fg: light-dark(oklch(0.5343 0.183 35.3), oklch(0.7272 0.1714 35.7));
   --ds-warning-fg: light-dark(oklch(0.5 0.1128 84.58), oklch(0.6983 0.1231 84.74));
@@ -102,6 +104,8 @@
   --color-positive: var(--ds-positive);
   --color-negative: var(--ds-negative);
   --color-warning: var(--ds-warning);
+  --color-over: var(--ds-over);
+  --color-over-fg: var(--ds-over-fg);
   --color-positive-fg: var(--ds-positive-fg);
   --color-negative-fg: var(--ds-negative-fg);
   --color-warning-fg: var(--ds-warning-fg);

@@ -21,8 +21,8 @@ use serde::de::IgnoredAny;
 
 use crate::api::{NoArgs, invoke, load};
 use crate::ds::{
-    Badge, Button, CONTROL, Card, CardTone, Checkbox, Eyebrow, Facts, FactsRow, Field, Help, Icon,
-    Lucide, Size, Skeleton, Stat, Tone, Variant, cn,
+    BOARD, BOARD_CARD, Badge, BoardColumn, Button, CONTROL, Card, CardTone, Checkbox, Eyebrow,
+    Facts, FactsRow, Field, Help, Icon, Lucide, Size, Skeleton, Stat, Tone, Variant, cn,
 };
 use crate::pages::Problem;
 use crate::{format, state};
@@ -785,6 +785,8 @@ pub(crate) struct Ui {
     /// The wish whose "Add to event" form is open, and the event chosen.
     pub(crate) joining: RwSignal<Option<String>>,
     pub(crate) join_event: RwSignal<String>,
+    /// The board box that is open below the board.
+    pub(crate) selected: RwSignal<Option<String>>,
 }
 
 impl Ui {
@@ -816,6 +818,7 @@ impl Ui {
             event_ends: RwSignal::new(String::new()),
             joining: RwSignal::new(None),
             join_event: RwSignal::new(String::new()),
+            selected: RwSignal::new(None),
         }
     }
 
@@ -960,12 +963,58 @@ fn page(ui: Ui, view: &WishesView, ctx: &Context) -> impl IntoView + use<> {
                 .map(|e| (e.wish_id.clone(), e.name.clone())),
         )
         .collect();
-    let empty = open.is_empty();
-    let rows = open
-        .into_iter()
-        .map(|row| wish_row(ui, row, months, ctx))
-        .collect_view();
+    let empty = open.is_empty() && done.is_empty();
     let done_count = done.len();
+    // The board: every wish a box in the column of its state; the box
+    // picked opens with all its controls under the board.
+    let mut columns: [(Decimal, Vec<AnyView>); 4] = Default::default();
+    let bought = done
+        .iter()
+        .filter(|r| r.wish.status != WishStatus::Dropped)
+        .take(DONE_ON_BOARD);
+    for row in open.iter().chain(bought) {
+        let column = &mut columns[wish_stage(row) as usize];
+        if row.wish.status == WishStatus::Planned {
+            column.0 += row.wish.amount;
+        }
+        column
+            .1
+            .push(wish_box(ui, row, &ctx.get_value()).into_any());
+    }
+    let board = STAGES
+        .into_iter()
+        .zip(columns)
+        .map(|((title, tone), (sum, boxes))| {
+            let count = boxes.len();
+            let total = (sum > Decimal::ZERO).then(|| amount(sum, &currency.code));
+            match total {
+                Some(total) => view! {
+                    <BoardColumn title=title tone=tone count=count total=total>{boxes}</BoardColumn>
+                }
+                .into_any(),
+                None => {
+                    view! { <BoardColumn title=title tone=tone count=count>{boxes}</BoardColumn> }
+                        .into_any()
+                }
+            }
+        })
+        .collect_view();
+    let open = StoredValue::new(open);
+    let picked = move || {
+        let id = ui.selected.get()?;
+        let row = open.with_value(|rows| rows.iter().find(|r| r.wish.wish_id == id).cloned())?;
+        Some(view! {
+            <Card>
+                <div class="flex items-center justify-between gap-3">
+                    <Eyebrow>"SELECTED WISH"</Eyebrow>
+                    <Button size=Size::Sm variant=Variant::Ghost on_click=Callback::new(move |_| ui.selected.set(None))>
+                        "Close"
+                    </Button>
+                </div>
+                <div class="grid">{wish_row(ui, row, months, ctx)}</div>
+            </Card>
+        })
+    };
     let done_rows = done_list(ui, done, ctx);
     let month_cards = view
         .months
@@ -1007,34 +1056,183 @@ fn page(ui: Ui, view: &WishesView, ctx: &Context) -> impl IntoView + use<> {
     );
     view! {
         <div class="grid gap-4">
-            {strip}
-            {fund}
+            <section aria-label="Wishes board" class="grid gap-3">
+                <div>
+                    <Eyebrow>"WISHES"</Eyebrow>
+                    <h2 class="mt-1 text-lg font-semibold">"From someday to bought"</h2>
+                </div>
+                {savings}
+                {feedback(ui, "dropped".into())}
+                <div class=BOARD>{board}</div>
+                {empty.then(|| view! { <p class="text-sm text-fg-muted">"No wishes yet."</p> })}
+            </section>
+            {picked}
             <Card>
                 <Eyebrow>"NEW WISH"</Eyebrow>
                 <h2 class="mt-2 text-lg font-semibold">"Add a wish"</h2>
                 {form}
             </Card>
-            <Card>
-                <Eyebrow>"WISHES"</Eyebrow>
-                <h2 class="mt-2 text-lg font-semibold">"Planned purchases"</h2>
-                {savings}
-                {feedback(ui, "dropped".into())}
-                <div class="mt-3 grid">{rows}</div>
-                {empty.then(|| view! { <p class="mt-3 text-sm text-fg-muted">"No planned wishes yet."</p> })}
-                {(done_count > 0).then(|| view! {
-                    <details class="mt-4 border-t border-line pt-3 text-sm">
-                        <summary class="cursor-pointer text-fg-muted">{format!("Done ({done_count})")}</summary>
+            {(done_count > 0).then(|| view! {
+                <Card>
+                    <details class="text-sm">
+                        <summary class="cursor-pointer font-medium">{format!("Bought and dropped ({done_count})")}</summary>
                         <div class="mt-2">{done_rows}</div>
                     </details>
-                })}
-            </Card>
-            {has_months.then(|| view! {
-                <div>
-                    <Eyebrow level=crate::ds::Heading::H2>"MONTHS"</Eyebrow>
-                    <div class="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{month_cards}</div>
-                </div>
+                </Card>
             })}
+            {has_months.then(|| view! {
+                <Card>
+                    <details>
+                        <summary class="cursor-pointer text-sm font-medium">"Month by month"</summary>
+                        <div class="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{month_cards}</div>
+                    </details>
+                </Card>
+            })}
+            {strip}
+            {fund}
         </div>
+    }
+}
+
+/// How many done wishes the board's last column shows; the rest are in
+/// the list under it.
+const DONE_ON_BOARD: usize = 6;
+
+/// Where a wish stands on the way to being bought: the board's columns.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Stage {
+    /// Nothing saved and nothing set aside this month.
+    Someday,
+    Saving,
+    /// Fully saved, not bought yet.
+    Ready,
+    Done,
+}
+
+pub(crate) const STAGES: [(&str, Tone); 4] = [
+    ("Someday", Tone::Neutral),
+    ("Saving up", Tone::Accent),
+    ("Ready to buy", Tone::Positive),
+    ("Bought", Tone::Neutral),
+];
+
+pub(crate) fn wish_stage(row: &WishRow) -> Stage {
+    let wish = &row.wish;
+    if wish.status != WishStatus::Planned {
+        Stage::Done
+    } else if wish.kind != WishKind::OneOff {
+        // A repeating wish or bill change is not saved for: it waits to start.
+        Stage::Someday
+    } else if wish.amount > Decimal::ZERO && wish.saved >= wish.amount {
+        Stage::Ready
+    } else if wish.saved > Decimal::ZERO || row.monthly_set_aside > Decimal::ZERO {
+        Stage::Saving
+    } else {
+        Stage::Someday
+    }
+}
+
+/// The share of a wish that is saved, 0–100.
+pub(crate) fn saved_percent(saved: Decimal, amount: Decimal) -> u32 {
+    use rust_decimal::prelude::ToPrimitive;
+    if amount <= Decimal::ZERO {
+        return 0;
+    }
+    (saved.max(Decimal::ZERO) / amount * Decimal::ONE_HUNDRED)
+        .min(Decimal::ONE_HUNDRED)
+        .floor()
+        .to_u32()
+        .unwrap_or(0)
+}
+
+/// A wish as a box on the board: name, amount, how it stands, how much is
+/// saved. Picking it opens its controls under the board.
+fn wish_box(ui: Ui, row: &WishRow, ctx: &Context) -> impl IntoView + use<> {
+    let wish = &row.wish;
+    let code = wish.currency.code.clone();
+    let id = wish.wish_id.clone();
+    let planned = wish.status == WishStatus::Planned;
+    let (tone, chip, facts) = if planned {
+        let (tone, chip) = if row.not_judged.is_some() {
+            (Tone::Outline, "Not judged")
+        } else if row.short > Decimal::ZERO {
+            (Tone::Warning, "Short")
+        } else if row.tradeoffs {
+            (Tone::Warning, "With trade-offs")
+        } else {
+            (Tone::Positive, "Affordable")
+        };
+        let mut facts = vec![("By".to_owned(), format::date(&wish.due_on))];
+        if row.monthly_set_aside > Decimal::ZERO {
+            facts.push((
+                "This month".to_owned(),
+                format!("+{}", amount(row.monthly_set_aside, &code)),
+            ));
+        }
+        (tone, chip, facts)
+    } else {
+        let (tone, chip, facts) = done_facts(wish, ctx);
+        (tone, chip, facts.into_iter().skip(1).take(1).collect())
+    };
+    let percent = saved_percent(wish.saved, wish.amount);
+    let progress = (planned && wish.kind == WishKind::OneOff).then(|| {
+        let label = format!("{} saved", amount(wish.saved, &code));
+        view! {
+            <span class="grid gap-1">
+                <span role="img" aria-label=label.clone() class="block h-1.5 overflow-hidden rounded-pill bg-soft">
+                    <i class="block h-full rounded-pill bg-over" style:width=format!("{percent}%")></i>
+                </span>
+                <span class="flex justify-between text-xs text-fg-muted">
+                    <span>{label}</span>
+                    <span class="tabular-nums">{format!("{percent}%")}</span>
+                </span>
+            </span>
+        }
+    });
+    let cost = wish
+        .bought
+        .as_ref()
+        .filter(|_| !planned)
+        .map_or(wish.amount, |p| p.amount);
+    let must = (planned && wish.must)
+        .then(|| view! { <Badge tone=Tone::Accent class="px-2 py-0">"Must"</Badge> });
+    let parts = (!row.children.is_empty()).then(|| {
+        let text = crate::pages::plural(row.children.len(), "part");
+        view! { <Badge tone=Tone::Outline class="px-2 py-0">{text}</Badge> }
+    });
+    let pick = id.clone();
+    let is_picked = move || ui.selected.get().as_deref() == Some(id.as_str());
+    let body = view! {
+        <span class="flex items-baseline justify-between gap-3">
+            <strong class="min-w-0 truncate font-semibold">{wish.name.clone()}</strong>
+            <strong class="whitespace-nowrap tabular-nums">{amount(cost, &code)}</strong>
+        </span>
+        <span class="flex flex-wrap items-center gap-1.5">
+            {must}
+            <Badge tone=tone class="px-2 py-0">{chip}</Badge>
+            {parts}
+        </span>
+        {progress}
+        <Facts rows=facts />
+    };
+    if planned {
+        view! {
+            <button
+                type="button"
+                class=cn([BOARD_CARD, "text-left transition-colors hover:border-over aria-pressed:border-over aria-pressed:ring-2 aria-pressed:ring-over/30"])
+                aria-pressed=move || is_picked().to_string()
+                on:click=move |_| {
+                    ui.selected.update(|s| {
+                        *s = if s.as_deref() == Some(pick.as_str()) { None } else { Some(pick.clone()) };
+                    });
+                }
+            >
+                {body}
+            </button>
+        }
+        .into_any()
+    } else {
+        view! { <div class=BOARD_CARD>{body}</div> }.into_any()
     }
 }
 
@@ -1685,7 +1883,7 @@ fn wish_body(
     let tone = if row.not_judged.is_some() {
         "text-fg-muted"
     } else if row.short > Decimal::ZERO {
-        "text-negative-fg"
+        "text-over-fg"
     } else if row.tradeoffs {
         "text-warning-fg"
     } else {
@@ -1736,7 +1934,7 @@ fn wish_body(
     let (chip_tone, chip) = if row.not_judged.is_some() {
         (Tone::Outline, "Not judged")
     } else if row.short > Decimal::ZERO {
-        (Tone::Negative, "Not affordable")
+        (Tone::Warning, "Short")
     } else if row.tradeoffs {
         (Tone::Warning, "With trade-offs")
     } else {
@@ -2536,6 +2734,14 @@ fn month_card(month: &WishMonth, code: &str) -> impl IntoView + use<> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn saved_share_is_floored_and_capped() {
+        let d = |t: &str| t.parse::<Decimal>().unwrap();
+        assert_eq!(saved_percent(d("599.62"), d("3000")), 19);
+        assert_eq!(saved_percent(d("3100"), d("3000")), 100);
+        assert_eq!(saved_percent(d("10"), d("0")), 0);
+    }
 
     fn facts(rows: &[(&str, &str)]) -> Vec<(String, String)> {
         rows.iter()

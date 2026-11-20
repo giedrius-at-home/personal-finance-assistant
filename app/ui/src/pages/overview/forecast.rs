@@ -199,14 +199,14 @@ pub fn DailyForecastPanel(report: Dashboard, currency_code: String) -> impl Into
             <div class="grid gap-x-10 gap-y-6 lg:grid-cols-[minmax(240px,.4fr)_minmax(0,1.1fr)_minmax(260px,.5fr)]">
                 <div class="grid content-start gap-6">
                     <Metric label="Next 7 days" facts=next_week_facts>{next_week}</Metric>
-                    <Metric label="Habit spending by month end" facts=month_end_facts>{month_end}</Metric>
+                    <Metric label="Everyday spending by month end" facts=month_end_facts>{month_end}</Metric>
                 </div>
                 {frame}
                 {upcoming}
             </div>
             <ol class="sr-only" aria-label="Forecast per day, as a list">{list}</ol>
             <details class="grid gap-3 text-sm leading-relaxed [&>*]:mt-3">
-                <summary class="cursor-pointer font-medium">"Your weekday habits & forecast evidence"</summary>
+                <summary class="cursor-pointer font-medium">"Your usual week"</summary>
                 <div tabindex="0" role="region" aria-label="Last twelve weeks" class=TABLE_CONTAINER>
                     <table class=TABLE data-density="md">
                         <caption class=CAPTION>"Last twelve weeks"</caption>
