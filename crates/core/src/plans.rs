@@ -158,6 +158,9 @@ struct Reconciler<'a> {
     zone: TimeZone,
     original_categories: &'a HashMap<String, Option<String>>,
     evidence: Vec<&'a Tx>,
+    /// Payments a bill already claims: never offered to a plan as a
+    /// match, but one that fits shows the plan was paid through the bill.
+    billed: Vec<&'a Tx>,
 }
 
 impl<'a> Reconciler<'a> {
@@ -238,8 +241,17 @@ impl<'a> Reconciler<'a> {
     }
 
     fn matching(&self, plan: &PlannedPayment, start: Date, end: Date) -> Vec<&'a Tx> {
-        self.evidence
-            .iter()
+        self.matching_in(&self.evidence, plan, start, end)
+    }
+
+    fn matching_in(
+        &self,
+        pool: &[&'a Tx],
+        plan: &PlannedPayment,
+        start: Date,
+        end: Date,
+    ) -> Vec<&'a Tx> {
+        pool.iter()
             .copied()
             .filter(|t| {
                 let direction_ok = match plan.direction {
@@ -269,20 +281,21 @@ pub fn reconcile_planned_payments(
 ) -> Vec<PlannedPaymentView> {
     let zone = now.time_zone().clone();
     let today = now.date();
-    let mut evidence: Vec<&Tx> = transactions
+    let (mut billed, mut evidence): (Vec<&Tx>, Vec<&Tx>) = transactions
         .iter()
         .filter(|t| {
             matches!(t.kind, Kind::Outflow | Kind::Inflow | Kind::Refund)
-                && t.subscription_id.is_none()
                 && t.occurred_at.timestamp() <= now.timestamp()
         })
-        .collect();
+        .partition(|t| t.subscription_id.is_some());
+    billed.sort_by(|a, b| a.transaction_id.cmp(&b.transaction_id));
     // The Python projection listed transactions by canonical id as text.
     evidence.sort_by(|a, b| a.transaction_id.cmp(&b.transaction_id));
     let r = Reconciler {
         zone,
         original_categories,
         evidence,
+        billed,
     };
     let dated: Vec<(&PlannedPayment, Date)> = plans
         .iter()
@@ -336,7 +349,15 @@ pub fn reconcile_planned_payments(
                 [only] if usage[only.transaction_id.as_str()] == 1 => Some(*only),
                 _ => None,
             };
-            let status = if unique.is_some() {
+            // The same payment also set up as a bill: the bill keeps the
+            // transaction, the plan is settled by it.
+            let via_bill = if found.is_empty() {
+                let (_, start, end) = windows[plan.plan_id.as_str()];
+                r.matching_in(&r.billed, plan, start, end).first().copied()
+            } else {
+                None
+            };
+            let status = if unique.is_some() || via_bill.is_some() {
                 PlanStatus::Paid
             } else if !found.is_empty() {
                 PlanStatus::NeedsReview
@@ -360,7 +381,7 @@ pub fn reconcile_planned_payments(
                 account_id: plan.account_id.clone(),
                 match_description: plan.match_description.clone(),
                 status,
-                paid_on: unique.map(|t| t.effective_on().to_string()),
+                paid_on: unique.or(via_bill).map(|t| t.effective_on().to_string()),
                 transaction_id: unique.map(|t| t.transaction_id.clone()),
                 candidate_count: found.len(),
                 candidates: found
@@ -523,10 +544,11 @@ mod tests {
         assert_eq!(paid.transaction_id.as_deref(), Some("match"));
         let mut linked = insurance("bill");
         linked.subscription_id = Some("bill-1".into());
-        assert_eq!(
-            reconcile(std::slice::from_ref(&first), &[linked])[0].status,
-            PlanStatus::Upcoming
-        );
+        // A payment a bill claims settles the plan; the bill keeps it.
+        let via_bill = &reconcile(std::slice::from_ref(&first), &[linked])[0];
+        assert_eq!(via_bill.status, PlanStatus::Paid);
+        assert_eq!(via_bill.paid_on.as_deref(), Some("2026-09-24"));
+        assert_eq!(via_bill.transaction_id, None);
         let ambiguous = &reconcile(
             std::slice::from_ref(&first),
             &[insurance("a"), insurance("b")],
