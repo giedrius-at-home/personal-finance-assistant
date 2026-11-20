@@ -16,6 +16,8 @@
       "positive":       { "$value": "{primitive.green.400}" },
       "negative":       { "$value": "{primitive.coral.400}" },
       "warning":        { "$value": "{primitive.amber.500}" },
+      "over":           { "$value": "{primitive.blue.350}" },
+      "over-fg":        { "$value": "{primitive.blue.250}" },
       "positive-fg":    { "$value": "{primitive.green.400}" },
       "negative-fg":    { "$value": "{primitive.coral.400}" },
       "warning-fg":     { "$value": "{primitive.amber.400}" },

@@ -97,9 +97,45 @@ pub fn spare_split(
     (carried, to_wishes, room - carried - to_wishes)
 }
 
+/// `amount` handed to the wishes in their order, after `given` already
+/// reached them: `(name, share)` for every wish that gets some.
+pub fn wish_shares(
+    amount: Decimal,
+    given: Decimal,
+    needs: &[(String, Decimal)],
+) -> Vec<(String, Decimal)> {
+    let (mut skip, mut left) = (given.max(Decimal::ZERO), amount.max(Decimal::ZERO));
+    let mut out = Vec::new();
+    for (name, need) in needs {
+        let covered = skip.min(*need);
+        skip -= covered;
+        let share = left.min(*need - covered);
+        if share > Decimal::ZERO {
+            out.push((name.clone(), share));
+            left -= share;
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wishes_are_filled_in_order_from_where_the_last_money_stopped() {
+        let d = |n: i64| Decimal::from(n);
+        let needs = [("Moving".to_owned(), d(1000)), ("Japan".to_owned(), d(500))];
+        assert_eq!(
+            wish_shares(d(600), d(0), &needs),
+            [("Moving".to_owned(), d(600))]
+        );
+        assert_eq!(
+            wish_shares(d(700), d(600), &needs),
+            [("Moving".to_owned(), d(400)), ("Japan".to_owned(), d(300))]
+        );
+        assert_eq!(wish_shares(d(50), d(1500), &needs), []);
+    }
 
     #[test]
     fn spare_money_covers_next_month_then_wishes_before_it_is_free() {

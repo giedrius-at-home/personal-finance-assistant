@@ -123,7 +123,7 @@ pub fn verdict(budget: &MonthlyBudget, days: usize) -> Verdict {
     let net = budget.planned - budget.spent;
     let ahead = month_end_total(budget, days).map(|total| total - budget.planned);
     let (tone, word) = if net < Decimal::ZERO {
-        (Tone::Negative, "Over plan")
+        (Tone::Warning, "Over plan")
     } else if ahead.is_some_and(|a| a > Decimal::ZERO) {
         (Tone::Warning, "Over pace")
     } else {
@@ -166,7 +166,7 @@ fn on_track(budget: &MonthlyBudget, days: usize) -> AnyView {
     };
     let month_end = ahead.map(|a| {
         let class = if a > Decimal::ZERO {
-            "text-negative-fg"
+            "text-over-fg"
         } else {
             "text-positive-fg"
         };
@@ -221,12 +221,12 @@ fn on_track(budget: &MonthlyBudget, days: usize) -> AnyView {
                         <span class="min-w-0 truncate">{row.name.clone()}</span>
                         <span class=cn([
                             "whitespace-nowrap tabular-nums",
-                            if over > Decimal::ZERO { "font-medium text-negative-fg" } else { "text-fg-muted" },
+                            if over > Decimal::ZERO { "font-medium text-over-fg" } else { "text-fg-muted" },
                         ])>{status}</span>
                     </div>
                     <div role="img" aria-label=label class="flex h-2 overflow-hidden rounded-pill bg-soft">
                         <i class="block h-full" style:width=format!("{within:.2}%") style:background=row_color(budget, &row.id)></i>
-                        <i class="block h-full bg-negative" style:width=format!("{beyond:.2}%")></i>
+                        <i class="block h-full bg-over" style:width=format!("{beyond:.2}%")></i>
                     </div>
                 </li>
             }
@@ -239,7 +239,7 @@ fn on_track(budget: &MonthlyBudget, days: usize) -> AnyView {
     view! {
         <div class="grid grid-cols-2 gap-x-6 gap-y-4">
             <Metric label=headline chip=(tone, word.to_owned()) size="text-3xl">
-                <Money value=net.abs() unit=unit.clone() neutral=true class=if net < Decimal::ZERO { "text-negative-fg" } else { "" } />
+                <Money value=net.abs() unit=unit.clone() neutral=true class=if net < Decimal::ZERO { "text-over-fg" } else { "" } />
             </Metric>
             {month_end}
         </div>
@@ -427,7 +427,7 @@ pub fn BudgetVisuals(
                     key: "projected".into(),
                     label: "Projected".into(),
                     color: if over {
-                        "var(--ds-negative)".into()
+                        "var(--ds-over)".into()
                     } else {
                         "var(--ds-positive)".into()
                     },
@@ -498,7 +498,7 @@ pub fn BudgetVisuals(
                 (false, false) => "Your daily average continues to month end.",
             };
             let gap = projected.filter(|_| elapsed > 0).map(|p| {
-                let class = if over { "text-negative-fg" } else { "text-positive-fg" };
+                let class = if over { "text-over-fg" } else { "text-positive-fg" };
                 let text = signed(p - planned, &unit);
                 view! {
                     <Stat label="vs budget">
@@ -509,7 +509,7 @@ pub fn BudgetVisuals(
             let pace = match projected {
                 None => view! { "—" }.into_any(),
                 Some(p) => view! {
-                    <Money value=p.round_dp(u32::from(unit.minor_unit)) unit=unit.clone() class=if over { "text-negative-fg" } else { "" } />
+                    <Money value=p.round_dp(u32::from(unit.minor_unit)) unit=unit.clone() class=if over { "text-over-fg" } else { "" } />
                 }
                 .into_any(),
             };

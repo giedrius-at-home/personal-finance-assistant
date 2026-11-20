@@ -1,10 +1,14 @@
-//! What could be better right now, as fields under the headline numbers:
-//! every group over its limit or its own norm with what is left of it, how
-//! many visits that still pays for (this month, a week, and next month), a
-//! fast last three days, and unsorted spending. The advice holds spending
-//! to the budget; it never asks for a bigger one.
+//! What to do right now, as tiles under the headline numbers: the money to
+//! move between accounts, every group over its limit or its own norm, a
+//! fast last three days, and unsorted spending. Each tile says the one
+//! thing to do, the amount it is about and at most two numbers to steer
+//! by; the visit counts sit behind "More". The advice holds spending to
+//! the budget; it never asks for a bigger one.
+
+use std::collections::HashMap;
 
 use finance_types::report::adjustments::Habit;
+use finance_types::report::closure::MoneyPlan;
 use finance_types::report::events::{EventPhase, EventRow, Pace};
 use finance_types::report::{Currency, Dashboard};
 use leptos::prelude::*;
@@ -12,8 +16,8 @@ use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 
 use crate::ds::{
-    Card, CardTitle, Eyebrow, Heading, Icon, Lucide, Metric, Size, Tone, Variant, button_class, cn,
-    money,
+    Badge, Card, CardTitle, EmptyState, Eyebrow, Facts, Heading, Icon, Lucide, Size, Tone, Variant,
+    button_class, cn, money,
 };
 use crate::pages::with_report;
 use crate::{SpendingSection, state};
@@ -32,9 +36,13 @@ const MONTH_WEEKS: Decimal = Decimal::from_parts(4333, 0, 0, false, 3);
 
 /// One thing to improve, as a field: `weight` is the money it is about,
 /// for ordering.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Nudge {
     pub label: String,
+    /// The one thing to do, in two or three words.
+    pub action: String,
+    /// At most two numbers to steer by, shown under the action.
+    pub key: Vec<(String, String)>,
     pub value: String,
     /// The value is an overrun.
     pub bad: bool,
@@ -160,13 +168,20 @@ pub fn event_nudge(event: &EventRow, unit: &Currency) -> Nudge {
     if event.left > Decimal::ZERO {
         facts.push(("A day, to stay inside".to_owned(), m(event.per_day)));
     }
-    let chip = match event.pace {
-        Pace::OnTrack => (Tone::Positive, "On track"),
-        Pace::Fast => (Tone::Warning, "Spending fast"),
-        Pace::Over => (Tone::Negative, "Over"),
+    let (chip, action) = match event.pace {
+        Pace::OnTrack => ((Tone::Positive, "On track"), "Keep going"),
+        Pace::Fast => ((Tone::Warning, "Spending fast"), "Slow down"),
+        Pace::Over => ((Tone::Warning, "Over"), "Stop spending"),
     };
+    let mut key = Vec::new();
+    if event.left > Decimal::ZERO {
+        key.push(("A day".to_owned(), m(event.per_day)));
+    }
+    key.push(("Days left".to_owned(), event.days_left.to_string()));
     Nudge {
         label: event.row.wish.name.clone(),
+        action: action.to_owned(),
+        key,
         value: if over {
             format!("{} over", m(-event.left))
         } else {
@@ -240,11 +255,12 @@ pub fn nudges(report: &Dashboard) -> Vec<Nudge> {
             } else {
                 "Usual month"
             };
-            let (value, bad, chip) = match (&rest, over) {
+            let (value, bad, chip, action) = match (&rest, over) {
                 (Some(_), Some(over)) => (
                     format!("{} over", m(over)),
                     true,
-                    (Tone::Negative, format!("Over {}", cap_label.to_lowercase())),
+                    (Tone::Warning, format!("Over {}", cap_label.to_lowercase())),
+                    "Stop for this month",
                 ),
                 (Some(rest), None) => (
                     format!("{} left", m(rest.left)),
@@ -254,9 +270,25 @@ pub fn nudges(report: &Dashboard) -> Vec<Nudge> {
                     } else {
                         (Tone::Warning, "More visits".to_owned())
                     },
+                    if heading.is_some() {
+                        "Slow down"
+                    } else {
+                        "Fewer visits this week"
+                    },
                 ),
-                (None, _) => (m(h.spent), false, (Tone::Warning, "More visits".to_owned())),
+                (None, _) => (
+                    m(h.spent),
+                    false,
+                    (Tone::Warning, "More visits".to_owned()),
+                    "Fewer visits this week",
+                ),
             };
+            // What to steer by: the rest of this month while some is left,
+            // else next month's allowance.
+            let mut key = Vec::new();
+            if let Some(rest) = rest.as_ref().filter(|r| r.left > zero) {
+                key = allowance_facts("A week", "Visits a week", m(rest.week), rest.week_visits);
+            }
 
             let mut facts = vec![("Spent".to_owned(), m(h.spent))];
             if let Some(cap) = cap {
@@ -297,22 +329,26 @@ pub fn nudges(report: &Dashboard) -> Vec<Nudge> {
             if let Some(next_cap) = next_cap {
                 let (week, visits) = month_week(next_cap, price);
                 // Less than a visit a week reads better as the whole month.
-                if visits.is_some_and(|v| v < Decimal::ONE) {
+                let next = if visits.is_some_and(|v| v < Decimal::ONE) {
                     let month = allowance(next_cap, zero, price, 31);
-                    facts.extend(allowance_facts(
+                    allowance_facts(
                         &next_month,
                         &format!("{next_month} visits"),
                         m(next_cap),
                         month.visits_left.map(Decimal::from),
-                    ));
+                    )
                 } else {
-                    facts.extend(allowance_facts(
+                    allowance_facts(
                         &format!("{next_month}, a week"),
                         &format!("{next_month}, visits a week"),
                         m(week),
                         visits,
-                    ));
+                    )
+                };
+                if key.is_empty() {
+                    key = next.clone();
                 }
+                facts.extend(next);
             }
             // The one store that drives the group most above its norm.
             let store = row
@@ -335,6 +371,8 @@ pub fn nudges(report: &Dashboard) -> Vec<Nudge> {
                 .unwrap_or_default();
             out.push(Nudge {
                 label: name.clone(),
+                action: action.to_owned(),
+                key,
                 value,
                 bad,
                 chip: Some(chip),
@@ -344,10 +382,12 @@ pub fn nudges(report: &Dashboard) -> Vec<Nudge> {
         }
         if adjustments.unsorted > zero {
             out.push(Nudge {
-                label: "Not sorted into a group".to_owned(),
+                label: "Not in any group".to_owned(),
+                action: "Sort it".to_owned(),
+                key: Vec::new(),
                 value: m(adjustments.unsorted),
                 bad: false,
-                chip: Some((Tone::Neutral, "Sort it".to_owned())),
+                chip: None,
                 facts: Vec::new(),
                 weight: adjustments.unsorted / Decimal::TWO,
             });
@@ -359,25 +399,64 @@ pub fn nudges(report: &Dashboard) -> Vec<Nudge> {
         if s.accelerating || s.excessive_speed {
             out.push(Nudge {
                 label: "Last three days".to_owned(),
+                action: "Slow down".to_owned(),
+                key: vec![("Three days before".to_owned(), m(s.previous_spending))],
                 value: m(s.spending),
                 bad: false,
                 chip: Some((Tone::Warning, "Faster".to_owned())),
-                facts: vec![
-                    ("Three days before".to_owned(), m(s.previous_spending)),
-                    ("Unplanned".to_owned(), m(s.unplanned)),
-                ],
+                facts: vec![("Of it unplanned".to_owned(), m(s.unplanned))],
                 weight: (s.spending - s.previous_spending).max(s.unplanned),
             });
         }
     }
 
-    let events = report
+    let events: Vec<Nudge> = report
         .events
         .iter()
         .filter(|e| e.phase == EventPhase::Running && e.row.wish.currency == *unit)
         .map(|e| event_nudge(e, unit))
         .collect();
-    ordered(events, out)
+    let moves = report
+        .money_plan
+        .as_ref()
+        .filter(|p| p.currency == *unit)
+        .and_then(move_nudge);
+    ordered(moves.into_iter().chain(events).collect(), out)
+}
+
+/// The transfers the money plan asks for, as one tile: the total to move
+/// and every transfer behind "More".
+pub fn move_nudge(plan: &MoneyPlan) -> Option<Nudge> {
+    let total: Decimal = plan.moves.iter().map(|m| m.amount).sum();
+    if total <= Decimal::ZERO {
+        return None;
+    }
+    let names: HashMap<String, String> = plan
+        .accounts
+        .iter()
+        .map(|a| (a.account_id.clone(), a.name.clone()))
+        .collect();
+    let name = |id: &str| names.get(id).cloned().unwrap_or_else(|| id.to_owned());
+    let facts: Vec<(String, String)> = plan
+        .moves
+        .iter()
+        .map(|m| {
+            (
+                format!("{} → {}", name(&m.from_account_id), name(&m.to_account_id)),
+                money(m.amount, &plan.currency),
+            )
+        })
+        .collect();
+    Some(Nudge {
+        label: "Between accounts".to_owned(),
+        action: "Move money".to_owned(),
+        key: facts.iter().take(2).cloned().collect(),
+        value: money(total, &plan.currency),
+        bad: false,
+        chip: None,
+        facts: facts.into_iter().skip(2).collect(),
+        weight: total,
+    })
 }
 
 #[component]
@@ -387,39 +466,21 @@ pub fn OverviewNudges() -> impl IntoView {
         let app = state();
         let list = nudges(report);
         let body = if list.is_empty() {
-            view! { <p class="mt-2 text-sm text-fg-muted">"Nothing stands out: spending is within your own norms and limits."</p> }
-                .into_any()
+            view! {
+                <EmptyState class="mt-3 p-5" icon=Icon::CircleCheck title="Nothing to do. Spending is inside your limits." />
+            }
+            .into_any()
         } else {
-            let rows = list
-                .into_iter()
-                .map(|n| {
-                    let class = if n.bad { "text-negative-fg" } else { "" };
-                    let value = n.value;
-                    let field = match n.chip {
-                        Some(chip) => view! {
-                            <Metric label=n.label chip=chip facts=n.facts size="text-xl">
-                                <span class=class>{value}</span>
-                            </Metric>
-                        }
-                        .into_any(),
-                        None => view! {
-                            <Metric label=n.label facts=n.facts size="text-xl">
-                                <span class=class>{value}</span>
-                            </Metric>
-                        }
-                        .into_any(),
-                    };
-                    view! { <li class="min-w-0">{field}</li> }
-                })
-                .collect_view();
-            view! { <ul class="mt-4 grid gap-x-12 gap-y-7 sm:grid-cols-2 xl:grid-cols-3">{rows}</ul> }.into_any()
+            let tiles = list.into_iter().map(tile).collect_view();
+            view! { <ul class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{tiles}</ul> }
+                .into_any()
         };
         Some(view! {
             <Card>
                 <header class="flex items-start justify-between gap-4">
                     <div>
-                        <Eyebrow level=Heading::P>"WORTH A LOOK"</Eyebrow>
-                        <CardTitle level=Heading::H2 class="mt-1">"What could be better"</CardTitle>
+                        <Eyebrow level=Heading::P>"TODAY"</Eyebrow>
+                        <CardTitle level=Heading::H2 class="mt-1 text-xl">"Do this now"</CardTitle>
                     </div>
                     <button
                         type="button"
@@ -434,6 +495,31 @@ pub fn OverviewNudges() -> impl IntoView {
             </Card>
         })
     })
+}
+
+/// One thing to do, as a box: where, what, how much, and two numbers to
+/// steer by; everything else behind "More".
+fn tile(n: Nudge) -> impl IntoView {
+    let more = (!n.facts.is_empty()).then(|| {
+        view! {
+            <details class="mt-1 text-xs">
+                <summary class="cursor-pointer text-fg-muted">"More"</summary>
+                <Facts rows=n.facts class="mt-2" />
+            </details>
+        }
+    });
+    view! {
+        <li class="grid min-w-0 content-start gap-2 rounded-lg border border-border bg-card-strong p-4">
+            <span class="truncate text-eyebrow font-bold uppercase tracking-eyebrow text-fg-muted">{n.label}</span>
+            <strong class="text-lg font-semibold leading-tight tracking-tight">{n.action}</strong>
+            <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                <span class=cn(["text-base font-semibold tabular-nums", if n.bad { "text-over-fg" } else { "" }])>{n.value}</span>
+                {n.chip.map(|(tone, text)| view! { <Badge tone=tone>{text}</Badge> })}
+            </div>
+            <Facts rows=n.key />
+            {more}
+        </li>
+    }
 }
 
 #[cfg(test)]
@@ -627,11 +713,8 @@ mod tests {
         let unit = Currency::new("EUR");
         let nudge = |weight: i64| Nudge {
             label: weight.to_string(),
-            value: String::new(),
-            bad: false,
-            chip: None,
-            facts: Vec::new(),
             weight: Decimal::from(weight),
+            ..Nudge::default()
         };
         let event = event_nudge(&running("10", Pace::Fast), &unit);
         let list = ordered(vec![event.clone()], (1..=8).map(nudge).collect());

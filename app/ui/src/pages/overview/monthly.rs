@@ -1,7 +1,7 @@
 //! This and next month's plan per currency (`owner-monthly-overview.tsx`).
 
 use finance_types::report::Currency;
-use finance_types::report::allocation::{CurrencyAllocation, spare_split};
+use finance_types::report::allocation::{CurrencyAllocation, spare_split, wish_shares};
 use finance_types::report::closure::MoneyPlan;
 use finance_types::report::trends::SpendingForecast;
 use leptos::ev;
@@ -74,7 +74,8 @@ fn BankBalanceBreakdown(allocation: CurrencyAllocation) -> impl IntoView {
     let open = RwSignal::new(false);
     let unit = allocation.currency.clone();
     let m = move |v: Decimal| money(v, &unit);
-    let headline = m(allocation.current_wiggle_room);
+    // Never a negative headline; the breakdown still shows the gap.
+    let headline = m(allocation.current_wiggle_room.max(Decimal::ZERO));
     let lines: Vec<(&str, Decimal, bool)> = vec![
         ("Included bank balances", allocation.bank_balance, false),
         ("Protected savings", allocation.protected_savings, true),
@@ -318,7 +319,7 @@ fn allocation_result(label: &str, value: Decimal, unit: &Currency, negative: boo
             <span>{label.to_owned()}</span>
             <strong class=cn([
                 "text-base font-semibold tabular-nums",
-                if negative { "text-negative-fg" } else { "text-positive-fg" },
+                if negative { "text-over-fg" } else { "text-positive-fg" },
             ])>{money(value, unit)}</strong>
         </div>
     }
@@ -367,7 +368,7 @@ fn forecast_row(
     };
     let action = if has_limit {
         view! {
-            <strong class=cn(["block text-sm font-semibold", if over { "text-negative-fg" } else { "" }])>
+            <strong class=cn(["block text-sm font-semibold", if over { "text-over-fg" } else { "" }])>
                 {if over { "Slow down" } else { "On track" }}
             </strong>
             <small class="block text-xs text-fg-muted">{format!("{}/day left", money(daily_room, &unit))}</small>
@@ -456,24 +457,45 @@ fn CurrencyOverview(
         current_parts.push(("To wishes".into(), wishes_now, Part::Plans));
     }
     current_parts.push(("Wiggle room".into(), wiggle_room.max(zero), Part::Free));
-    let wish_rows = wish_savings
+    // Which wish the money is for: what each already holds, and what this
+    // month's spare money adds, in the order the wishes are served.
+    let needs = wish_savings
         .as_ref()
-        .filter(|s| !s.wishes.is_empty())
-        .map(|s| {
-            let rows = s
-                .wishes
-                .iter()
-                .map(|(name, saved)| {
-                    view! {
-                        <div class="flex justify-between gap-4 text-xs text-fg-muted">
-                            <span class="truncate">{name.clone()}</span>
-                            <span class="tabular-nums">{money(*saved, &unit)}</span>
-                        </div>
-                    }
-                })
-                .collect_view();
-            view! { <div class="mt-2 grid gap-0.5 pl-4">{rows}</div> }
-        });
+        .map(|s| s.wishes_needs.clone())
+        .unwrap_or_default();
+    let wish_list = |title: String, rows: Vec<(String, Decimal)>| {
+        (!rows.is_empty()).then(|| {
+            let rows = rows
+                .into_iter()
+                .map(|(name, amount)| (name, money(amount, &unit)))
+                .collect();
+            view! {
+                <div class="grid min-w-0 content-start gap-1.5">
+                    <span class="text-eyebrow font-bold uppercase tracking-eyebrow text-fg-muted">{title}</span>
+                    <Facts rows=rows />
+                </div>
+            }
+        })
+    };
+    let saved_rows = wish_list(
+        "Saved for wishes".to_owned(),
+        wish_savings
+            .as_ref()
+            .map(|s| s.wishes.clone())
+            .unwrap_or_default(),
+    );
+    let now_rows = wish_list(
+        "To wishes this month".to_owned(),
+        wish_shares(wishes_now, zero, &needs),
+    );
+    let wish_rows = (saved_rows.is_some() || now_rows.is_some()).then(|| {
+        view! {
+            <div class="mt-3 grid gap-x-8 gap-y-3 border-t border-line pt-3 sm:grid-cols-2">
+                {saved_rows}
+                {now_rows}
+            </div>
+        }
+    });
 
     let mut next_parts = vec![("Bills".to_owned(), a.next_fixed, Part::Fixed)];
     if a.next_group_rows.is_empty() {
@@ -504,6 +526,11 @@ fn CurrencyOverview(
         a.next_wiggle_room - to_wishes,
         Part::Free,
     ));
+    let next_wish_rows = wish_list(
+        format!("To wishes in {}", month_name(&a.funded_month)),
+        wish_shares(to_wishes, wishes_now, &needs),
+    )
+    .map(|rows| view! { <div class="mt-3 border-t border-line pt-3">{rows}</div> });
 
     let limit_of = |group: &str| {
         a.groups
@@ -544,7 +571,7 @@ fn CurrencyOverview(
     } else if carried > zero {
         "Covered from this month"
     } else {
-        "To wishes, then savings"
+        "Left after the plan"
     };
     let next_value = if !next_funded || next_shortfall > zero {
         next_shortfall
@@ -645,7 +672,16 @@ fn CurrencyOverview(
     ];
     let current_bar = allocation_bar(current_total, &current_parts, &unit);
     let current_legend = allocation_legend(&current_parts, &unit);
-    let current_result = allocation_result("Wiggle room", wiggle_room, &unit, wiggle_room < zero);
+    let current_result = allocation_result(
+        if wiggle_room < zero {
+            "Short"
+        } else {
+            "Wiggle room"
+        },
+        wiggle_room.abs(),
+        &unit,
+        wiggle_room < zero,
+    );
     let next_bar = allocation_bar(next_total, &next_parts, &unit);
     let next_legend = allocation_legend(&next_parts, &unit);
     let next_result = allocation_result(next_label, next_value, &unit, next_negative);
@@ -688,6 +724,7 @@ fn CurrencyOverview(
                     </header>
                     {next_bar}
                     {next_legend}
+                    {next_wish_rows}
                     {next_result}
                 </Card>
             </div>

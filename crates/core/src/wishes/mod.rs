@@ -52,6 +52,27 @@ pub fn wishes_view(
     .view(wishes, settings)
 }
 
+/// What the plan sets aside per wish over its months, in the order the
+/// money reaches them: `(name, total)`.
+pub fn set_aside_order(months: &[WishMonth], wishes: &[Wish]) -> Vec<(String, Decimal)> {
+    let mut out: Vec<(String, Decimal)> = Vec::new();
+    for v in months.iter().flat_map(|m| &m.verdicts) {
+        if !v.set_aside || v.skipped || v.amount <= Decimal::ZERO {
+            continue;
+        }
+        let name = v
+            .wish_id
+            .as_deref()
+            .and_then(|id| wishes.iter().find(|w| w.wish_id == id))
+            .map_or(v.label.as_str(), |w| w.name.as_str());
+        match out.iter_mut().find(|(n, _)| n == name) {
+            Some((_, total)) => *total += v.amount,
+            None => out.push((name.to_owned(), v.amount)),
+        }
+    }
+    out
+}
+
 /// What each event still asks of the months, from the dashboard's ledger
 /// reading; empty without an allocation to judge in.
 pub fn event_needs(dashboard: &Dashboard, wishes: &[Wish]) -> Vec<EventNeed> {
@@ -983,6 +1004,55 @@ mod tests {
     use finance_types::gateway::{CardSettings, WishPurchase, WishSource, WishStatus};
     use finance_types::report::Currency;
     use jiff::civil::date;
+
+    #[test]
+    fn set_asides_are_totalled_per_wish_in_the_order_money_reaches_them() {
+        let aside = |id: &str, amount: &str, set_aside: bool, skipped: bool| Verdict {
+            wish_id: Some(id.into()),
+            label: format!("label {id}"),
+            amount: d(amount),
+            from_free: Decimal::ZERO,
+            from_savings: Decimal::ZERO,
+            cuts: Vec::new(),
+            on_card: Decimal::ZERO,
+            short: Decimal::ZERO,
+            set_aside,
+            next_short: Decimal::ZERO,
+            next_cuts: Vec::new(),
+            must: false,
+            skipped,
+        };
+        let month = |verdicts: Vec<Verdict>| WishMonth {
+            month: String::new(),
+            free_before: Decimal::ZERO,
+            free_left: Decimal::ZERO,
+            savings_before: Decimal::ZERO,
+            savings_left: Decimal::ZERO,
+            card_charge_in: Decimal::ZERO,
+            card_used: Decimal::ZERO,
+            cards: Vec::new(),
+            verdicts,
+        };
+        let months = [
+            month(vec![
+                aside("moving", "600", true, false),
+                aside("bike", "50", false, false),
+            ]),
+            month(vec![
+                aside("moving", "400", true, false),
+                aside("japan", "300", true, false),
+                aside("gone", "70", true, true),
+            ]),
+        ];
+        let wishes = [wish("moving", None, "1000", "2027-03-01")];
+        assert_eq!(
+            set_aside_order(&months, &wishes),
+            [
+                ("moving".to_owned(), d("1000")),
+                ("label japan".to_owned(), d("300"))
+            ]
+        );
+    }
 
     fn wish(id: &str, parent: Option<&str>, amount: &str, due: &str) -> Wish {
         Wish {
