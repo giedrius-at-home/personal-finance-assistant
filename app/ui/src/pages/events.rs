@@ -6,7 +6,9 @@
 use finance_types::gateway::{EventDetails, EventPick, WishKind, WishSource};
 use finance_types::report::Currency;
 use finance_types::report::events::{EventPhase, EventRow, EventsView, Pace};
-use finance_types::report::review::{TransactionSearchQuery, TransactionSearchResult};
+use finance_types::report::review::{
+    SearchDirection, TransactionSearchQuery, TransactionSearchResult,
+};
 use finance_types::report::wishes::WishMonth;
 use leptos::ev::SubmitEvent;
 use leptos::prelude::*;
@@ -16,8 +18,8 @@ use serde::Serialize;
 
 use crate::api::{NoArgs, invoke, load};
 use crate::ds::{
-    BOARD_CARD, Badge, BoardColumn, Button, CONTROL, Card, Checkbox, Eyebrow, Facts, FactsRow,
-    Field, Icon, Lucide, Size, Skeleton, Tone, Variant, cn,
+    BOARD_CARD, Badge, BoardColumn, Button, CONTROL, Card, Checkbox, Dialog, Eyebrow, Facts,
+    FactsRow, Field, Icon, Lucide, Size, Skeleton, Tone, Variant, cn,
 };
 use crate::format;
 use crate::pages::Problem;
@@ -45,8 +47,8 @@ struct SearchArgs {
     query: TransactionSearchQuery,
 }
 
-/// How many payments a search offers.
-const FOUND: u32 = 8;
+/// How many payments the list offers at once, newest first.
+const FOUND: u32 = 200;
 
 /// The event's own numbers, one value per fact, only those that apply.
 pub fn event_facts(e: &EventRow, code: &str) -> Vec<Fact> {
@@ -106,7 +108,7 @@ struct Own {
     starts: RwSignal<String>,
     ends: RwSignal<String>,
     must: RwSignal<bool>,
-    /// The event whose form is open, and which: `part`, `pay` or `dates`.
+    /// The event whose form is open, and which: `part` or `dates`.
     open: RwSignal<Option<(String, &'static str)>>,
     part_name: RwSignal<String>,
     part_amount: RwSignal<String>,
@@ -523,58 +525,79 @@ fn event_block(
         );
     };
 
-    // Add a payment: search the ledger, pick one in.
-    let search_target = target.clone();
-    let search_code = code.clone();
-    let search = move |ev: SubmitEvent| {
-        ev.prevent_default();
+    // Add a payment: the ledger's payments in a popup, newest first; typing
+    // narrows them.
+    let pay_open = RwSignal::new(false);
+    let taken: std::collections::HashSet<String> = event
+        .transactions
+        .iter()
+        .map(|t| t.transaction_id.clone())
+        .collect();
+    let taken = StoredValue::new(taken);
+    let list_target = target.clone();
+    let list_code = code.clone();
+    let list = move || {
+        let q = own.query.get_untracked();
         let query = TransactionSearchQuery {
-            q: own.query.get_untracked(),
+            q: q.clone(),
             account: None,
             from: None,
             to: None,
-            direction: None,
+            direction: Some(SearchDirection::Out),
             min: None,
             max: None,
             page: 1,
             page_size: FOUND,
         };
-        let target = search_target.clone();
-        let code = search_code.clone();
+        let target = list_target.clone();
+        let code = list_code.clone();
         spawn_local(async move {
-            match invoke::<TransactionSearchResult>("search_transactions", &SearchArgs { query })
-                .await
-            {
-                Ok(result) => {
-                    if result.items.is_empty() {
-                        ui.set_message(&target, "No payment found.", true);
-                    } else {
-                        ui.set_message(&target, "", false);
-                    }
-                    own.found.set(
-                        result
-                            .items
-                            .into_iter()
-                            .filter(|row| row.amount.currency.code == code)
-                            .map(|row| {
-                                let text = [row.counterparty, row.description]
-                                    .into_iter()
-                                    .flatten()
-                                    .find(|s| !s.is_empty())
-                                    .unwrap_or_else(|| "Payment".to_owned());
-                                (
-                                    row.transaction_id,
-                                    format::date(&row.occurred_on),
-                                    text,
-                                    amount(row.amount.amount, &code),
-                                )
-                            })
-                            .collect(),
-                    );
+            let result =
+                invoke::<TransactionSearchResult>("search_transactions", &SearchArgs { query })
+                    .await;
+            // A later keystroke has asked again: its answer is the one to show.
+            if own.query.get_untracked() != q {
+                return;
+            }
+            match result {
+                Ok(result) => own.found.set(
+                    result
+                        .items
+                        .into_iter()
+                        .filter(|row| row.amount.currency.code == code)
+                        .filter(|row| {
+                            let id = format!("firefly:{}", row.transaction_id);
+                            taken.with_value(|t| !t.contains(&id))
+                        })
+                        .map(|row| {
+                            let text = [row.counterparty, row.description]
+                                .into_iter()
+                                .flatten()
+                                .find(|s| !s.is_empty())
+                                .unwrap_or_else(|| "Payment".to_owned());
+                            (
+                                row.transaction_id,
+                                format::date(&row.occurred_on),
+                                text,
+                                amount(row.amount.amount, &code),
+                            )
+                        })
+                        .collect(),
+                ),
+                Err(e) => {
+                    pay_open.set(false);
+                    ui.set_message(&target, e, true);
                 }
-                Err(e) => ui.set_message(&target, e, true),
             }
         });
+    };
+    let list = StoredValue::new(list);
+    let open_pay = move |_| {
+        own.open.set(None);
+        own.query.set(String::new());
+        own.found.set(Vec::new());
+        pay_open.set(true);
+        list.with_value(|f| f());
     };
     let pick_target = target.clone();
     let found = move || {
@@ -582,6 +605,7 @@ fn event_block(
             .get()
             .into_iter()
             .map(|(tx, day, text, value)| {
+                let title = text.clone();
                 let target = pick_target.clone();
                 let pick = move |_| {
                     ui.write(
@@ -593,13 +617,13 @@ fn event_block(
                             pick: EventPick::Pick,
                         },
                         "Payment added.",
-                        move || own.found.set(Vec::new()),
+                        move || pay_open.set(false),
                     );
                 };
                 view! {
                     <li class="grid grid-cols-[6.5rem_1fr_auto_auto] items-center gap-x-3 border-t border-line py-1.5 text-sm first:border-t-0">
                         <span class="text-fg-muted tabular-nums">{day}</span>
-                        <span class="min-w-0 truncate">{text}</span>
+                        <span class="min-w-0 truncate" title=title>{text}</span>
                         <span class="tabular-nums">{value}</span>
                         <Button size=Size::Sm variant=Variant::Secondary disabled=Signal::derive(move || ui.busy.get()) on_click=Callback::new(pick)>
                             "Add"
@@ -656,7 +680,6 @@ fn event_block(
     let ids = StoredValue::new(wish.wish_id.clone());
     let field_id = move |name: &str| format!("{name}-{}", ids.get_value());
     let add_part = StoredValue::new(add_part);
-    let search = StoredValue::new(search);
     let save_dates = StoredValue::new(save_dates);
     let found = StoredValue::new(found);
 
@@ -680,7 +703,7 @@ fn event_block(
                 <Button
                     size=Size::Sm
                     variant=Variant::Secondary
-                    on_click=Callback::new(move |_| id.with_value(|id| own.toggle(id, "pay")))
+                    on_click=Callback::new(open_pay)
                 >
                     "Add a payment"
                 </Button>
@@ -702,18 +725,31 @@ fn event_block(
                     <Button submit=true size=Size::Sm disabled=Signal::derive(move || ui.busy.get())>"Add part"</Button>
                 </form>
             </Show>
-            <Show when=move || is("pay")>
-                <form
-                    class="mt-3 flex flex-wrap items-end gap-2"
-                    on:submit=move |ev: SubmitEvent| search.with_value(|f| f(ev))
-                >
-                    <Field label="Find a payment" id=field_id("pay-query") hint="A shop, a name or a description.">
-                        {text_input(field_id("pay-query"), own.query, "text")}
-                    </Field>
-                    <Button submit=true size=Size::Sm variant=Variant::Secondary>"Search"</Button>
-                </form>
-                <ul class="mt-2">{move || found.with_value(|f| f())}</ul>
-            </Show>
+            <Dialog
+                open=pay_open
+                title="Add a payment"
+                description="Newest first. Type a shop, a name or a description to narrow them."
+                class="w-[min(92vw,44rem)]"
+            >
+                <input
+                    type="text"
+                    aria-label="Narrow the payments"
+                    placeholder="Narrow the payments"
+                    maxlength="128"
+                    class=CONTROL
+                    prop:value=move || own.query.get()
+                    on:input=move |e| {
+                        own.query.set(event_target_value(&e));
+                        list.with_value(|f| f());
+                    }
+                />
+                <ul class="max-h-[55vh] overflow-y-auto">
+                    {move || found.with_value(|f| f())}
+                    <Show when=move || own.found.with(Vec::is_empty)>
+                        <li class="py-2 text-sm text-fg-muted">"No payment to add."</li>
+                    </Show>
+                </ul>
+            </Dialog>
             <Show when=move || is("dates")>
                 <form
                     class="mt-3 grid items-end gap-2 sm:grid-cols-4"
