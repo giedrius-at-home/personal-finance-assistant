@@ -1,7 +1,9 @@
 # Events: planned spending with dates, and fields without dots or sentences
 
 Date: 2026-11-20
-Status: draft, waiting for the owner's approval.
+Status: approved by the owner in chat ("good but also event can have
+wishes and subwishes, so the object can be the same"), with that change
+folded in below.
 
 ## Intent
 
@@ -30,6 +32,9 @@ in mind is affordable or how to pace it while it runs.
 2. Events get **their own section** (approach C below), not a wish kind.
 3. A wish is the saving-up phase; an event is the spending phase. **A
    planned wish moves to Events** and is planned financially there.
+5. **An event is the same object as a wish** and can have wishes and
+   sub-wishes inside it (Japan: Flights, Hotel; parents: Zoo, Naturalis),
+   planned financially like any wish.
 4. An event also counts **hand-picked payments outside its dates** (a
    flight booked in January; zoo or museum tickets bought ahead for the
    parents' visit).
@@ -163,28 +168,38 @@ shows planned against spent and stops asking for money. What was not
 spent is simply not spent. Its transactions stay with it, so that week
 never bends the groups' norms.
 
-**Amounts entered by hand.** An event also takes entries of a name and an
-amount with no transaction behind them ("Flight, €780"), counted as spent.
-They are for what the ledger cannot show: a purchase put on the credit
-card, and the bought parts of a wish below.
+**One object.** An event is a stored wish (same table, same `Wish`
+type, same save, drop, must and saved-money writes) that also carries
+event details: start and end date, the hand-picked and the excluded
+transaction ids. A wish with those details shows on Events and not on
+Wishes. Its amount is the planned total (a parent's cap).
 
-**Wish to event.** A one-off wish that is still planned gets "Plan as
-event", and so does a parent wish with sub-wishes: the owner gives the
-dates, and the event is made with the wish's name, amount (a parent's
-cap), must-have and saved money. A parent's bought parts become hand
-entries (name and paid amount); its planned parts are covered by the cap
-and are not carried as items. The wish and its parts are kept as stored
-and only marked (a new wish status, `Event`), so they leave the Wishes
-list and "Back to wishes", offered until the event starts, restores them
-exactly, source and saved money included. An event has no card-or-account
-source; the ladder decides. Recurring wishes and bill changes cannot
-become events.
+**Parts.** An event has sub-wishes exactly as a parent wish has: "Zoo
+€18", "Flight €780", each with its own date, source and saved money,
+judged and saved for by the existing wish code in the month it is due.
+Buying a part ("Bought", as today, with the paid amount) counts it as
+spent on the event; that is also how a purchase the ledger cannot show is
+entered, such as one put on the credit card. A hand-picked transaction can
+be tied to a part, which marks the part bought at that amount, so it is
+never counted twice. The parts sit inside the planned total; what is left
+after them (the parent's `rest`) is the money for the days themselves, and
+that, less the usual share, is the *extra to find* judged per month as
+above. Read "paid ahead" above as: bought parts plus hand-picked
+transactions not tied to a part.
+
+**Wish to event.** Any one-off wish that is still planned, with or
+without sub-wishes, gets "Plan as event": the owner gives the dates and
+the wish gains the event details; nothing else about it changes, so its
+parts, bought parts, saved money and source all stay. "Back to wishes",
+offered until the event starts, removes the details again. Recurring
+wishes and bill changes cannot become events.
 
 **Where it shows.**
 
 - A new top tab, **Events**, after Wishes: a form (name, dates, amount,
   must), then the running, upcoming and past events, each a block of
-  fields in the style of the Wishes rows.
+  fields in the style of the Wishes rows, with its parts listed under it
+  as sub-wishes are (add a part, Bought, Drop).
 
 ```
 Parents in NL   30 Nov – 5 Dec   [Affordable]
@@ -231,8 +246,9 @@ A day, to stay inside €70.80
   writes), `crates/storage` (SQLite migrations), `app/src-tauri` and
   `app/devserver` (commands; every command needs both, plus a Tauri
   permission file), `app/ui` (Leptos).
-- Stored as wishes are: an `events` table of `event_id` + `payload_json`,
-  added as a new migration file. The live ledger migrates on first write.
+- Stored in the `wishes` table: the event details are an optional field
+  of the wish payload (absent on every wish stored today), so no
+  migration is needed.
 - Tests cover the calculations and the writes, not wording.
 - Every merge to main ships a release, so parts 1–2 and part 3 are two
   pull requests, each complete on its own.
@@ -246,9 +262,11 @@ A day, to stay inside €70.80
   per month and an event crosses months; there is no verdict before it
   starts. Dropped.
 - **C. Events as their own section, borrowing the wish judging** (chosen
-  by the owner, with wishes moving into it once planned). More code than
-  A, but saving-up and spending stay two clear phases, and paid-ahead
-  payments have a natural home.
+  by the owner, with wishes moving into it once planned). Saving-up and
+  spending stay two clear phases, and paid-ahead payments have a natural
+  home. The owner then asked for the same object as a wish, so C keeps its
+  own tab and its own live tracking but takes A's storage: no `events`
+  table, no second set of writes.
 
 ## Calls made by the designer (not asked of the owner)
 
@@ -260,8 +278,9 @@ A day, to stay inside €70.80
 - An overlap goes to the event that starts first.
 - "Not part of this" exists, so a laptop bought during the visit can be
   kept out.
-- A past event is derived from its end date, not a stored status; the
-  stored statuses are planned and dropped.
+- A past event is derived from its end date, not a stored status.
+- Parts sit inside the planned total rather than adding to it, as
+  sub-wishes sit inside a parent's cap today.
 
 ## Settled with the owner after the review
 
@@ -272,7 +291,8 @@ A day, to stay inside €70.80
 
 ## Left to the builder
 
-- Type and module layout (`crates/core/src/events/`), command names, and
+- Type and module layout (`crates/core/src/events/`), command names,
+  whether the Events rows reuse the Wishes row components, and
   how the event demands are threaded into `wishes::Inputs` and
   `spare_split`.
 - How `Ownership` learns about events without every caller changing.
