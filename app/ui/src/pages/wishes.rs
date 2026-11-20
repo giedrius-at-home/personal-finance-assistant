@@ -98,21 +98,18 @@ fn merged_cuts<'a>(cuts: impl Iterator<Item = &'a Cut>) -> Vec<Cut> {
     out
 }
 
-/// `going out drops to €0 and groceries to €300`.
-fn cuts_phrase(cuts: &[Cut], code: &str) -> String {
+/// One fact per cut: `Going out down to` → `€0`. `when` names the month
+/// when it is not the wish's own.
+fn cut_facts(cuts: &[Cut], when: Option<&str>, code: &str) -> Vec<Fact> {
     cuts.iter()
-        .enumerate()
-        .map(|(i, cut)| {
-            let name = cut.name.to_lowercase();
-            let to = amount(cut.to, code);
-            if i == 0 {
-                format!("{name} drops to {to}")
-            } else {
-                format!("{name} to {to}")
-            }
+        .map(|cut| {
+            let label = match when {
+                Some(month) => format!("{} down to, {month}", cut.name),
+                None => format!("{} down to", cut.name),
+            };
+            (label, amount(cut.to, code))
         })
-        .collect::<Vec<_>>()
-        .join(" and ")
+        .collect()
 }
 
 /// The row's verdicts month by month, from the first month that has one.
@@ -148,88 +145,80 @@ fn first_cuts(by_month: &[(&WishMonth, Vec<&Verdict>)]) -> Vec<Cut> {
         .unwrap_or_default()
 }
 
-/// The row's verdict in plain words: one sentence, the worst news first.
-pub fn verdict_line(row: &WishRow, months: &[WishMonth]) -> String {
+/// A labelled value of a row.
+pub type Fact = (String, String);
+
+fn fact(label: impl Into<String>, value: impl Into<String>) -> Fact {
+    (label.into(), value.into())
+}
+
+/// What the row's verdict comes down to, one value per fact, the worst
+/// news first. Empty for a wish that is simply affordable: the chip says so.
+pub fn verdict_facts(row: &WishRow, months: &[WishMonth]) -> Vec<Fact> {
     if let Some(why) = &row.not_judged {
-        return format!("Not judged yet: {why}.");
+        return vec![fact("Not judged yet", why.as_str())];
     }
     let by_month = row_months(row, months);
     let code = row.wish.currency.code.as_str();
-    let line = if row.wish.kind == WishKind::OneOff {
-        one_off_line(&by_month, code)
+    let mut facts = if row.wish.kind == WishKind::OneOff {
+        let mut facts = skipped_facts(&by_month, code);
+        facts.extend(one_off_facts(&by_month, code));
+        facts
     } else {
-        repeating_line(&by_month, code)
+        repeating_facts(&by_month, code)
     };
-    if line == "Affordable." || line == "Affordable every month." {
-        return line;
+    if !facts.is_empty() {
+        facts.extend(earlier_saves_facts(row, &by_month, code));
     }
-    match earlier_saves_note(row, &by_month, code) {
-        Some(note) => format!("{line} {note}"),
-        None => line,
-    }
+    facts
 }
 
-/// `€300 saved for Bike first.`: what the month set aside for wishes due
+/// `Saved first for Bike` → `€300`: what the month set aside for wishes due
 /// earlier before this row got its turn, in the first judged month that
 /// did so. Money saved for an earlier wish is why a later one comes up
-/// short or costs something, so the verdict says where it went.
-fn earlier_saves_note(
+/// short or costs something, so the row says where it went.
+fn earlier_saves_facts(
     row: &WishRow,
     by_month: &[(&WishMonth, Vec<&Verdict>)],
     code: &str,
-) -> Option<String> {
+) -> Vec<Fact> {
     let ids = row_ids(row);
-    by_month.iter().find_map(|(month, _)| {
-        let mine = month
-            .verdicts
-            .iter()
-            .position(|v| v.wish_id.as_deref().is_some_and(|id| ids.contains(&id)))?;
-        let mut taken: Vec<(String, Decimal)> = Vec::new();
-        for v in &month.verdicts[..mine] {
-            if !v.set_aside || v.skipped || v.wish_id.is_none() || v.amount <= Decimal::ZERO {
-                continue;
-            }
-            let name = v.label.strip_prefix("Saving for ").unwrap_or(&v.label);
-            match taken.iter_mut().find(|(seen, _)| seen == name) {
-                Some((_, sum)) => *sum += v.amount,
-                None => taken.push((name.to_owned(), v.amount)),
-            }
-        }
-        let parts = taken
-            .iter()
-            .enumerate()
-            .map(|(i, (name, n))| {
-                if i == 0 {
-                    format!("{} saved for {name}", amount(*n, code))
-                } else {
-                    format!("{} for {name}", amount(*n, code))
-                }
-            })
-            .collect::<Vec<_>>();
-        (!parts.is_empty()).then(|| format!("{} first.", parts.join(" and ")))
-    })
-}
-
-/// A one-off's verdict, after a word on any month its set-aside skipped.
-fn one_off_line(by_month: &[(&WishMonth, Vec<&Verdict>)], code: &str) -> String {
-    let rest = one_off_verdict(by_month, code);
-    match skipped_note(by_month, code) {
-        None => rest,
-        // The catch-up rate already says it fits; a skipped month followed
-        // straight by the due month still needs the verdict.
-        Some((note, true)) if rest == "Affordable." => note,
-        Some((note, _)) => format!("{note} {rest}"),
-    }
-}
-
-/// `Nothing set aside in November; €300/month from December.` for the
-/// first month whose set-aside was skipped, with the next month that
-/// sets money aside again (the flag says whether there is one).
-fn skipped_note(by_month: &[(&WishMonth, Vec<&Verdict>)], code: &str) -> Option<(String, bool)> {
-    let at = by_month
+    by_month
         .iter()
-        .position(|(_, v)| v.iter().any(|v| v.skipped))?;
-    let skipped = format!("Nothing set aside in {}", month_name(&by_month[at].0.month));
+        .find_map(|(month, _)| {
+            let mine = month
+                .verdicts
+                .iter()
+                .position(|v| v.wish_id.as_deref().is_some_and(|id| ids.contains(&id)))?;
+            let mut taken: Vec<(String, Decimal)> = Vec::new();
+            for v in &month.verdicts[..mine] {
+                if !v.set_aside || v.skipped || v.wish_id.is_none() || v.amount <= Decimal::ZERO {
+                    continue;
+                }
+                let name = v.label.strip_prefix("Saving for ").unwrap_or(&v.label);
+                match taken.iter_mut().find(|(seen, _)| seen == name) {
+                    Some((_, sum)) => *sum += v.amount,
+                    None => taken.push((name.to_owned(), v.amount)),
+                }
+            }
+            (!taken.is_empty()).then_some(taken)
+        })
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(name, n)| fact(format!("Saved first for {name}"), amount(n, code)))
+        .collect()
+}
+
+/// `Saving starts` → `December`, `A month from then` → `€300` for the
+/// first month whose set-aside was skipped; `Not set aside in` → that
+/// month when no later month sets money aside again.
+fn skipped_facts(by_month: &[(&WishMonth, Vec<&Verdict>)], code: &str) -> Vec<Fact> {
+    let Some(at) = by_month
+        .iter()
+        .position(|(_, v)| v.iter().any(|v| v.skipped))
+    else {
+        return Vec::new();
+    };
     let next = by_month[at + 1..].iter().find_map(|(m, v)| {
         let sum = v
             .iter()
@@ -238,31 +227,29 @@ fn skipped_note(by_month: &[(&WishMonth, Vec<&Verdict>)], code: &str) -> Option<
             .sum::<Decimal>();
         (sum > Decimal::ZERO).then_some((m, sum))
     });
-    Some(match next {
-        Some((month, n)) => (
-            format!(
-                "{skipped}; {}/month from {}.",
-                amount(n, code),
-                month_name(&month.month)
-            ),
-            true,
-        ),
-        None => (format!("{skipped}."), false),
-    })
+    match next {
+        Some((month, n)) => vec![
+            fact("Saving starts", month_name(&month.month)),
+            fact("A month from then", amount(n, code)),
+        ],
+        None => vec![fact("Not set aside in", month_name(&by_month[at].0.month))],
+    }
 }
 
-fn one_off_verdict(by_month: &[(&WishMonth, Vec<&Verdict>)], code: &str) -> String {
+fn one_off_facts(by_month: &[(&WishMonth, Vec<&Verdict>)], code: &str) -> Vec<Fact> {
     let short: Decimal = by_month.iter().map(|(_, v)| total(v, |v| v.short)).sum();
     if short > Decimal::ZERO {
-        return format!("Not affordable — short by {}.", amount(short, code));
+        return vec![fact("Short by", amount(short, code))];
     }
     let cuts = first_cuts(by_month);
     let from_savings: Decimal = by_month
         .iter()
         .map(|(_, v)| total(v, |v| v.from_savings))
         .sum();
-    let savings = (from_savings > Decimal::ZERO)
-        .then(|| format!("Affordable — {} from savings", amount(from_savings, code)));
+    let mut facts = Vec::new();
+    if from_savings > Decimal::ZERO {
+        facts.push(fact("From savings", amount(from_savings, code)));
+    }
     let on_card: Decimal = by_month.iter().map(|(_, v)| total(v, |v| v.on_card)).sum();
     let first_card = by_month
         .iter()
@@ -281,63 +268,42 @@ fn one_off_verdict(by_month: &[(&WishMonth, Vec<&Verdict>)], code: &str) -> Stri
                 .flat_map(|v| &v.next_cuts),
         );
         if next_short > Decimal::ZERO {
-            let even = if next_cuts.is_empty() {
-                String::new()
-            } else {
-                format!(" even after {}", cuts_phrase(&next_cuts, code))
-            };
-            return format!(
-                "Not affordable — {n} on the cards, so {next} starts {} short{even}.",
-                amount(next_short, code)
-            );
+            let mut facts = vec![
+                fact("On the cards", n),
+                fact(format!("{next} starts short by"), amount(next_short, code)),
+            ];
+            facts.extend(cut_facts(&next_cuts, Some(&next), code));
+            return facts;
         }
-        let there = if next_cuts.is_empty() {
-            String::new()
-        } else {
-            format!(", so {} in {next}", cuts_phrase(&next_cuts, code))
-        };
-        let after = if cuts.is_empty() {
-            String::new()
-        } else {
-            format!(" — after {}", cuts_phrase(&cuts, code))
-        };
-        return match savings {
-            Some(savings) => {
-                format!(
-                    "{savings}, then {n} on the cards — {next} starts {n} lighter{there}{after}."
-                )
-            }
-            None => {
-                format!(
-                    "Affordable with {n} on the cards — {next} starts {n} lighter{there}{after}."
-                )
-            }
-        };
+        facts.push(fact("On the cards", n.clone()));
+        facts.push(fact(format!("{next} starts lighter by"), n));
+        facts.extend(cut_facts(&next_cuts, Some(&next), code));
+        facts.extend(cut_facts(&cuts, None, code));
+        return facts;
     }
-    if let Some(savings) = savings {
+    if from_savings > Decimal::ZERO {
         if !cuts.is_empty() {
-            return format!("{savings}, then {}.", cuts_phrase(&cuts, code));
+            facts.extend(cut_facts(&cuts, None, code));
+            return facts;
         }
         let left = by_month
             .iter()
             .rev()
             .find(|(_, v)| total(v, |v| v.from_savings) > Decimal::ZERO)
             .map_or(Decimal::ZERO, |(m, _)| m.savings_left);
-        return format!("{savings}, leaving {}.", amount(left, code));
+        facts.push(fact("Savings left", amount(left, code)));
+        return facts;
     }
     if !cuts.is_empty() {
-        return format!("Affordable if {}.", cuts_phrase(&cuts, code));
+        return cut_facts(&cuts, None, code);
     }
     let drop = by_month.iter().find(|(m, v)| {
         m.free_left < m.free_before && v.iter().any(|v| v.from_free > Decimal::ZERO)
     });
-    if let Some((month, _)) = drop {
-        return format!(
-            "Affordable — free money drops to {}.",
-            amount(month.free_left, code)
-        );
+    match drop {
+        Some((month, _)) => vec![fact("Free money after", amount(month.free_left, code))],
+        None => Vec::new(),
     }
-    "Affordable.".to_owned()
 }
 
 /// Each month's short (`YYYY-MM`), in month order, with a card charge's
@@ -365,30 +331,27 @@ fn shorts_by_month(by_month: &[(&WishMonth, Vec<&Verdict>)]) -> Vec<(String, Dec
 }
 
 /// A recurring wish or bill change, judged over every month it touches.
-fn repeating_line(by_month: &[(&WishMonth, Vec<&Verdict>)], code: &str) -> String {
+fn repeating_facts(by_month: &[(&WishMonth, Vec<&Verdict>)], code: &str) -> Vec<Fact> {
     let shorts = shorts_by_month(by_month);
     if let Some(i) = shorts.iter().position(|(_, n)| *n > Decimal::ZERO) {
         let (month, n) = &shorts[i];
-        let n = amount(*n, code);
-        let from = month_name(month);
-        return match i.checked_sub(1) {
-            None => format!("Not affordable — short by {n} from {from}."),
-            Some(j) => format!(
-                "Fits until {}. From {from}, short by {n}.",
-                month_name(&shorts[j].0)
-            ),
-        };
+        let mut facts = Vec::new();
+        if let Some(j) = i.checked_sub(1) {
+            facts.push(fact("Fits until", month_name(&shorts[j].0)));
+        }
+        facts.push(fact("Short from", month_name(month)));
+        facts.push(fact("Short by", amount(*n, code)));
+        return facts;
     }
     let freed = by_month.iter().find_map(|(m, v)| {
         let sum = total(v, |v| v.amount);
         (sum < Decimal::ZERO).then_some((m, -sum))
     });
     if let Some((month, n)) = freed {
-        return format!(
-            "Frees {} a month from {}.",
-            amount(n, code),
-            month_name(&month.month)
-        );
+        return vec![
+            fact("Frees a month", amount(n, code)),
+            fact("From", month_name(&month.month)),
+        ];
     }
     let mut cuts = first_cuts(by_month);
     if cuts.is_empty() {
@@ -402,21 +365,12 @@ fn repeating_line(by_month: &[(&WishMonth, Vec<&Verdict>)], code: &str) -> Strin
         .iter()
         .map(|(_, v)| total(v, |v| v.on_card))
         .find(|n| *n > Decimal::ZERO);
+    let mut facts = Vec::new();
     if let Some(n) = card {
-        let after = if cuts.is_empty() {
-            String::new()
-        } else {
-            format!(" — after {} each month", cuts_phrase(&cuts, code))
-        };
-        return format!(
-            "{} a month on the cards, paid the following month{after}.",
-            amount(n, code)
-        );
+        facts.push(fact("On the cards a month", amount(n, code)));
     }
-    if !cuts.is_empty() {
-        return format!("Affordable if {} each month.", cuts_phrase(&cuts, code));
-    }
-    "Affordable every month.".to_owned()
+    facts.extend(cut_facts(&cuts, None, code));
+    facts
 }
 
 /// How a one-off wish gets saved up, for the row's data fields.
@@ -1672,7 +1626,7 @@ fn wish_body(
     let sub = parent_must.is_some();
     let wish = row.wish.clone();
     let code = wish.currency.code.clone();
-    let line = months.with_value(|m| verdict_line(row, m));
+    let facts = months.with_value(|m| verdict_facts(row, m));
     let tone = if row.not_judged.is_some() {
         "text-fg-muted"
     } else if row.short > Decimal::ZERO {
@@ -1936,7 +1890,7 @@ fn wish_body(
                 </h3>
                 <FactsRow rows=detail />
             </div>
-            <p class=cn(["text-sm", tone])>{line}</p>
+            <FactsRow rows=facts class=tone />
             <div class="flex flex-wrap items-end gap-2">
                 {one_off.then(move || view! {
                 <form class="flex items-end gap-2" on:submit=save_saved>
@@ -2224,6 +2178,12 @@ fn month_card(month: &WishMonth, code: &str) -> impl IntoView + use<> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn facts(rows: &[(&str, &str)]) -> Vec<(String, String)> {
+        rows.iter()
+            .map(|(label, value)| ((*label).to_owned(), (*value).to_owned()))
+            .collect()
+    }
     use finance_types::report::wishes::CardUsed;
 
     fn d(n: i64, scale: u32) -> Decimal {
@@ -2439,8 +2399,8 @@ mod tests {
         };
         let months = [month(d(500, 0), d(350, 0), vec![v])];
         assert_eq!(
-            verdict_line(&row("w"), &months),
-            "Affordable — free money drops to €350."
+            verdict_facts(&row("w"), &months),
+            facts(&[("Free money after", "€350")])
         );
     }
 
@@ -2452,8 +2412,8 @@ mod tests {
         };
         let months = [month(d(100, 0), d(4002, 2), vec![v])];
         assert_eq!(
-            verdict_line(&row("w"), &months),
-            "Affordable — free money drops to €40.02."
+            verdict_facts(&row("w"), &months),
+            facts(&[("Free money after", "€40.02")])
         );
     }
 
@@ -2468,8 +2428,8 @@ mod tests {
         };
         let months = [month(Decimal::ZERO, Decimal::ZERO, vec![v])];
         assert_eq!(
-            verdict_line(&row("w"), &months),
-            "Affordable if going out drops to €0 and groceries to €370."
+            verdict_facts(&row("w"), &months),
+            facts(&[("Going out down to", "€0"), ("Groceries down to", "€370")])
         );
     }
 
@@ -2488,8 +2448,11 @@ mod tests {
             month_at("2026-11-01", vec![later]),
         ];
         assert_eq!(
-            verdict_line(&row("w"), &months),
-            "Affordable with €130 on the cards — November starts €130 lighter."
+            verdict_facts(&row("w"), &months),
+            facts(&[
+                ("On the cards", "€130"),
+                ("November starts lighter by", "€130")
+            ])
         );
     }
 
@@ -2508,8 +2471,13 @@ mod tests {
             month_at("2026-11-01", vec![v]),
         ];
         assert_eq!(
-            verdict_line(&row("w"), &months),
-            "Affordable with €130 on the cards — December starts €130 lighter — after going out drops to €0 and groceries to €300."
+            verdict_facts(&row("w"), &months),
+            facts(&[
+                ("On the cards", "€130"),
+                ("December starts lighter by", "€130"),
+                ("Going out down to", "€0"),
+                ("Groceries down to", "€300")
+            ])
         );
     }
 
@@ -2537,8 +2505,8 @@ mod tests {
             month_at("2026-12-01", vec![paid(60)]),
         ];
         assert_eq!(
-            verdict_line(&repeating("w", Repeat::Monthly), &months),
-            "Affordable every month."
+            verdict_facts(&repeating("w", Repeat::Monthly), &months),
+            facts(&[])
         );
     }
 
@@ -2553,8 +2521,8 @@ mod tests {
             month_at("2026-11-01", vec![v]),
         ];
         assert_eq!(
-            verdict_line(&repeating("w", Repeat::Monthly), &months),
-            "Affordable if going out drops to €60 each month."
+            verdict_facts(&repeating("w", Repeat::Monthly), &months),
+            facts(&[("Going out down to", "€60")])
         );
     }
 
@@ -2570,8 +2538,8 @@ mod tests {
             month_at("2026-12-01", vec![card(60)]),
         ];
         assert_eq!(
-            verdict_line(&repeating("w", Repeat::Monthly), &months),
-            "€40 a month on the cards, paid the following month."
+            verdict_facts(&repeating("w", Repeat::Monthly), &months),
+            facts(&[("On the cards a month", "€40")])
         );
         let with_cuts = Verdict {
             cuts: vec![cut("g1", "Going out", 120, 0)],
@@ -2579,8 +2547,8 @@ mod tests {
         };
         let months = [month_at("2026-10-01", vec![with_cuts])];
         assert_eq!(
-            verdict_line(&repeating("w", Repeat::Monthly), &months),
-            "€40 a month on the cards, paid the following month — after going out drops to €0 each month."
+            verdict_facts(&repeating("w", Repeat::Monthly), &months),
+            facts(&[("On the cards a month", "€40"), ("Going out down to", "€0")])
         );
     }
 
@@ -2601,8 +2569,12 @@ mod tests {
             month_at("2027-01-01", vec![later]),
         ];
         assert_eq!(
-            verdict_line(&repeating("w", Repeat::Monthly), &months),
-            "Fits until November. From December, short by €25."
+            verdict_facts(&repeating("w", Repeat::Monthly), &months),
+            facts(&[
+                ("Fits until", "November"),
+                ("Short from", "December"),
+                ("Short by", "€25")
+            ])
         );
     }
 
@@ -2618,8 +2590,8 @@ mod tests {
             month_at("2026-11-01", vec![short]),
         ];
         assert_eq!(
-            verdict_line(&repeating("w", Repeat::Weekly), &months),
-            "Not affordable — short by €15 from November."
+            verdict_facts(&repeating("w", Repeat::Weekly), &months),
+            facts(&[("Short from", "November"), ("Short by", "€15")])
         );
     }
 
@@ -2640,8 +2612,8 @@ mod tests {
             month_at("2026-12-01", vec![freed]),
         ];
         assert_eq!(
-            verdict_line(&r, &months),
-            "Frees €15 a month from November."
+            verdict_facts(&r, &months),
+            facts(&[("Frees a month", "€15"), ("From", "November")])
         );
     }
 
@@ -2652,7 +2624,7 @@ mod tests {
             ..verdict("w", d(-15, 0))
         };
         let months = [month(d(100, 0), d(115, 0), vec![freed])];
-        assert_eq!(verdict_line(&row("w"), &months), "Affordable.");
+        assert_eq!(verdict_facts(&row("w"), &months), facts(&[]));
     }
 
     #[test]
@@ -2664,8 +2636,8 @@ mod tests {
         };
         let months = [month(Decimal::ZERO, Decimal::ZERO, vec![v])];
         assert_eq!(
-            verdict_line(&row("w"), &months),
-            "Not affordable — short by €50."
+            verdict_facts(&row("w"), &months),
+            facts(&[("Short by", "€50")])
         );
     }
 
@@ -2690,8 +2662,8 @@ mod tests {
             vec![saving_for("bike", "Bike", d(300, 0)), v],
         )];
         assert_eq!(
-            verdict_line(&row("w"), &months),
-            "Not affordable — short by €50. €300 saved for Bike first."
+            verdict_facts(&row("w"), &months),
+            facts(&[("Short by", "€50"), ("Saved first for Bike", "€300")])
         );
     }
 
@@ -2711,8 +2683,12 @@ mod tests {
             ],
         )];
         assert_eq!(
-            verdict_line(&row("w"), &months),
-            "Affordable if going out drops to €40. €300 saved for Bike and €100 for Laptop first."
+            verdict_facts(&row("w"), &months),
+            facts(&[
+                ("Going out down to", "€40"),
+                ("Saved first for Bike", "€300"),
+                ("Saved first for Laptop", "€100")
+            ])
         );
     }
 
@@ -2726,8 +2702,12 @@ mod tests {
             month_at("2026-12-01", vec![verdict_set_aside("w", d(30000, 2))]),
         ];
         assert_eq!(
-            verdict_line(&row("w"), &months),
-            "Nothing set aside in November; €300/month from December. €300 saved for Bike first."
+            verdict_facts(&row("w"), &months),
+            facts(&[
+                ("Saving starts", "December"),
+                ("A month from then", "€300"),
+                ("Saved first for Bike", "€300")
+            ])
         );
     }
 
@@ -2742,7 +2722,7 @@ mod tests {
             d(400, 0),
             vec![saving_for("bike", "Bike", d(300, 0)), v.clone()],
         )];
-        assert_eq!(verdict_line(&row("w"), &months), "Affordable.");
+        assert_eq!(verdict_facts(&row("w"), &months), facts(&[]));
         let later = Verdict {
             short: d(50, 0),
             ..v
@@ -2753,8 +2733,8 @@ mod tests {
             vec![later, saving_for("bike", "Bike", d(300, 0))],
         )];
         assert_eq!(
-            verdict_line(&row("w"), &months),
-            "Not affordable — short by €50."
+            verdict_facts(&row("w"), &months),
+            facts(&[("Short by", "€50")])
         );
     }
 
@@ -2770,8 +2750,8 @@ mod tests {
             vec![verdict_skipped("bike"), v],
         )];
         assert_eq!(
-            verdict_line(&row("w"), &months),
-            "Not affordable — short by €50."
+            verdict_facts(&row("w"), &months),
+            facts(&[("Short by", "€50")])
         );
     }
 
@@ -2851,7 +2831,7 @@ mod tests {
             ..verdict("other", d(80, 0))
         };
         let months = [month(d(100, 0), d(20, 0), vec![other])];
-        assert_eq!(verdict_line(&row("w"), &months), "Affordable.");
+        assert_eq!(verdict_facts(&row("w"), &months), facts(&[]));
     }
 
     #[test]
@@ -2863,8 +2843,11 @@ mod tests {
         };
         let months = [month(Decimal::ZERO, Decimal::ZERO, vec![v])];
         assert_eq!(
-            verdict_line(&row("w"), &months),
-            "Not affordable — €500 on the cards, so November starts €500 short."
+            verdict_facts(&row("w"), &months),
+            facts(&[
+                ("On the cards", "€500"),
+                ("November starts short by", "€500")
+            ])
         );
     }
 
@@ -2878,8 +2861,12 @@ mod tests {
         };
         let months = [month(Decimal::ZERO, Decimal::ZERO, vec![v])];
         assert_eq!(
-            verdict_line(&row("w"), &months),
-            "Not affordable — €500 on the cards, so November starts €380 short even after going out drops to €0."
+            verdict_facts(&row("w"), &months),
+            facts(&[
+                ("On the cards", "€500"),
+                ("November starts short by", "€380"),
+                ("Going out down to, November", "€0")
+            ])
         );
     }
 
@@ -2892,8 +2879,12 @@ mod tests {
         };
         let months = [month(Decimal::ZERO, Decimal::ZERO, vec![v])];
         assert_eq!(
-            verdict_line(&row("w"), &months),
-            "Affordable with €100 on the cards — November starts €100 lighter, so going out drops to €20 in November."
+            verdict_facts(&row("w"), &months),
+            facts(&[
+                ("On the cards", "€100"),
+                ("November starts lighter by", "€100"),
+                ("Going out down to, November", "€20")
+            ])
         );
     }
 
@@ -2910,8 +2901,12 @@ mod tests {
             month_at("2026-12-01", vec![card(60, 60)]),
         ];
         assert_eq!(
-            verdict_line(&repeating("w", Repeat::Monthly), &months),
-            "Fits until November. From December, short by €20."
+            verdict_facts(&repeating("w", Repeat::Monthly), &months),
+            facts(&[
+                ("Fits until", "November"),
+                ("Short from", "December"),
+                ("Short by", "€20")
+            ])
         );
     }
 
@@ -2950,7 +2945,10 @@ mod tests {
     fn unjudged_wish_says_why() {
         let mut r = row("w");
         r.not_judged = Some("too far ahead".into());
-        assert_eq!(verdict_line(&r, &[]), "Not judged yet: too far ahead.");
+        assert_eq!(
+            verdict_facts(&r, &[]),
+            facts(&[("Not judged yet", "too far ahead")])
+        );
     }
 
     #[test]
@@ -2980,8 +2978,11 @@ mod tests {
         };
         let months = [month(Decimal::ZERO, Decimal::ZERO, vec![v])];
         assert_eq!(
-            verdict_line(&parent, &months),
-            "Affordable with €900 on the cards — November starts €900 lighter."
+            verdict_facts(&parent, &months),
+            facts(&[
+                ("On the cards", "€900"),
+                ("November starts lighter by", "€900")
+            ])
         );
     }
 
@@ -3009,8 +3010,8 @@ mod tests {
             month_at("2027-01-01", vec![verdict_set_aside("w", d(30000, 2))]),
         ];
         assert_eq!(
-            verdict_line(&row("w"), &months),
-            "Nothing set aside in November; €300/month from December."
+            verdict_facts(&row("w"), &months),
+            facts(&[("Saving starts", "December"), ("A month from then", "€300")])
         );
     }
 
@@ -3025,8 +3026,8 @@ mod tests {
             month_at("2026-12-01", vec![paid]),
         ];
         assert_eq!(
-            verdict_line(&row("w"), &months),
-            "Nothing set aside in November. Affordable."
+            verdict_facts(&row("w"), &months),
+            facts(&[("Not set aside in", "November")])
         );
     }
 
@@ -3042,8 +3043,13 @@ mod tests {
             month_at("2027-01-01", vec![charged]),
         ];
         assert_eq!(
-            verdict_line(&row("w"), &months),
-            "Nothing set aside in November; €50/month from December. Affordable with €100 on the cards — February starts €100 lighter."
+            verdict_facts(&row("w"), &months),
+            facts(&[
+                ("Saving starts", "December"),
+                ("A month from then", "€50"),
+                ("On the cards", "€100"),
+                ("February starts lighter by", "€100")
+            ])
         );
     }
 
@@ -3056,8 +3062,11 @@ mod tests {
         };
         let months = [month(Decimal::ZERO, Decimal::ZERO, vec![v])];
         assert_eq!(
-            verdict_line(&row("w"), &months),
-            "Not affordable — €566 on the cards, so November starts €30.48 short."
+            verdict_facts(&row("w"), &months),
+            facts(&[
+                ("On the cards", "€566"),
+                ("November starts short by", "€30.48")
+            ])
         );
     }
 
@@ -3077,8 +3086,8 @@ mod tests {
         };
         let months = [with_savings("2026-10-01", d(30, 0), vec![v])];
         assert_eq!(
-            verdict_line(&row("w"), &months),
-            "Affordable — €120 from savings, leaving €30."
+            verdict_facts(&row("w"), &months),
+            facts(&[("From savings", "€120"), ("Savings left", "€30")])
         );
     }
 
@@ -3091,8 +3100,8 @@ mod tests {
         };
         let months = [with_savings("2026-10-01", Decimal::ZERO, vec![v])];
         assert_eq!(
-            verdict_line(&row("w"), &months),
-            "Affordable — €120 from savings, then going out drops to €40."
+            verdict_facts(&row("w"), &months),
+            facts(&[("From savings", "€120"), ("Going out down to", "€40")])
         );
     }
 
@@ -3105,8 +3114,12 @@ mod tests {
         };
         let months = [with_savings("2026-10-01", Decimal::ZERO, vec![v])];
         assert_eq!(
-            verdict_line(&row("w"), &months),
-            "Affordable — €120 from savings, then €80 on the cards — November starts €80 lighter."
+            verdict_facts(&row("w"), &months),
+            facts(&[
+                ("From savings", "€120"),
+                ("On the cards", "€80"),
+                ("November starts lighter by", "€80")
+            ])
         );
     }
 

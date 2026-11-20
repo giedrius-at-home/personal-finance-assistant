@@ -110,13 +110,40 @@ pub fn month_week(cap: Decimal, ticket: Decimal) -> (Decimal, Option<Decimal>) {
     (week, visits)
 }
 
-fn visits_text(count: Decimal) -> String {
-    let count = count.normalize();
-    if count == Decimal::ONE {
-        "1 visit".to_owned()
-    } else {
-        format!("{count} visits")
+/// How often the owner went and usually goes, one count per fact.
+fn visit_facts(h: &Habit) -> Vec<(String, String)> {
+    let mut facts = vec![
+        ("Visits this month".to_owned(), h.visits.to_string()),
+        (
+            "Visits this week".to_owned(),
+            h.visits_this_week.to_string(),
+        ),
+    ];
+    if let Some(month) = h.typical_visits {
+        facts.push((
+            "Usual visits a month".to_owned(),
+            month.normalize().to_string(),
+        ));
     }
+    facts.push((
+        "Usual visits a week".to_owned(),
+        h.typical_week_visits.normalize().to_string(),
+    ));
+    facts
+}
+
+/// An allowance as money, and as visits when a visit has a price.
+fn allowance_facts(
+    label: &str,
+    visits_label: &str,
+    money: String,
+    visits: Option<Decimal>,
+) -> Vec<(String, String)> {
+    let mut facts = vec![(label.to_owned(), money)];
+    if let Some(visits) = visits {
+        facts.push((visits_label.to_owned(), visits.normalize().to_string()));
+    }
+    facts
 }
 
 /// Every nudge for the first currency, heaviest first, at most [`MOST`].
@@ -138,10 +165,6 @@ pub fn nudges(report: &Dashboard) -> Vec<Nudge> {
         "Next month".to_owned()
     } else {
         month_name(&a.funded_month)
-    };
-    let allowance_text = |money: Decimal, visits: Option<Decimal>| match visits {
-        Some(v) => format!("{} · {}", m(money), visits_text(v)),
-        None => m(money),
     };
 
     for adjustments in report.adjustments.iter().filter(|x| x.currency == *unit) {
@@ -198,21 +221,7 @@ pub fn nudges(report: &Dashboard) -> Vec<Nudge> {
             if let (Some(_), Some(expected)) = (heading, expected) {
                 facts.push(("Month end at this pace".to_owned(), m(expected)));
             }
-            facts.push((
-                "Visits".to_owned(),
-                format!("{} this month · {} this week", h.visits, h.visits_this_week),
-            ));
-            facts.push((
-                "Usually".to_owned(),
-                match h.typical_visits {
-                    Some(month) => format!(
-                        "{} a month · {} a week",
-                        month.normalize(),
-                        h.typical_week_visits.normalize()
-                    ),
-                    None => format!("{} a week", h.typical_week_visits.normalize()),
-                },
-            ));
+            facts.extend(visit_facts(h));
             if price > zero {
                 facts.push(("A visit costs".to_owned(), m(price)));
             }
@@ -221,9 +230,11 @@ pub fn nudges(report: &Dashboard) -> Vec<Nudge> {
                     facts.push(("Visits left this month".to_owned(), visits.to_string()));
                 }
                 if rest.left > zero {
-                    facts.push((
-                        "A week, to stay inside".to_owned(),
-                        allowance_text(rest.week, rest.week_visits),
+                    facts.extend(allowance_facts(
+                        "A week, to stay inside",
+                        "Visits a week, to stay inside",
+                        m(rest.week),
+                        rest.week_visits,
                     ));
                 }
             }
@@ -241,14 +252,18 @@ pub fn nudges(report: &Dashboard) -> Vec<Nudge> {
                 // Less than a visit a week reads better as the whole month.
                 if visits.is_some_and(|v| v < Decimal::ONE) {
                     let month = allowance(next_cap, zero, price, 31);
-                    facts.push((
-                        next_month.clone(),
-                        allowance_text(next_cap, month.visits_left.map(Decimal::from)),
+                    facts.extend(allowance_facts(
+                        &next_month,
+                        &format!("{next_month} visits"),
+                        m(next_cap),
+                        month.visits_left.map(Decimal::from),
                     ));
                 } else {
-                    facts.push((
-                        format!("{next_month}, a week"),
-                        allowance_text(week, visits),
+                    facts.extend(allowance_facts(
+                        &format!("{next_month}, a week"),
+                        &format!("{next_month}, visits a week"),
+                        m(week),
+                        visits,
                     ));
                 }
             }
@@ -260,13 +275,10 @@ pub fn nudges(report: &Dashboard) -> Vec<Nudge> {
                 .filter_map(|s| above_norm(&s.habit).0.map(|over| (s, over)))
                 .max_by_key(|(_, over)| *over);
             if let Some((store, _)) = store {
+                facts.push((format!("{} spent", store.category), m(store.habit.spent)));
                 facts.push((
-                    format!("Mostly {}", store.category),
-                    format!(
-                        "{} · {}",
-                        m(store.habit.spent),
-                        visits_text(Decimal::from(store.habit.visits))
-                    ),
+                    format!("{} visits", store.category),
+                    store.habit.visits.to_string(),
                 ));
             }
             let weight = [over, heading, norm_over, extra_visits.map(|e| e * price)]
@@ -448,6 +460,49 @@ mod tests {
         };
         assert_eq!(ticket(&quiet), d("20"));
         assert_eq!(ticket(&Habit::default()), d("0"));
+    }
+
+    #[test]
+    fn visits_and_usual_visits_are_separate_facts() {
+        let h = Habit {
+            visits: 6,
+            visits_this_week: 0,
+            typical_visits: Some(d("5")),
+            typical_week_visits: d("1.5"),
+            ..Habit::default()
+        };
+        assert_eq!(
+            visit_facts(&h),
+            vec![
+                ("Visits this month".to_owned(), "6".to_owned()),
+                ("Visits this week".to_owned(), "0".to_owned()),
+                ("Usual visits a month".to_owned(), "5".to_owned()),
+                ("Usual visits a week".to_owned(), "1.5".to_owned()),
+            ]
+        );
+        // No usual month yet: the weekly norm alone.
+        let new = Habit {
+            typical_visits: None,
+            ..h
+        };
+        assert_eq!(visit_facts(&new).len(), 3);
+    }
+
+    #[test]
+    fn an_allowance_is_money_and_then_visits_when_a_visit_has_a_price() {
+        assert_eq!(
+            allowance_facts(
+                "A week, to stay inside",
+                "Visits a week, to stay inside",
+                "€40".into(),
+                Some(d("2"))
+            ),
+            vec![
+                ("A week, to stay inside".to_owned(), "€40".to_owned()),
+                ("Visits a week, to stay inside".to_owned(), "2".to_owned()),
+            ]
+        );
+        assert_eq!(allowance_facts("x", "y", "€40".into(), None).len(), 1);
     }
 
     #[test]
