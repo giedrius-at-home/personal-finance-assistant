@@ -4,6 +4,7 @@
 //! soonest due first, and whatever is still unsaved is the purchase itself.
 
 use super::ladder::Demand;
+use crate::events::EventNeed;
 use finance_types::gateway::{Repeat, Wish, WishKind, WishSource, WishStatus};
 use jiff::Span;
 use jiff::civil::Date;
@@ -218,12 +219,64 @@ fn occurrences_between(
     u32::try_from((upto - skipped + 1).max(0)).unwrap_or(0)
 }
 
+/// The wish a verdict or item id belongs to: an event's month share is
+/// `<wish id>#<YYYY-MM>`.
+pub fn base_id(id: &str) -> &str {
+    id.split('#').next().unwrap_or(id)
+}
+
 /// Every planned purchase, plus what is left of each parent's cap.
 pub fn plan_items(
     wishes: &[Wish],
     current_month: Date,
     bills: &HashMap<String, BillNow>,
 ) -> (Vec<Planned>, Vec<Family>) {
+    plan_items_with(wishes, current_month, bills, &[])
+}
+
+/// One item per month an event still asks money of, the money saved for
+/// it paying the earliest month first.
+fn event_items(w: &Wish, need: &EventNeed, current_month: Date) -> Vec<Planned> {
+    let starts = w
+        .event
+        .as_ref()
+        .and_then(|e| e.starts_on.parse::<Date>().ok())
+        .unwrap_or(current_month);
+    let mut saved = w.saved;
+    need.months
+        .iter()
+        .filter_map(|(month, amount)| {
+            let paid = saved.min(*amount);
+            saved -= paid;
+            let remaining = *amount - paid;
+            (remaining > Decimal::ZERO).then(|| Planned {
+                wish_id: format!("{}#{}", w.wish_id, &month.to_string()[..7]),
+                label: w.name.clone(),
+                due: starts.max(*month).max(current_month),
+                remaining,
+                on_card: false,
+                created_at: w.created_at.clone(),
+                per_month: None,
+                saved_this_month: saved_in(w, current_month),
+                must: w.must,
+            })
+        })
+        .collect()
+}
+
+/// [`plan_items`], with what each event still asks month by month: an
+/// event's own money (its rest) is those months, not one purchase.
+pub fn plan_items_with(
+    wishes: &[Wish],
+    current_month: Date,
+    bills: &HashMap<String, BillNow>,
+    needs: &[EventNeed],
+) -> (Vec<Planned>, Vec<Family>) {
+    let need_of = |w: &Wish| {
+        w.event
+            .as_ref()
+            .and_then(|_| needs.iter().find(|n| n.wish_id == w.wish_id))
+    };
     let mut children: HashMap<&str, Vec<&Wish>> = HashMap::new();
     for w in wishes {
         if let Some(p) = w.parent_id.as_deref() {
@@ -250,6 +303,10 @@ pub fn plan_items(
             .map(|v| v.iter().copied().filter(|s| one_off(s)).collect())
             .unwrap_or_default();
         if subs.is_empty() {
+            if let Some(need) = need_of(w) {
+                items.extend(event_items(w, need, current_month));
+                continue;
+            }
             items.push(leaf(
                 w,
                 w.name.clone(),
@@ -285,6 +342,10 @@ pub fn plan_items(
             rest,
             over_cap,
         });
+        if let Some(need) = need_of(w) {
+            items.extend(event_items(w, need, current_month));
+            continue;
+        }
         items.push(leaf(
             w,
             format!("{}: rest", w.name),
@@ -442,6 +503,36 @@ pub fn horizon(items: &[Planned], current_month: Date) -> usize {
     latest.clamp(2, MAX_MONTHS)
 }
 
+/// [`earmarked`], an event holding only what it still asks.
+pub fn earmarked_with(wishes: &[Wish], needs: &[EventNeed]) -> Decimal {
+    // An event is never "bought", so what it has spent would stay held for
+    // good: release what is saved beyond its months' needs and its parts.
+    let released: Decimal = wishes
+        .iter()
+        .filter(|w| {
+            w.status == WishStatus::Planned && w.kind == WishKind::OneOff && w.parent_id.is_none()
+        })
+        .filter_map(|w| {
+            let need = w
+                .event
+                .as_ref()
+                .and_then(|_| needs.iter().find(|n| n.wish_id == w.wish_id))?;
+            let parts: Decimal = wishes
+                .iter()
+                .filter(|p| {
+                    p.parent_id.as_deref() == Some(&w.wish_id)
+                        && p.status == WishStatus::Planned
+                        && p.kind == WishKind::OneOff
+                })
+                .map(|p| (p.amount - p.saved).max(Decimal::ZERO))
+                .sum();
+            let asked = need.months.iter().map(|(_, n)| *n).sum::<Decimal>() + parts;
+            Some((w.saved - asked).max(Decimal::ZERO))
+        })
+        .sum();
+    earmarked(wishes) - released
+}
+
 /// Money already set aside for planned wishes. Parts of a parent that is no
 /// longer planned (or gone) are not judged, so their savings are not held.
 pub fn earmarked(wishes: &[Wish]) -> Decimal {
@@ -495,7 +586,97 @@ mod tests {
             kind: WishKind::OneOff,
             must: false,
             created_at: format!("2026-01-01T00:00:{id}"),
+            event: None,
         }
+    }
+
+    fn event_wish(amount: &str, saved: &str) -> Wish {
+        Wish {
+            saved: d(saved),
+            event: Some(finance_types::gateway::EventDetails {
+                starts_on: "2026-11-30".into(),
+                ends_on: "2026-12-05".into(),
+                ..Default::default()
+            }),
+            ..wish("e", None, amount, "2026-11-30", true)
+        }
+    }
+
+    fn need(months: &[(&str, &str)]) -> Vec<crate::events::EventNeed> {
+        vec![crate::events::EventNeed {
+            wish_id: "e".into(),
+            months: months.iter().map(|(m, n)| (month(m), d(n))).collect(),
+        }]
+    }
+
+    fn remaining(items: &[Planned]) -> Vec<(&str, Decimal)> {
+        items
+            .iter()
+            .map(|i| (i.wish_id.as_str(), i.remaining))
+            .collect()
+    }
+
+    #[test]
+    fn an_event_is_one_item_per_month_it_still_asks_money_of() {
+        let nov = month("2026-11-01");
+        let needs = need(&[("2026-11-01", "66.67"), ("2026-12-01", "283.33")]);
+        let (items, _) = plan_items_with(&[event_wish("400", "0")], nov, &HashMap::new(), &needs);
+        assert_eq!(
+            remaining(&items),
+            vec![("e#2026-11", d("66.67")), ("e#2026-12", d("283.33"))]
+        );
+        assert_eq!(items[0].due, month("2026-11-30"));
+        assert_eq!(items[1].due, month("2026-12-01"));
+        // An event is not put on a card by choice: the ladder decides.
+        assert!(!items[0].on_card);
+        // Money saved for it pays the earliest month first.
+        let (items, _) = plan_items_with(&[event_wish("400", "100")], nov, &HashMap::new(), &needs);
+        assert_eq!(remaining(&items), vec![("e#2026-12", d("250"))]);
+        // An event that asks for nothing more leaves no item.
+        let (items, _) = plan_items_with(
+            &[event_wish("400", "0")],
+            nov,
+            &HashMap::new(),
+            &[crate::events::EventNeed {
+                wish_id: "e".into(),
+                months: Vec::new(),
+            }],
+        );
+        assert!(items.is_empty());
+    }
+
+    #[test]
+    fn an_events_parts_stay_their_own_items() {
+        let nov = month("2026-11-01");
+        let zoo = wish("zoo", Some("e"), "18", "2026-12-02", false);
+        let needs = need(&[("2026-12-01", "300")]);
+        let (items, fams) =
+            plan_items_with(&[event_wish("400", "0"), zoo], nov, &HashMap::new(), &needs);
+        assert_eq!(
+            remaining(&items),
+            vec![("zoo", d("18")), ("e#2026-12", d("300"))]
+        );
+        assert_eq!(fams[0].rest, d("382"));
+    }
+
+    #[test]
+    fn money_saved_for_an_event_is_held_only_for_what_it_still_asks() {
+        let zoo = wish("zoo", Some("e"), "18", "2026-12-02", false);
+        let wishes = [event_wish("400", "300"), zoo];
+        // Still asking 100 for its days and 18 for a part: 118 of 300 held.
+        let asking = need(&[("2026-12-01", "100")]);
+        assert_eq!(earmarked_with(&wishes, &asking), d("118"));
+        // Over and done: nothing asked, only the part still to buy.
+        let done = need(&[]);
+        assert_eq!(earmarked_with(&wishes, &done), d("18"));
+        // Without a reading of the event it is held like any wish.
+        assert_eq!(earmarked_with(&wishes, &[]), d("300"));
+    }
+
+    #[test]
+    fn a_month_share_reads_as_its_wish() {
+        assert_eq!(base_id("e#2026-12"), "e");
+        assert_eq!(base_id("e"), "e");
     }
 
     fn amounts(v: &[Demand]) -> Vec<Decimal> {
@@ -638,6 +819,7 @@ mod tests {
             on: "2026-10-05".into(),
             source: WishSource::Card,
             cards: Vec::new(),
+            transaction_id: None,
         });
         let ws = [wish("trip", None, "3000", "2026-12-31", false), sub];
         let (items, fams) = plan_items(&ws, cur, &HashMap::new());

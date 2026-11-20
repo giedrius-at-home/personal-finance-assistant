@@ -158,7 +158,10 @@ pub fn adjustments(
             continue;
         }
         let on: Date = t.effective_on();
-        if matches!(key, "fixed" | "extras") || (month.is_none() && on < first_week) {
+        if matches!(key, "fixed" | "extras")
+            || key.starts_with(crate::events::KEY)
+            || (month.is_none() && on < first_week)
+        {
             continue;
         }
         let visit = t.kind == Kind::Outflow;
@@ -237,6 +240,7 @@ pub fn all(
         payments,
         resolver: Some(&ctx.resolver),
         current_month: Some(month),
+        events: &ctx.events,
     };
     held_currencies(ctx, spending)
         .values()
@@ -301,6 +305,35 @@ mod tests {
     }
 
     fn run(plan: &BudgetPlan, transactions: &[Tx], fixed: &[&str]) -> Adjustments {
+        run_with_events(plan, transactions, fixed, &[])
+    }
+
+    #[test]
+    fn an_events_purchase_is_no_visit_and_no_spending_of_its_group() {
+        let transactions = [
+            at("1", "10", Some("Jumbo"), "2026-09-02"),
+            at("2", "70", Some("Jumbo"), "2026-09-09"),
+            at("3", "40", Some("Jumbo"), "2026-08-14"),
+        ];
+        let plain = run(&plan(), &transactions, &[]);
+        assert_eq!(row(&plain, "groceries").habit.visits, 2);
+        let september = crate::events::tests::claim("2026-09-08", "2026-09-12");
+        let report = run_with_events(&plan(), &transactions, &[], &[september]);
+        let habit = &row(&report, "groceries").habit;
+        assert_eq!((habit.visits, habit.spent), (1, d(10)));
+        assert_eq!(habit.visits_this_week, 0);
+        // An event in a past month takes its days out of the history too.
+        let august = crate::events::tests::claim("2026-08-10", "2026-08-20");
+        let report = run_with_events(&plan(), &transactions, &[], &[august]);
+        assert_eq!(row(&report, "groceries").row.history[4], d(0));
+    }
+
+    fn run_with_events(
+        plan: &BudgetPlan,
+        transactions: &[Tx],
+        fixed: &[&str],
+        events: &[crate::events::EventClaim],
+    ) -> Adjustments {
         let fixed_ids: HashSet<String> = fixed.iter().map(|s| (*s).to_owned()).collect();
         let mappings = mappings();
         let now = now();
@@ -316,6 +349,7 @@ mod tests {
                 payments: &[],
                 resolver: None,
                 current_month: None,
+                events,
             },
         )
     }
@@ -499,6 +533,7 @@ mod tests {
                 payments: &[],
                 resolver: Some(&resolver),
                 current_month: Some(date(2026, 9, 1)),
+                events: &[],
             },
         );
         let groceries = row(&report, "groceries");

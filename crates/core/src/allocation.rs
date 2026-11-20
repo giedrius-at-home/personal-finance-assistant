@@ -584,6 +584,7 @@ mod tests {
             daily_spending: Vec::new(),
             elapsed_days: 0,
             expected: Vec::new(),
+            to_events: Vec::new(),
         };
         let budget = |month: &str, reserved: i64| MonthlyBudget {
             plan: crate::budget::default_budget(month.parse().unwrap(), &Currency::eur()),
@@ -596,6 +597,7 @@ mod tests {
             reserved: d(reserved),
             planned: d(300),
             spent: d(300 - reserved),
+            events: Vec::new(),
         };
         let budgets = [budget("2026-09-01", 100), budget("2026-10-01", 300)];
         let mut current = empty();

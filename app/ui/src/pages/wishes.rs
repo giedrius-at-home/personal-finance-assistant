@@ -4,8 +4,8 @@
 use std::collections::HashMap;
 
 use finance_types::gateway::{
-    CardCharge, CardSettings, Repeat, Wish, WishKind, WishPurchase, WishSettings, WishSource,
-    WishStatus,
+    CardCharge, CardSettings, EventDetails, Repeat, Wish, WishKind, WishPurchase, WishSettings,
+    WishSource, WishStatus,
 };
 use finance_types::report::Currency;
 use finance_types::report::Dashboard;
@@ -26,19 +26,19 @@ use crate::pages::Problem;
 use crate::{format, state};
 
 /// What an amount box accepts: a plain amount with a point or a comma.
-const AMOUNT_PATTERN: &str = "[0-9]+([.,][0-9]{1,2})?";
+pub(crate) const AMOUNT_PATTERN: &str = "[0-9]+([.,][0-9]{1,2})?";
 
 /// Drops a control that sits beside fields by its label's height
 /// (`text-sm` line plus the field's gap), so it lines up with their boxes.
 const LABEL_OFFSET: &str = "sm:mt-[26px]";
 
 /// Reads an amount box; a comma counts as the decimal point.
-fn parse_amount(value: &str) -> Result<Decimal, rust_decimal::Error> {
+pub(crate) fn parse_amount(value: &str) -> Result<Decimal, rust_decimal::Error> {
     value.trim().replace(',', ".").parse()
 }
 
 /// An amount the way the verdicts say it: `€70`, `€40.02`.
-fn amount(value: Decimal, code: &str) -> String {
+pub(crate) fn amount(value: Decimal, code: &str) -> String {
     let decimals = if value.fract().is_zero() { 0 } else { 2 };
     format::money_dp(value, code, decimals)
 }
@@ -493,7 +493,7 @@ fn month_short(month: &WishMonth) -> Decimal {
 }
 
 /// `YYYY-MM-DD` of today, local time.
-fn today() -> String {
+pub(crate) fn today() -> String {
     let now = js_sys::Date::new_0();
     format!(
         "{:04}-{:02}-{:02}",
@@ -505,21 +505,23 @@ fn today() -> String {
 
 /// What `save_wish` takes (`WishDraft` only deserializes).
 #[derive(Serialize)]
-struct Draft {
-    wish_id: Option<String>,
-    parent_id: Option<String>,
-    name: String,
-    amount: Decimal,
-    currency: Currency,
-    due_on: String,
-    source: WishSource,
-    kind: WishKind,
-    must: bool,
+pub(crate) struct Draft {
+    pub(crate) wish_id: Option<String>,
+    pub(crate) parent_id: Option<String>,
+    pub(crate) name: String,
+    pub(crate) amount: Decimal,
+    pub(crate) currency: Currency,
+    pub(crate) due_on: String,
+    pub(crate) source: WishSource,
+    pub(crate) kind: WishKind,
+    pub(crate) must: bool,
+    /// The event's dates, for a wish that is one.
+    pub(crate) event: Option<EventDetails>,
 }
 
 #[derive(Serialize)]
-struct DraftArgs {
-    draft: Draft,
+pub(crate) struct DraftArgs {
+    pub(crate) draft: Draft,
 }
 
 #[derive(Serialize)]
@@ -535,8 +537,15 @@ struct MustArgs {
 }
 
 #[derive(Serialize)]
-struct WishIdArgs {
+pub(crate) struct WishIdArgs {
+    pub(crate) wish_id: String,
+}
+
+#[derive(Serialize)]
+struct EventDatesArgs {
     wish_id: String,
+    starts_on: String,
+    ends_on: String,
 }
 
 #[derive(Serialize)]
@@ -633,7 +642,7 @@ fn changeable_bills(
 
 /// What the page reads from the dashboard.
 #[derive(Clone, Debug, Default)]
-struct Context {
+pub(crate) struct Context {
     /// Spendable accounts: (id, name).
     accounts: Vec<(String, String)>,
     bills: Vec<BillOption>,
@@ -644,7 +653,7 @@ struct Context {
 }
 
 impl Context {
-    fn from(report: &Dashboard) -> Self {
+    pub(crate) fn from(report: &Dashboard) -> Self {
         let mut accounts: Vec<(String, String)> = Vec::new();
         for bank in report
             .monthly_allocation
@@ -718,40 +727,44 @@ impl Context {
 
 /// Screen state that outlives a reload.
 #[derive(Clone, Copy)]
-struct Ui {
-    app: crate::AppState,
-    busy: RwSignal<bool>,
+pub(crate) struct Ui {
+    pub(crate) app: crate::AppState,
+    pub(crate) busy: RwSignal<bool>,
     /// Feedback per target: (text, is error).
-    messages: RwSignal<HashMap<String, (String, bool)>>,
-    name: RwSignal<String>,
-    amount: RwSignal<String>,
-    due_on: RwSignal<String>,
-    source: RwSignal<String>,
-    parent: RwSignal<String>,
+    pub(crate) messages: RwSignal<HashMap<String, (String, bool)>>,
+    pub(crate) name: RwSignal<String>,
+    pub(crate) amount: RwSignal<String>,
+    pub(crate) due_on: RwSignal<String>,
+    pub(crate) source: RwSignal<String>,
+    pub(crate) parent: RwSignal<String>,
     /// The add form's "Must happen".
-    must: RwSignal<bool>,
+    pub(crate) must: RwSignal<bool>,
     /// The wish whose "Bought" form is open.
-    buying: RwSignal<Option<String>>,
-    buy_amount: RwSignal<String>,
-    buy_on: RwSignal<String>,
-    buy_source: RwSignal<String>,
+    pub(crate) buying: RwSignal<Option<String>>,
+    pub(crate) buy_amount: RwSignal<String>,
+    pub(crate) buy_on: RwSignal<String>,
+    pub(crate) buy_source: RwSignal<String>,
     /// The bought form's amount per card, in card order.
-    buy_cards: RwSignal<Vec<String>>,
+    pub(crate) buy_cards: RwSignal<Vec<String>>,
     /// The wish whose drop is being confirmed.
-    dropping: RwSignal<Option<String>>,
+    pub(crate) dropping: RwSignal<Option<String>>,
     /// The add form's kind: `one_off`, `repeats` or `bill`.
-    kind: RwSignal<String>,
+    pub(crate) kind: RwSignal<String>,
     /// `weekly`, `biweekly`, `monthly` or `yearly`.
-    every: RwSignal<String>,
-    ends_on: RwSignal<String>,
-    bill: RwSignal<String>,
+    pub(crate) every: RwSignal<String>,
+    pub(crate) ends_on: RwSignal<String>,
+    pub(crate) bill: RwSignal<String>,
     /// The wish whose "Start" form is open.
-    starting: RwSignal<Option<String>>,
-    start_category: RwSignal<String>,
+    pub(crate) starting: RwSignal<Option<String>>,
+    pub(crate) start_category: RwSignal<String>,
+    /// The wish whose "Plan as event" form is open, and its dates.
+    pub(crate) eventing: RwSignal<Option<String>>,
+    pub(crate) event_starts: RwSignal<String>,
+    pub(crate) event_ends: RwSignal<String>,
 }
 
 impl Ui {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             app: state(),
             busy: RwSignal::new(false),
@@ -774,6 +787,9 @@ impl Ui {
             bill: RwSignal::new(String::new()),
             starting: RwSignal::new(None),
             start_category: RwSignal::new(String::new()),
+            eventing: RwSignal::new(None),
+            event_starts: RwSignal::new(String::new()),
+            event_ends: RwSignal::new(String::new()),
         }
     }
 
@@ -782,9 +798,10 @@ impl Ui {
         self.buying.set(None);
         self.dropping.set(None);
         self.starting.set(None);
+        self.eventing.set(None);
     }
 
-    fn set_message(self, target: &str, text: impl Into<String>, error: bool) {
+    pub(crate) fn set_message(self, target: &str, text: impl Into<String>, error: bool) {
         let text = text.into();
         self.messages.update(|m| {
             m.insert(target.to_owned(), (text, error));
@@ -792,7 +809,7 @@ impl Ui {
     }
 
     /// Run a write command; on success show `done` and reload every screen.
-    fn write<A: Serialize + 'static>(
+    pub(crate) fn write<A: Serialize + 'static>(
         self,
         target: String,
         cmd: &'static str,
@@ -820,7 +837,7 @@ impl Ui {
 }
 
 /// The receipt or error of `target`, when there is one.
-fn feedback(ui: Ui, target: String) -> impl IntoView {
+pub(crate) fn feedback(ui: Ui, target: String) -> impl IntoView {
     move || {
         ui.messages.with(|m| {
             m.get(&target).filter(|(text, _)| !text.is_empty()).map(|(text, error)| {
@@ -1450,6 +1467,7 @@ fn add_form(
             source,
             kind,
             must: ui.must.get_untracked(),
+            event: None,
         };
         ui.write(
             "add".into(),
@@ -1539,7 +1557,7 @@ fn add_form(
 }
 
 /// A top-level planned wish, with its sub-wishes.
-fn wish_row(
+pub(crate) fn wish_row(
     ui: Ui,
     row: WishRow,
     months: StoredValue<Vec<WishMonth>>,
@@ -1637,13 +1655,20 @@ fn wish_body(
         "text-positive-fg"
     };
     let source = ctx.with_value(|c| c.source_label(&wish.source));
-    let mut detail = match &wish.kind {
-        WishKind::OneOff => vec![
+    let is_event = wish.event.is_some();
+    let mut detail = match (&wish.kind, &wish.event) {
+        // An event runs over its days and has no one way of being paid.
+        (WishKind::OneOff, Some(event)) => vec![
+            ("Amount".to_owned(), amount(wish.amount, &code)),
+            ("From".to_owned(), format::date(&event.starts_on)),
+            ("Until".to_owned(), format::date(&event.ends_on)),
+        ],
+        (WishKind::OneOff, None) => vec![
             ("Amount".to_owned(), amount(wish.amount, &code)),
             ("By".to_owned(), format::date(&wish.due_on)),
             ("Paid from".to_owned(), source),
         ],
-        WishKind::Recurring { every, .. } => vec![
+        (WishKind::Recurring { every, .. }, _) => vec![
             (
                 format!("Per {}", period(*every)),
                 amount(wish.amount, &code),
@@ -1651,7 +1676,7 @@ fn wish_body(
             ("From".to_owned(), format::date(&wish.due_on)),
             ("Paid from".to_owned(), source),
         ],
-        WishKind::BillChange { bill_id, .. } => {
+        (WishKind::BillChange { bill_id, .. }, _) => {
             let old = ctx.with_value(|c| c.bill(bill_id).map(|b| amount(b.amount, &code)));
             let mut rows = Vec::new();
             if let Some(old) = old {
@@ -1834,6 +1859,7 @@ fn wish_body(
             on: ui.buy_on.get_untracked(),
             source,
             cards: charges,
+            transaction_id: None,
         };
         ui.write(
             buy_target.clone(),
@@ -1880,6 +1906,31 @@ fn wish_body(
         }
     };
     let buy_sources = StoredValue::new(sources);
+    let eventing = move || ui.eventing.get().as_deref() == Some(id.get_value().as_str());
+    let due_on = wish.due_on.clone();
+    let open_event = move |_| {
+        ui.close_forms();
+        ui.event_starts.set(due_on.clone());
+        ui.event_ends.set(due_on.clone());
+        ui.eventing.set(Some(id.get_value()));
+    };
+    let event_target = target.clone();
+    let plan_event = StoredValue::new(move |ev: SubmitEvent| {
+        ev.prevent_default();
+        ui.write(
+            event_target.clone(),
+            "plan_wish_as_event",
+            EventDatesArgs {
+                wish_id: id.get_value(),
+                starts_on: ui.event_starts.get_untracked(),
+                ends_on: ui.event_ends.get_untracked(),
+            },
+            "Moved to Events.",
+            move || ui.eventing.set(None),
+        );
+    });
+    let event_starts_id = StoredValue::new(format!("event-starts-{}", wish.wish_id));
+    let event_ends_id = StoredValue::new(format!("event-ends-{}", wish.wish_id));
     view! {
         <div class="grid gap-2 py-3">
             <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
@@ -1914,7 +1965,10 @@ fn wish_body(
                     </Button>
                 </form>
                 })}
-                {if one_off {
+                {if is_event {
+                    // An event is spent over its days, not bought at once.
+                    ().into_any()
+                } else if one_off {
                     view! {
                         <Button size=Size::Sm variant=Variant::Secondary on_click=Callback::new(open_buy)>
                             "Bought"
@@ -1949,7 +2003,40 @@ fn wish_body(
                     {if must { "Not a must" } else { "Mark must" }}
                 </Button>
                 })}
+                {(one_off && !sub && !is_event).then(move || view! {
+                <Button size=Size::Sm variant=Variant::Ghost on_click=Callback::new(open_event)>
+                    "Plan as event"
+                </Button>
+                })}
             </div>
+            <Show when=eventing>
+                <form class="grid items-end gap-2 sm:grid-cols-4" on:submit=move |ev: SubmitEvent| plan_event.with_value(|f| f(ev))>
+                    <Field label="First day" id=event_starts_id.get_value()>
+                        <input
+                            id=event_starts_id.get_value()
+                            type="date"
+                            required
+                            class=CONTROL
+                            prop:value=move || ui.event_starts.get()
+                            on:input=move |e| ui.event_starts.set(event_target_value(&e))
+                        />
+                    </Field>
+                    <Field label="Last day" id=event_ends_id.get_value()>
+                        <input
+                            id=event_ends_id.get_value()
+                            type="date"
+                            required
+                            class=CONTROL
+                            prop:value=move || ui.event_ends.get()
+                            on:input=move |e| ui.event_ends.set(event_target_value(&e))
+                        />
+                    </Field>
+                    <div class="flex gap-2">
+                        <Button submit=true size=Size::Sm disabled=Signal::derive(move || ui.busy.get())>"Move to Events"</Button>
+                        <Button size=Size::Sm variant=Variant::Ghost on_click=Callback::new(move |_| ui.eventing.set(None))>"Cancel"</Button>
+                    </div>
+                </form>
+            </Show>
             <Show when=buying>
                 <form class="grid items-end gap-2 sm:grid-cols-4" on:submit=buy_submit.clone()>
                     <Field label="Cost" id=buy_amount_id.get_value()>
@@ -2207,6 +2294,7 @@ mod tests {
                 kind: Default::default(),
                 must: false,
                 created_at: "2026-10-01T00:00:00Z".into(),
+                event: None,
             },
             children: Vec::new(),
             rest: Decimal::ZERO,

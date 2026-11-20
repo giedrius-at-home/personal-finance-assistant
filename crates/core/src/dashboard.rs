@@ -22,7 +22,9 @@ pub fn dashboard(
     now: &Zoned,
     forecaster: Option<&dyn daily::SeriesForecaster>,
 ) -> Result<Dashboard> {
-    let ctx = Ctx::new(snap, now);
+    let mut ctx = Ctx::new(snap, now);
+    let wishes = crate::wishes::store::load_wishes(store.connection())?;
+    ctx.events = crate::events::claims(&wishes);
     let inputs = ReportInputs::load(store.connection(), snap.sync_health.0)?;
     let txs = &snap.transactions;
     let assigned = reporting::assignments(txs, &inputs.approved_categories);
@@ -55,6 +57,13 @@ pub fn dashboard(
     let current_month = ctx.current_month();
     let mut forecast_excluded = fixed_ids.clone();
     forecast_excluded.extend(plans::paid_outflow_ids(&payments));
+    let event_spends = budget::event_spending(&ctx, &spending, &payments);
+    forecast_excluded.extend(
+        event_spends
+            .iter()
+            .flat_map(|s| &s.transactions)
+            .map(|t| t.transaction_id.clone()),
+    );
     let spending_forecasts = forecast::spending_forecasts(
         &spending,
         &snap.group_mappings,
@@ -210,7 +219,13 @@ pub fn dashboard(
                 .budget_plans
                 .iter()
                 .find(|p| p.month == allocation.current_month && p.currency.code == "EUR");
-            let wishes = crate::wishes::store::load_wishes(store.connection())?;
+            let event_needs = crate::wishes::event_needs_for(
+                allocation,
+                &adjustments,
+                &event_spends,
+                &wishes,
+                Some(ctx.now.date()),
+            );
             Ok::<_, crate::Error>(crate::closure::plan::money_plan(
                 &crate::closure::plan::PlanInputs {
                     as_of: ctx.now.date(),
@@ -220,6 +235,7 @@ pub fn dashboard(
                     accounts: &accounts,
                     roles: &roles,
                     wishes: &wishes,
+                    event_needs: &event_needs,
                     salary_account_id: snap.settings.salary_account_id.as_deref(),
                     expected_unplanned,
                     predicted_bills: &predicted_bills,
@@ -232,7 +248,7 @@ pub fn dashboard(
         .iter()
         .map(|e| e.transaction_id.clone())
         .collect();
-    Ok(Dashboard {
+    let mut dashboard = Dashboard {
         generated_at: ctx.now.strftime("%Y-%m-%dT%H:%M:%S%:z").to_string(),
         settings: snap.settings.clone(),
         net_worth: reporting::net_worth_report(&snap.accounts, &ctx.now, inputs.refreshed_at),
@@ -267,7 +283,25 @@ pub fn dashboard(
         planned_payments: payments,
         weekly,
         cash_overview: cash,
-    })
+        events: Vec::new(),
+        event_spends,
+    };
+    // The events still to come or running, judged like the Events screen.
+    if !ctx.events.is_empty() {
+        let settings = crate::wishes::store::load_wish_settings(store.connection())?;
+        dashboard.events = crate::wishes::events_view(
+            &dashboard,
+            &snap.budget_plans,
+            &snap.bills,
+            &wishes,
+            &settings,
+        )
+        .events
+        .into_iter()
+        .filter(|e| e.phase != finance_types::report::events::EventPhase::Past)
+        .collect();
+    }
+    Ok(dashboard)
 }
 
 /// The review inbox. Automatic categorisation runs in a later phase, so the

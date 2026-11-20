@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-plan-wish-as-event"
+description = "Enables the plan_wish_as_event command without any pre-configured scope."
+commands.allow = ["plan_wish_as_event"]
+
+[[permission]]
+identifier = "deny-plan-wish-as-event"
+description = "Denies the plan_wish_as_event command without any pre-configured scope."
+commands.deny = ["plan_wish_as_event"]

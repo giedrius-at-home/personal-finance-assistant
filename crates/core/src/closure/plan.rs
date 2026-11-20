@@ -14,6 +14,7 @@ use finance_types::report::plans::{PlanStatus, PlannedPaymentView};
 use jiff::civil::Date;
 use rust_decimal::Decimal;
 
+use crate::events::EventNeed;
 use crate::model::Account;
 
 /// What [`money_plan`] reads.
@@ -31,6 +32,8 @@ pub struct PlanInputs<'a> {
     pub accounts: &'a [&'a Account],
     pub roles: &'a [AccountRole],
     pub wishes: &'a [Wish],
+    /// What each event still asks, month by month.
+    pub event_needs: &'a [EventNeed],
     pub salary_account_id: Option<&'a str>,
     /// Unplanned spending expected for the rest of the month (the outlook's
     /// estimate from past months); kept back from the wiggle room.
@@ -63,7 +66,27 @@ fn day_of(text: &str) -> Option<Date> {
 
 /// What the planned one-off wishes in `currency` still need saved (a
 /// parent's cap covers its parts).
-pub fn wishes_open(wishes: &[Wish], currency: &str) -> Decimal {
+pub fn wishes_open(wishes: &[Wish], currency: &str, needs: &[EventNeed]) -> Decimal {
+    let asked = |w: &Wish| {
+        w.event
+            .as_ref()
+            .and_then(|_| needs.iter().find(|n| n.wish_id == w.wish_id))
+            .map(|n| {
+                // An event asks for what its months still need, plus the
+                // parts still to buy.
+                let parts: Decimal = wishes
+                    .iter()
+                    .filter(|p| {
+                        p.parent_id.as_deref() == Some(&w.wish_id)
+                            && p.status == WishStatus::Planned
+                            && p.kind == WishKind::OneOff
+                    })
+                    .map(|p| p.amount)
+                    .sum();
+                n.months.iter().map(|(_, need)| *need).sum::<Decimal>() + parts
+            })
+            .unwrap_or(w.amount)
+    };
     wishes
         .iter()
         .filter(|w| {
@@ -72,7 +95,7 @@ pub fn wishes_open(wishes: &[Wish], currency: &str) -> Decimal {
                 && w.parent_id.is_none()
                 && w.currency.code == currency
         })
-        .map(|w| (w.amount - w.saved).max(Decimal::ZERO))
+        .map(|w| (asked(w) - w.saved).max(Decimal::ZERO))
         .sum()
 }
 
@@ -352,7 +375,7 @@ pub fn money_plan(input: &PlanInputs<'_>) -> MoneyPlan {
             outgoing,
             must_keep,
             wishes,
-            wishes_open: wishes_open(input.wishes, code),
+            wishes_open: wishes_open(input.wishes, code, input.event_needs),
             expected,
             wiggle_room: account.balance + incoming - outgoing - must_keep - set_aside,
         })
@@ -408,6 +431,25 @@ mod tests {
         }
     }
 
+    #[test]
+    fn an_open_event_counts_what_it_still_asks_not_its_whole_amount() {
+        let event = Wish {
+            event: Some(Default::default()),
+            ..wish("e", "50", WishStatus::Planned)
+        };
+        let needs = [crate::events::EventNeed {
+            wish_id: "e".into(),
+            months: vec![
+                (jiff::civil::date(2026, 11, 1), d("60")),
+                (jiff::civil::date(2026, 12, 1), d("190")),
+            ],
+        }];
+        // 250 still asked, 50 of it saved; the plain wish counts 500 − 50.
+        let wishes = [event, wish("w", "50", WishStatus::Planned)];
+        assert_eq!(wishes_open(&wishes, "EUR", &needs), d("650"));
+        assert_eq!(wishes_open(&wishes, "EUR", &[]), d("900"));
+    }
+
     fn wish(name: &str, saved: &str, status: WishStatus) -> Wish {
         Wish {
             wish_id: name.to_owned(),
@@ -424,6 +466,7 @@ mod tests {
             kind: WishKind::OneOff,
             must: false,
             created_at: String::new(),
+            event: None,
         }
     }
 
@@ -487,6 +530,7 @@ mod tests {
             salary_account_id: Some("firefly:1"),
             expected_unplanned: Decimal::ZERO,
             predicted_bills: &[],
+            event_needs: &[],
         })
     }
 
@@ -576,6 +620,7 @@ mod tests {
                 accounts: &refs,
                 roles: &roles,
                 wishes: &[],
+                event_needs: &[],
                 salary_account_id: Some("firefly:1"),
                 expected_unplanned: d("150"),
                 predicted_bills: bills,

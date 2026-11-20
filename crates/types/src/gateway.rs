@@ -455,6 +455,35 @@ pub enum WishKind {
 }
 
 /// What a wish actually cost, once bought.
+/// What makes a wish an event: the days it runs and the payments the
+/// owner put in or took out by hand. All day-to-day spending inside the
+/// dates belongs to the event.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EventDetails {
+    /// `YYYY-MM-DD`.
+    pub starts_on: String,
+    /// `YYYY-MM-DD`, the last day.
+    pub ends_on: String,
+    /// Transactions picked in by hand, whatever their date or group.
+    #[serde(default)]
+    pub transaction_ids: Vec<String>,
+    /// Transactions inside the dates that are not part of the event.
+    #[serde(default)]
+    pub excluded_ids: Vec<String>,
+}
+
+/// What to do with a payment on an event.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EventPick {
+    /// Count it, whatever its date or group.
+    Pick,
+    /// Not part of the event, though it falls inside the dates.
+    Exclude,
+    /// Neither: its date decides.
+    Clear,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WishPurchase {
     pub amount: Decimal,
@@ -464,6 +493,10 @@ pub struct WishPurchase {
     /// What went on each credit card.
     #[serde(default)]
     pub cards: Vec<CardCharge>,
+    /// The ledger transaction that is this purchase, when the owner named
+    /// one: an event then counts the money here and not a second time.
+    #[serde(default)]
+    pub transaction_id: Option<String>,
 }
 
 /// An amount charged to one credit card.
@@ -501,6 +534,9 @@ pub struct Wish {
     /// A must-have: it is paid for before anything else is.
     #[serde(default)]
     pub must: bool,
+    /// Set on an event: it shows on Events, not on Wishes.
+    #[serde(default)]
+    pub event: Option<EventDetails>,
     pub created_at: String,
 }
 
@@ -521,6 +557,9 @@ pub struct WishDraft {
     pub kind: WishKind,
     #[serde(default)]
     pub must: bool,
+    /// The event's dates; the id lists are kept as stored.
+    #[serde(default)]
+    pub event: Option<EventDetails>,
 }
 
 /// One credit card the wishes may lean on.
@@ -645,6 +684,21 @@ mod tests {
         let json = r#"{"wish_id":"w","name":"Bike","amount":"900","currency":{"code":"EUR","minor_unit":2},"due_on":"2026-12-01","source":{"kind":"card"},"created_at":"x"}"#;
         let wish: Wish = serde_json::from_str(json).unwrap();
         assert_eq!(wish.kind, WishKind::OneOff);
+        assert_eq!(wish.event, None);
+        let json = json.replace(
+            r#""created_at""#,
+            r#""event":{"starts_on":"2026-11-30","ends_on":"2026-12-05"},"created_at""#,
+        );
+        let wish: Wish = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            wish.event,
+            Some(EventDetails {
+                starts_on: "2026-11-30".into(),
+                ends_on: "2026-12-05".into(),
+                transaction_ids: Vec::new(),
+                excluded_ids: Vec::new(),
+            })
+        );
         let kind: WishKind =
             serde_json::from_str(r#"{"type":"recurring","every":"biweekly"}"#).unwrap();
         assert_eq!(

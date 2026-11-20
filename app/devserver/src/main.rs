@@ -60,6 +60,20 @@ struct WishIdArgs {
 }
 
 #[derive(Deserialize)]
+struct EventDatesArgs {
+    wish_id: String,
+    starts_on: String,
+    ends_on: String,
+}
+
+#[derive(Deserialize)]
+struct EventTransactionArgs {
+    wish_id: String,
+    transaction_id: String,
+    pick: finance_types::gateway::EventPick,
+}
+
+#[derive(Deserialize)]
 struct WishMustArgs {
     wish_id: String,
     must: bool,
@@ -237,6 +251,20 @@ fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
         "drop_wish" => {
             let a: WishIdArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
             ok(service.drop_wish(&a.wish_id))
+        }
+        "events" => ok(service.events()),
+        "plan_wish_as_event" => {
+            let a: EventDatesArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
+            ok(service.plan_wish_as_event(&a.wish_id, &a.starts_on, &a.ends_on))
+        }
+        "wish_back_from_event" => {
+            let a: WishIdArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
+            ok(service.wish_back_from_event(&a.wish_id))
+        }
+        "set_event_transaction" => {
+            let a: EventTransactionArgs =
+                serde_json::from_value(args).map_err(|e| e.to_string())?;
+            ok(service.set_event_transaction(&a.wish_id, &a.transaction_id, a.pick))
         }
         "set_wish_must" => {
             let a: WishMustArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;

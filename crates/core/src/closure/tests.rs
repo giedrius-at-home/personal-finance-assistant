@@ -349,6 +349,7 @@ fn wish(id: &str, amount: &str, saved: &str, parent: Option<&str>) -> Wish {
         kind: WishKind::OneOff,
         must: false,
         created_at: "2026-09-01T00:00:00Z".into(),
+        event: None,
     }
 }
 
@@ -397,6 +398,7 @@ fn wish_lines_need_a_planned_one_off_wish_with_room() {
             on: "2026-09-10".into(),
             source: WishSource::Card,
             cards: Vec::new(),
+            transaction_id: None,
         }),
         ..wish("bought", "50", "0", None)
     };

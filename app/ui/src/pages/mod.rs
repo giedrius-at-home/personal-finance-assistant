@@ -3,6 +3,7 @@
 pub mod adjustments;
 pub mod category_trends;
 pub mod closure;
+pub mod events;
 pub mod goals;
 pub mod manage;
 pub mod organise;

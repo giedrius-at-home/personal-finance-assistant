@@ -807,6 +807,7 @@ mod tests {
                 daily_spending: Vec::new(),
                 elapsed_days: elapsed,
                 expected: Vec::new(),
+                to_events: Vec::new(),
             },
             budgeted,
             group: (!budgeted).then(|| "Shopping".into()),

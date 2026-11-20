@@ -13,6 +13,9 @@ pub struct Ctx<'a> {
     /// The build moment, in the owner's time zone.
     pub now: Zoned,
     pub resolver: PeriodResolver,
+    /// The events, which own the spending of their days; set by the
+    /// builds that read the wishes.
+    pub events: Vec<crate::events::EventClaim>,
 }
 
 impl<'a> Ctx<'a> {
@@ -26,6 +29,7 @@ impl<'a> Ctx<'a> {
             snap,
             now: now.with_time_zone(snap.zone.clone()),
             resolver,
+            events: Vec::new(),
         }
     }
 

@@ -455,6 +455,7 @@ pub fn review_month(
         snap,
         now: now.with_time_zone(snap.zone.clone()),
         resolver,
+        events: Vec::new(),
     };
     // The closing month's payday decides whether next month's salary still
     // counts, even when the closure is reviewed after month end.

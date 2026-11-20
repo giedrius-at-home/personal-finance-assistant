@@ -102,6 +102,7 @@ mod tests {
             kind: Default::default(),
             must: false,
             created_at: "2026-10-28T10:00:00Z".into(),
+            event: None,
         };
         let settings = WishSettings {
             cards: vec![
