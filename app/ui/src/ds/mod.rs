@@ -581,7 +581,10 @@ pub fn MultiSelect(
     #[prop(into)] label: String,
     #[prop(optional, into)] id: String,
 ) -> impl IntoView {
+    // A long list shows what is chosen and a search box for the rest.
+    let long = options.len() > LONG_LIST;
     let options = StoredValue::new(options);
+    let query = RwSignal::new(String::new());
     let chips = move || {
         let chosen = list_names(&value.get());
         let mut all = options.get_value();
@@ -590,7 +593,9 @@ pub fn MultiSelect(
                 all.push(name.clone());
             }
         }
-        all.into_iter()
+        let shown = shown_names(&all, &chosen, long.then(|| query.get()).as_deref());
+        shown
+            .into_iter()
             .map(|name| {
                 let on = chosen.iter().any(|c| c.eq_ignore_ascii_case(&name));
                 let text = name.clone();
@@ -614,8 +619,22 @@ pub fn MultiSelect(
             })
             .collect_view()
     };
+    let search = long.then(|| {
+        let placeholder = format!("Search {} to add", options.with_value(Vec::len));
+        view! {
+            <input
+                type="search"
+                class=cn([CONTROL, "h-8 max-w-xs basis-full"])
+                placeholder=placeholder
+                aria-label=format!("Search {label}")
+                prop:value=move || query.get()
+                on:input=move |ev| query.set(event_target_value(&ev))
+            />
+        }
+    });
     view! {
-        <div id=id role="group" aria-label=label class="flex flex-wrap gap-1.5">
+        <div id=id role="group" aria-label=label.clone() class="flex flex-wrap gap-1.5">
+            {search}
             {chips}
             {move || {
                 (options.with_value(Vec::is_empty) && list_names(&value.get()).is_empty())
@@ -623,6 +642,28 @@ pub fn MultiSelect(
             }}
         </div>
     }
+}
+
+/// More options than this and [`MultiSelect`] searches instead of listing.
+const LONG_LIST: usize = 24;
+
+/// The chips to show: all of them for a short list (`query` is `None`);
+/// for a long one the chosen names, then the others matching `query`.
+pub fn shown_names(all: &[String], chosen: &[String], query: Option<&str>) -> Vec<String> {
+    let Some(query) = query else {
+        return all.to_vec();
+    };
+    let query = query.trim().to_lowercase();
+    let is_chosen = |n: &String| chosen.iter().any(|c| c.eq_ignore_ascii_case(n));
+    let mut out: Vec<String> = all.iter().filter(|n| is_chosen(n)).cloned().collect();
+    if !query.is_empty() {
+        out.extend(
+            all.iter()
+                .filter(|n| !is_chosen(n) && n.to_lowercase().contains(&query))
+                .cloned(),
+        );
+    }
+    out
 }
 
 /// The site's `SegmentedControl`: a pill of mutually exclusive options.

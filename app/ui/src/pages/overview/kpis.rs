@@ -16,6 +16,14 @@ pub fn OverviewKpis() -> impl IntoView {
     with_report(strip)
 }
 
+/// A bank shortfall split into what the savings above the wishes cover
+/// and what would eat into the next salary: `(from_savings, at_risk)`.
+pub(super) fn bank_gap(spendable: Decimal, savings_room: Decimal) -> (Decimal, Decimal) {
+    let gap = (-spendable).max(Decimal::ZERO);
+    let from_savings = gap.min(savings_room.max(Decimal::ZERO));
+    (from_savings, gap - from_savings)
+}
+
 fn strip(report: &Dashboard) -> Option<AnyView> {
     let a = report.monthly_allocation.as_ref()?.currencies.first()?;
     let unit = a.currency.clone();
@@ -25,14 +33,23 @@ fn strip(report: &Dashboard) -> Option<AnyView> {
     let month = format!("{}-01", &through[..7.min(through.len())]);
 
     let next_short = a.next_planned_funds > zero && a.next_shortfall > zero;
-    let (spend_tone, spend_word, spend_facts) = if a.salary_at_risk > zero {
+    let savings_room = report
+        .money_plan
+        .as_ref()
+        .and_then(|p| p.savings.as_ref())
+        .map_or(zero, |s| s.balance - s.must_keep);
+    let (from_savings, at_risk) = bank_gap(a.current_wiggle_room, savings_room);
+    let (spend_tone, spend_word, spend_facts) = if at_risk > zero {
+        let mut facts = vec![("Of next month\u{2019}s salary".to_owned(), m(at_risk))];
+        if from_savings > zero {
+            facts.insert(0, ("Take from savings".to_owned(), m(from_savings)));
+        }
+        (Tone::Warning, "Salary at risk", facts)
+    } else if from_savings > zero {
         (
             Tone::Warning,
-            "Salary at risk",
-            vec![(
-                "Of next month\u{2019}s salary".to_owned(),
-                m(a.salary_at_risk),
-            )],
+            "Savings cover it",
+            vec![("Take from savings".to_owned(), m(from_savings))],
         )
     } else if next_short {
         (
@@ -98,7 +115,7 @@ fn strip(report: &Dashboard) -> Option<AnyView> {
     let saved = m(a.savings_balance);
     let saved_facts = vec![(
         "By month end".to_owned(),
-        m(a.current_wiggle_room.max(zero) + a.savings_balance),
+        m((a.current_wiggle_room + a.savings_balance).max(zero)),
     )];
     let savings =
         view! { <Metric label="In savings" facts=saved_facts>{saved}</Metric> }.into_any();
@@ -152,4 +169,18 @@ fn strip(report: &Dashboard) -> Option<AnyView> {
         }
         .into_any(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn savings_take_a_bank_gap_before_the_salary_does() {
+        let d = |t: &str| t.parse::<Decimal>().unwrap();
+        assert_eq!(bank_gap(d("-11.74"), d("611.36")), (d("11.74"), d("0")));
+        assert_eq!(bank_gap(d("-50"), d("20")), (d("20"), d("30")));
+        assert_eq!(bank_gap(d("-50"), d("-5")), (d("0"), d("50")));
+        assert_eq!(bank_gap(d("10"), d("100")), (d("0"), d("0")));
+    }
 }

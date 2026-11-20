@@ -317,8 +317,9 @@ fn band(
     )
 }
 
-/// Unpaid planned payments and bills from today through `end`. An overdue
-/// outflow is still owed, so it lands on today; an overdue deposit is dropped.
+/// Unpaid planned payments and bills from today through `end`. An outflow
+/// overdue this month is still owed, so it lands on today; an overdue
+/// deposit is dropped.
 fn upcoming(
     currency: &Currency,
     today: Date,
@@ -335,6 +336,11 @@ fn upcoming(
             continue;
         };
         if p.direction == Direction::Inflow && due_on < today {
+            continue;
+        }
+        // Like the monthly plan: a payment left unpaid in an earlier month
+        // is only still owed while it is a pending card reservation.
+        if due_on < today.first_of_month() && !p.pending {
             continue;
         }
         let day = today.max(due_on);
@@ -1158,6 +1164,27 @@ mod tests {
         assert_eq!(monday.spend_day_share, Decimal::ONE);
         assert_eq!(forecast.baseline_error, Some(Decimal::ZERO));
         assert_eq!(forecast.model_error, None);
+    }
+
+    #[test]
+    fn a_plan_left_unpaid_in_an_earlier_month_is_owed_only_while_pending() {
+        let today = date(2026, 9, 25);
+        let stale = planned(
+            "old",
+            "Card due",
+            "2026-08-01",
+            PlanStatus::Overdue,
+            Direction::Outflow,
+        );
+        let reserved = PlannedPaymentView {
+            pending: true,
+            ..stale.clone()
+        };
+        let eur = Currency::new("EUR");
+        let owed =
+            |p: PlannedPaymentView| upcoming(&eur, today, date(2026, 10, 2), &[p], &[]).len();
+        assert_eq!(owed(stale), 0);
+        assert_eq!(owed(reserved), 1);
     }
 
     #[test]

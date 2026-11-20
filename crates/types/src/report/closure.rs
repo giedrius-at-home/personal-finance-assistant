@@ -405,6 +405,10 @@ pub struct PlanMove {
     pub via_account_id: Option<String>,
     pub amount: Decimal,
     pub reason: String,
+    /// Covers an account that is short, from another account's spare
+    /// money or from savings (not part of handing out the salary).
+    #[serde(default)]
+    pub cover: bool,
 }
 
 /// The savings account: what sits there, what the wishes already saved

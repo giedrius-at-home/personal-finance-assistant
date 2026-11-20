@@ -472,8 +472,12 @@ pub fn saving(row: &WishRow, months: &[WishMonth]) -> Option<Saving> {
 /// the room above that. The pot the months start from already leaves the
 /// saved money out, so it is the wiggle room.
 fn savings_fields(months: &[WishMonth], must_keep: Decimal) -> Option<(Decimal, Decimal, Decimal)> {
-    let free = months.first()?.savings_before;
-    Some((free + must_keep, must_keep, free))
+    let first = months.first()?;
+    let free = first.savings_before;
+    // What the bank accounts are short this month comes out of the room
+    // first, as on the Overview.
+    let room = free + first.free_before.min(Decimal::ZERO);
+    Some((free + must_keep, must_keep, room))
 }
 
 /// What the wishes put on the cards this month, paid back on the 1st of
@@ -3112,6 +3116,14 @@ mod tests {
         assert_eq!(
             savings_fields(&months, d(624, 0)),
             Some((d(1374, 0), d(624, 0), d(750, 0)))
+        );
+        let short = WishMonth {
+            free_before: d(-50, 0),
+            ..with_savings("2026-10-01", d(250, 0), Vec::new())
+        };
+        assert_eq!(
+            savings_fields(&[short], d(624, 0)),
+            Some((d(1374, 0), d(624, 0), d(700, 0)))
         );
         assert_eq!(savings_fields(&[], d(624, 0)), None);
     }

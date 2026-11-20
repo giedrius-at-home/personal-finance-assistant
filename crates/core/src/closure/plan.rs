@@ -208,6 +208,7 @@ pub fn money_plan(input: &PlanInputs<'_>) -> MoneyPlan {
                 via_account_id: role_of(&target.account_id).and_then(|r| r.via_account_id.clone()),
                 amount,
                 reason: format!("Top up {}", target.name),
+                cover: false,
             });
         }
         if left > Decimal::ZERO
@@ -221,14 +222,85 @@ pub fn money_plan(input: &PlanInputs<'_>) -> MoneyPlan {
                 via_account_id: role_of(target).and_then(|r| r.via_account_id.clone()),
                 amount: left,
                 reason: "Savings".to_owned(),
+                cover: false,
             });
         }
     }
 
     let wishes = wishes_must_keep(input.wishes, code);
     let must_keep: Decimal = wishes.iter().map(|(_, v)| *v).sum();
-    // What the salary account could not cover comes back out of savings,
-    // as far as the room above the wishes and the estimate reaches.
+    // What each spending account is still short after the moves so far:
+    // the salary account's bills first, then the pockets by name.
+    let open_shorts = |moves: &[PlanMove]| -> Vec<(usize, Decimal)> {
+        let mut open: Vec<(usize, Decimal)> = accounts
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| a.role == AccountRoleKind::Spending)
+            .filter_map(|(i, a)| {
+                let sent: Decimal = moves
+                    .iter()
+                    .filter(|m| m.to_account_id == a.account_id)
+                    .map(|m| m.amount)
+                    .sum();
+                let left = a.short - sent;
+                (left > Decimal::ZERO).then_some((i, left))
+            })
+            .collect();
+        open.sort_by(|(a, _), (b, _)| {
+            let pocket =
+                |i: &usize| input.salary_account_id != Some(accounts[*i].account_id.as_str());
+            pocket(a)
+                .cmp(&pocket(b))
+                .then_with(|| accounts[*a].name.cmp(&accounts[*b].name))
+        });
+        open
+    };
+    let cover = |from: &PlanAccount, to: &PlanAccount, amount: Decimal, reason: String| PlanMove {
+        from_account_id: from.account_id.clone(),
+        to_account_id: to.account_id.clone(),
+        via_account_id: role_of(&to.account_id).and_then(|r| r.via_account_id.clone()),
+        amount,
+        reason,
+        cover: true,
+    };
+    // Spare money on the other spending accounts covers a short one first
+    // (the salary account's spare is already handed out above).
+    let mut spare: Vec<(usize, Decimal)> = accounts
+        .iter()
+        .enumerate()
+        .filter(|(_, a)| {
+            a.role == AccountRoleKind::Spending
+                && a.spare > Decimal::ZERO
+                && input.salary_account_id != Some(a.account_id.as_str())
+        })
+        .map(|(i, a)| (i, a.spare))
+        .collect();
+    spare.sort_by(|(a, x), (b, y)| {
+        y.cmp(x)
+            .then_with(|| accounts[*a].name.cmp(&accounts[*b].name))
+    });
+    for (target, mut left) in open_shorts(&moves) {
+        for (source, room) in spare.iter_mut() {
+            if left <= Decimal::ZERO {
+                break;
+            }
+            let amount = left.min(*room);
+            if amount <= Decimal::ZERO {
+                continue;
+            }
+            *room -= amount;
+            left -= amount;
+            let (from, to) = (&accounts[*source], &accounts[target]);
+            moves.push(cover(
+                from,
+                to,
+                amount,
+                format!("Cover {} from {}", to.name, from.name),
+            ));
+        }
+    }
+    // What is still open comes back out of savings, as far as the room
+    // above the wishes and the estimate reaches.
     let mut outgoing = Decimal::ZERO;
     if let Some(source) = savings_target
         .as_ref()
@@ -236,38 +308,20 @@ pub fn money_plan(input: &PlanInputs<'_>) -> MoneyPlan {
     {
         let mut room = (source.balance - must_keep - input.expected_unplanned.max(Decimal::ZERO))
             .max(Decimal::ZERO);
-        let mut open: Vec<(&PlanAccount, Decimal)> = accounts
-            .iter()
-            .filter(|a| a.role == AccountRoleKind::Spending)
-            .filter_map(|a| {
-                let sent: Decimal = moves
-                    .iter()
-                    .filter(|m| m.to_account_id == a.account_id)
-                    .map(|m| m.amount)
-                    .sum();
-                let left = a.short - sent;
-                (left > Decimal::ZERO).then_some((a, left))
-            })
-            .collect();
-        // The salary account's bills first, then the pockets by name.
-        open.sort_by(|(a, _), (b, _)| {
-            let salary = |a: &PlanAccount| input.salary_account_id != Some(a.account_id.as_str());
-            salary(a).cmp(&salary(b)).then_with(|| a.name.cmp(&b.name))
-        });
-        for (target, left) in open {
+        for (target, left) in open_shorts(&moves) {
             if room <= Decimal::ZERO {
                 break;
             }
             let amount = left.min(room);
             room -= amount;
             outgoing += amount;
-            moves.push(PlanMove {
-                from_account_id: source.account_id.clone(),
-                to_account_id: target.account_id.clone(),
-                via_account_id: role_of(&target.account_id).and_then(|r| r.via_account_id.clone()),
+            let to = &accounts[target];
+            moves.push(cover(
+                source,
+                to,
                 amount,
-                reason: format!("Cover {} from savings", target.name),
-            });
+                format!("Cover {} from savings", to.name),
+            ));
         }
     }
     let mut overspent: Vec<(String, Decimal)> = allocation
@@ -563,13 +617,20 @@ mod tests {
         let refs: Vec<&Account> = accounts.iter().collect();
         let plan = plan(&refs, &roles, &[]);
         assert_eq!(plan.accounts[0].short, d("19.92"));
-        // Only savings give: nothing leaves the salary account.
+        // Spare money and savings give: nothing leaves the salary account.
         assert!(
             plan.moves
                 .iter()
-                .all(|m| m.from_account_id == "firefly:413")
+                .all(|m| m.cover && m.from_account_id != "firefly:1")
         );
-        assert_eq!(plan.moves[0].amount, d("19.92"));
+        // Swedbank's spare 7 first, then savings for the bills' other 12.92.
+        let to_bills: Vec<Decimal> = plan
+            .moves
+            .iter()
+            .filter(|m| m.to_account_id == "firefly:1")
+            .map(|m| m.amount)
+            .collect();
+        assert_eq!(to_bills, [d("7"), d("12.92")]);
         assert_eq!(plan.savings.unwrap().incoming, Decimal::ZERO);
     }
 
@@ -612,7 +673,21 @@ mod tests {
             let a = plan.accounts.iter().find(|a| a.account_id == id).unwrap();
             a.short
         };
-        assert_eq!(from_savings[0], ("firefly:1", short("firefly:1")));
+        // Swedbank's spare 7 goes to the bills first; savings cover the rest.
+        let spare: Vec<(&str, &str, Decimal)> = plan
+            .moves
+            .iter()
+            .filter(|m| m.cover && m.from_account_id != "firefly:413")
+            .map(|m| {
+                (
+                    m.from_account_id.as_str(),
+                    m.to_account_id.as_str(),
+                    m.amount,
+                )
+            })
+            .collect();
+        assert_eq!(spare, [("firefly:5", "firefly:1", d("7"))]);
+        assert_eq!(from_savings[0], ("firefly:1", short("firefly:1") - d("7")));
         let total: Decimal = from_savings.iter().map(|(_, v)| *v).sum();
         let savings = plan.savings.unwrap();
         assert_eq!(savings.outgoing, total);

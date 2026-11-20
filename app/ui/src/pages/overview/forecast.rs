@@ -97,12 +97,18 @@ pub fn DailyForecastPanel(report: Dashboard, currency_code: String) -> impl Into
             view! { <li aria-label=aria>{format!("{}: {}", label(&d.day), m(d.habit_expected + d.planned))}</li> }
         })
         .collect_view();
-    let upcoming = (!forecast.upcoming.is_empty()).then(|| {
+    // A bill with nothing to pay (an unused card) is not worth a line.
+    let coming: Vec<_> = forecast
+        .upcoming
+        .iter()
+        .filter(|flow| !flow.amount.is_zero())
+        .cloned()
+        .collect();
+    let upcoming = (!coming.is_empty()).then(|| {
         view! {
             <ul class="grid content-start" aria-label="Coming up">
                 <li class="pb-1 text-eyebrow font-bold uppercase tracking-eyebrow text-fg-muted">"Coming up"</li>
-                {forecast
-                    .upcoming
+                {coming
                     .iter()
                     .map(|flow| {
                         view! {
