@@ -342,6 +342,13 @@ pub fn set_event_transaction(
     pick: EventPick,
 ) -> Result<Wish> {
     let mut wish = event_wish(&load_wishes(&w.tx)?, wish_id)?;
+    // The transaction search names a payment by its bare ledger id.
+    let ledger = format!("firefly:{transaction_id}");
+    let transaction_id = if snap.transactions.iter().any(|t| t.transaction_id == ledger) {
+        ledger.as_str()
+    } else {
+        transaction_id
+    };
     known_payment(snap, transaction_id, &wish.currency)?;
     if let Some(event) = &mut wish.event {
         event.transaction_ids.retain(|id| id != transaction_id);
@@ -1030,6 +1037,9 @@ mod tests {
         let e = set("firefly:12", EventPick::Clear).unwrap();
         assert_eq!((e.transaction_ids.len(), e.excluded_ids.len()), (0, 0));
         assert!(set("no-such-payment", EventPick::Pick).is_err());
+        // The search's bare ledger id lands as the ledger's own id.
+        let e = set("12", EventPick::Pick).unwrap();
+        assert_eq!(e.transaction_ids, ["firefly:12"]);
         let plain = db.write(|w, s| save_wish(w, s, draft("Bike"))).unwrap();
         assert!(
             db.write(|w, s| set_event_transaction(
