@@ -25,6 +25,7 @@ use crate::model::{Kind, Tx};
 use crate::period::{PeriodResolver, shift_month};
 use crate::personal::apply_personal_spending;
 use crate::plans::net_spending_transactions;
+use finance_types::report::events::{EventSpend, EventTransaction};
 
 /// The months a budget's history covers: five before it and the month itself.
 pub(crate) const HISTORY_MONTHS: i32 = 6;
@@ -641,15 +642,16 @@ pub fn monthly_budgets(
     .collect()
 }
 
-/// The ids of every transaction an event owns, for the passes that must
-/// leave event days out of the groups' record (the spending forecasts).
-pub fn event_owned_ids(
+/// What every event has spent, read from the ledger: the payments picked
+/// in ahead, the spending of its days by budget month, and each
+/// transaction it owns.
+pub fn event_spending(
     ctx: &Ctx,
     spending: &[Tx],
     payments: &[PlannedPaymentView],
-) -> HashSet<String> {
+) -> Vec<EventSpend> {
     if ctx.events.is_empty() {
-        return HashSet::new();
+        return Vec::new();
     }
     let fixed_ids = budget_fixed_ids(ctx, spending);
     let inputs = BudgetInputs {
@@ -664,11 +666,61 @@ pub fn event_owned_ids(
     };
     let plan = default_budget(ctx.current_month(), &Currency::eur());
     let ownership = Ownership::new(&plan, &inputs);
-    spending
+    let mut out: Vec<EventSpend> = ctx
+        .events
         .iter()
-        .filter(|t| ownership.event(t).is_some())
-        .map(|t| t.transaction_id.clone())
-        .collect()
+        .map(|claim| EventSpend {
+            wish_id: claim.wish_id.clone(),
+            ..EventSpend::default()
+        })
+        .collect();
+    for t in spending {
+        if !matches!(t.kind, Kind::Outflow | Kind::Refund)
+            || t.occurred_at.timestamp() > ctx.now.timestamp()
+        {
+            continue;
+        }
+        let Some(claim) = ownership.event(t) else {
+            continue;
+        };
+        let Some(spend) = out.iter_mut().find(|s| s.wish_id == claim.wish_id) else {
+            continue;
+        };
+        let on = t.effective_on();
+        let amount = signed(t);
+        let part_id = claim.tied.get(&t.transaction_id).cloned();
+        if part_id.is_none() {
+            if on < claim.starts {
+                spend.picked_ahead += amount;
+            } else {
+                let month = month_of(t, &inputs).to_string();
+                match spend.by_month.iter_mut().find(|(m, _)| *m == month) {
+                    Some((_, sum)) => *sum += amount,
+                    None => spend.by_month.push((month, amount)),
+                }
+            }
+        }
+        let description = [t.description.as_deref(), t.category.as_deref()]
+            .into_iter()
+            .flatten()
+            .find(|s| !s.is_empty())
+            .unwrap_or("Purchase");
+        spend.transactions.push(EventTransaction {
+            transaction_id: t.transaction_id.clone(),
+            description: description.to_owned(),
+            on: on.to_string(),
+            amount,
+            picked: claim.picked.contains(&t.transaction_id),
+            part_id,
+        });
+    }
+    for spend in &mut out {
+        spend.by_month.sort();
+        spend
+            .transactions
+            .sort_by(|a, b| (&b.on, &b.transaction_id).cmp(&(&a.on, &a.transaction_id)));
+    }
+    out
 }
 
 /// Label of the unplanned row's estimate.

@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 
 use finance_types::gateway::{Wish, WishKind, WishStatus};
 use finance_types::report::Currency;
-use finance_types::report::events::Pace;
+use finance_types::report::events::{EventSpend, Pace};
 use jiff::civil::Date;
 use rust_decimal::Decimal;
 
@@ -111,6 +111,90 @@ pub fn owner<'a>(
                 .filter(open)
                 .find(|c| day_to_day && c.starts <= on && on <= c.ends)
         })
+}
+
+/// A spending group as an event's future months see it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GroupUsual {
+    /// Its usual month.
+    pub usual: Decimal,
+    /// Its limit: it cannot hand over more than it is given.
+    pub limit: Decimal,
+}
+
+/// What the groups would usually spend on `days` days of `month`: what a
+/// later month's groups hand an event, never more than the event's `share`.
+pub fn usual_estimate(groups: &[GroupUsual], month: Date, days: u32, share: Decimal) -> Decimal {
+    groups
+        .iter()
+        .map(|g| {
+            usual_share(g.usual, month, days)
+                .min(g.limit)
+                .max(Decimal::ZERO)
+        })
+        .sum::<Decimal>()
+        .min(share.max(Decimal::ZERO))
+}
+
+/// What an event still asks of each calendar month, from the running one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EventNeed {
+    pub wish_id: String,
+    pub months: Vec<(Date, Decimal)>,
+}
+
+fn month_day(text: &str) -> Option<Date> {
+    day(text).map(|d| d.first_of_month())
+}
+
+/// The money for the days: the rest less what was picked in ahead.
+pub fn days_money(claim: &EventClaim, spend: Option<&EventSpend>) -> Decimal {
+    (claim.rest - spend.map_or(Decimal::ZERO, |s| s.picked_ahead)).max(Decimal::ZERO)
+}
+
+/// What `spend` counts in the budget month starting on `month`.
+pub fn spent_in(spend: Option<&EventSpend>, month: Date) -> Decimal {
+    spend.map_or(Decimal::ZERO, |s| {
+        s.by_month
+            .iter()
+            .filter(|(m, _)| month_day(m) == Some(month))
+            .map(|(_, n)| *n)
+            .sum()
+    })
+}
+
+/// Each month's share less what is spent of it. The running month's groups
+/// have already handed over their usual days (the budget lowers their
+/// reserves); a later month's have not, so their usual days come off here.
+/// An event that is over asks for nothing.
+pub fn need(
+    claim: &EventClaim,
+    spend: Option<&EventSpend>,
+    groups: &[GroupUsual],
+    current_month: Date,
+    today: Date,
+) -> EventNeed {
+    let months = if today > claim.ends {
+        Vec::new()
+    } else {
+        shares(claim, days_money(claim, spend))
+            .into_iter()
+            .filter(|(month, _)| *month >= current_month)
+            .map(|(month, share)| {
+                let usual = if month > current_month {
+                    usual_estimate(groups, month, days_in(claim, month), share)
+                } else {
+                    Decimal::ZERO
+                };
+                let left = share - spent_in(spend, month) - usual;
+                (month, left.max(Decimal::ZERO))
+            })
+            .collect()
+    };
+    EventNeed {
+        wish_id: claim.wish_id.clone(),
+        months,
+    }
 }
 
 fn span_days(from: Date, to: Date) -> u32 {
@@ -247,6 +331,81 @@ pub(crate) mod tests {
             }),
             ..wish(id, None, amount)
         }
+    }
+
+    fn spend(picked_ahead: &str, by_month: &[(&str, &str)]) -> EventSpend {
+        EventSpend {
+            wish_id: "e".into(),
+            picked_ahead: d(picked_ahead),
+            by_month: by_month
+                .iter()
+                .map(|(m, n)| ((*m).to_owned(), d(n)))
+                .collect(),
+            transactions: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn an_event_asks_each_month_for_its_share_less_what_is_spent() {
+        let e = claim("2026-11-30", "2026-12-05");
+        let (nov, dec) = (date(2026, 11, 1), date(2026, 12, 1));
+        // Nothing spent, judged in November: the running month's groups
+        // hand over their usual share themselves, later months net it here.
+        let groups = [GroupUsual {
+            usual: d("310"),
+            limit: d("300"),
+        }];
+        assert_eq!(
+            need(&e, None, &groups, nov, date(2026, 11, 20)).months,
+            vec![(nov, d("66.67")), (dec, d("283.33"))]
+        );
+        // December runs: €100 spent of its share.
+        let s = spend("0", &[("2026-12-01", "100")]);
+        assert_eq!(
+            need(&e, Some(&s), &groups, dec, date(2026, 12, 2)).months,
+            vec![(dec, d("233.33"))]
+        );
+        // Paid ahead comes off the money for the days.
+        let s = spend("46", &[]);
+        assert_eq!(
+            need(&e, Some(&s), &[], nov, date(2026, 11, 20)).months,
+            vec![(nov, d("59")), (dec, d("295"))]
+        );
+        // Spent more than the share: nothing more is asked, never less than zero.
+        let s = spend("0", &[("2026-12-01", "500")]);
+        assert_eq!(
+            need(&e, Some(&s), &groups, dec, date(2026, 12, 2)).months,
+            vec![(dec, d("0"))]
+        );
+        // Over: it asks for nothing.
+        assert!(
+            need(&e, None, &groups, dec, date(2026, 12, 6))
+                .months
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn the_usual_days_never_exceed_a_groups_limit_or_the_events_share() {
+        let groups = [
+            GroupUsual {
+                usual: d("310"),
+                limit: d("300"),
+            },
+            GroupUsual {
+                usual: d("62"),
+                limit: d("0"),
+            },
+        ];
+        // 310 × 5 ÷ 31 = 50 from the first; the second has no limit to give.
+        assert_eq!(
+            usual_estimate(&groups, date(2026, 12, 1), 5, d("333.33")),
+            d("50")
+        );
+        assert_eq!(
+            usual_estimate(&groups, date(2026, 12, 1), 5, d("20")),
+            d("20")
+        );
     }
 
     #[test]

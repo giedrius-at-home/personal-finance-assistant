@@ -95,6 +95,9 @@ pub struct Dashboard {
     /// The running and upcoming events, for Overview and Plan.
     #[serde(default)]
     pub events: Vec<events::EventRow>,
+    /// What each event has spent so far.
+    #[serde(default)]
+    pub event_spends: Vec<events::EventSpend>,
 }
 
 /// The category review inbox (Transactions screen).

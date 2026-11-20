@@ -17,6 +17,10 @@ use finance_types::report::{Currency, Dashboard};
 use jiff::civil::Date;
 use rust_decimal::Decimal;
 use schedule::{BillNow, Family, Planned, Saver};
+
+use crate::events::{EventNeed, GroupUsual};
+use finance_types::report::adjustments::Adjustments;
+use finance_types::report::events::EventSpend;
 use std::collections::HashMap;
 
 use crate::load::Bill;
@@ -42,8 +46,57 @@ pub fn wishes_view(
             &allocation(dashboard).map_or_else(Currency::eur, |a| a.currency.clone()),
             &settings.essential_groups,
         ),
+        events: event_needs(dashboard, wishes),
     }
     .view(wishes, settings)
+}
+
+/// What each event still asks of the months, from the dashboard's ledger
+/// reading; empty without an allocation to judge in.
+pub fn event_needs(dashboard: &Dashboard, wishes: &[Wish]) -> Vec<EventNeed> {
+    allocation(dashboard).map_or_else(Vec::new, |alloc| {
+        event_needs_for(
+            alloc,
+            &dashboard.adjustments,
+            &dashboard.event_spends,
+            wishes,
+            today(dashboard),
+        )
+    })
+}
+
+/// [`event_needs`] from the dashboard's parts, for while it is being built.
+pub fn event_needs_for(
+    alloc: &CurrencyAllocation,
+    adjustments: &[Adjustments],
+    spends: &[EventSpend],
+    wishes: &[Wish],
+    today: Option<Date>,
+) -> Vec<EventNeed> {
+    let Some(month0) = baseline::current_month(alloc) else {
+        return Vec::new();
+    };
+    // The budgeted groups as an event's later months see them.
+    let groups: Vec<GroupUsual> = adjustments
+        .iter()
+        .filter(|a| a.currency == alloc.currency)
+        .flat_map(|a| &a.rows)
+        .filter(|row| row.budgeted)
+        .filter_map(|row| {
+            Some(GroupUsual {
+                usual: goals::usual(&row.row.history)?,
+                limit: row.row.planned,
+            })
+        })
+        .collect();
+    crate::events::claims(wishes)
+        .iter()
+        .filter(|c| c.currency == alloc.currency)
+        .map(|claim| {
+            let spend = spends.iter().find(|s| s.wish_id == claim.wish_id);
+            crate::events::need(claim, spend, &groups, month0, today.unwrap_or(month0))
+        })
+        .collect()
 }
 
 /// The cuts buying `wish_id` with `purchase` needs in month 0: the unsaved
@@ -65,6 +118,7 @@ pub fn purchase_cuts(
         card_bills,
         bills: &bills,
         habits: Vec::new(),
+        events: event_needs(dashboard, wishes),
     }
     .purchase_cuts(wishes, settings, wish_id, purchase)
 }
@@ -188,6 +242,9 @@ pub struct Inputs<'a> {
     /// The spending groups at their typical month; empty leaves the goals
     /// unjudged against habits.
     pub habits: Vec<goals::HabitRow>,
+    /// What each event still asks, month by month; an event without an
+    /// entry is judged as the plain wish it also is.
+    pub events: Vec<EventNeed>,
 }
 
 impl Inputs<'_> {
@@ -229,7 +286,14 @@ impl Inputs<'_> {
         {
             first.retain(|d| !d.on_card);
         }
-        ladder::judge(bases, &repeats, &mut saver)
+        let mut judged = ladder::judge(bases, &repeats, &mut saver);
+        // An event's month shares are verdicts of the event itself.
+        for verdict in judged.iter_mut().flat_map(|m| &mut m.verdicts) {
+            if let Some(id) = &mut verdict.wish_id {
+                id.truncate(schedule::base_id(id).len());
+            }
+        }
+        judged
     }
 
     /// Judge `items` from month 0 on.
@@ -256,7 +320,8 @@ impl Inputs<'_> {
     ) -> Option<GoalOutlook> {
         let alloc = self.alloc.filter(|_| !self.habits.is_empty())?;
         let month0 = baseline::current_month(alloc)?;
-        let (mut items, families) = schedule::plan_items(wishes, month0, self.bills);
+        let (mut items, families) =
+            schedule::plan_items_with(wishes, month0, self.bills, &self.events);
         self.open_statement(&mut items, month0);
         let months = schedule::horizon(&items, month0);
         let (plan_bases, _) = self.bases(alloc, month0, wishes, settings, months);
@@ -412,7 +477,8 @@ impl Inputs<'_> {
     pub fn view(&self, wishes: &[Wish], settings: &WishSettings) -> WishesView {
         let judged = self.alloc.and_then(|a| {
             let month0 = baseline::current_month(a)?;
-            let (mut items, families) = schedule::plan_items(wishes, month0, self.bills);
+            let (mut items, families) =
+                schedule::plan_items_with(wishes, month0, self.bills, &self.events);
             self.open_statement(&mut items, month0);
             let (judged, stale) = self.judge(a, month0, &items, wishes, settings);
             Some((judged, families, stale))
@@ -482,7 +548,7 @@ impl Inputs<'_> {
         if gap <= Decimal::ZERO {
             return Vec::new();
         }
-        let (mut items, _) = schedule::plan_items(wishes, month0, self.bills);
+        let (mut items, _) = schedule::plan_items_with(wishes, month0, self.bills, &self.events);
         items.retain(|i| i.wish_id != wish_id);
         let due = purchase.on.parse::<Date>().unwrap_or(month0).max(month0);
         items.push(Planned {
@@ -537,6 +603,7 @@ pub fn view_from(
         card_bills,
         bills,
         habits: Vec::new(),
+        events: Vec::new(),
     }
     .view(wishes, settings)
 }
@@ -968,6 +1035,7 @@ mod tests {
             card_bills: Vec::new(),
             bills: &bills,
             habits: Vec::new(),
+            events: Vec::new(),
         };
         // While planned, month 0 only sets aside a third of the gap, and a
         // set-aside's cuts are not a purchase's.
@@ -1023,6 +1091,7 @@ mod tests {
             card_bills: Vec::new(),
             bills: &bills,
             habits: Vec::new(),
+            events: Vec::new(),
         };
         let view = inputs.view(&[late, gym], &WishSettings::default());
         let paid = |m: usize, id: &str| {
@@ -1055,6 +1124,7 @@ mod tests {
             card_bills: Vec::new(),
             bills: &bills,
             habits: Vec::new(),
+            events: Vec::new(),
         };
         let cuts = inputs.purchase_cuts(
             &wishes,
@@ -1097,6 +1167,7 @@ mod tests {
             card_bills: Vec::new(),
             bills: &bills,
             habits: Vec::new(),
+            events: Vec::new(),
         };
         let view = inputs.view(&wishes, &no_card_room());
         let tv: Vec<_> = view.months[0]
@@ -1330,6 +1401,7 @@ mod tests {
             card_bills: Vec::new(),
             bills: &HashMap::new(),
             habits,
+            events: Vec::new(),
         }
         .view(wishes, &WishSettings::default())
     }

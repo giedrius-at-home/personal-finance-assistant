@@ -57,7 +57,13 @@ pub fn dashboard(
     let current_month = ctx.current_month();
     let mut forecast_excluded = fixed_ids.clone();
     forecast_excluded.extend(plans::paid_outflow_ids(&payments));
-    forecast_excluded.extend(budget::event_owned_ids(&ctx, &spending, &payments));
+    let event_spends = budget::event_spending(&ctx, &spending, &payments);
+    forecast_excluded.extend(
+        event_spends
+            .iter()
+            .flat_map(|s| &s.transactions)
+            .map(|t| t.transaction_id.clone()),
+    );
     let spending_forecasts = forecast::spending_forecasts(
         &spending,
         &snap.group_mappings,
@@ -213,6 +219,13 @@ pub fn dashboard(
                 .budget_plans
                 .iter()
                 .find(|p| p.month == allocation.current_month && p.currency.code == "EUR");
+            let event_needs = crate::wishes::event_needs_for(
+                allocation,
+                &adjustments,
+                &event_spends,
+                &wishes,
+                Some(ctx.now.date()),
+            );
             Ok::<_, crate::Error>(crate::closure::plan::money_plan(
                 &crate::closure::plan::PlanInputs {
                     as_of: ctx.now.date(),
@@ -222,6 +235,7 @@ pub fn dashboard(
                     accounts: &accounts,
                     roles: &roles,
                     wishes: &wishes,
+                    event_needs: &event_needs,
                     salary_account_id: snap.settings.salary_account_id.as_deref(),
                     expected_unplanned,
                     predicted_bills: &predicted_bills,
@@ -270,6 +284,7 @@ pub fn dashboard(
         weekly,
         cash_overview: cash,
         events: Vec::new(),
+        event_spends,
     })
 }
 

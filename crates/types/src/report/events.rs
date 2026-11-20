@@ -53,6 +53,19 @@ pub struct EventTransaction {
     pub part_id: Option<String>,
 }
 
+/// What an event has spent, from the ledger.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EventSpend {
+    pub wish_id: String,
+    /// Payments picked in from before the first day (not a bought part's).
+    pub picked_ahead: Decimal,
+    /// `(YYYY-MM-01, spent)` from the first day on, by budget month,
+    /// without the payments that are a bought part's.
+    pub by_month: Vec<(String, Decimal)>,
+    /// Every transaction the event owns, newest first.
+    pub transactions: Vec<EventTransaction>,
+}
+
 /// An event with what it costs, what it has spent and how it is going.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EventRow {
