@@ -212,6 +212,10 @@ Paid ahead: Naturalis €28.00, Zoo €18.00            [Add a payment]
 - "Add a payment" searches the transactions (the existing search) and
   picks one in; each picked or dated transaction is listed with "Not part
   of this" to take it out.
+- On **Plan**, each month an event touches lists it among what that
+  month pays for: its name, dates, that month's share and what is spent
+  of it. (Owner: "once the wish is planned in the events, it gets removed
+  from the wishes and appear in the plan".)
 - On Overview, a running event is one more field in "What could be
   better", first in the list:
 
