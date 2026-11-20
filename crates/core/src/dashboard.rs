@@ -301,6 +301,30 @@ pub fn dashboard(
         .filter(|e| e.phase != finance_types::report::events::EventPhase::Past)
         .collect();
     }
+    // Which wish spare money is for, as the Wishes screen plans it.
+    let open_wishes = dashboard
+        .money_plan
+        .as_ref()
+        .and_then(|p| p.savings.as_ref())
+        .is_some_and(|s| s.wishes_open > rust_decimal::Decimal::ZERO);
+    if open_wishes {
+        let settings = crate::wishes::store::load_wish_settings(store.connection())?;
+        let view = crate::wishes::wishes_view(
+            &dashboard,
+            &snap.budget_plans,
+            &snap.bills,
+            &wishes,
+            &settings,
+        );
+        let order = crate::wishes::set_aside_order(&view.months, &wishes);
+        if let Some(savings) = dashboard
+            .money_plan
+            .as_mut()
+            .and_then(|p| p.savings.as_mut())
+        {
+            savings.wishes_needs = order;
+        }
+    }
     Ok(dashboard)
 }
 

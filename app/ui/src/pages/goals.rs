@@ -91,7 +91,7 @@ fn card(view: &WishesView) -> Option<AnyView> {
     let need = whole(outlook.needed_monthly.max(zero), unit);
     let left = whole(outlook.habit_free, unit);
     let left_class = if outlook.habit_free < zero {
-        "text-negative-fg"
+        "text-over-fg"
     } else {
         ""
     };

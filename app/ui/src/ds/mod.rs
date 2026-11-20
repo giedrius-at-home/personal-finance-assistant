@@ -209,7 +209,7 @@ pub fn Badge(
         Tone::Accent => "border-transparent bg-accent-soft text-accent",
         Tone::Positive => "border-positive/30 bg-positive/10 text-positive-fg",
         Tone::Negative => "border-negative/30 bg-negative/10 text-negative-fg",
-        Tone::Warning => "border-warning/30 bg-warning/10 text-warning-fg",
+        Tone::Warning => "border-over/30 bg-over/10 text-over-fg",
         Tone::Outline => "border-border text-fg",
     };
     view! {
@@ -236,7 +236,7 @@ pub fn Money(
 ) -> impl IntoView {
     let negative = value.is_sign_negative() && !value.is_zero();
     let tone = if !neutral && negative {
-        "text-negative-fg"
+        "text-over-fg"
     } else {
         ""
     };
@@ -253,7 +253,7 @@ pub fn Stat(
 ) -> impl IntoView {
     let tone = match tone {
         Tone::Positive => "text-positive-fg",
-        Tone::Negative => "text-negative-fg",
+        Tone::Negative => "text-over-fg",
         _ => "text-fg-muted",
     };
     view! {
@@ -340,6 +340,45 @@ pub fn FactsRow(
             </dl>
         }
     })
+}
+
+/// A board of state columns (kanban): each column a stack of compact boxes.
+pub const BOARD: &str = "grid items-start gap-3 sm:grid-cols-2 xl:grid-cols-4";
+/// One box on a board.
+pub const BOARD_CARD: &str =
+    "grid min-w-0 gap-1.5 rounded-lg border border-border bg-card-strong p-3 text-sm shadow-xs";
+
+/// One state of a board: its name, how many boxes it holds, an optional
+/// total, and the boxes.
+#[component]
+pub fn BoardColumn(
+    #[prop(into)] title: String,
+    /// The dot beside the title.
+    #[prop(optional)]
+    tone: Tone,
+    count: usize,
+    #[prop(optional, into)] total: Option<String>,
+    children: Children,
+) -> impl IntoView {
+    let dot = match tone {
+        Tone::Positive => "bg-positive",
+        Tone::Negative => "bg-negative",
+        Tone::Warning | Tone::Accent => "bg-over",
+        _ => "bg-fg-muted/50",
+    };
+    let label = title.clone();
+    view! {
+        <section aria-label=label class="grid min-w-0 content-start gap-2 rounded-xl bg-soft/70 p-2.5">
+            <header class="flex items-center gap-2 px-1 pt-0.5">
+                <i aria-hidden="true" class=cn(["size-2 rounded-pill", dot])></i>
+                <h3 class="text-eyebrow font-bold uppercase tracking-eyebrow text-fg-muted">{title}</h3>
+                <span class="rounded-pill bg-card-strong px-1.5 text-xs tabular-nums text-fg-muted">{count}</span>
+                {total.map(|t| view! { <span class="ml-auto text-xs font-medium tabular-nums">{t}</span> })}
+            </header>
+            {children()}
+            {(count == 0).then(|| view! { <p class="px-1 pb-1 text-xs text-fg-muted">"Nothing here"</p> })}
+        </section>
+    }
 }
 
 /// Fields side by side across the page, a rule between neighbours.

@@ -793,13 +793,13 @@ pub fn BudgetBar(
                         view! { <div class="absolute inset-y-0 left-0 rounded-pill bg-chart-1/30" style:width=pct(forecast_pct)></div> }
                     })}
                     <div
-                        class=if over { "absolute inset-y-0 left-0 rounded-pill bg-negative" } else { "absolute inset-y-0 left-0 rounded-pill bg-chart-1" }
+                        class=if over { "absolute inset-y-0 left-0 rounded-pill bg-over" } else { "absolute inset-y-0 left-0 rounded-pill bg-chart-1" }
                         style:width=pct(spent_pct)
                     ></div>
                 </div>
                 <div aria-hidden="true" class="absolute inset-y-0 w-0.5 -translate-x-1/2 rounded-pill bg-chart-limit" style:left=pct(limit_pct)></div>
             </div>
-            <p class=if over { "text-xs tabular-nums font-medium text-negative-fg" } else { "text-xs tabular-nums text-fg-muted" }>{text}</p>
+            <p class=if over { "text-xs tabular-nums font-medium text-over-fg" } else { "text-xs tabular-nums text-fg-muted" }>{text}</p>
         </div>
     }
 }
@@ -825,7 +825,7 @@ pub fn ProgressBar(
     let fill = match tone {
         BarTone::Accent => "h-full rounded-pill bg-accent transition-[width]",
         BarTone::Positive => "h-full rounded-pill bg-positive transition-[width]",
-        BarTone::Negative => "h-full rounded-pill bg-negative transition-[width]",
+        BarTone::Negative => "h-full rounded-pill bg-over transition-[width]",
         BarTone::Warning => "h-full rounded-pill bg-warning transition-[width]",
     };
     view! {

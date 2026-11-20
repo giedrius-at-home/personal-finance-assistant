@@ -8,7 +8,7 @@ use finance_types::report::closure::{AccountRoleKind, MoneyPlan, PlanAccount, Pl
 use leptos::prelude::*;
 use rust_decimal::Decimal;
 
-use super::{Stat, TABLE, TABLE_CONTAINER, TCELL, TH, TROW, Tone, cn, money};
+use super::{Metric, Stat, TABLE, TABLE_CONTAINER, TCELL, TH, TROW, Tone, cn, money};
 
 /// `(label, value, warns)` of an account's standing column.
 pub fn standing(account: &PlanAccount, salary: bool) -> (&'static str, Decimal, bool) {
@@ -122,7 +122,7 @@ pub fn MoneyPlanFields(
                     </th>
                     <td class=cell.clone()>{money(account.balance, &unit)}</td>
                     <td class=cell.clone()>{(account.keep > Decimal::ZERO).then(|| money(account.keep, &unit))}</td>
-                    <td class=cn([cell.as_str(), if warn { "text-negative-fg" } else { "" }])>
+                    <td class=cn([cell.as_str(), if warn { "text-over-fg" } else { "" }])>
                         {(!label.is_empty()).then(|| view! {
                             <small class="mr-1 font-normal text-fg-muted">{label}</small>
                             {money(value, &unit)}
@@ -228,7 +228,7 @@ pub fn MoneyPlanFields(
                     <div class="grid gap-0.5">
                         {estimate_rows}
                         <div class="flex justify-between gap-4 text-xs text-fg-muted">
-                            <span>"Wiggle room after the estimate"</span>
+                            <span>"Left after that"</span>
                             <span class="tabular-nums">{after_estimate}</span>
                         </div>
                     </div>
@@ -241,11 +241,7 @@ pub fn MoneyPlanFields(
             .predicted_bills
             .iter()
             .map(|b| {
-                let label = if b.paid_this_month {
-                    format!("{} · next on {} ({})", b.category, b.due_on, b.method)
-                } else {
-                    format!("{} · due {} ({})", b.category, b.due_on, b.method)
-                };
+                let label = format!("{} · {}", b.category, crate::format::day_month(&b.due_on));
                 let amount = money(b.amount, &unit);
                 view! {
                     <div class="flex justify-between gap-4 text-sm">
@@ -257,7 +253,7 @@ pub fn MoneyPlanFields(
             .collect_view();
         view! {
             <div class="grid gap-1">
-                <div class="text-xs font-medium uppercase tracking-wide text-fg-muted">"Predicted bills"</div>
+                <div class="text-xs font-medium uppercase tracking-wide text-fg-muted">"Bills that change, estimated"</div>
                 {rows}
             </div>
         }
@@ -279,44 +275,23 @@ pub fn MoneyPlanFields(
         .sum::<Decimal>()
         - covered;
     let why = (short_total > Decimal::ZERO).then(|| {
-        let over = if plan.overspent.is_empty() {
-            "The accounts hold less than the bills and budgets left need: spending outside the budget groups used the money.".to_owned()
-        } else {
-            let groups = plan
-                .overspent
-                .iter()
-                .map(|(group, by)| format!("{group} {}", money(*by, &unit)))
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("Over budget this month: {groups}. That money was meant for the bills and budgets left.")
-        };
-        let mut steps = Vec::new();
+        let mut rows: Vec<(String, String)> = plan
+            .overspent
+            .iter()
+            .map(|(group, by)| (format!("{group}, over budget"), money(*by, &unit)))
+            .collect();
         if from_spare > Decimal::ZERO {
-            steps.push(format!("{} from spare money on your other accounts", money(from_spare, &unit)));
+            rows.push(("Move from other accounts".to_owned(), money(from_spare, &unit)));
         }
         if covered > Decimal::ZERO {
-            steps.push(format!("{} back from savings", money(covered, &unit)));
+            rows.push(("Move back from savings".to_owned(), money(covered, &unit)));
         }
         let open = short_total - from_spare - covered;
-        let mut fix = if steps.is_empty() {
-            String::new()
-        } else {
-            format!("Move {} as listed.", steps.join(" and "))
-        };
         if open > Decimal::ZERO {
-            fix.push_str(&format!(
-                " {} stays uncovered: savings have no room above the wishes.",
-                money(open, &unit)
-            ));
+            rows.push(("Still uncovered".to_owned(), money(open, &unit)));
         }
-        view! {
-            <p class="text-sm text-fg-muted">
-                <strong class="font-medium text-fg">{format!("Short {}. ", money(short_total, &unit))}</strong>
-                {over}
-                " "
-                {fix}
-            </p>
-        }
+        let short = money(short_total, &unit);
+        view! { <Metric label="Short for bills and budgets" size="text-xl" facts=rows>{short}</Metric> }
     });
     view! {
         <div class="grid gap-4">
@@ -386,6 +361,7 @@ mod tests {
                 must_keep: d("624"),
                 wishes: Vec::new(),
                 wishes_open: Decimal::ZERO,
+                wishes_needs: Vec::new(),
                 expected: Vec::new(),
                 wiggle_room: d("1376"),
             }),

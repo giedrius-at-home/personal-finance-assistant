@@ -25,8 +25,8 @@ use crate::api::invoke;
 use crate::ds::money_plan::MoneyPlanFields;
 use crate::ds::sync_value;
 use crate::ds::{
-    Badge, Button, CONTROL, Card, CardTone, Eyebrow, Facts, FactsRow, Field, Help, Icon, Lucide,
-    Money, MonthSwitcher, Size, Tone, Variant, card_class, cn,
+    BOARD, BOARD_CARD, Badge, BoardColumn, Button, CONTROL, Card, CardTone, Eyebrow, Facts,
+    FactsRow, Field, Help, Icon, Lucide, Money, MonthSwitcher, Size, Tone, Variant, cn,
 };
 use crate::pages::with_report;
 use crate::{ManageSection, format, state};
@@ -312,6 +312,32 @@ fn page(ui: Ui, report: &Dashboard) -> impl IntoView + use<> {
         .collect();
     let stale = active.stale;
     let scheduled = active.scheduled_payments.clone();
+    let today = report.generated_at.get(..10).unwrap_or_default().to_owned();
+    let mut boxes: Vec<Boxed> = scheduled
+        .iter()
+        // A bill of nothing (a card with no charge) is not a payment.
+        .filter(|payment| payment.paid_on.is_some() || payment.amount.amount > Decimal::ZERO)
+        .map(|payment| {
+            let column = bill_column(
+                payment.paid_on.is_some(),
+                !payment.candidate_ids.is_empty(),
+                &payment.due_on,
+                &today,
+            );
+            let day = payment
+                .paid_on
+                .clone()
+                .unwrap_or_else(|| payment.due_on.clone());
+            let head = box_head(
+                payment.name.clone(),
+                crate::ds::money(payment.amount.amount, &payment.amount.currency),
+                (Tone::Outline, "Bill"),
+                format::day_month(&day),
+            );
+            let view = view! { <div class=BOARD_CARD>{head}</div> }.into_any();
+            (column, day, payment.amount.amount, view)
+        })
+        .collect();
     let shared = StoredValue::new(Shared {
         active_month: active_month.clone(),
         stale,
@@ -338,16 +364,16 @@ fn page(ui: Ui, report: &Dashboard) -> impl IntoView + use<> {
                     .collect_view();
                 view! {
                     <strong class="mt-1 block text-2xl font-semibold">{amounts}</strong>
-                    <Facts class="mt-2" rows=vec![("Received".to_owned(), day.clone())] />
+                    <Facts class="mt-2" rows=vec![("On".to_owned(), format::day_month(day))] />
                 }
                 .into_any()
             }
-            None => view! { <Facts class="mt-2" rows=vec![("Expected".to_owned(), payday.due_on.clone())] /> }.into_any(),
+            None => view! { <Facts class="mt-2" rows=vec![("Expected".to_owned(), format::day_month(&payday.due_on))] /> }.into_any(),
         };
         let title = if payday.received_on.is_some() {
-            "Salary received"
+            "Received"
         } else {
-            "Salary not recorded yet"
+            "Not in yet"
         };
         let plan_fields = report.money_plan.clone().map(|plan| {
             let names: HashMap<String, String> = accounts.iter().cloned().collect();
@@ -360,7 +386,7 @@ fn page(ui: Ui, report: &Dashboard) -> impl IntoView + use<> {
         });
         view! {
             <Card>
-                <Eyebrow>"MONTHLY PAYDAY"</Eyebrow>
+                <Eyebrow>"SALARY"</Eyebrow>
                 <h2 class="mt-2 text-lg font-semibold">{title}</h2>
                 {body}
                 {plan_fields}
@@ -381,39 +407,85 @@ fn page(ui: Ui, report: &Dashboard) -> impl IntoView + use<> {
     });
 
     // The events with a share of the shown month.
-    let event_rows = report
-        .events
-        .iter()
-        .filter_map(|event| {
-            let month = event
-                .months
-                .iter()
-                .find(|m| m.month.starts_with(&active_month))?;
-            let code = event.row.wish.currency.code.as_str();
-            let dates = event.row.wish.event.as_ref()?;
-            let m = |v: Decimal| format::money_dp(v, code, 2);
-            let rows = vec![
-                ("From".to_owned(), format::date(&dates.starts_on)),
-                ("Until".to_owned(), format::date(&dates.ends_on)),
-                ("Share this month".to_owned(), m(month.share)),
-                ("Spent".to_owned(), m(month.spent)),
-            ];
-            Some(view! {
-                <div class="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 border-b border-line py-3">
-                    <span class="flex items-center gap-2 font-medium">
-                        {event.row.wish.name.clone()}
-                        <Badge tone=Tone::Accent>"Event"</Badge>
-                    </span>
-                    <FactsRow rows=rows />
-                </div>
-            })
-        })
-        .collect::<Vec<_>>();
-    let no_plans = format!("No plans for {active_label}.");
-    let plans_empty = plans.is_empty() && event_rows.is_empty();
-    let plan_rows = plans
+    for event in &report.events {
+        let Some(month) = event
+            .months
+            .iter()
+            .find(|m| m.month.starts_with(&active_month))
+        else {
+            continue;
+        };
+        let Some(dates) = event.row.wish.event.as_ref() else {
+            continue;
+        };
+        let unit = &event.row.wish.currency;
+        let head = box_head(
+            event.row.wish.name.clone(),
+            crate::ds::money(month.share, unit),
+            (Tone::Accent, "Event"),
+            format::day_month(&dates.starts_on),
+        );
+        let rows = vec![
+            ("Until".to_owned(), format::day_month(&dates.ends_on)),
+            ("Spent".to_owned(), crate::ds::money(month.spent, unit)),
+        ];
+        let view = view! { <div class=BOARD_CARD>{head}<Facts rows=rows /></div> }.into_any();
+        boxes.push((Column::Due, dates.starts_on.clone(), month.share, view));
+    }
+    boxes.extend(plans.into_iter().map(|plan| plan_card(ui, plan)));
+    boxes.sort_by(|a, b| a.1.cmp(&b.1));
+    let board_unit = report
+        .monthly_allocation
+        .as_ref()
+        .and_then(|m| m.currencies.first())
+        .map(|a| a.currency.clone());
+    let board = COLUMNS
         .into_iter()
-        .map(|plan| plan_row(ui, plan))
+        .map(|(column, title, tone)| {
+            let (mut total, mut cards) = (Decimal::ZERO, Vec::new());
+            let mut rest = Vec::new();
+            for item in std::mem::take(&mut boxes) {
+                if item.0 == column {
+                    total += item.2;
+                    cards.push(item.3);
+                } else {
+                    rest.push(item);
+                }
+            }
+            boxes = rest;
+            let count = cards.len();
+            // What is paid matters least: the latest few, the rest folded.
+            if column == Column::Done {
+                cards.reverse();
+                if cards.len() > PAID_SHOWN {
+                    let older = cards.split_off(PAID_SHOWN);
+                    let label = format!("{} earlier", older.len());
+                    cards.push(
+                        view! {
+                            <details class="grid gap-2">
+                                <summary class="cursor-pointer px-1 text-xs text-fg-muted">{label}</summary>
+                                <div class="mt-2 grid gap-2">{older}</div>
+                            </details>
+                        }
+                        .into_any(),
+                    );
+                }
+            }
+            let total = board_unit
+                .as_ref()
+                .filter(|_| count > 0)
+                .map(|unit| crate::ds::money(total, unit));
+            match total {
+                Some(total) => view! {
+                    <BoardColumn title=title tone=tone count=count total=total>{cards}</BoardColumn>
+                }
+                .into_any(),
+                None => {
+                    view! { <BoardColumn title=title tone=tone count=count>{cards}</BoardColumn> }
+                        .into_any()
+                }
+            }
+        })
         .collect_view();
     let no_bills = rows.is_empty();
     let bill_cards = rows
@@ -432,29 +504,31 @@ fn page(ui: Ui, report: &Dashboard) -> impl IntoView + use<> {
                     max=next_month.clone()
                 />
             </div>
-            <Card>
-                <Eyebrow>"PLANS"</Eyebrow>
-                <h2 class="mt-2 text-lg font-semibold">{active_label.clone()}</h2>
-                {create_form(ui, &available, &owners, &accounts, &currencies, &active_month, &active_end)}
-                <div class="border-t border-line">
-                    {feedback(ui, "plan-removed".into())}
-                    {event_rows}
-                    {plan_rows}
-                    {plans_empty.then(|| view! { <p class="mt-3 text-sm text-fg-muted">{no_plans}</p> })}
+            <section aria-label="Payments board" class="grid gap-3">
+                <div>
+                    <Eyebrow>"PAYMENTS"</Eyebrow>
+                    <h2 class="mt-1 text-lg font-semibold">{active_label.clone()}</h2>
                 </div>
-            </Card>
+                <div class=BOARD>{board}</div>
+            </section>
             <Card>
-                <Eyebrow>"BILLS"</Eyebrow>
-                <h2 class="mt-2 text-lg font-semibold">"Fixed spending"</h2>
+                <Eyebrow>"NEW"</Eyebrow>
+                <h2 class="mt-2 text-lg font-semibold">"Add a payment or income"</h2>
+                {create_form(ui, &available, &owners, &accounts, &currencies, &active_month, &active_end)}
+                {feedback(ui, "plan-removed".into())}
+            </Card>
+            <section aria-label="Bills" class="grid gap-3">
+                <div>
+                    <Eyebrow>"EVERY MONTH"</Eyebrow>
+                    <h2 class="mt-1 text-lg font-semibold">"Bills"</h2>
+                </div>
                 {stale.then(|| view! {
-                    <p role="status" class="mt-2 text-sm text-warning-fg">
-                        "Bill information is stale. Refresh reports before linking payments."
-                    </p>
+                    <p role="status" class="text-sm text-warning-fg">"Out of date. Refresh first."</p>
                 })}
                 {feedback(ui, "bill-removed".into())}
-            </Card>
-            {no_bills.then(|| view! { <p>"No bills this month."</p> })}
-            <div class="grid gap-4">{bill_cards}</div>
+                {no_bills.then(|| view! { <p class="text-sm text-fg-muted">"No bills this month."</p> })}
+                <div class="grid items-start gap-3 sm:grid-cols-2 xl:grid-cols-4">{bill_cards}</div>
+            </section>
         </div>
     }
 }
@@ -799,43 +873,88 @@ fn archive_plan(ui: Ui, plan_id: String, name: String) {
     });
 }
 
-fn plan_row(ui: Ui, plan: PlannedPaymentView) -> impl IntoView {
+/// Where a payment stands, as a board column.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Column {
+    Due,
+    Late,
+    Check,
+    Done,
+}
+
+const COLUMNS: [(Column, &str, Tone); 4] = [
+    (Column::Due, "To pay", Tone::Accent),
+    (Column::Late, "Late", Tone::Negative),
+    (Column::Check, "To check", Tone::Neutral),
+    (Column::Done, "Paid", Tone::Positive),
+];
+
+fn plan_column(status: PlanStatus) -> Column {
+    match status {
+        PlanStatus::Upcoming | PlanStatus::Pending => Column::Due,
+        PlanStatus::Overdue => Column::Late,
+        PlanStatus::NeedsReview => Column::Check,
+        PlanStatus::Paid => Column::Done,
+    }
+}
+
+/// A bill payment: paid, found but not linked yet, late once its day has
+/// passed, else still to pay.
+fn bill_column(paid: bool, found: bool, due_on: &str, today: &str) -> Column {
+    if paid {
+        Column::Done
+    } else if found {
+        Column::Check
+    } else if due_on < today {
+        Column::Late
+    } else {
+        Column::Due
+    }
+}
+
+/// How many paid boxes the board shows before folding the rest.
+const PAID_SHOWN: usize = 4;
+
+/// One box on the payments board: `(column, day for ordering, amount, box)`.
+type Boxed = (Column, String, Decimal, AnyView);
+
+/// The head of a box: name, amount, a kind tag and the day.
+fn box_head(name: String, amount: String, tag: (Tone, &'static str), day: String) -> impl IntoView {
+    view! {
+        <span class="flex items-baseline justify-between gap-3">
+            <strong class="min-w-0 truncate font-semibold">{name}</strong>
+            <strong class="whitespace-nowrap tabular-nums">{amount}</strong>
+        </span>
+        <span class="flex items-center justify-between gap-3 text-xs text-fg-muted">
+            <Badge tone=tag.0 class="px-2 py-0">{tag.1}</Badge>
+            <span class="whitespace-nowrap">{day}</span>
+        </span>
+    }
+}
+
+fn plan_card(ui: Ui, plan: PlannedPaymentView) -> Boxed {
     let inflow = plan.direction == Direction::Inflow;
-    let detail = vec![
-        (
-            "Kind".to_owned(),
-            if inflow { "Expected income" } else { "Payment" }.to_owned(),
-        ),
-        (
-            "Matches".to_owned(),
-            plan.match_description
-                .clone()
-                .unwrap_or_else(|| plan.match_category.clone()),
-        ),
-        (
-            if plan.pending { "Card payment" } else { "Due" }.to_owned(),
-            plan.due_on.clone(),
-        ),
-    ];
-    let status = match plan.status {
-        PlanStatus::Paid => format!(
-            "{} {}",
-            if inflow { "Received" } else { "Paid" },
-            format::day_month(plan.paid_on.as_deref().unwrap_or(&plan.due_on))
-        ),
-        PlanStatus::Pending => "Reserved · awaiting bank posting".into(),
+    let column = plan_column(plan.status);
+    let day = plan.paid_on.clone().unwrap_or_else(|| plan.due_on.clone());
+    let mut detail = vec![(
+        "Group".to_owned(),
+        plan.match_description
+            .clone()
+            .unwrap_or_else(|| plan.match_category.clone()),
+    )];
+    match plan.status {
+        PlanStatus::Pending => detail.push(("Card".to_owned(), "Reserved".to_owned())),
         PlanStatus::NeedsReview => {
-            format!("{} possible matches · review needed", plan.candidate_count)
+            detail.push((
+                "Possible matches".to_owned(),
+                plan.candidate_count.to_string(),
+            ));
         }
-        PlanStatus::Overdue => "Overdue · no matching transaction".into(),
-        PlanStatus::Upcoming if inflow => "Expected".into(),
-        PlanStatus::Upcoming => "Upcoming".into(),
-    };
-    let tone = match plan.status {
-        PlanStatus::Paid => "text-positive-fg",
-        PlanStatus::Overdue | PlanStatus::NeedsReview => "text-warning-fg",
-        _ => "text-fg-muted",
-    };
+        PlanStatus::Paid => {
+            detail.push(("Planned for".to_owned(), format::day_month(&plan.due_on)))
+        }
+        _ => {}
+    }
     let id = plan.plan_id.clone();
     let action = if id.starts_with("recurring-salary-") {
         view! {
@@ -900,21 +1019,34 @@ fn plan_row(ui: Ui, plan: PlannedPaymentView) -> impl IntoView {
         }
         .into_any()
     };
-    view! {
-        <div class="grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-2 border-b border-line py-3 text-sm md:grid-cols-[minmax(0,1fr)_7rem_14rem_minmax(6rem,auto)]">
-            <div class="grid min-w-0 gap-1">
-                <strong>{plan.name.clone()}</strong>
-                // Fixed tracks, so every row's fields line up in columns.
-                <FactsRow rows=detail class="grid grid-cols-[9rem_minmax(0,1fr)_7rem] sm:max-w-xl" />
-            </div>
-            <strong class="text-right tabular-nums">
-                <Money value=plan.amount.amount unit=plan.amount.currency.clone() neutral=true />
-            </strong>
-            <span class=cn(["col-span-2 md:col-span-1", tone])>{status}</span>
-            {action}
-            {feedback_in(ui, format!("plan:{id}"), "col-span-full")}
-        </div>
+    let tag = if inflow {
+        (Tone::Positive, "Income")
+    } else {
+        (Tone::Neutral, "One-off")
+    };
+    let amount = crate::ds::money(plan.amount.amount, &plan.amount.currency);
+    let head = box_head(
+        plan.name.clone(),
+        if inflow { format!("+{amount}") } else { amount },
+        tag,
+        format::day_month(&day),
+    );
+    let view = view! {
+        <details class=BOARD_CARD>
+            <summary class="grid cursor-pointer list-none gap-1.5">{head}</summary>
+            <Facts rows=detail class="mt-1" />
+            <div class="mt-1 flex justify-end">{action}</div>
+            {feedback_in(ui, format!("plan:{id}"), "")}
+        </details>
     }
+    .into_any();
+    // Income is not part of what a column still costs.
+    let counted = if inflow {
+        Decimal::ZERO
+    } else {
+        plan.amount.amount
+    };
+    (column, day, counted, view)
 }
 
 /// One bill: its amount, editor, removal, automatic matching, schedule and
@@ -933,18 +1065,24 @@ fn BillCard(ui: Ui, bill: SubscriptionRow, shared: StoredValue<Shared>) -> impl 
         )
     });
     let id = bill.bill_id.clone();
-    let mut subtitle = vec![
-        ("Frequency".to_owned(), bill.frequency.to_string()),
-        (
-            "Latest payment".to_owned(),
-            bill.last_recorded_on.clone().unwrap_or_else(|| "—".into()),
-        ),
-    ];
+    let _ = &active_month;
+    let frequency = bill.frequency.to_string();
+    let days = |dates: &[String]| {
+        dates
+            .iter()
+            .map(|d| format::day_month(d))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let next_day = days(&bill.expected_dates);
+    let mut subtitle = vec![(
+        "Last paid".to_owned(),
+        bill.last_recorded_on
+            .as_deref()
+            .map_or_else(|| "—".into(), format::day_month),
+    )];
     if !bill.expected_dates.is_empty() {
-        subtitle.push((
-            format!("Scheduled {active_month}"),
-            bill.expected_dates.join(", "),
-        ));
+        subtitle.push(("This month".to_owned(), next_day.clone()));
     }
     let bill = StoredValue::new(bill);
     let editing_this = {
@@ -965,18 +1103,18 @@ fn BillCard(ui: Ui, bill: SubscriptionRow, shared: StoredValue<Shared>) -> impl 
                         "text-positive-fg",
                         format!("Paid {}", format::day_month(day)),
                     ),
-                    (None, false) => ("text-fg-muted", "Payment found · review match".to_owned()),
+                    (None, false) => ("text-fg-muted", "Found, check below".to_owned()),
                     (None, true) => (
                         "text-fg-muted",
                         format!(
-                            "To pay · {}",
+                            "To pay {}",
                             crate::ds::money(payment.amount.amount, &payment.amount.currency)
                         ),
                     ),
                 };
                 view! {
                     <p class="flex justify-between gap-4 border-b border-line py-2.5 text-sm">
-                        <span>{format!("Due {}", payment.due_on)}</span>
+                        <span>{format::day_month(&payment.due_on)}</span>
                         <strong class=class>{text}</strong>
                     </p>
                 }
@@ -1035,7 +1173,7 @@ fn BillCard(ui: Ui, bill: SubscriptionRow, shared: StoredValue<Shared>) -> impl 
                         disabled=Signal::derive(move || ui.plan_busy.get() || stale)
                         on_click=Callback::new(move |_| ui.removing_bill.set(Some(id.clone())))
                     >
-                        "Remove recurring plan"
+                        "Remove"
                     </Button>
                 }
                 .into_any()
@@ -1045,23 +1183,27 @@ fn BillCard(ui: Ui, bill: SubscriptionRow, shared: StoredValue<Shared>) -> impl 
     let editing_label = editing_this.clone();
     let editor = move || editing_this().then(|| bill_editor(ui, bill));
     view! {
-        <article class=cn([card_class(CardTone::Default), "min-w-0"])>
-            <div class="flex flex-col items-stretch justify-between gap-4 sm:flex-row sm:items-start">
-                <div>
-                    <h3 class="text-lg font-semibold">{name}</h3>
-                    <FactsRow class="mt-2" rows=subtitle />
-                </div>
-                <strong class="whitespace-nowrap text-accent">
-                    <Money value=amount_max unit=currency neutral=true />
-                </strong>
-            </div>
+        <details class=cn([BOARD_CARD, "open:col-span-full"])>
+            <summary class="grid cursor-pointer list-none gap-1.5">
+                <span class="flex items-baseline justify-between gap-3">
+                    <h3 class="min-w-0 truncate font-semibold">{name}</h3>
+                    <strong class="whitespace-nowrap tabular-nums">
+                        <Money value=amount_max unit=currency neutral=true />
+                    </strong>
+                </span>
+                <span class="flex items-center justify-between gap-3 text-xs text-fg-muted">
+                    <span>{frequency}</span>
+                    <span class="whitespace-nowrap">{next_day}</span>
+                </span>
+            </summary>
+            <FactsRow class="mt-2" rows=subtitle />
             <div class="mt-3 flex flex-wrap items-center gap-2">
                 <Button
                     variant=Variant::Secondary
                     disabled=Signal::derive(move || ui.edit_busy.get() || stale)
                     on_click=Callback::new(toggle_editor)
                 >
-                    {move || if editing_label() { "Close editor" } else { "Edit fixed spending" }}
+                    {move || if editing_label() { "Close" } else { "Edit" }}
                 </Button>
                 {remove_controls}
             </div>
@@ -1072,7 +1214,7 @@ fn BillCard(ui: Ui, bill: SubscriptionRow, shared: StoredValue<Shared>) -> impl 
             {schedule}
             {feedback(ui, format!("bill:{id}:link"))}
             {candidates(ui, bill, stale)}
-        </article>
+        </details>
     }
 }
 
@@ -1481,5 +1623,21 @@ fn candidates(ui: Ui, bill: StoredValue<SubscriptionRow>, stale: bool) -> impl I
                 </div>
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod board_tests {
+    use super::*;
+
+    #[test]
+    fn a_bill_payment_lands_in_the_column_of_its_state() {
+        let today = "2026-11-20";
+        assert_eq!(bill_column(true, true, "2026-11-01", today), Column::Done);
+        assert_eq!(bill_column(false, true, "2026-11-01", today), Column::Check);
+        assert_eq!(bill_column(false, false, "2026-11-19", today), Column::Late);
+        assert_eq!(bill_column(false, false, "2026-11-20", today), Column::Due);
+        assert_eq!(plan_column(PlanStatus::Pending), Column::Due);
+        assert_eq!(plan_column(PlanStatus::Overdue), Column::Late);
     }
 }

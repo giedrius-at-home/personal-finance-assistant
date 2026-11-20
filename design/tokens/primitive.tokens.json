@@ -30,7 +30,11 @@
       "400": { "$value": { "colorSpace": "oklch", "components": [0.6794, 0.0845, 266.4] } },
       "650": { "$value": { "colorSpace": "oklch", "components": [0.515, 0.0714, 266.54] } },
       "600": { "$value": { "colorSpace": "oklch", "components": [0.531, 0.0714, 266.54] } },
-      "900": { "$value": { "colorSpace": "oklch", "components": [0.3312, 0.033, 270.22] } }
+      "900": { "$value": { "colorSpace": "oklch", "components": [0.3312, 0.033, 270.22] } },
+      "250": { "$value": { "colorSpace": "oklch", "components": [0.76, 0.11, 262] } },
+      "350": { "$value": { "colorSpace": "oklch", "components": [0.72, 0.12, 262] } },
+      "500": { "$value": { "colorSpace": "oklch", "components": [0.56, 0.13, 262] } },
+      "700": { "$value": { "colorSpace": "oklch", "components": [0.47, 0.135, 262] } }
     },
     "coral": {
       "400": { "$value": { "colorSpace": "oklch", "components": [0.7272, 0.1714, 35.7] } },

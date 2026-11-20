@@ -376,6 +376,7 @@ pub fn money_plan(input: &PlanInputs<'_>) -> MoneyPlan {
             must_keep,
             wishes,
             wishes_open: wishes_open(input.wishes, code, input.event_needs),
+            wishes_needs: Vec::new(),
             expected,
             wiggle_room: account.balance + incoming - outgoing - must_keep - set_aside,
         })

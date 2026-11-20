@@ -408,7 +408,7 @@ fn panel(report: &Dashboard, selection: &str, s: PanelState) -> AnyView {
     });
 
     let savings_label = if savings.is_some_and(|v| v < Decimal::ZERO) {
-        "Funding shortfall"
+        "Short this month"
     } else if is_current {
         "Available to save"
     } else {
@@ -420,8 +420,8 @@ fn panel(report: &Dashboard, selection: &str, s: PanelState) -> AnyView {
         ("Spent", m(budget.spent), false),
         (
             savings_label,
-            savings.map_or("—".to_owned(), &m),
-            savings.is_some_and(|v| v < Decimal::ZERO),
+            savings.map_or("—".to_owned(), |v| m(v.abs())),
+            false,
         ),
     ];
     if let Some(a) = &allocation {
@@ -445,7 +445,7 @@ fn panel(report: &Dashboard, selection: &str, s: PanelState) -> AnyView {
         .map(|(label, value, negative)| {
             view! {
                 <Metric label=label>
-                    <span class=if negative { "text-negative-fg" } else { "" }>{value}</span>
+                    <span class=if negative { "text-over-fg" } else { "" }>{value}</span>
                 </Metric>
             }
         })
@@ -500,7 +500,7 @@ fn panel(report: &Dashboard, selection: &str, s: PanelState) -> AnyView {
                 <span class="col-span-3 sm:col-span-1 sm:pl-[26px]">"Total"</span>
                 <span data-label="Planned" class=cell>{m(budget.planned)}</span>
                 <span data-label="Spent" class=cell>{m(budget.spent)}</span>
-                <span data-label="Remaining" class=cn([cell, if net < Decimal::ZERO { "text-negative-fg" } else { "" }])>
+                <span data-label="Remaining" class=cn([cell, if net < Decimal::ZERO { "text-over-fg" } else { "" }])>
                     {if net < Decimal::ZERO { format!("{} over", m(-net)) } else { m(net) }}
                 </span>
             </div>
@@ -538,8 +538,8 @@ fn panel(report: &Dashboard, selection: &str, s: PanelState) -> AnyView {
                 {totals}
             </div>
             <div class="grid gap-8 py-8">
-                <SavingsOutlookPanel report=report.clone() currency_code=code.clone() />
                 {daily}
+                <SavingsOutlookPanel report=report.clone() currency_code=code.clone() />
             </div>
             <BudgetVisuals budget=budget.clone() allocation=allocation.clone() current_month=current_month.clone() selection=s.trajectory />
             {move || {
@@ -619,8 +619,8 @@ fn budget_row(budget: &MonthlyBudget, row: &BudgetRow, kind: Kind, s: PanelState
         }
         Kind::Extras => "One-off payments · all paid".into(),
         Kind::Event => "Event, this month's share".into(),
-        Kind::Unplanned if !row.expected.is_empty() => "Outside your groups · estimate".into(),
-        Kind::Unplanned => "Outside your planned groups".into(),
+        Kind::Unplanned if !row.expected.is_empty() => "Estimate from past months".into(),
+        Kind::Unplanned => "Not in any group".into(),
         Kind::Group => match &group {
             Some(g) if g.source_groups.iter().any(|n| *n != row.name) => {
                 g.source_groups.join(" · ")
@@ -654,7 +654,7 @@ fn budget_row(budget: &MonthlyBudget, row: &BudgetRow, kind: Kind, s: PanelState
         view! {
             <span class="mt-2.5 block h-1 max-w-44 overflow-hidden rounded-pill bg-soft">
                 <i
-                    class=if over { "block h-full rounded-pill bg-negative" } else { "block h-full rounded-pill " }
+                    class=if over { "block h-full rounded-pill bg-over" } else { "block h-full rounded-pill " }
                     style:width=format!("{width}%")
                     style:background=(!over).then_some(color)
                 ></i>
@@ -818,7 +818,7 @@ fn budget_row(budget: &MonthlyBudget, row: &BudgetRow, kind: Kind, s: PanelState
                 </span>
                 <span data-label=if estimate { "Expected" } else { "Planned" } class=cn([cell, if estimate { "text-fg-muted" } else { "" }])>{planned}</span>
                 <span data-label="Spent" class=cell>{m(row.spent)}</span>
-                <span data-label="Remaining" class=cn([cell, if estimate { "text-fg-muted" } else { "font-semibold" }, if over { "text-negative-fg" } else { "" }])>{remaining}</span>
+                <span data-label="Remaining" class=cn([cell, if estimate { "text-fg-muted" } else { "font-semibold" }, if over { "text-over-fg" } else { "" }])>{remaining}</span>
             </summary>
             <div class="px-3 pb-5 pt-1.5 sm:pl-[38px]">
                 {edit}

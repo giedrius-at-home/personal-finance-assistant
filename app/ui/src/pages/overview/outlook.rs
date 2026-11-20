@@ -1,6 +1,7 @@
 //! The three-month savings outlook (`savings-outlook.tsx`).
 
-use finance_types::report::Dashboard;
+use finance_types::report::outlook::{SavingsOutlook, ThreeDaySignal};
+use finance_types::report::{Currency, Dashboard};
 use leptos::prelude::*;
 use rust_decimal::{Decimal, RoundingStrategy};
 
@@ -196,17 +197,6 @@ pub fn SavingsOutlookPanel(report: Dashboard, currency_code: String) -> impl Int
         let (unit, class) = (unit.clone(), class.to_owned());
         view! { <Money value=v unit=unit class=class /> }.into_any()
     };
-    let deductions = (!outlook.deductions.is_empty()).then(|| {
-        view! {
-            <ul class="list-disc pl-5">
-                {outlook
-                    .deductions
-                    .iter()
-                    .map(|d| view! { <li>{format!("−{} points: {}", d.points, d.reason)}</li> })
-                    .collect_view()}
-            </ul>
-        }
-    });
     let history = outlook
         .unplanned_history
         .iter()
@@ -247,7 +237,7 @@ pub fn SavingsOutlookPanel(report: Dashboard, currency_code: String) -> impl Int
     let recent = amount(outlook.signal.spending, "");
     let recent_facts = vec![
         (
-            "Previous three".to_owned(),
+            "Three days before".to_owned(),
             m(outlook.signal.previous_spending),
         ),
         ("Unplanned".to_owned(), m(outlook.signal.unplanned)),
@@ -256,8 +246,37 @@ pub fn SavingsOutlookPanel(report: Dashboard, currency_code: String) -> impl Int
     let score = outlook
         .behavior_score
         .map_or("Paused".to_owned(), |s| format!("{s}/100"));
-    let score_chip = alert.then(|| (Tone::Negative, "Needs attention".to_owned()));
+    let score_chip = alert.then(|| (Tone::Warning, "Needs attention".to_owned()));
+    let reasons = score_reasons(&outlook);
+    let score_help = (!reasons.is_empty()).then(|| {
+        let rows = reasons
+            .into_iter()
+            .map(|r| {
+                let fix = r.fix(&outlook.signal, &unit);
+                view! {
+                    <li class="grid min-w-0 content-start gap-1.5 rounded-lg border border-border bg-card-strong p-3">
+                        <span class="flex items-center justify-between gap-3 text-eyebrow font-bold uppercase tracking-eyebrow text-fg-muted">
+                            {r.why}
+                            <Badge tone=Tone::Warning>{format!("\u{2212}{} points", r.points)}</Badge>
+                        </span>
+                        <strong class="text-sm font-semibold">{r.action}</strong>
+                        <Facts rows=fix />
+                    </li>
+                }
+            })
+            .collect_view();
+        view! {
+            <section aria-label="How to raise the habit score" class="grid gap-3">
+                <Eyebrow level=Heading::P>"RAISE YOUR SCORE"</Eyebrow>
+                <ul class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{rows}</ul>
+            </section>
+        }
+    });
     let unplanned = amount(outlook.expected_unplanned, "");
+    let unplanned_facts = vec![(
+        "Rest of this month".to_owned(),
+        m(outlook.expected_unplanned_month),
+    )];
     let evidence = vec![
         (
             "Refunds received this month".to_owned(),
@@ -272,16 +291,11 @@ pub fn SavingsOutlookPanel(report: Dashboard, currency_code: String) -> impl Int
             m(outlook.starting_balance),
         ),
     ];
-    let assumptions = outlook
-        .assumptions
-        .iter()
-        .map(|a| view! { <li>{a.clone()}</li> })
-        .collect_view();
     let content = view! {
         <div role="region" aria-label="Three-month savings forecast" class="contents">
             <header class="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                    <Eyebrow level=Heading::P>"LOOKING AHEAD"</Eyebrow>
+                    <Eyebrow level=Heading::P>"NEXT THREE MONTHS"</Eyebrow>
                     <CardTitle>{title}</CardTitle>
                 </div>
                 <Badge tone=status_tone>{status}</Badge>
@@ -289,23 +303,23 @@ pub fn SavingsOutlookPanel(report: Dashboard, currency_code: String) -> impl Int
             <div class="grid gap-x-10 gap-y-6 lg:grid-cols-[minmax(240px,.4fr)_minmax(0,1.6fr)]">
                 <div class="grid content-start gap-6">
                     <Metric label="Following your plan" facts=planned_facts>{planned}</Metric>
-                    <Metric label="Continuing current habits" facts=expected_facts>{expected}</Metric>
+                    <Metric label="Spending like now" facts=expected_facts>{expected}</Metric>
                     {salary_line}
                 </div>
                 {frame}
             </div>
             <div class=cn([METRIC_STRIP, "border-t border-line pt-5"])>
-                <Metric label="Last three complete days" size="text-xl" facts=recent_facts>{recent}</Metric>
+                <Metric label="Last three days" size="text-xl" facts=recent_facts>{recent}</Metric>
                 {match score_chip {
-                    Some(chip) => view! { <Metric label="Behavior score" size="text-xl" chip=chip>{score}</Metric> }.into_any(),
-                    None => view! { <Metric label="Behavior score" size="text-xl">{score}</Metric> }.into_any(),
+                    Some(chip) => view! { <Metric label="Habit score" size="text-xl" chip=chip>{score}</Metric> }.into_any(),
+                    None => view! { <Metric label="Habit score" size="text-xl">{score}</Metric> }.into_any(),
                 }}
-                <Metric label="Expected unplanned · 3 months" size="text-xl">{unplanned}</Metric>
+                <Metric label="Unplanned, next 3 months" size="text-xl" facts=unplanned_facts>{unplanned}</Metric>
             </div>
+            {score_help}
             <details class="grid gap-3 text-sm leading-relaxed [&>*]:mt-3">
-                <summary class="cursor-pointer font-medium">"Unplanned spending, refunds & forecast evidence"</summary>
+                <summary class="cursor-pointer font-medium">"Unplanned spending, month by month"</summary>
                 <Facts rows=evidence class="max-w-md" />
-                {deductions}
                 <div tabindex="0" role="region" aria-label="Unplanned spending by month" class=TABLE_CONTAINER>
                     <table class=TABLE data-density="md">
                         <caption class=CAPTION>"Unplanned spending by month"</caption>
@@ -321,10 +335,97 @@ pub fn SavingsOutlookPanel(report: Dashboard, currency_code: String) -> impl Int
                         <tbody>{history}</tbody>
                     </table>
                 </div>
-                <ul class="list-disc pl-5 text-xs text-fg-muted" title="* Reconstructed using the current plan.">{assumptions}</ul>
             </details>
         </div>
     }
     .into_any();
     view! { <Card class="grid gap-5">{content}</Card> }.into_any()
+}
+
+/// One thing that costs habit-score points, with the way to win them back.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ScoreReason {
+    pub points: u32,
+    pub why: &'static str,
+    pub action: &'static str,
+    kind: ReasonKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ReasonKind {
+    Speed,
+    Rise,
+    Unusual,
+    Month,
+    Other,
+}
+
+impl ScoreReason {
+    /// The numbers to aim for.
+    pub fn fix(&self, signal: &ThreeDaySignal, unit: &Currency) -> Vec<(String, String)> {
+        let m = |v: Decimal| money(v.max(Decimal::ZERO), unit);
+        match self.kind {
+            ReasonKind::Speed => vec![("Next three days, at most".to_owned(), m(signal.allowance))],
+            ReasonKind::Rise => vec![(
+                "Next three days, at most".to_owned(),
+                m(signal.previous_spending),
+            )],
+            ReasonKind::Unusual => {
+                vec![("Unplanned, last three days".to_owned(), m(signal.unplanned))]
+            }
+            ReasonKind::Month => vec![
+                (
+                    "Every".to_owned(),
+                    format!("{} unplanned", m(Decimal::from(50))),
+                ),
+                ("Costs".to_owned(), "5 points".to_owned()),
+            ],
+            ReasonKind::Other => Vec::new(),
+        }
+    }
+}
+
+/// The score's deductions in plain words, heaviest first.
+pub fn score_reasons(outlook: &SavingsOutlook) -> Vec<ScoreReason> {
+    let mut out: Vec<ScoreReason> = outlook
+        .deductions
+        .iter()
+        .map(|d| {
+            let (kind, why, action) = if d.reason.starts_with("Three-day") {
+                (
+                    ReasonKind::Speed,
+                    "Fast three days",
+                    "Spend less for three days",
+                )
+            } else if d.reason.starts_with("Spending rose") {
+                (
+                    ReasonKind::Rise,
+                    "Spending jumped",
+                    "Go back to last week\u{2019}s pace",
+                )
+            } else if d.reason.starts_with("Unplanned purchases") {
+                (
+                    ReasonKind::Unusual,
+                    "Many unplanned buys",
+                    "Skip unplanned buys for three days",
+                )
+            } else if d.reason.starts_with("At least") {
+                (
+                    ReasonKind::Month,
+                    "Unplanned this month",
+                    "Plan buys ahead; resets next month",
+                )
+            } else {
+                (ReasonKind::Other, "Other", "")
+            };
+            ScoreReason {
+                points: d.points,
+                why,
+                action,
+                kind,
+            }
+        })
+        .collect();
+    out.sort_by_key(|a| std::cmp::Reverse(a.points));
+    out
 }

@@ -18,8 +18,8 @@ use serde::Serialize;
 
 use crate::api::{NoArgs, invoke, load};
 use crate::ds::{
-    Badge, Button, CONTROL, Card, Checkbox, Dialog, Eyebrow, FactsRow, Field, Icon, Lucide, Size,
-    Skeleton, Tone, Variant,
+    BOARD_CARD, Badge, BoardColumn, Button, CONTROL, Card, Checkbox, Dialog, Eyebrow, Facts,
+    FactsRow, Field, Icon, Lucide, Size, Skeleton, Tone, Variant, cn,
 };
 use crate::format;
 use crate::pages::Problem;
@@ -96,7 +96,7 @@ pub fn standing(e: &EventRow) -> Option<(Tone, &'static str)> {
         (EventPhase::Past, _) => Some((Tone::Outline, "Done")),
         (EventPhase::Running, Pace::OnTrack) => Some((Tone::Positive, "On track")),
         (EventPhase::Running, Pace::Fast) => Some((Tone::Warning, "Spending fast")),
-        (EventPhase::Running, Pace::Over) => Some((Tone::Negative, "Over")),
+        (EventPhase::Running, Pace::Over) => Some((Tone::Warning, "Over")),
     }
 }
 
@@ -208,36 +208,154 @@ fn page(ui: Ui, own: Own, view: &EventsView, ctx: Context) -> impl IntoView + us
     let ctx = StoredValue::new(ctx);
     let currency = view.currency.clone();
     let form = add_form(ui, own, currency.clone());
-    let section = |title: &'static str, phase: EventPhase| {
-        let rows: Vec<_> = view
+    // The board: every event a box under its phase; the one picked opens
+    // with its numbers, parts and payments under the board.
+    let board = [
+        ("Upcoming", Tone::Accent, EventPhase::Upcoming),
+        ("Running", Tone::Positive, EventPhase::Running),
+        ("Past", Tone::Neutral, EventPhase::Past),
+    ]
+    .into_iter()
+    .map(|(title, tone, phase)| {
+        let boxes: Vec<_> = view
             .events
             .iter()
             .filter(|e| e.phase == phase)
-            .map(|e| event_block(ui, own, e, months, ctx, &currency))
+            .map(|e| event_box(ui, e, &currency.code))
             .collect();
-        (!rows.is_empty()).then(|| {
-            view! {
-                <section class="grid gap-3">
-                    <Eyebrow>{title}</Eyebrow>
-                    {rows}
-                </section>
-            }
-        })
+        let count = boxes.len();
+        view! { <BoardColumn title=title tone=tone count=count>{boxes}</BoardColumn> }
+    })
+    .collect_view();
+    let events = StoredValue::new(view.events.clone());
+    let picked = move || {
+        let id = ui.selected.get()?;
+        let event =
+            events.with_value(|all| all.iter().find(|e| e.row.wish.wish_id == id).cloned())?;
+        Some(event_block(ui, own, &event, months, ctx, &currency))
     };
     let empty = view.events.is_empty().then(|| {
-        view! { <p class="text-sm text-fg-muted">"No events yet. Name one, give it dates and what you want to spend."</p> }
+        view! { <p class="text-sm text-fg-muted">"No events yet."</p> }
     });
     view! {
-        <div class="grid gap-6">
+        <div class="grid gap-4">
+            <section aria-label="Events board" class="grid gap-3">
+                <div>
+                    <Eyebrow>"EVENTS"</Eyebrow>
+                    <h2 class="mt-1 text-lg font-semibold">"Planned days and trips"</h2>
+                </div>
+                <div class="grid items-start gap-3 md:grid-cols-3">{board}</div>
+                {empty}
+            </section>
+            {picked}
             <Card>
-                <Eyebrow>"PLAN AN EVENT"</Eyebrow>
+                <Eyebrow>"NEW EVENT"</Eyebrow>
                 {form}
             </Card>
-            {empty}
-            {section("RUNNING", EventPhase::Running)}
-            {section("UPCOMING", EventPhase::Upcoming)}
-            {section("PAST", EventPhase::Past)}
         </div>
+    }
+}
+
+/// What an event has used of its plan, 0–100: what is spent and paid ahead.
+pub fn used_percent(e: &EventRow) -> u32 {
+    crate::pages::wishes::saved_percent(e.spent + e.paid_ahead, e.row.wish.amount)
+}
+
+/// An event as a box on the board: name, plan, days, how it stands, what
+/// is used, and its parts as small boxes.
+fn event_box(ui: Ui, event: &EventRow, code: &str) -> impl IntoView + use<> {
+    let wish = &event.row.wish;
+    let id = wish.wish_id.clone();
+    let m = |value: Decimal| amount(value, code);
+    let days = wish.event.as_ref().map_or_else(String::new, |d| {
+        if d.starts_on == d.ends_on {
+            format::day_month(&d.starts_on)
+        } else {
+            format!(
+                "{} – {}",
+                format::day_month(&d.starts_on),
+                format::day_month(&d.ends_on)
+            )
+        }
+    });
+    let chip = standing(event).or_else(|| {
+        Some(if event.row.short > Decimal::ZERO {
+            (Tone::Warning, "Short")
+        } else if event.row.tradeoffs {
+            (Tone::Warning, "With trade-offs")
+        } else {
+            (Tone::Positive, "Affordable")
+        })
+    });
+    let facts = match event.phase {
+        EventPhase::Upcoming => vec![("Extra to find".to_owned(), m(event.extra))],
+        EventPhase::Running => {
+            let mut rows = vec![("Left".to_owned(), m(event.left))];
+            if event.left > Decimal::ZERO {
+                rows.push(("A day".to_owned(), m(event.per_day)));
+            }
+            rows
+        }
+        EventPhase::Past => vec![("Spent".to_owned(), m(event.spent))],
+    };
+    let percent = used_percent(event);
+    let used = m(event.spent + event.paid_ahead);
+    let parts = (!event.row.children.is_empty()).then(|| {
+        let boxes = event
+            .row
+            .children
+            .iter()
+            .map(|part| {
+                let bought = part.wish.status == finance_types::gateway::WishStatus::Bought;
+                let cost = part.wish.bought.as_ref().map_or(part.wish.amount, |p| p.amount);
+                view! {
+                    <li class="flex items-baseline justify-between gap-2 rounded-sm bg-soft px-2 py-1 text-xs">
+                        <span class=cn(["min-w-0 truncate", if bought { "text-fg-muted line-through" } else { "" }])>
+                            {part.wish.name.clone()}
+                        </span>
+                        <span class="whitespace-nowrap tabular-nums">{m(cost)}</span>
+                    </li>
+                }
+            })
+            .collect_view();
+        view! { <ul class="grid gap-1">{boxes}</ul> }
+    });
+    let pick = id.clone();
+    let is_picked = move || ui.selected.get().as_deref() == Some(id.as_str());
+    view! {
+        <button
+            type="button"
+            class=cn([BOARD_CARD, "text-left transition-colors hover:border-over aria-pressed:border-over aria-pressed:ring-2 aria-pressed:ring-over/30"])
+            aria-pressed=move || is_picked().to_string()
+            on:click=move |_| {
+                ui.selected.update(|s| {
+                    *s = if s.as_deref() == Some(pick.as_str()) { None } else { Some(pick.clone()) };
+                });
+            }
+        >
+            <span class="flex items-baseline justify-between gap-3">
+                <strong class="min-w-0 truncate font-semibold">{wish.name.clone()}</strong>
+                <strong class="whitespace-nowrap tabular-nums">{m(wish.amount)}</strong>
+            </span>
+            <span class="flex flex-wrap items-center justify-between gap-1.5 text-xs text-fg-muted">
+                <span class="flex items-center gap-1.5">
+                    {wish.must.then(|| view! { <Badge tone=Tone::Accent class="px-2 py-0">"Must"</Badge> })}
+                    {chip.map(|(tone, text)| view! { <Badge tone=tone class="px-2 py-0">{text}</Badge> })}
+                </span>
+                <span class="whitespace-nowrap">{days}</span>
+            </span>
+            <span class="grid gap-1">
+                <span role="img" aria-label=format!("{used} used") class="block h-1.5 overflow-hidden rounded-pill bg-soft">
+                    <i class="block h-full rounded-pill bg-over" style:width=format!("{percent}%")></i>
+                </span>
+                <span class="flex justify-between text-xs text-fg-muted">
+                    <span>{format!("{used} used")}</span>
+                    <span class="tabular-nums">{format!("{percent}%")}</span>
+                </span>
+            </span>
+            <Facts rows=facts />
+            {parts}
+        </button>
     }
 }
 
@@ -758,6 +876,6 @@ mod tests {
             ..running
         };
         assert!(!labels(&event_facts(&over, "EUR")).contains(&"A day, to stay inside"));
-        assert_eq!(standing(&over), Some((Tone::Negative, "Over")));
+        assert_eq!(standing(&over), Some((Tone::Warning, "Over")));
     }
 }
