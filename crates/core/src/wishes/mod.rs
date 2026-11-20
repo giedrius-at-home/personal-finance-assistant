@@ -276,34 +276,55 @@ impl Inputs<'_> {
         sort_by_due(&mut tops);
         let statuses = tops
             .into_iter()
-            .map(|w| GoalStatus {
-                wish_id: w.wish_id.clone(),
-                name: w.name.clone(),
-                due_on: w.due_on.clone(),
-                amount: w.amount,
-                must: w.must,
-                short: ctx.row(w).short.round_dp(2),
-                on_card: habit_months
+            .map(|w| {
+                // A purchase the cards cover is paid; what the charge then
+                // lacks belongs to the month the card is charged.
+                let card_short = habit_months
                     .iter()
                     .flat_map(|m| &m.verdicts)
                     .filter(|v| {
-                        // Only what lands on a card the owner did not choose.
                         v.wish_id.as_deref().is_some_and(|id| {
-                            wishes.iter().any(|c| {
-                                c.wish_id == id
-                                    && c.source != WishSource::Card
-                                    && (id == w.wish_id
-                                        || c.parent_id.as_deref() == Some(&w.wish_id))
-                            })
+                            id == w.wish_id
+                                || wishes.iter().any(|c| {
+                                    c.wish_id == id && c.parent_id.as_deref() == Some(&w.wish_id)
+                                })
                         })
                     })
-                    .map(|v| v.on_card)
+                    .map(|v| v.next_short)
                     .sum::<Decimal>()
-                    .round_dp(2),
-                plan_short: plan_rows
-                    .iter()
-                    .find(|r| r.wish.wish_id == w.wish_id)
-                    .map_or(Decimal::ZERO, |r| r.short),
+                    .round_dp(2);
+                let short = ctx.row(w).short.round_dp(2);
+                let card_short = card_short.min(short);
+                GoalStatus {
+                    wish_id: w.wish_id.clone(),
+                    name: w.name.clone(),
+                    due_on: w.due_on.clone(),
+                    amount: w.amount,
+                    must: w.must,
+                    short: short - card_short,
+                    card_short,
+                    on_card: habit_months
+                        .iter()
+                        .flat_map(|m| &m.verdicts)
+                        .filter(|v| {
+                            // Only what lands on a card the owner did not choose.
+                            v.wish_id.as_deref().is_some_and(|id| {
+                                wishes.iter().any(|c| {
+                                    c.wish_id == id
+                                        && c.source != WishSource::Card
+                                        && (id == w.wish_id
+                                            || c.parent_id.as_deref() == Some(&w.wish_id))
+                                })
+                            })
+                        })
+                        .map(|v| v.on_card)
+                        .sum::<Decimal>()
+                        .round_dp(2),
+                    plan_short: plan_rows
+                        .iter()
+                        .find(|r| r.wish.wish_id == w.wish_id)
+                        .map_or(Decimal::ZERO, |r| r.short),
+                }
             })
             .collect();
         // Each later purchase spread over the months left until it is due,
@@ -1351,6 +1372,20 @@ mod tests {
         );
         let fund = goals.fund.unwrap();
         assert_eq!((fund.months, fund.essentials_monthly), (6, d("330")));
+    }
+
+    #[test]
+    fn a_goal_the_card_covers_is_not_short_the_card_bill_is() {
+        // Nothing free now, so 600 goes on the card; next month's 270 at
+        // current habits cannot pay the whole charge.
+        let a = alloc("0", "500", vec![], vec![]);
+        let tv = wish("tv", None, "600", "2026-10-20");
+        let view = with_habits(&a, vec![habit("Groceries", "330", "100", true)], &[tv]);
+        let tv = &view.goals.unwrap().goals[0];
+        assert_eq!(
+            (tv.short, tv.on_card, tv.card_short),
+            (d("0"), d("600"), d("330"))
+        );
     }
 
     #[test]
