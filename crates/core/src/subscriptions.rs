@@ -8,7 +8,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use finance_types::gateway::SubscriptionCategoryRule;
+use finance_types::gateway::{CardSettings, SubscriptionCategoryRule};
 use finance_types::report::subscriptions::{
     BillLinkCandidate, ScheduledBillPayment, SubscriptionReport, SubscriptionRow,
 };
@@ -178,6 +178,44 @@ pub fn subscription_report(ctx: &Ctx, window: BillWindow) -> Result<Subscription
         last_import: snap.last_import,
     };
     report(&inputs, &ctx.now, window)
+}
+
+/// A card's linked bill charges what the owner typed as used on the
+/// statement: the statement ending in `used_month` is charged in the month
+/// after, so that month's unpaid payment of the bill, and the totals that
+/// count it, take the typed amount instead of the bill's own.
+pub fn apply_card_usage(report: &mut SubscriptionReport, cards: &[CardSettings]) {
+    for card in cards {
+        let Some(bill_id) = card.bill_id.as_deref() else {
+            continue;
+        };
+        let Some(charged) = format!("{}-01", card.used_month.get(..7).unwrap_or_default())
+            .parse::<Date>()
+            .ok()
+            .map(|m| shift_month(m, 1))
+        else {
+            continue;
+        };
+        for payment in &mut report.scheduled_payments {
+            let due_then = payment
+                .due_on
+                .parse::<Date>()
+                .is_ok_and(|d| d.first_of_month() == charged);
+            if payment.bill_id != bill_id || payment.paid_on.is_some() || !due_then {
+                continue;
+            }
+            let delta = card.used - payment.amount.amount;
+            payment.amount.amount = card.used;
+            for total in report
+                .expected_costs
+                .iter_mut()
+                .chain(report.remaining_costs.iter_mut())
+                .filter(|t| t.currency == payment.amount.currency)
+            {
+                total.amount += delta;
+            }
+        }
+    }
 }
 
 /// The part of the snapshot a bill report reads.
@@ -520,6 +558,63 @@ fn report(snap: &Inputs, now: &Zoned, window: BillWindow) -> Result<Subscription
 mod tests {
     use super::*;
     use jiff::civil::date;
+
+    #[test]
+    fn card_usage_replaces_the_bill_amount_in_the_charged_month() {
+        let eur = Currency::new("EUR");
+        let d = |s: &str| s.parse::<Decimal>().unwrap();
+        let payment = |bill: &str, due: &str, paid: Option<&str>| ScheduledBillPayment {
+            bill_id: bill.into(),
+            name: bill.into(),
+            due_on: due.into(),
+            paid_on: paid.map(Into::into),
+            amount: UnitMoney {
+                amount: d("400"),
+                currency: eur.clone(),
+            },
+            candidate_ids: Vec::new(),
+        };
+        let total = |amount: &str| {
+            vec![UnitMoney {
+                amount: d(amount),
+                currency: eur.clone(),
+            }]
+        };
+        let mut report = SubscriptionReport {
+            fetched_at: None,
+            through_date: "2026-12-31".into(),
+            stale: false,
+            rows: Vec::new(),
+            expected_costs: total("1200"),
+            remaining_costs: total("800"),
+            scheduled_payments: vec![
+                payment("card", "2026-12-01", None),
+                payment("rent", "2026-12-01", None),
+                payment("card", "2026-12-15", Some("2026-12-15")),
+            ],
+            unmatched_count: 0,
+            evidence_start: "2026-01-01".into(),
+            category_matched_names: Vec::new(),
+        };
+        let card = |month: &str| CardSettings {
+            card_id: "card-1".into(),
+            name: "Credit card".into(),
+            limit: d("2500"),
+            used: d("9.98"),
+            used_month: month.into(),
+            bill_id: Some("card".into()),
+        };
+        // October's statement is charged in November: nothing here changes.
+        apply_card_usage(&mut report, &[card("2026-10-01")]);
+        assert_eq!(report.expected_costs, total("1200"));
+        // November's statement is charged in December, on the unpaid payment.
+        apply_card_usage(&mut report, &[card("2026-11-01")]);
+        assert_eq!(report.scheduled_payments[0].amount.amount, d("9.98"));
+        assert_eq!(report.scheduled_payments[1].amount.amount, d("400"));
+        assert_eq!(report.scheduled_payments[2].amount.amount, d("400"));
+        assert_eq!(report.expected_costs, total("809.98"));
+        assert_eq!(report.remaining_costs, total("409.98"));
+    }
 
     fn now() -> Zoned {
         "2026-09-09T14:00:00+02:00[Europe/Amsterdam]"

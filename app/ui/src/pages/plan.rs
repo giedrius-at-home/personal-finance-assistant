@@ -871,12 +871,13 @@ fn plan_row(ui: Ui, plan: PlannedPaymentView) -> impl IntoView {
         .into_any()
     };
     view! {
-        <div class="grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-2 border-b border-line py-3 text-sm md:grid-cols-[minmax(150px,1.5fr)_minmax(100px,auto)_minmax(150px,1fr)_auto]">
-            <div class="grid gap-1">
+        <div class="grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-2 border-b border-line py-3 text-sm md:grid-cols-[minmax(0,1fr)_7rem_14rem_minmax(6rem,auto)]">
+            <div class="grid min-w-0 gap-1">
                 <strong>{plan.name.clone()}</strong>
-                <FactsRow rows=detail />
+                // Fixed tracks, so every row's fields line up in columns.
+                <FactsRow rows=detail class="grid grid-cols-[9rem_minmax(0,1fr)_7rem] sm:max-w-xl" />
             </div>
-            <strong class="tabular-nums">
+            <strong class="text-right tabular-nums">
                 <Money value=plan.amount.amount unit=plan.amount.currency.clone() neutral=true />
             </strong>
             <span class=cn(["col-span-2 md:col-span-1", tone])>{status}</span>
@@ -935,7 +936,13 @@ fn BillCard(ui: Ui, bill: SubscriptionRow, shared: StoredValue<Shared>) -> impl 
                         format!("Paid {}", format::day_month(day)),
                     ),
                     (None, false) => ("text-fg-muted", "Payment found · review match".to_owned()),
-                    (None, true) => ("text-fg-muted", "To pay".to_owned()),
+                    (None, true) => (
+                        "text-fg-muted",
+                        format!(
+                            "To pay · {}",
+                            crate::ds::money(payment.amount.amount, &payment.amount.currency)
+                        ),
+                    ),
                 };
                 view! {
                     <p class="flex justify-between gap-4 border-b border-line py-2.5 text-sm">

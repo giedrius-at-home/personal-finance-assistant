@@ -83,6 +83,25 @@ fn rooms(rows: &[GroupAllocation], plans: &[&BudgetPlan], keep_spent: bool) -> V
         .collect()
 }
 
+/// Each card bill as next month's fixed costs counted it: the usage typed for
+/// month 0's statement (charged in month 1), else the bill's own amount.
+pub fn counted_bills(
+    card_bills: &[(String, Decimal)],
+    settings: &WishSettings,
+    month0: Date,
+) -> Vec<(String, Decimal)> {
+    card_bills
+        .iter()
+        .map(|(id, bill)| {
+            let typed = settings
+                .cards
+                .iter()
+                .find(|c| c.card_id == *id && parse_month(&c.used_month) == Some(month0));
+            (id.clone(), typed.map_or(*bill, |c| c.used))
+        })
+        .collect()
+}
+
 /// One baseline per month for `months` months, and the ids of the cards whose
 /// recorded usage is for a statement that closed before `today`. `card_bills`
 /// is each card's linked bill amount (a card without a linked bill has no
@@ -152,7 +171,10 @@ pub fn baselines(
         }
         next_cards.push(room(bill, card.limit));
     }
-    let bills_total: Decimal = card_bills.iter().map(|(_, amount)| *amount).sum();
+    let bills_total: Decimal = counted_bills(card_bills, settings, month0)
+        .iter()
+        .map(|(_, amount)| *amount)
+        .sum();
     // `next_wiggle_room` is clamped at zero; the deficit is `next_shortfall`.
     // Next month's fixed costs count each card bill and its savings goals'
     // contributions; every later month pays the cards through the ladder
@@ -320,6 +342,21 @@ pub(crate) mod tests {
     /// The first card's linked bill, as `dashboard_parts` reports it.
     fn bill(amount: &str) -> Vec<(String, Decimal)> {
         vec![("card-1".to_string(), d(amount))]
+    }
+
+    #[test]
+    fn typed_usage_is_the_bill_next_month_counted() {
+        let month0 = Date::new(2026, 10, 1).unwrap();
+        let cards = |month: &str| WishSettings {
+            cards: vec![card("card-1", month, "9.98", Some("b1"))],
+            ..WishSettings::default()
+        };
+        // Typed for month 0's statement: that is what month 1 is charged.
+        let counted = counted_bills(&bill("400"), &cards("2026-10-01"), month0);
+        assert_eq!(counted, bill("9.98"));
+        // Typed for another statement: the bill's own amount stands.
+        let counted = counted_bills(&bill("400"), &cards("2026-09-01"), month0);
+        assert_eq!(counted, bill("400"));
     }
 
     #[test]
@@ -530,7 +567,8 @@ pub(crate) mod tests {
         );
         assert_eq!(months[0].cards[0].used, d("40"));
         for m in &months[1..] {
-            assert_eq!(m.free, d("300"));
+            // Next month's fixed costs counted the typed 40, not the 100.
+            assert_eq!(m.free, d("240"));
             assert_eq!(m.cards[0].used, d("100"));
         }
         // Each later month pays the month before's regular card spending.
@@ -540,7 +578,7 @@ pub(crate) mod tests {
         assert_eq!(judged[1].card_charge_in, d("40"));
         assert_eq!(judged[2].card_charge_in, d("100"));
         assert_eq!(judged[3].card_charge_in, d("100"));
-        assert_eq!(judged[3].free_left, d("200"));
+        assert_eq!(judged[3].free_left, d("140"));
     }
 
     #[test]
@@ -625,7 +663,8 @@ pub(crate) mod tests {
         assert_eq!(stale, vec!["mc".to_string()]);
         assert_eq!(months[1].cards[0].used, d("500"));
         assert_eq!(months[1].cards[1].used, Decimal::ZERO);
-        assert_eq!(months[1].free, a.next_wiggle_room + a.next_goals + d("500"));
+        // Visa's usage was typed for month 0: that 40 is what was counted.
+        assert_eq!(months[1].free, a.next_wiggle_room + a.next_goals + d("40"));
     }
 
     #[test]

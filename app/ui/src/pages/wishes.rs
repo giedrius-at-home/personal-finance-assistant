@@ -1274,6 +1274,22 @@ fn card_strip(
 /// which spending groups are bare living. It takes what the wishes leave.
 fn fund_block(ui: Ui, view: &WishesView, shared: SettingsForms) -> impl IntoView + use<> {
     let (months, groups) = (shared.months, shared.groups);
+    // Every group a budget plan or the owner named.
+    let group_options = state().report.data.with_untracked(|report| {
+        let mut names: Vec<String> = report
+            .iter()
+            .filter_map(|r| r.as_ref().ok())
+            .flat_map(|r| {
+                r.monthly_budgets
+                    .iter()
+                    .flat_map(|b| b.plan.groups.iter().map(|g| g.name.clone()))
+                    .chain(r.custom_spending_groups.iter().cloned())
+            })
+            .collect();
+        names.sort_by_key(|n| n.to_lowercase());
+        names.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+        names
+    });
     let statement = statement_month(&today());
     let unit = view.currency.clone();
     let money = move |value: Decimal| format::money_dp(value, &unit.code, 0);
@@ -1348,15 +1364,9 @@ fn fund_block(ui: Ui, view: &WishesView, shared: SettingsForms) -> impl IntoView
                 <Field
                     label="Bare living groups"
                     id="fund-groups"
-                    hint="Spending groups, separated by commas. Bills always count."
+                    hint="The spending groups you cannot live without. Bills always count."
                 >
-                    <input
-                        id="fund-groups"
-                        type="text"
-                        class=CONTROL
-                        prop:value=move || groups.get()
-                        on:input=move |e| groups.set(event_target_value(&e))
-                    />
+                    <crate::ds::MultiSelect id="fund-groups" label="Bare living groups" value=groups options=group_options />
                 </Field>
                 <Button
                     submit=true

@@ -552,6 +552,79 @@ pub fn Checkbox(
     }
 }
 
+/// The names in a comma list, trimmed, without blanks.
+pub fn list_names(text: &str) -> Vec<String> {
+    text.split(',')
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+/// `names` with `name` switched: removed when present (any letter case),
+/// added at the end otherwise.
+pub fn toggle_name(names: &[String], name: &str) -> Vec<String> {
+    let same = |n: &String| n.eq_ignore_ascii_case(name);
+    if names.iter().any(same) {
+        names.iter().filter(|n| !same(n)).cloned().collect()
+    } else {
+        names.iter().cloned().chain([name.to_owned()]).collect()
+    }
+}
+
+/// Pick several of `options` as chips. `value` stays the comma list the
+/// forms save; a saved name that is no longer an option keeps its chip.
+#[component]
+pub fn MultiSelect(
+    value: RwSignal<String>,
+    options: Vec<String>,
+    #[prop(into)] label: String,
+    #[prop(optional, into)] id: String,
+) -> impl IntoView {
+    let options = StoredValue::new(options);
+    let chips = move || {
+        let chosen = list_names(&value.get());
+        let mut all = options.get_value();
+        for name in &chosen {
+            if !all.iter().any(|o| o.eq_ignore_ascii_case(name)) {
+                all.push(name.clone());
+            }
+        }
+        all.into_iter()
+            .map(|name| {
+                let on = chosen.iter().any(|c| c.eq_ignore_ascii_case(&name));
+                let text = name.clone();
+                view! {
+                    <button
+                        type="button"
+                        aria-pressed=on.to_string()
+                        class=cn([
+                            "inline-flex items-center gap-1 rounded-pill border px-3 py-1 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                            if on { "border-contrast bg-contrast text-fg-on-contrast" } else { "border-border text-fg-muted hover:text-fg" },
+                        ])
+                        on:click=move |_| {
+                            let next = toggle_name(&list_names(&value.get_untracked()), &name);
+                            value.set(next.join(", "));
+                        }
+                    >
+                        {on.then(|| view! { <Lucide icon=Icon::Check size=12 stroke=3.0 /> })}
+                        {text}
+                    </button>
+                }
+            })
+            .collect_view()
+    };
+    view! {
+        <div id=id role="group" aria-label=label class="flex flex-wrap gap-1.5">
+            {chips}
+            {move || {
+                (options.with_value(Vec::is_empty) && list_names(&value.get()).is_empty())
+                    .then(|| view! { <p class="text-sm text-fg-muted">"Nothing to choose from yet."</p> })
+            }}
+        </div>
+    }
+}
+
 /// The site's `SegmentedControl`: a pill of mutually exclusive options.
 #[component]
 pub fn SegmentedControl(

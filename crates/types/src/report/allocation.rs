@@ -76,3 +76,23 @@ pub struct MonthlyAllocation {
     pub through_date: String,
     pub currencies: Vec<CurrencyAllocation>,
 }
+
+/// What this month's wiggle room hands to next month's plan shortfall:
+/// room is not free until next month is paid for. Never more than either.
+pub fn carried_to_next(wiggle_room: Decimal, next_shortfall: Decimal) -> Decimal {
+    wiggle_room.min(next_shortfall).max(Decimal::ZERO)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wiggle_room_fills_next_shortfall_first() {
+        let d = |n: i64| Decimal::from(n);
+        assert_eq!(carried_to_next(d(300), d(500)), d(300));
+        assert_eq!(carried_to_next(d(800), d(500)), d(500));
+        assert_eq!(carried_to_next(d(-50), d(500)), d(0));
+        assert_eq!(carried_to_next(d(300), d(0)), d(0));
+    }
+}
