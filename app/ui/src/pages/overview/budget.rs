@@ -480,6 +480,13 @@ fn panel(report: &Dashboard, selection: &str, s: PanelState) -> AnyView {
         if budget.extras.planned > Decimal::ZERO || budget.extras.spent > Decimal::ZERO {
             rows.push(budget_row(budget, &budget.extras, Kind::Extras, s));
         }
+        // An event's days: its share of the month against what is spent.
+        rows.extend(
+            budget
+                .events
+                .iter()
+                .map(|row| budget_row(budget, row, Kind::Event, s)),
+        );
         rows.push(budget_row(budget, &budget.unplanned, Kind::Unplanned, s));
         rows
     };
@@ -568,6 +575,8 @@ enum Kind {
     Group,
     Unplanned,
     Extras,
+    /// An event's days in this month.
+    Event,
 }
 
 fn budget_row(budget: &MonthlyBudget, row: &BudgetRow, kind: Kind, s: PanelState) -> AnyView {
@@ -609,6 +618,7 @@ fn budget_row(budget: &MonthlyBudget, row: &BudgetRow, kind: Kind, s: PanelState
             format!("One-off payments · {} still due", m(row.scheduled))
         }
         Kind::Extras => "One-off payments · all paid".into(),
+        Kind::Event => "Event, this month's share".into(),
         Kind::Unplanned if !row.expected.is_empty() => "Outside your groups · estimate".into(),
         Kind::Unplanned => "Outside your planned groups".into(),
         Kind::Group => match &group {

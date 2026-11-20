@@ -380,8 +380,37 @@ fn page(ui: Ui, report: &Dashboard) -> impl IntoView + use<> {
         ui.due_on.set(String::new());
     });
 
+    // The events with a share of the shown month.
+    let event_rows = report
+        .events
+        .iter()
+        .filter_map(|event| {
+            let month = event
+                .months
+                .iter()
+                .find(|m| m.month.starts_with(&active_month))?;
+            let code = event.row.wish.currency.code.as_str();
+            let dates = event.row.wish.event.as_ref()?;
+            let m = |v: Decimal| format::money_dp(v, code, 2);
+            let rows = vec![
+                ("From".to_owned(), format::date(&dates.starts_on)),
+                ("Until".to_owned(), format::date(&dates.ends_on)),
+                ("Share this month".to_owned(), m(month.share)),
+                ("Spent".to_owned(), m(month.spent)),
+            ];
+            Some(view! {
+                <div class="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 border-b border-line py-3">
+                    <span class="flex items-center gap-2 font-medium">
+                        {event.row.wish.name.clone()}
+                        <Badge tone=Tone::Accent>"Event"</Badge>
+                    </span>
+                    <FactsRow rows=rows />
+                </div>
+            })
+        })
+        .collect::<Vec<_>>();
     let no_plans = format!("No plans for {active_label}.");
-    let plans_empty = plans.is_empty();
+    let plans_empty = plans.is_empty() && event_rows.is_empty();
     let plan_rows = plans
         .into_iter()
         .map(|plan| plan_row(ui, plan))
@@ -409,6 +438,7 @@ fn page(ui: Ui, report: &Dashboard) -> impl IntoView + use<> {
                 {create_form(ui, &available, &owners, &accounts, &currencies, &active_month, &active_end)}
                 <div class="border-t border-line">
                     {feedback(ui, "plan-removed".into())}
+                    {event_rows}
                     {plan_rows}
                     {plans_empty.then(|| view! { <p class="mt-3 text-sm text-fg-muted">{no_plans}</p> })}
                 </div>

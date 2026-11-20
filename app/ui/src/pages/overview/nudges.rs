@@ -4,8 +4,9 @@
 //! fast last three days, and unsorted spending. The advice holds spending
 //! to the budget; it never asks for a bigger one.
 
-use finance_types::report::Dashboard;
 use finance_types::report::adjustments::Habit;
+use finance_types::report::events::{EventPhase, EventRow, Pace};
+use finance_types::report::{Currency, Dashboard};
 use leptos::prelude::*;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
@@ -146,7 +147,47 @@ fn allowance_facts(
     facts
 }
 
-/// Every nudge for the first currency, heaviest first, at most [`MOST`].
+/// A running event as a field: what is left of it, how it is going, and
+/// what a day may still cost.
+pub fn event_nudge(event: &EventRow, unit: &Currency) -> Nudge {
+    let m = |v: Decimal| money(v, unit);
+    let over = event.left < Decimal::ZERO;
+    let mut facts = vec![
+        ("Planned".to_owned(), m(event.row.wish.amount)),
+        ("Spent".to_owned(), m(event.spent)),
+        ("Days left".to_owned(), event.days_left.to_string()),
+    ];
+    if event.left > Decimal::ZERO {
+        facts.push(("A day, to stay inside".to_owned(), m(event.per_day)));
+    }
+    let chip = match event.pace {
+        Pace::OnTrack => (Tone::Positive, "On track"),
+        Pace::Fast => (Tone::Warning, "Spending fast"),
+        Pace::Over => (Tone::Negative, "Over"),
+    };
+    Nudge {
+        label: event.row.wish.name.clone(),
+        value: if over {
+            format!("{} over", m(-event.left))
+        } else {
+            format!("{} left", m(event.left))
+        },
+        bad: over,
+        chip: Some((chip.0, chip.1.to_owned())),
+        facts,
+        weight: event.left.abs(),
+    }
+}
+
+/// The running events first, then the [`MOST`] heaviest of the rest.
+fn ordered(events: Vec<Nudge>, mut rest: Vec<Nudge>) -> Vec<Nudge> {
+    rest.sort_by(|a, b| b.weight.cmp(&a.weight).then_with(|| a.label.cmp(&b.label)));
+    rest.truncate(MOST);
+    events.into_iter().chain(rest).collect()
+}
+
+/// The running events, then every nudge for the first currency, heaviest
+/// first, at most [`MOST`].
 pub fn nudges(report: &Dashboard) -> Vec<Nudge> {
     let Some(a) = report
         .monthly_allocation
@@ -174,6 +215,9 @@ pub fn nudges(report: &Dashboard) -> Vec<Nudge> {
             let limit = (row.budgeted && row.row.planned > zero).then_some(row.row.planned);
             // Held to the limit; without one, to the owner's own usual month.
             let cap = limit.or(h.typical_spent.filter(|usual| *usual > zero));
+            // The usual days handed to an event are not this group's to spend.
+            let handed: Decimal = row.row.to_events.iter().map(|(_, n)| *n).sum();
+            let cap = cap.map(|c| c - handed);
             let (norm_over, extra_visits) = above_norm(h);
             let expected = report
                 .spending_forecasts
@@ -216,7 +260,10 @@ pub fn nudges(report: &Dashboard) -> Vec<Nudge> {
 
             let mut facts = vec![("Spent".to_owned(), m(h.spent))];
             if let Some(cap) = cap {
-                facts.push((cap_label.to_owned(), m(cap)));
+                facts.push((cap_label.to_owned(), m(cap + handed)));
+            }
+            for (event, amount) in &row.row.to_events {
+                facts.push((format!("To {event}"), m(*amount)));
             }
             if let (Some(_), Some(expected)) = (heading, expected) {
                 facts.push(("Month end at this pace".to_owned(), m(expected)));
@@ -324,9 +371,13 @@ pub fn nudges(report: &Dashboard) -> Vec<Nudge> {
         }
     }
 
-    out.sort_by(|a, b| b.weight.cmp(&a.weight).then_with(|| a.label.cmp(&b.label)));
-    out.truncate(MOST);
-    out
+    let events = report
+        .events
+        .iter()
+        .filter(|e| e.phase == EventPhase::Running && e.row.wish.currency == *unit)
+        .map(|e| event_nudge(e, unit))
+        .collect();
+    ordered(events, out)
 }
 
 #[component]
@@ -503,6 +554,91 @@ mod tests {
             ]
         );
         assert_eq!(allowance_facts("x", "y", "€40".into(), None).len(), 1);
+    }
+
+    fn running(left: &str, pace: Pace) -> EventRow {
+        use finance_types::gateway::{Wish, WishKind, WishSource, WishStatus};
+        use finance_types::report::wishes::WishRow;
+        EventRow {
+            row: WishRow {
+                wish: Wish {
+                    wish_id: "e".into(),
+                    parent_id: None,
+                    name: "Parents in NL".into(),
+                    amount: d("400"),
+                    currency: Currency::new("EUR"),
+                    due_on: "2026-11-30".into(),
+                    source: WishSource::Card,
+                    saved: Decimal::ZERO,
+                    saved_month: None,
+                    status: WishStatus::Planned,
+                    bought: None,
+                    kind: WishKind::OneOff,
+                    must: false,
+                    event: None,
+                    created_at: String::new(),
+                },
+                children: Vec::new(),
+                rest: Decimal::ZERO,
+                over_cap: false,
+                monthly_set_aside: Decimal::ZERO,
+                suggested_saved: Decimal::ZERO,
+                short: Decimal::ZERO,
+                tradeoffs: false,
+                not_judged: None,
+            },
+            phase: EventPhase::Running,
+            usual: d("150"),
+            extra: d("250"),
+            paid_ahead: Decimal::ZERO,
+            spent: d("400") - d(left),
+            left: d(left),
+            days: 6,
+            days_left: 3,
+            per_day: (d(left) / d("3")).max(Decimal::ZERO).round_dp(2),
+            pace,
+            fits_up_to: None,
+            months: Vec::new(),
+            transactions: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_running_event_is_a_field_with_what_is_left_and_a_day() {
+        let unit = Currency::new("EUR");
+        let n = event_nudge(&running("212.40", Pace::OnTrack), &unit);
+        assert_eq!((n.label.as_str(), n.bad), ("Parents in NL", false));
+        assert!(n.value.starts_with("€212.40"));
+        assert_eq!(n.chip, Some((Tone::Positive, "On track".to_owned())));
+        let labels: Vec<&str> = n.facts.iter().map(|(l, _)| l.as_str()).collect();
+        assert_eq!(
+            labels,
+            ["Planned", "Spent", "Days left", "A day, to stay inside"]
+        );
+        assert_eq!(n.facts[3].1, "€70.80");
+        // Over: the overrun, and no daily amount to stay inside.
+        let n = event_nudge(&running("-20", Pace::Over), &unit);
+        assert!(n.bad && n.value.starts_with("€20"));
+        assert_eq!(n.facts.len(), 3);
+    }
+
+    #[test]
+    fn the_running_events_come_before_the_six_heaviest() {
+        let unit = Currency::new("EUR");
+        let nudge = |weight: i64| Nudge {
+            label: weight.to_string(),
+            value: String::new(),
+            bad: false,
+            chip: None,
+            facts: Vec::new(),
+            weight: Decimal::from(weight),
+        };
+        let event = event_nudge(&running("10", Pace::Fast), &unit);
+        let list = ordered(vec![event.clone()], (1..=8).map(nudge).collect());
+        assert_eq!(list.len(), 7);
+        assert_eq!(list[0], event);
+        assert_eq!(list[1].label, "8");
+        assert_eq!(list[6].label, "3");
     }
 
     #[test]
