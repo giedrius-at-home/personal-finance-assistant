@@ -1,14 +1,13 @@
-//! The Spending section: plan & patterns, organising categories, and the
+//! The Spending section: habits & goals, organising categories, and the
 //! full history (personal-site `integrated-finance.tsx`, Spending tab).
 
-use finance_types::report::Currency;
 use finance_types::report::trends::CurrencyTrends;
 use leptos::prelude::*;
 
 use crate::ds::charts::ProgressBar;
 use crate::ds::{
-    Badge, Card, CardHeader, CardTitle, Eyebrow, Facts, Heading, Help, Icon, Lucide, Money, Size,
-    Switch, Tone, Variant, button_class, money,
+    Badge, Card, Eyebrow, Facts, Heading, Help, Icon, Lucide, Money, Size, Switch, Tone, Variant,
+    button_class, money,
 };
 use crate::pages::category_trends::CategoryTrends;
 use crate::pages::{f, with_report};
@@ -19,10 +18,9 @@ pub fn PlanPatterns() -> impl IntoView {
     let app = state();
     let variable = RwSignal::new(true);
     view! {
-        {crate::pages::overview::budget_panel()}
         <button
             type="button"
-            class=format!("{} -ml-4 mt-2", button_class(Variant::Ghost, Size::Md))
+            class=format!("{} -ml-4", button_class(Variant::Ghost, Size::Md))
             on:click=move |_| app.go(Tab::Transactions)
         >
             "Review shared spending & money back →"
@@ -110,8 +108,8 @@ pub fn Organise() -> impl IntoView {
     crate::pages::organise::Organise()
 }
 
-/// "All spending history": this month by group and store, every month, and
-/// the category comparison.
+/// "All spending history": this month by group and store, and the category
+/// comparison. The months side by side are the Overview's trends.
 #[component]
 pub fn History() -> impl IntoView {
     with_report(|report| {
@@ -180,12 +178,6 @@ pub fn History() -> impl IntoView {
             })
             .collect_view();
         let through = ms.through.clone();
-        let over_time = report
-            .time_trends
-            .currencies
-            .iter()
-            .map(|trend| spending_over_time(trend.clone()))
-            .collect_view();
         let compare = report
             .time_trends
             .currencies
@@ -196,46 +188,7 @@ pub fn History() -> impl IntoView {
             .collect_view();
         view! {
             <div class="grid gap-3 md:grid-cols-2">{cards}</div>
-            {over_time}
             {compare}
         }
     })
-}
-
-fn spending_over_time(trend: CurrencyTrends) -> impl IntoView {
-    let unit: Currency = trend.currency.clone();
-    let code = unit.code.clone();
-    view! {
-        <Card class="my-4">
-            <CardHeader class="mb-5">
-                <CardTitle level=Heading::H2>"Spending over time"</CardTitle>
-                <Badge tone=Tone::Outline>{code}</Badge>
-            </CardHeader>
-            <dl class="grid grid-cols-2 gap-x-3 gap-y-5 sm:grid-cols-3 lg:grid-cols-6">
-                {trend
-                    .months
-                    .into_iter()
-                    .map(|month| {
-                        let detail = match month.spending {
-                            None => "—".to_owned(),
-                            Some(_) if month.partial_month => "Partial month".into(),
-                            Some(_) => format!("{} records", month.record_count),
-                        };
-                        view! {
-                            <div class="grid gap-2 border-l border-line pl-3">
-                                <dt class="text-xs text-fg-muted">{month.start[..7].to_owned()}</dt>
-                                <dd class="whitespace-nowrap text-base font-semibold">
-                                    {match month.spending {
-                                        None => "—".to_owned().into_any(),
-                                        Some(s) => view! { <Money value=s unit=unit.clone() neutral=true /> }.into_any(),
-                                    }}
-                                </dd>
-                                <dd class="text-xs text-fg-muted">{detail}</dd>
-                            </div>
-                        }
-                    })
-                    .collect_view()}
-            </dl>
-        </Card>
-    }
 }

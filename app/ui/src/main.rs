@@ -67,7 +67,7 @@ impl SpendingSection {
 
     fn label(self) -> &'static str {
         match self {
-            Self::PlanPatterns => "Plan & patterns",
+            Self::PlanPatterns => "Habits & goals",
             Self::Organise => "Organise categories",
             Self::History => "All spending history",
         }

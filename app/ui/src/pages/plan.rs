@@ -70,6 +70,8 @@ struct Ui {
     amount: RwSignal<String>,
     currency: RwSignal<String>,
     due_on: RwSignal<String>,
+    /// The purchase an expected income pays back, when it does.
+    reimbursement_for: RwSignal<String>,
 }
 
 impl Ui {
@@ -97,6 +99,7 @@ impl Ui {
             amount: RwSignal::new(String::new()),
             currency: RwSignal::new(String::new()),
             due_on: RwSignal::new(String::new()),
+            reimbursement_for: RwSignal::new(String::new()),
         }
     }
 
@@ -120,6 +123,7 @@ impl Ui {
             self.account_id,
             self.amount,
             self.due_on,
+            self.reimbursement_for,
         ] {
             field.set(String::new());
         }
@@ -257,6 +261,21 @@ fn page(ui: Ui, report: &Dashboard) -> impl IntoView + use<> {
         .as_ref()
         .map_or_else(|| current_month.clone(), |n| month_of(&n.through_date));
     let active_end = format::month_end(&active_month);
+    // What an expected income may pay back: the shown month's purchases.
+    let reimbursable: Vec<(String, String)> = report
+        .monthly_budgets
+        .iter()
+        .filter(|b| b.plan.month.starts_with(&active_month))
+        .flat_map(|b| {
+            b.purchases
+                .iter()
+                .filter(|p| p.amount > Decimal::ZERO)
+                .map(|p| {
+                    let amount = crate::ds::money(p.amount, &b.plan.currency);
+                    (p.id.clone(), format!("{} · {amount}", p.description))
+                })
+        })
+        .collect();
     let removed_plans = ui.removed_plans.get();
     let month_start = format!("{active_month}-01");
     let plans: Vec<PlannedPaymentView> = report
@@ -514,7 +533,7 @@ fn page(ui: Ui, report: &Dashboard) -> impl IntoView + use<> {
             <Card>
                 <Eyebrow>"NEW"</Eyebrow>
                 <h2 class="mt-2 text-lg font-semibold">"Add a payment or income"</h2>
-                {create_form(ui, &available, &owners, &accounts, &currencies, &active_month, &active_end)}
+                {create_form(ui, &available, &owners, &accounts, &currencies, &active_month, &active_end, reimbursable)}
                 {feedback(ui, "plan-removed".into())}
             </Card>
             <section aria-label="Bills" class="grid gap-3">
@@ -542,6 +561,7 @@ struct Shared {
     owners: HashMap<String, (String, String)>,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn create_form(
     ui: Ui,
     available: &[String],
@@ -550,7 +570,9 @@ fn create_form(
     currencies: &[String],
     active_month: &str,
     active_end: &str,
+    reimbursable: Vec<(String, String)>,
 ) -> impl IntoView + use<> {
+    let reimbursable = StoredValue::new(reimbursable);
     let first_currency = currencies.first().cloned().unwrap_or_default();
     let has_currencies = !currencies.is_empty();
     let currency = {
@@ -599,7 +621,8 @@ fn create_form(
                     currency,
                     due_on,
                     account_id: ui.account_id.get_untracked(),
-                    reimbursement_for: None,
+                    reimbursement_for: Some(ui.reimbursement_for.get_untracked())
+                        .filter(|id| !id.is_empty() && ui.direction.get_untracked() == "inflow"),
                     match_description: None,
                 };
                 spawn_local(async move {
@@ -822,6 +845,34 @@ fn create_form(
                     on:input=move |e| ui.due_on.set(event_target_value(&e))
                 />
             </Field>
+            {move || {
+                (ui.repeat.get() == "once" && ui.direction.get() == "inflow").then(|| view! {
+                    <Field
+                        label="Pays back"
+                        id="plan-reimbursement"
+                        hint="Optional. Once received, it lowers that purchase's spending."
+                    >
+                        {select_wrap(view! {
+                            <select
+                                id="plan-reimbursement"
+                                class=select_class()
+                                prop:value=move || ui.reimbursement_for.get()
+                                on:change=move |e| ui.reimbursement_for.set(event_target_value(&e))
+                            >
+                                <option value="">"Nothing, general income"</option>
+                                {reimbursable
+                                    .get_value()
+                                    .into_iter()
+                                    .map(|(id, label)| {
+                                        let selected = id == ui.reimbursement_for.get_untracked();
+                                        view! { <option value=id selected=selected>{label}</option> }
+                                    })
+                                    .collect_view()}
+                            </select>
+                        })}
+                    </Field>
+                })
+            }}
             <Button
                 submit=true
                 variant=Variant::Secondary

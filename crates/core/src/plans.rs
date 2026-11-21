@@ -357,7 +357,13 @@ pub fn reconcile_planned_payments(
             } else {
                 None
             };
-            let status = if unique.is_some() || via_bill.is_some() {
+            // A wish bought on a credit card leaves the bank with the
+            // card's statement, never as a payment of its own: it is paid
+            // the day it was bought.
+            let on_card = found.is_empty()
+                && plan.plan_id.starts_with(WISH_PLAN_PREFIX)
+                && plan.account_id.is_none();
+            let status = if unique.is_some() || via_bill.is_some() || on_card {
                 PlanStatus::Paid
             } else if !found.is_empty() {
                 PlanStatus::NeedsReview
@@ -381,7 +387,10 @@ pub fn reconcile_planned_payments(
                 account_id: plan.account_id.clone(),
                 match_description: plan.match_description.clone(),
                 status,
-                paid_on: unique.or(via_bill).map(|t| t.effective_on().to_string()),
+                paid_on: unique
+                    .or(via_bill)
+                    .map(|t| t.effective_on().to_string())
+                    .or_else(|| on_card.then(|| due.to_string())),
                 transaction_id: unique.map(|t| t.transaction_id.clone()),
                 candidate_count: found.len(),
                 candidates: found
@@ -598,6 +607,15 @@ mod tests {
         )[0];
         assert_eq!(found.status, PlanStatus::Paid);
         assert_eq!(found.transaction_id.as_deref(), Some("zoo"));
+        // From an account with no payment in yet: still waited for.
+        let waiting = &reconcile(std::slice::from_ref(&bought), &[])[0];
+        assert_eq!(waiting.status, PlanStatus::Overdue);
+        // On a card: the statement pays it, so it is paid when bought.
+        bought.account_id = None;
+        let on_card = &reconcile(&[bought], &[])[0];
+        assert_eq!(on_card.status, PlanStatus::Paid);
+        assert_eq!(on_card.paid_on.as_deref(), Some("2026-09-24"));
+        assert_eq!(on_card.transaction_id, None);
     }
 
     #[test]
