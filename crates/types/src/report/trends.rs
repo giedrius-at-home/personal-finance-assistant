@@ -39,7 +39,6 @@ pub struct MonthSpending {
     pub partial_month: bool,
     /// `None` when the month has no spending records at all.
     pub spending: Option<Decimal>,
-    pub record_count: usize,
 }
 
 /// One reviewed group's net spending per month (oldest first).

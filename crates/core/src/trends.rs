@@ -305,7 +305,6 @@ fn currency_trends(
             .to_string(),
             partial_month: *start == current_start,
             spending: is_observed(start).then(|| net(&month_rows(start))),
-            record_count: month_rows(start).len(),
         })
         .collect();
 
@@ -577,7 +576,6 @@ pub(crate) mod tests {
             [None, None, None, None, Some(dec("40")), Some(dec("32"))]
         );
         assert!(euro.months[5].partial_month && !euro.months[4].partial_month);
-        assert_eq!(euro.months[5].record_count, 3);
         let groceries = euro
             .groups
             .iter()
@@ -734,7 +732,6 @@ pub(crate) mod tests {
         let excluded = HashSet::from(["fixed-old".to_owned(), "fixed".to_owned()]);
         let report = &time_trends(&rows, &[], &now(), &excluded).currencies[0];
         assert_eq!(report.months[4].spending, Some(Decimal::ZERO));
-        assert_eq!(report.months[4].record_count, 0);
         assert_eq!(report.months[5].spending, Some(dec("15")));
         let last = report.daily.last().unwrap();
         assert_eq!(
