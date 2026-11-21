@@ -21,13 +21,6 @@ pub struct Money {
     pub currency: String,
 }
 
-/// A reference to a named record (account, category, …).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Named {
-    pub id: i64,
-    pub name: String,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AccountKind {
@@ -86,8 +79,6 @@ pub enum TxKind {
 }
 
 impl TxKind {
-    pub const FILTERABLE: [Self; 3] = [Self::Withdrawal, Self::Deposit, Self::Transfer];
-
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Withdrawal => "withdrawal",
@@ -135,23 +126,6 @@ pub struct AccountSummary {
     pub last_activity: Option<String>,
 }
 
-/// Money in and out of the owner's accounts for one month and currency.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MonthFlow {
-    pub month: String,
-    pub currency: String,
-    pub income: Decimal,
-    pub spending: Decimal,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CategoryTotal {
-    pub category: Option<Named>,
-    pub currency: String,
-    pub amount: Decimal,
-    pub count: u64,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DataStatus {
     pub transactions: u64,
@@ -159,67 +133,6 @@ pub struct DataStatus {
     pub last_date: Option<String>,
     pub imported_at: Option<String>,
     pub source: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Overview {
-    pub net_worth: Vec<Money>,
-    pub accounts: Vec<AccountSummary>,
-    pub months: Vec<MonthFlow>,
-    /// Spending by category for `category_month`.
-    pub categories: Vec<CategoryTotal>,
-    pub category_month: Option<String>,
-    pub status: DataStatus,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TxQuery {
-    pub text: Option<String>,
-    pub account_id: Option<i64>,
-    pub category_id: Option<i64>,
-    /// Only rows without a category (ignored when `category_id` is set).
-    pub uncategorised: bool,
-    pub kind: Option<TxKind>,
-    pub from: Option<String>,
-    pub to: Option<String>,
-    pub limit: u32,
-    pub offset: u32,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TxRow {
-    pub id: i64,
-    pub date: String,
-    pub description: String,
-    pub kind: TxKind,
-    /// Signed from the owner's point of view: spending negative, income positive,
-    /// transfers positive.
-    pub amount: Money,
-    pub foreign: Option<Money>,
-    pub source: Named,
-    pub destination: Named,
-    pub category: Option<Named>,
-    pub bill: Option<String>,
-    pub tags: Vec<String>,
-    pub notes: Option<String>,
-    pub reconciled: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TxPage {
-    pub rows: Vec<TxRow>,
-    pub total: u64,
-    /// Net total of all matching rows, per currency.
-    pub sums: Vec<Money>,
-}
-
-/// Values the transaction filters can choose from.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Facets {
-    pub accounts: Vec<Named>,
-    pub categories: Vec<Named>,
-    pub first_date: Option<String>,
-    pub last_date: Option<String>,
 }
 
 /// Per-account totals used to prove a migration copied everything.

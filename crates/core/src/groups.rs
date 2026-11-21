@@ -8,7 +8,6 @@ use finance_types::report::reporting::{
     CurrencySpending, GroupSpending, MonthlySpending, StoreSpending,
 };
 use jiff::Zoned;
-use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 use crate::load::Bill;
@@ -199,10 +198,6 @@ fn gross(rows: &[&Tx]) -> Decimal {
         .sum()
 }
 
-fn days_in_month(month: Date) -> i8 {
-    month.days_in_month()
-}
-
 /// This calendar month through today against the same days of last month,
 /// by reviewed group and category. Dates are local to `now`'s time zone.
 pub fn monthly_spending(
@@ -214,7 +209,7 @@ pub fn monthly_spending(
     let today = now.date();
     let start = today.first_of_month();
     let previous_start = shift_month(start, -1);
-    let day = today.day().min(days_in_month(previous_start));
+    let day = today.day().min(previous_start.days_in_month());
     let comparison_through = today.with().day(day).build().unwrap_or(today);
     let previous_through = previous_start
         .with()
@@ -223,7 +218,11 @@ pub fn monthly_spending(
         .unwrap_or(previous_start);
     let reviewed: HashMap<&str, &GroupMapping> =
         mappings.iter().map(|m| (m.category.as_str(), m)).collect();
-    let local = |t: &Tx| t.occurred_at.with_time_zone(zone.clone()).date();
+    // A card purchase counts on its own day, as the budget counts it.
+    let local = |t: &Tx| {
+        t.purchased_on
+            .unwrap_or_else(|| t.occurred_at.with_time_zone(zone.clone()).date())
+    };
 
     let rows: Vec<&Tx> = transactions
         .iter()
@@ -495,6 +494,26 @@ mod tests {
             .map(|m| (m.category.as_str(), m.revision))
             .collect();
         assert_eq!(names, vec![("Albert Heijn", 1), ("Jumbo", 1), ("Rent", 0)]);
+    }
+
+    #[test]
+    fn a_card_purchase_counts_in_the_month_it_was_bought() {
+        // Bought on 30 September, booked on 2 October.
+        let card = Tx {
+            purchased_on: Some(jiff::civil::date(2026, 9, 30)),
+            ..tx(
+                "1",
+                Kind::Outflow,
+                "40",
+                Some("Albert Heijn"),
+                "2026-10-02T12:00:00+02:00[Europe/Amsterdam]",
+            )
+        };
+        let now: Zoned = "2026-10-10T12:00:00+02:00[Europe/Amsterdam]"
+            .parse()
+            .unwrap();
+        let report = monthly_spending(&[card], &[], &now);
+        assert!(report.currencies.iter().all(|c| c.spending.is_zero()));
     }
 
     #[test]

@@ -10,6 +10,7 @@ use finance_types::report::events::{EventMonth, EventPhase, EventSpend, Pace};
 use jiff::civil::Date;
 use rust_decimal::Decimal;
 
+use crate::closure::day_of;
 use crate::period::shift_month;
 
 /// The prefix of an event's row and ownership key: `event:<wish id>`.
@@ -36,10 +37,6 @@ pub struct EventClaim {
     pub saved: Decimal,
 }
 
-fn day(text: &str) -> Option<Date> {
-    text.get(..10)?.parse().ok()
-}
-
 /// Planned event wishes, earliest start first, then by wish id.
 pub fn claims(wishes: &[Wish]) -> Vec<EventClaim> {
     let mut out: Vec<EventClaim> = wishes
@@ -49,32 +46,20 @@ pub fn claims(wishes: &[Wish]) -> Vec<EventClaim> {
         })
         .filter_map(|w| {
             let event = w.event.as_ref()?;
-            let (starts, ends) = (day(&event.starts_on)?, day(&event.ends_on)?);
+            let (starts, ends) = (day_of(&event.starts_on)?, day_of(&event.ends_on)?);
             if ends < starts {
                 return None;
             }
             let mut rest = w.amount;
-            // An amount on top of the parts is all for the days.
-            let within = if event.on_top {
-                Decimal::ZERO
-            } else {
-                Decimal::ONE
-            };
             let mut tied = HashMap::new();
             for part in wishes.iter().filter(|p| {
                 p.parent_id.as_deref() == Some(&w.wish_id) && p.kind == WishKind::OneOff
             }) {
-                match part.status {
-                    WishStatus::Planned => rest -= part.amount * within,
-                    WishStatus::Bought => {
-                        rest -= part.bought.as_ref().map_or(part.amount, |b| b.amount) * within;
-                        if let Some(id) =
-                            part.bought.as_ref().and_then(|b| b.transaction_id.clone())
-                        {
-                            tied.insert(id, part.wish_id.clone());
-                        }
-                    }
-                    WishStatus::Dropped | WishStatus::Started => {}
+                rest -= crate::wishes::part_cost(w, part);
+                if part.status == WishStatus::Bought
+                    && let Some(id) = part.bought.as_ref().and_then(|b| b.transaction_id.clone())
+                {
+                    tied.insert(id, part.wish_id.clone());
                 }
             }
             Some(EventClaim {
@@ -153,7 +138,7 @@ pub struct EventNeed {
 }
 
 fn month_day(text: &str) -> Option<Date> {
-    day(text).map(|d| d.first_of_month())
+    day_of(text).map(|d| d.first_of_month())
 }
 
 /// The money for the days: the rest less what was picked in ahead.

@@ -32,6 +32,8 @@ use crate::writes::{Writer, utc_stamp};
 
 /// Days of overlap each sync downloads again (the importer's 30-day range).
 const OVERLAP_DAYS: i64 = 30;
+/// Banks hand out about 90 days of history without a fresh login.
+const HISTORY_DAYS: i64 = 89;
 /// The importer gave up after this many pages of one account.
 const MAX_PAGES: usize = 50;
 
@@ -97,12 +99,25 @@ pub struct Window {
     pub to: Date,
 }
 
-/// The last 30 days up to `today` (UTC), never before the cut-over day.
-/// `None` on the cut-over day itself: there is no completed day yet.
-pub fn window(today: Date, not_before: Option<Date>) -> Result<Option<Window>, SyncStatus> {
-    let mut from = today
-        .checked_sub(OVERLAP_DAYS.days())
-        .map_err(|_| SyncStatus::InvalidConfiguration)?;
+/// The last 30 days up to `today` (UTC), reaching back to two days before
+/// the last good sync after a longer gap (at most the bank's ~90 days), and
+/// never before the cut-over day. `None` on the cut-over day itself: there
+/// is no completed day yet.
+pub fn window(
+    today: Date,
+    not_before: Option<Date>,
+    last_success: Option<Date>,
+) -> Result<Option<Window>, SyncStatus> {
+    let days_back = |days: i64| {
+        today
+            .checked_sub(days.days())
+            .map_err(|_| SyncStatus::InvalidConfiguration)
+    };
+    let mut from = days_back(OVERLAP_DAYS)?;
+    if let Some(last) = last_success {
+        let gap = last.checked_sub(2.days()).unwrap_or(last);
+        from = from.min(gap).max(days_back(HISTORY_DAYS)?);
+    }
     if let Some(cutoff) = not_before {
         if cutoff > today {
             return Err(SyncStatus::InvalidConfiguration);
@@ -245,6 +260,7 @@ pub fn download(api: &mut dyn Api, uid: &str, window: Window) -> Result<Vec<Entr
             .unwrap_or("")
             .to_owned();
         if key.is_empty() {
+            number_repeats(&mut entries);
             return Ok(entries);
         }
         if !seen.insert(key.clone()) {
@@ -252,6 +268,20 @@ pub fn download(api: &mut dyn Api, uid: &str, window: Window) -> Result<Vec<Entr
         }
     }
     Err(SyncStatus::ProviderPaginationError)
+}
+
+/// Entries without a bank reference are known by a hash of their content,
+/// so two identical payments on one day would share an id and the second
+/// would be skipped as already imported. The 2nd, 3rd… copy gets `-2`, `-3`…
+fn number_repeats(entries: &mut [Entry]) {
+    let mut seen: HashMap<String, u32> = HashMap::new();
+    for entry in entries.iter_mut().filter(|e| e.id.starts_with("eb-")) {
+        let count = seen.entry(entry.id.clone()).or_default();
+        *count += 1;
+        if *count > 1 {
+            entry.id = format!("{}-{count}", entry.id);
+        }
+    }
 }
 
 /// When the scheduler may sync a bank again: a day after success, six hours
@@ -502,7 +532,7 @@ impl Service {
         now: Timestamp,
     ) -> Result<(), SyncStatus> {
         let today = now.to_zoned(TimeZone::UTC).date();
-        let window = window(today, connection.import_not_before)?.unwrap_or(Window {
+        let window = window(today, connection.import_not_before, None)?.unwrap_or(Window {
             from: today,
             to: today,
         });
@@ -527,7 +557,7 @@ impl Service {
             imported,
             expires,
             balances,
-        } = self.attempt(bank, connection, api, now);
+        } = self.attempt(bank, connection, api, now, &previous);
         let mut run = record(&previous, status, imported, now);
         if expires.is_some() {
             run.consent_valid_until = expires;
@@ -554,13 +584,18 @@ impl Service {
         connection: &Connection,
         api: &mut dyn Api,
         now: Timestamp,
+        previous: &BankRun,
     ) -> Attempt {
         let failed = |status| Attempt {
             status,
             ..Attempt::default()
         };
         let today = now.to_zoned(TimeZone::UTC).date();
-        let window = match window(today, connection.import_not_before) {
+        let last_success = previous
+            .last_success
+            .as_deref()
+            .and_then(|s| s.get(..10)?.parse().ok());
+        let window = match window(today, connection.import_not_before, last_success) {
             Ok(Some(window)) => window,
             Ok(None) => return failed(SyncStatus::WaitingForCompletedDay),
             Err(status) => return failed(status),
@@ -910,23 +945,44 @@ mod tests {
     fn window_is_thirty_days_after_the_cutover() {
         let today = jiff::civil::date(2026, 10, 27);
         assert_eq!(
-            window(today, None).unwrap(),
+            window(today, None, None).unwrap(),
             Some(Window {
                 from: jiff::civil::date(2026, 9, 27),
                 to: today
             })
         );
         assert_eq!(
-            window(today, Some(jiff::civil::date(2026, 10, 20)))
+            window(today, Some(jiff::civil::date(2026, 10, 20)), None)
                 .unwrap()
                 .unwrap()
                 .from,
             jiff::civil::date(2026, 10, 20)
         );
-        assert_eq!(window(today, Some(today)).unwrap(), None);
+        assert_eq!(window(today, Some(today), None).unwrap(), None);
         assert_eq!(
-            window(today, Some(jiff::civil::date(2026, 11, 1))).unwrap_err(),
+            window(today, Some(jiff::civil::date(2026, 11, 1)), None).unwrap_err(),
             SyncStatus::InvalidConfiguration
+        );
+    }
+
+    #[test]
+    fn window_reaches_back_to_the_last_sync_after_a_long_gap() {
+        let today = jiff::civil::date(2026, 12, 10);
+        let from = |last| window(today, None, Some(last)).unwrap().unwrap().from;
+        // Closed from 1 Nov: the gap is fetched again, with two days' overlap.
+        assert_eq!(
+            from(jiff::civil::date(2026, 11, 1)),
+            jiff::civil::date(2026, 10, 30)
+        );
+        // A recent sync keeps the usual 30 days.
+        assert_eq!(
+            from(jiff::civil::date(2026, 12, 9)),
+            jiff::civil::date(2026, 11, 10)
+        );
+        // Never further back than the bank's history.
+        assert_eq!(
+            from(jiff::civil::date(2026, 1, 1)),
+            jiff::civil::date(2026, 9, 12)
         );
     }
 
@@ -1064,6 +1120,27 @@ mod tests {
             Ok((None, BTreeMap::new()))
         );
         assert_eq!(api.asked, ["sessions/s1"]);
+    }
+
+    #[test]
+    fn identical_entries_without_a_reference_keep_apart() {
+        let window = Window {
+            from: jiff::civil::date(2026, 10, 1),
+            to: jiff::civil::date(2026, 10, 27),
+        };
+        let base = "accounts/uid-1/transactions?date_from=2026-10-01&date_to=2026-10-27";
+        let coffee = json!({"booking_date": "2026-10-02", "transaction_amount": {"amount": "3.50", "currency": "EUR"}});
+        let mut api = Script::new(vec![(
+            base,
+            Ok(json!({"transactions": [coffee.clone(), coffee, {"entry_reference": "a"}]})),
+        )]);
+        let ids: Vec<String> = download(&mut api, "uid-1", window)
+            .unwrap()
+            .into_iter()
+            .map(|e| e.id)
+            .collect();
+        assert_eq!(ids[1], format!("{}-2", ids[0]));
+        assert_eq!(ids[2], "a");
     }
 
     #[test]

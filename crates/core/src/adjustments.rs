@@ -15,8 +15,9 @@ use rust_decimal::Decimal;
 
 use crate::budget::{
     BudgetInputs, HISTORY_MONTHS, Ownership, budget_fixed_ids, counts, held_currencies, month_of,
-    monthly_budget, parse_date, plan_for, signed,
+    monthly_budget, plan_for, signed,
 };
+use crate::closure::day_of;
 use crate::context::Ctx;
 use crate::model::{Kind, Tx};
 use crate::period::shift_month;
@@ -34,7 +35,7 @@ const FULL_WEEKS: usize = 12;
 const RECENT_WEEKS: usize = 4;
 
 fn plan_month(plan: &BudgetPlan, inputs: &BudgetInputs) -> Date {
-    parse_date(&plan.month).unwrap_or_else(|| inputs.now.date().first_of_month())
+    day_of(&plan.month).unwrap_or_else(|| inputs.now.date().first_of_month())
 }
 
 /// The six budget months a plan's history covers, oldest first.

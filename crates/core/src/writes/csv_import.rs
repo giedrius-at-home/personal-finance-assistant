@@ -1055,8 +1055,15 @@ pub fn preview(
 pub fn commit(w: &Writer<'_>, accounts: &[Target], request: &CsvCommit) -> Result<CsvCommitResult> {
     let staged = begin(&request.preview_id)?;
     let result = commit_staged(w, accounts, &staged, request.skip_flagged);
-    release(&request.preview_id, result.is_ok());
+    // Kept until the transaction commits ([`spend`]): a failed commit
+    // leaves the preview to try again.
+    release(&request.preview_id, false);
     result
+}
+
+/// Forget a preview once its rows are committed to the ledger.
+pub(crate) fn spend(preview_id: &str) {
+    release(preview_id, true);
 }
 
 fn commit_staged(
@@ -1342,6 +1349,7 @@ mod tests {
             .expect("commit");
             assert_eq!(done.imported, 4);
             w.tx.commit().expect("commit tx");
+            spend(&p.preview_id);
         }
         // The id is spent.
         assert!(begin(&p.preview_id).is_err());

@@ -808,27 +808,6 @@ impl Inputs<'_> {
     }
 }
 
-/// The wishes screen, judged against one currency's allocation.
-pub fn view_from(
-    alloc: Option<&CurrencyAllocation>,
-    plans: &[BudgetPlan],
-    card_bills: Vec<(String, Decimal)>,
-    wishes: &[Wish],
-    settings: &WishSettings,
-    bills: &HashMap<String, BillNow>,
-) -> WishesView {
-    Inputs {
-        alloc,
-        today: None,
-        plans: plans.to_vec(),
-        card_bills,
-        bills,
-        habits: Vec::new(),
-        events: Vec::new(),
-    }
-    .view(wishes, settings)
-}
-
 fn sort_by_due(wishes: &mut [&Wish]) {
     wishes.sort_by(|a, b| (&a.due_on, &a.created_at).cmp(&(&b.due_on, &b.created_at)));
 }
@@ -997,8 +976,43 @@ pub fn month_zero_cuts(view: &WishesView, wish_id: &str) -> Vec<Cut> {
         .unwrap_or_default()
 }
 
+/// What a one-off `part` takes out of its parent's amount: its price while
+/// planned, what it cost once bought, nothing when dropped or started. An
+/// event counting its amount on top of the parts gives them nothing.
+pub(crate) fn part_cost(parent: &Wish, part: &Wish) -> Decimal {
+    if parent.event.as_ref().is_some_and(|e| e.on_top) {
+        return Decimal::ZERO;
+    }
+    match part.status {
+        WishStatus::Planned => part.amount,
+        WishStatus::Bought => part.bought.as_ref().map_or(part.amount, |b| b.amount),
+        WishStatus::Dropped | WishStatus::Started => Decimal::ZERO,
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    /// The wishes screen, judged against one currency's allocation.
+    fn view_from(
+        alloc: Option<&CurrencyAllocation>,
+        plans: &[BudgetPlan],
+        card_bills: Vec<(String, Decimal)>,
+        wishes: &[Wish],
+        settings: &WishSettings,
+        bills: &HashMap<String, BillNow>,
+    ) -> WishesView {
+        Inputs {
+            alloc,
+            today: None,
+            plans: plans.to_vec(),
+            card_bills,
+            bills,
+            habits: Vec::new(),
+            events: Vec::new(),
+        }
+        .view(wishes, settings)
+    }
+
     use super::baseline::tests::{alloc, d, plan, plan_group, row};
     use super::*;
     use finance_types::gateway::{CardSettings, WishPurchase, WishSource, WishStatus};

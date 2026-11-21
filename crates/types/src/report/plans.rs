@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::UnitMoney;
-use crate::gateway::{Direction, PlannedPayment};
+use crate::gateway::Direction;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -42,26 +42,6 @@ pub struct PlannedPaymentView {
     /// The owner tied `transaction_id` to the plan by hand.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub by_hand: bool,
-}
-
-impl PlannedPaymentView {
-    /// The stored plan this view reconciles.
-    pub fn plan(&self) -> PlannedPayment {
-        PlannedPayment {
-            plan_id: self.plan_id.clone(),
-            name: self.name.clone(),
-            match_category: self.match_category.clone(),
-            direction: self.direction,
-            amount: self.amount.clone(),
-            due_on: self.due_on.clone(),
-            created_at: self.created_at.clone(),
-            reimbursement_for: self.reimbursement_for.clone(),
-            pending: self.pending,
-            account_id: self.account_id.clone(),
-            match_description: self.match_description.clone(),
-            paid_by: self.by_hand.then(|| self.transaction_id.clone()).flatten(),
-        }
-    }
 }
 
 /// A transaction that could be the plan's payment.

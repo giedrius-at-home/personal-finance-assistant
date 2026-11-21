@@ -13,9 +13,8 @@ use std::sync::LazyLock;
 
 use finance_types::gateway::DailyReviewEntry;
 use finance_types::report::review::{
-    BatchDecision, BatchSaved, CategorisationMethod, CategoryAlternative, CategoryOptions,
-    CategoryProposal, DecisionResult, DecisionStatus, DecisionsSaved, ProposalSource,
-    ProposalStatus, ReviewAction, ReviewDecision,
+    BatchDecision, BatchSaved, CategorisationMethod, CategoryProposal, DecisionResult,
+    DecisionStatus, DecisionsSaved, ProposalSource, ProposalStatus, ReviewAction, ReviewDecision,
 };
 use jiff::tz::TimeZone;
 use jiff::{SignedDuration, Timestamp};
@@ -30,9 +29,6 @@ use crate::model::Kind;
 use crate::review::latest_proposals;
 use crate::text::casefold;
 use crate::{Error, Result, Snapshot};
-
-/// Python `domain/categorisation.MAX_CATEGORIES`.
-const MAX_CATEGORIES: usize = 256;
 
 fn chars(text: &str) -> usize {
     text.chars().count()
@@ -395,74 +391,6 @@ pub fn review_batch(
     reconcile_daily_review(w, snap, &HashMap::new())?;
     Ok(BatchSaved {
         saved: selected.len(),
-    })
-}
-
-/// `/review/{id}/category-options`: the ranked categories the suggestion
-/// pass stored, limited to categories in use, plus every category in use.
-pub fn category_options(
-    conn: &rusqlite::Connection,
-    snap: &Snapshot,
-    proposal_id: &str,
-) -> Result<CategoryOptions> {
-    if !is_proposal_id(proposal_id) {
-        return Err(invalid("Invalid transaction."));
-    }
-    let payload: Option<String> = conn
-        .query_row(
-            "SELECT payload_json FROM category_proposals WHERE proposal_id = ?1 AND status = 'pending'",
-            [proposal_id],
-            |r| r.get(0),
-        )
-        .optional()?;
-    let Some(proposal) = payload.and_then(|p| serde_json::from_str::<CategoryProposal>(&p).ok())
-    else {
-        return Err(invalid("This review changed. Refresh and try again."));
-    };
-    let mut counts: HashMap<&str, u64> = HashMap::new();
-    for t in &snap.raw_transactions {
-        if let Some(c) = t.category.as_deref().filter(|c| !c.is_empty())
-            && t.kind != Kind::Transfer
-        {
-            *counts.entry(c).or_default() += 1;
-        }
-    }
-    let mut ranked: Vec<(&str, u64)> = counts.into_iter().collect();
-    ranked.sort_by(|a, b| {
-        b.1.cmp(&a.1)
-            .then_with(|| casefold(a.0).cmp(&casefold(b.0)))
-    });
-    let existing: Vec<String> = ranked
-        .into_iter()
-        .take(MAX_CATEGORIES)
-        .map(|(c, _)| c.to_owned())
-        .collect();
-    let known = |c: &str| existing.iter().any(|e| e == c);
-    let mut options: Vec<CategoryAlternative> = proposal
-        .category_options
-        .iter()
-        .filter(|o| known(&o.category))
-        .cloned()
-        .collect();
-    if options.is_empty() {
-        options = [
-            (&proposal.proposed_category, proposal.confidence),
-            (&proposal.runner_up, proposal.runner_up_confidence),
-        ]
-        .into_iter()
-        .filter_map(|(c, p)| match (c, p) {
-            (Some(c), Some(p)) if known(c) => Some(CategoryAlternative {
-                category: c.clone(),
-                probability: p,
-            }),
-            _ => None,
-        })
-        .collect();
-    }
-    options.truncate(4);
-    Ok(CategoryOptions {
-        options,
-        existing_categories: existing,
     })
 }
 

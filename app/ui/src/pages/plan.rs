@@ -471,6 +471,7 @@ fn page(ui: Ui, report: &Dashboard) -> impl IntoView + use<> {
                 currency: p.amount.currency.code.clone(),
                 incoming: p.direction == Direction::Inflow,
                 amount: p.amount.amount,
+                taken: None,
             })
         })
     };
@@ -1224,6 +1225,7 @@ fn plan_popup(ui: Ui, plan: PlannedPaymentView) -> impl IntoView {
             currency: plan.amount.currency.code.clone(),
             incoming: inflow,
             amount: plan.amount.amount,
+            taken: None,
         };
         view! {
             <Button

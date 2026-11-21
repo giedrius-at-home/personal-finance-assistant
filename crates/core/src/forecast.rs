@@ -66,7 +66,7 @@ pub struct ForecastPeriod {
     pub period_start: Date,
 }
 
-fn signed(t: &Tx) -> Decimal {
+pub(crate) fn signed(t: &Tx) -> Decimal {
     if t.kind == Kind::Outflow {
         t.amount
     } else {

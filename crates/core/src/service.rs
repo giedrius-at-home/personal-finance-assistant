@@ -285,7 +285,11 @@ impl Service {
         let store = guard.as_mut().ok_or_else(|| NO_DATA.to_owned())?;
         (|| {
             let writer = Writer {
-                tx: store.connection_mut().transaction()?,
+                // IMMEDIATE: take the write lock up front, so a read-then-write never
+                // fails mid-way when another process (devserver, sync) writes too.
+                tx: store
+                    .connection_mut()
+                    .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?,
                 now: Zoned::now(),
             };
             let value = f(&writer)?;
@@ -300,14 +304,9 @@ impl Service {
         f: impl FnOnce(&Writer<'_>, &Snapshot) -> crate::Result<T>,
         always_refresh: bool,
     ) -> Result<T, String> {
-        let snapshot = {
-            let mut snap = None;
-            self.read(|_, s| {
-                snap = Some(s.clone());
-                Ok(())
-            })?;
-            snap.ok_or_else(|| NO_DATA.to_owned())?
-        };
+        if !self.path.exists() {
+            return Err(NO_DATA.to_owned());
+        }
         let mut guard = self
             .writer
             .lock()
@@ -316,11 +315,25 @@ impl Service {
             backup(&self.path).map_err(|e| format!("backup failed: {e}"))?;
             *guard = Some(Store::open(&self.path).map_err(|e| e.to_string())?);
         }
+        // Taken under the writer lock, so it includes every write this
+        // process committed before (a bank import this write waited for).
+        let snapshot = {
+            let mut snap = None;
+            self.read(|_, s| {
+                snap = Some(s.clone());
+                Ok(())
+            })?;
+            snap.ok_or_else(|| NO_DATA.to_owned())?
+        };
         let store = guard.as_mut().ok_or_else(|| NO_DATA.to_owned())?;
         let before = store.connection().total_changes();
         let result = (|| {
             let writer = Writer {
-                tx: store.connection_mut().transaction()?,
+                // IMMEDIATE: take the write lock up front, so a read-then-write never
+                // fails mid-way when another process (devserver, sync) writes too.
+                tx: store
+                    .connection_mut()
+                    .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?,
                 now: Zoned::now().with_time_zone(snapshot.zone.clone()),
             };
             let value = f(&writer, &snapshot)?;
@@ -678,10 +691,14 @@ impl Service {
         &self,
         commit: finance_types::manage::CsvCommit,
     ) -> Result<finance_types::manage::CsvCommitResult, String> {
-        self.write(|w, snap| {
+        let result = self.write(|w, snap| {
             let targets = crate::manage::import_targets(&w.tx, snap)?;
             crate::writes::csv_import::commit(w, &targets, &commit)
-        })
+        });
+        if result.is_ok() {
+            crate::writes::csv_import::spend(&commit.preview_id);
+        }
+        result
     }
 
     pub fn preview_settings(
@@ -739,12 +756,6 @@ impl Service {
 
     pub fn review_batch(&self, items: Vec<rv::BatchDecision>) -> Result<rv::BatchSaved, String> {
         self.write(|w, snap| crate::writes::review::review_batch(w, snap, items))
-    }
-
-    pub fn review_category_options(&self, proposal: &str) -> Result<rv::CategoryOptions, String> {
-        self.read(|store, snap| {
-            crate::writes::review::category_options(store.connection(), snap, proposal)
-        })
     }
 
     pub fn save_review_details(

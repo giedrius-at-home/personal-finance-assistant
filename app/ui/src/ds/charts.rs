@@ -56,11 +56,6 @@ impl Series {
         }
     }
 
-    pub fn colored(mut self, named: &str) -> Self {
-        self.color = series_color(0, Some(named));
-        self
-    }
-
     pub fn line(mut self, line: Line) -> Self {
         self.line = line;
         self
@@ -693,45 +688,6 @@ pub fn Donut(
                 }}
             </div>
             <Legend series=data.iter().map(|s| (s.label.clone(), s.color.clone())).collect() />
-        </div>
-    }
-}
-
-/// An axis-free trend line (`Sparkline`).
-#[component]
-pub fn Sparkline(
-    data: Vec<f64>,
-    #[prop(optional, into)] color: Option<String>,
-    #[prop(default = 32)] height: u32,
-    #[prop(into)] label: String,
-    #[prop(optional, into)] class: String,
-) -> impl IntoView {
-    let (lo, hi) = data
-        .iter()
-        .fold((f64::MAX, f64::MIN), |(l, h), v| (l.min(*v), h.max(*v)));
-    let span = (hi - lo).max(f64::EPSILON);
-    let n = data.len().max(2);
-    let points: Vec<(f64, f64)> = data
-        .iter()
-        .enumerate()
-        .map(|(i, v)| {
-            (
-                2.0 + i as f64 / (n - 1) as f64 * 96.0,
-                94.0 - (v - lo) / span * 88.0,
-            )
-        })
-        .collect();
-    let d = if points.is_empty() {
-        String::new()
-    } else {
-        smooth(&points)
-    };
-    let color = color.unwrap_or_else(|| series_color(0, None));
-    view! {
-        <div role="img" aria-label=label class=cn(["w-full min-w-0", class.as_str()]) style:height=format!("{height}px")>
-            <svg class="h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
-                <path d=d fill="none" stroke=color stroke-width="1.5" vector-effect="non-scaling-stroke"></path>
-            </svg>
         </div>
     }
 }

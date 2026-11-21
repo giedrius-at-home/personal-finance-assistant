@@ -36,13 +36,6 @@ pub fn known_categories(snap: &Snapshot) -> BTreeSet<String> {
 }
 
 /// Python `save_group_mapping`: `Writer::stamp` with Python's `+00:00` offset.
-fn reviewed_at(w: &Writer<'_>) -> String {
-    let stamp = w.stamp();
-    stamp
-        .strip_suffix('Z')
-        .map_or(stamp.clone(), |s| format!("{s}+00:00"))
-}
-
 /// Append a reviewed revision for `category` (a `None` group unassigns it)
 /// if nobody saved it since `revision`.
 pub fn save_group_mapping(
@@ -81,7 +74,13 @@ pub fn save_group_mapping(
         "INSERT INTO spending_group_history (category, revision, group_name, reviewed_at) \
          SELECT ?1, ?2, ?3, ?4 WHERE COALESCE((SELECT MAX(revision) \
          FROM spending_group_history WHERE category = ?1), 0) = ?5",
-        params![category, revision + 1, group, reviewed_at(w), revision],
+        params![
+            category,
+            revision + 1,
+            group,
+            super::transactions::iso_now(w),
+            revision
+        ],
     )?;
     if changed != 1 {
         return Err(invalid(CHANGED));

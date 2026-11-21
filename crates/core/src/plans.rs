@@ -11,6 +11,7 @@ use jiff::tz::TimeZone;
 use rust_decimal::Decimal;
 
 use crate::Ctx;
+use crate::closure::day_of;
 use crate::load::parse_instant;
 use crate::model::{Kind, Tx};
 use crate::period::shift_month;
@@ -103,7 +104,7 @@ pub fn with_recurring_salary(
                 && casefold(p.match_category.trim()) == "salary"
                 && p.amount.currency.code == "EUR"
         })
-        .filter_map(|p| due_on(p).map(Date::first_of_month))
+        .filter_map(|p| day_of(&p.due_on).map(Date::first_of_month))
         .collect();
     let created_at = now
         .timestamp()
@@ -136,10 +137,6 @@ pub fn with_recurring_salary(
         });
     }
     out
-}
-
-fn due_on(plan: &PlannedPayment) -> Option<Date> {
-    plan.due_on.get(..10)?.parse().ok()
 }
 
 fn is_purchase(plan: &PlannedPayment) -> bool {
@@ -175,7 +172,9 @@ impl<'a> Reconciler<'a> {
         }
         if plan.plan_id.starts_with(WISH_PLAN_PREFIX) {
             // The purchase itself was recorded; any category may hold it.
-            return true;
+            // Bought on a card, it never leaves the bank as a payment of
+            // its own: a bank payment of the same amount is something else.
+            return plan.account_id.is_some();
         }
         if let Some(wanted) = &plan.match_description {
             // Merchant evidence takes precedence over broad accounting categories.
@@ -319,11 +318,11 @@ pub fn reconcile_planned_payments(
     };
     let dated: Vec<(&PlannedPayment, Date)> = plans
         .iter()
-        .filter_map(|p| due_on(p).map(|d| (p, d)))
+        .filter_map(|p| day_of(&p.due_on).map(|d| (p, d)))
         .collect();
     let windows: HashMap<&str, (Date, Date, Date)> = archived
         .iter()
-        .filter_map(|p| due_on(p).map(|d| (p, d)))
+        .filter_map(|p| day_of(&p.due_on).map(|d| (p, d)))
         .chain(dated.iter().copied())
         .map(|(p, d)| (p.plan_id.as_str(), r.window(p, d)))
         .collect();
@@ -638,9 +637,20 @@ mod tests {
         assert_eq!(waiting.status, PlanStatus::Overdue);
         // On a card: the statement pays it, so it is paid when bought.
         bought.account_id = None;
-        let on_card = &reconcile(&[bought], &[])[0];
+        let on_card = &reconcile(std::slice::from_ref(&bought), &[])[0];
         assert_eq!(on_card.status, PlanStatus::Paid);
         assert_eq!(on_card.paid_on.as_deref(), Some("2026-09-24"));
+        assert_eq!(on_card.transaction_id, None);
+        // A bank payment of the same amount is not the card purchase.
+        let same = tx(
+            "zoo",
+            Some("Entertainment"),
+            "114",
+            "2026-09-24",
+            Kind::Outflow,
+        );
+        let on_card = &reconcile(&[bought], &[same])[0];
+        assert_eq!(on_card.status, PlanStatus::Paid);
         assert_eq!(on_card.transaction_id, None);
     }
 

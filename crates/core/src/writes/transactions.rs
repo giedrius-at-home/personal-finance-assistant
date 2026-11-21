@@ -278,26 +278,17 @@ pub fn apply_consolidation(
     if token != expected {
         return Err(invalid(CONSOLIDATION_CHANGED));
     }
-    let mut applied = 0;
     for t in &selected {
+        // A conflict undoes the whole move (the write rolls back), as a
+        // review batch does: never half the transactions moved.
         if set_ledger_category(w, t.ledger_id, Some(&request.source), Some(&request.target))?
             .is_err()
         {
-            return Ok(ConsolidationApplied {
-                applied,
-                total: selected.len(),
-                complete: false,
-                refreshed: true,
-                error: Some(
-                    "Stopped on a source conflict or unavailable service. Refresh and preview again."
-                        .into(),
-                ),
-            });
+            return Err(invalid(CONSOLIDATION_CHANGED));
         }
-        applied += 1;
     }
     Ok(ConsolidationApplied {
-        applied,
+        applied: selected.len(),
         total: selected.len(),
         complete: true,
         // The ledger is the source: nothing waits for a refresh.

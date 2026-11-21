@@ -27,13 +27,8 @@ pub const REPORT_VERSION: &str = "2026-09-v1";
 /// Python's decimal context keeps 28 significant digits.
 const PRECISION: u32 = 28;
 
-fn digit_count(mut n: u128) -> u32 {
-    let mut count = 0;
-    while n > 0 {
-        n /= 10;
-        count += 1;
-    }
-    count
+pub(crate) fn digit_count(n: u128) -> u32 {
+    n.checked_ilog10().map_or(0, |d| d + 1)
 }
 
 /// `d` rounded to 28 significant digits (half-even), as Python's decimal

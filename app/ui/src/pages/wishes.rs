@@ -999,6 +999,7 @@ fn page(ui: Ui, view: &WishesView, ctx: &Context) -> impl IntoView + use<> {
                 currency: row.wish.currency.code.clone(),
                 incoming: false,
                 amount: row.wish.amount,
+                taken: None,
             })
             .collect::<Vec<_>>(),
     );
@@ -1051,7 +1052,7 @@ fn page(ui: Ui, view: &WishesView, ctx: &Context) -> impl IntoView + use<> {
                 account_id: paid.account_id,
             },
             cards: Vec::new(),
-            transaction_id: Some(format!("firefly:{}", paid.transaction_id)),
+            transaction_id: Some(paid.transaction_id.clone()),
         };
         ui.write(
             "dropped".into(),

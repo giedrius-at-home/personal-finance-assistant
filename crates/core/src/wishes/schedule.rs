@@ -5,6 +5,8 @@
 
 use super::ladder::Demand;
 use crate::events::EventNeed;
+use crate::outlook::days_between;
+use crate::period::shift_month;
 use finance_types::gateway::{Repeat, Wish, WishKind, WishSource, WishStatus};
 use jiff::Span;
 use jiff::civil::Date;
@@ -51,7 +53,7 @@ pub struct Family {
 pub fn statement_month(date: Date) -> Date {
     let month = date.first_of_month();
     if date.day() >= 26 {
-        shift_months(month, 1)
+        shift_month(month, 1)
     } else {
         month
     }
@@ -141,18 +143,6 @@ fn repeating(w: &Wish, bills: &HashMap<String, BillNow>) -> Option<Planned> {
             amount,
         )),
     })
-}
-
-fn shift_months(month: Date, by: usize) -> Date {
-    let by = i64::try_from(by).unwrap_or(0);
-    month
-        .first_of_month()
-        .checked_add(Span::new().months(by))
-        .unwrap_or(month)
-}
-
-fn days_between(from: Date, to: Date) -> i64 {
-    from.until(to).map_or(0, |s| i64::from(s.get_days()))
 }
 
 /// How many times something starting on `first` and repeating `every` falls
@@ -317,28 +307,16 @@ pub fn plan_items_with(
             continue;
         }
         let mut rest = w.amount;
-        // An event's amount on top of its parts is not their cap.
-        let within = if w.event.as_ref().is_some_and(|e| e.on_top) {
-            Decimal::ZERO
-        } else {
-            Decimal::ONE
-        };
         for sub in subs {
-            match sub.status {
-                WishStatus::Planned => {
-                    rest -= sub.amount * within;
-                    items.push(leaf(
-                        sub,
-                        sub.name.clone(),
-                        sub.amount - sub.saved,
-                        current_month,
-                        sub.must || w.must,
-                    ));
-                }
-                WishStatus::Bought => {
-                    rest -= sub.bought.as_ref().map_or(sub.amount, |b| b.amount) * within;
-                }
-                WishStatus::Dropped | WishStatus::Started => {}
+            rest -= super::part_cost(w, sub);
+            if sub.status == WishStatus::Planned {
+                items.push(leaf(
+                    sub,
+                    sub.name.clone(),
+                    sub.amount - sub.saved,
+                    current_month,
+                    sub.must || w.must,
+                ));
             }
         }
         let over_cap = rest < Decimal::ZERO;
@@ -368,7 +346,7 @@ pub fn plan_items_with(
 pub fn repeat_demands(items: &[Planned], current_month: Date, months: usize) -> Vec<Vec<Demand>> {
     (0..months)
         .map(|i| {
-            let month = shift_months(current_month, i);
+            let month = shift_month(current_month, i32::try_from(i).unwrap_or(0));
             let (freed, costs): (Vec<_>, Vec<_>) = items
                 .iter()
                 .filter_map(|item| {

@@ -315,17 +315,6 @@ fn review_batch(
 }
 
 #[tauri::command(async)]
-fn review_category_options(
-    service: State<'_, Service>,
-    proposal: String,
-) -> Result<rv::CategoryOptions, String> {
-    traced(
-        "review_category_options",
-        service.review_category_options(&proposal),
-    )
-}
-
-#[tauri::command(async)]
 fn save_review_details(
     service: State<'_, Service>,
     details: rv::DetailsSave,
@@ -592,7 +581,6 @@ fn main() {
             set_transaction_category,
             review_decisions,
             review_batch,
-            review_category_options,
             save_review_details,
             audit_daily_review,
             preview_consolidation,

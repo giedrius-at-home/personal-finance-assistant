@@ -476,14 +476,6 @@ pub struct BatchSaved {
     pub saved: usize,
 }
 
-/// `/review/{id}/category-options`: the stored ranked choices among
-/// categories in use, and every category in use (most used first).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CategoryOptions {
-    pub options: Vec<CategoryAlternative>,
-    pub existing_categories: Vec<String>,
-}
-
 /// Save the owner's details & tags on a reviewed transaction.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DetailsSave {

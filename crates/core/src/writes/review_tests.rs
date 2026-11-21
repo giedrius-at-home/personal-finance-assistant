@@ -230,21 +230,6 @@ fn batch_saves_all_or_nothing() {
 }
 
 #[test]
-fn category_options_keep_categories_in_use() {
-    let db = db();
-    db.proposal(P1, 10, Some("Groceries"));
-    let options = category_options(db.store.connection(), &db.snap(), P1).expect("options");
-    let names: Vec<_> = options
-        .options
-        .iter()
-        .map(|o| o.category.as_str())
-        .collect();
-    assert_eq!(names, ["Groceries"]);
-    assert_eq!(options.existing_categories, ["Groceries"]);
-    assert!(category_options(db.store.connection(), &db.snap(), P2).is_err());
-}
-
-#[test]
 fn merchants_are_normalized_like_python() {
     assert_eq!(
         normalize_merchant(

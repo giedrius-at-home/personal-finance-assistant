@@ -15,10 +15,11 @@ use jiff::civil::Date;
 use jiff::tz::TimeZone;
 use rust_decimal::{Decimal, RoundingStrategy};
 
+use crate::forecast::signed;
 use crate::groups::{group_index, net};
 use crate::model::{Kind, Tx};
 use crate::period::{month_start, shift_month};
-use crate::reporting::{py_div, py_round};
+use crate::reporting::{digit_count, py_div, py_round};
 use crate::text::casefold;
 
 const WEEKDAYS: [&str; 7] = [
@@ -72,15 +73,6 @@ pub(crate) fn py_mul(a: Decimal, b: Decimal) -> Decimal {
     } else {
         magnitude
     }
-}
-
-fn digit_count(mut n: u128) -> u32 {
-    let mut count = 0;
-    while n > 0 {
-        n /= 10;
-        count += 1;
-    }
-    count
 }
 
 /// `digits × 10^exp` cut to 28 significant digits, half-even; `sticky` says
@@ -172,12 +164,11 @@ pub(crate) fn cents(d: Decimal) -> Decimal {
     rounded
 }
 
+/// The day a payment counts on: a card purchase's own day, as the budget
+/// counts it, else its local booking day.
 fn local_day(t: &Tx, zone: &TimeZone) -> Date {
-    t.occurred_at.with_time_zone(zone.clone()).date()
-}
-
-fn month_end(start: Date) -> Date {
-    start.last_of_month()
+    t.purchased_on
+        .unwrap_or_else(|| t.occurred_at.with_time_zone(zone.clone()).date())
 }
 
 /// Six calendar months (the current one partial) of spending and refunds,
@@ -312,12 +303,11 @@ fn currency_trends(
             through: if *start == current_start {
                 today
             } else {
-                month_end(*start)
+                start.last_of_month()
             }
             .to_string(),
             partial_month: *start == current_start,
             spending: is_observed(start).then(|| net(&month_rows(start))),
-            record_count: month_rows(start).len(),
         })
         .collect();
 
@@ -423,14 +413,6 @@ fn trend(
         },
         history_month_count: previous.len(),
         purchase_count: current.iter().filter(|t| t.kind == Kind::Outflow).count(),
-    }
-}
-
-fn signed(t: &Tx) -> Decimal {
-    if t.kind == Kind::Outflow {
-        t.amount
-    } else {
-        -t.amount
     }
 }
 
@@ -597,7 +579,6 @@ pub(crate) mod tests {
             [None, None, None, None, Some(dec("40")), Some(dec("32"))]
         );
         assert!(euro.months[5].partial_month && !euro.months[4].partial_month);
-        assert_eq!(euro.months[5].record_count, 3);
         let groceries = euro
             .groups
             .iter()
@@ -754,7 +735,6 @@ pub(crate) mod tests {
         let excluded = HashSet::from(["fixed-old".to_owned(), "fixed".to_owned()]);
         let report = &time_trends(&rows, &[], &now(), &excluded).currencies[0];
         assert_eq!(report.months[4].spending, Some(Decimal::ZERO));
-        assert_eq!(report.months[4].record_count, 0);
         assert_eq!(report.months[5].spending, Some(dec("15")));
         let last = report.daily.last().unwrap();
         assert_eq!(
