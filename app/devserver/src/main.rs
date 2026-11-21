@@ -234,6 +234,10 @@ fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
             let a: ArchivePlanArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
             ok(service.archive_planned_payment(&a.plan_id))
         }
+        "tie_planned_payment" => ok(service.tie_planned_payment(
+            &arg::<String>(args.clone(), "plan_id")?,
+            arg::<Option<String>>(args, "transaction_id")?.as_deref(),
+        )),
         "search_transactions" => {
             let a: SearchArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
             ok(service.search(&a.query))

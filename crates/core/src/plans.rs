@@ -132,6 +132,7 @@ pub fn with_recurring_salary(
             pending: false,
             account_id: settings.salary_account_id.clone(),
             match_description: None,
+            paid_by: None,
         });
     }
     out
@@ -291,6 +292,25 @@ pub fn reconcile_planned_payments(
     billed.sort_by(|a, b| a.transaction_id.cmp(&b.transaction_id));
     // The Python projection listed transactions by canonical id as text.
     evidence.sort_by(|a, b| a.transaction_id.cmp(&b.transaction_id));
+    // A payment tied to a plan by hand is that plan's alone.
+    let by_hand: HashMap<&str, &Tx> = archived
+        .iter()
+        .chain(plans)
+        .filter_map(|p| {
+            let id = p.paid_by.as_deref()?;
+            let paid = billed
+                .iter()
+                .chain(&evidence)
+                .find(|t| t.transaction_id == id)?;
+            Some((p.plan_id.as_str(), *paid))
+        })
+        .collect();
+    let tied: HashSet<&str> = by_hand
+        .values()
+        .map(|t| t.transaction_id.as_str())
+        .collect();
+    evidence.retain(|t| !tied.contains(t.transaction_id.as_str()));
+    billed.retain(|t| !tied.contains(t.transaction_id.as_str()));
     let r = Reconciler {
         zone,
         original_categories,
@@ -322,6 +342,10 @@ pub fn reconcile_planned_payments(
         .collect();
     let mut candidates: HashMap<&str, Vec<&Tx>> = HashMap::new();
     for (plan, _) in &dated {
+        if let Some(paid) = by_hand.get(plan.plan_id.as_str()) {
+            candidates.insert(plan.plan_id.as_str(), vec![*paid]);
+            continue;
+        }
         let (early, start, end) = windows[plan.plan_id.as_str()];
         let mut found = r.matching(plan, start, end);
         if let Ok(before) = start.checked_sub(jiff::Span::new().days(1)) {
@@ -405,6 +429,7 @@ pub fn reconcile_planned_payments(
                         amount: t.money(),
                     })
                     .collect(),
+                by_hand: by_hand.contains_key(plan.plan_id.as_str()),
             }
         })
         .collect()
@@ -485,6 +510,7 @@ mod tests {
             pending: false,
             account_id: None,
             match_description: None,
+            paid_by: None,
         }
     }
 
@@ -616,6 +642,41 @@ mod tests {
         assert_eq!(on_card.status, PlanStatus::Paid);
         assert_eq!(on_card.paid_on.as_deref(), Some("2026-09-24"));
         assert_eq!(on_card.transaction_id, None);
+    }
+
+    #[test]
+    fn a_payment_tied_by_hand_pays_its_plan_and_no_other() {
+        // Another category, amount and month: nothing would match it.
+        let odd = tx(
+            "odd",
+            Some("Groceries"),
+            "61.20",
+            "2026-08-02",
+            Kind::Outflow,
+        );
+        let mut tied = plan("tied");
+        tied.paid_by = Some("odd".into());
+        let views = reconcile(&[tied.clone(), plan("other")], &[odd, insurance("a")]);
+        let of = |id: &str| views.iter().find(|v| v.plan_id == id).unwrap();
+        assert_eq!(of("tied").status, PlanStatus::Paid);
+        assert_eq!(of("tied").transaction_id.as_deref(), Some("odd"));
+        assert_eq!(of("tied").paid_on.as_deref(), Some("2026-08-02"));
+        assert!(of("tied").by_hand);
+        // The untied plan keeps its own match.
+        assert_eq!(of("other").transaction_id.as_deref(), Some("a"));
+        assert!(!of("other").by_hand);
+        // A payment that fits two plans goes to the one it is tied to.
+        tied.paid_by = Some("a".into());
+        let views = reconcile(&[tied, plan("other")], &[insurance("a")]);
+        let of = |id: &str| views.iter().find(|v| v.plan_id == id).unwrap();
+        assert_eq!(of("tied").status, PlanStatus::Paid);
+        assert_eq!(of("other").status, PlanStatus::Upcoming);
+        // A tie to a payment that is gone falls back to matching.
+        let mut lost = plan("lost");
+        lost.paid_by = Some("gone".into());
+        let view = &reconcile(&[lost], &[insurance("a")])[0];
+        assert_eq!(view.transaction_id.as_deref(), Some("a"));
+        assert!(!view.by_hand);
     }
 
     #[test]

@@ -1036,6 +1036,7 @@ fn payment(
         transaction_id: None,
         candidate_count: 0,
         candidates: Vec::new(),
+        by_hand: false,
     }
 }
 

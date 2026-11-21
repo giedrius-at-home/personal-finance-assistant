@@ -21,6 +21,7 @@ const COMMANDS: &[&str] = &[
     "decline_bill_match",
     "create_planned_payment",
     "archive_planned_payment",
+    "tie_planned_payment",
     "closure",
     "closure_action",
     "wishes",

@@ -39,6 +39,9 @@ pub struct PlannedPaymentView {
     pub transaction_id: Option<String>,
     pub candidate_count: usize,
     pub candidates: Vec<PlanMatchCandidate>,
+    /// The owner tied `transaction_id` to the plan by hand.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub by_hand: bool,
 }
 
 impl PlannedPaymentView {
@@ -56,6 +59,7 @@ impl PlannedPaymentView {
             pending: self.pending,
             account_id: self.account_id.clone(),
             match_description: self.match_description.clone(),
+            paid_by: self.by_hand.then(|| self.transaction_id.clone()).flatten(),
         }
     }
 }

@@ -26,8 +26,9 @@ use crate::ds::money_plan::MoneyPlanFields;
 use crate::ds::sync_value;
 use crate::ds::{
     BOARD, BOARD_CARD, Badge, BoardColumn, Button, CONTROL, Card, CardTone, Eyebrow, Facts,
-    FactsRow, Field, Help, Icon, Lucide, Money, MonthSwitcher, Size, Tone, Variant, cn,
+    FactsRow, Field, Help, Icon, Lucide, Money, MonthSwitcher, Popup, Size, Tone, Variant, cn,
 };
+use crate::pages::payment_pick::{Ask, PaymentPicker};
 use crate::pages::with_report;
 use crate::{ManageSection, format, state};
 
@@ -72,6 +73,12 @@ struct Ui {
     due_on: RwSignal<String>,
     /// The purchase an expected income pays back, when it does.
     reimbursement_for: RwSignal<String>,
+    /// The plan whose box is open over the page.
+    open_plan: RwSignal<Option<String>>,
+    /// The plan being dragged, and whether it is one paid by hand.
+    dragging: RwSignal<Option<(String, bool)>>,
+    /// The plan a payment is being picked for.
+    ask: RwSignal<Option<Ask>>,
 }
 
 impl Ui {
@@ -100,6 +107,9 @@ impl Ui {
             currency: RwSignal::new(String::new()),
             due_on: RwSignal::new(String::new()),
             reimbursement_for: RwSignal::new(String::new()),
+            open_plan: RwSignal::new(None),
+            dragging: RwSignal::new(None),
+            ask: RwSignal::new(None),
         }
     }
 
@@ -451,7 +461,19 @@ fn page(ui: Ui, report: &Dashboard) -> impl IntoView + use<> {
         let view = view! { <div class=BOARD_CARD>{head}<Facts rows=rows /></div> }.into_any();
         boxes.push((Column::Due, dates.starts_on.clone(), month.share, view));
     }
-    boxes.extend(plans.into_iter().map(|plan| plan_card(ui, plan)));
+    boxes.extend(plans.iter().map(|plan| plan_card(ui, plan)));
+    let plans = StoredValue::new(plans);
+    let ask_for = move |id: &str| {
+        plans.with_value(|all| {
+            all.iter().find(|p| p.plan_id == id).map(|p| Ask {
+                id: p.plan_id.clone(),
+                name: p.name.clone(),
+                currency: p.amount.currency.code.clone(),
+                incoming: p.direction == Direction::Inflow,
+                amount: p.amount.amount,
+            })
+        })
+    };
     boxes.sort_by(|a, b| a.1.cmp(&b.1));
     let board_unit = report
         .monthly_allocation
@@ -494,15 +516,34 @@ fn page(ui: Ui, report: &Dashboard) -> impl IntoView + use<> {
                 .as_ref()
                 .filter(|_| count > 0)
                 .map(|unit| crate::ds::money(total, unit));
+            // A box goes to Paid by naming its payment, and one paid by
+            // hand goes back to waiting; nothing else can be moved.
+            let takes = move |tied: bool| match column {
+                Column::Done => !tied,
+                Column::Due => tied,
+                Column::Late | Column::Check => false,
+            };
+            let accepts =
+                Signal::derive(move || ui.dragging.get().is_some_and(|(_, tied)| takes(tied)));
+            let on_drop = Callback::new(move |()| {
+                let Some((id, tied)) = ui.dragging.get_untracked() else {
+                    return;
+                };
+                if tied {
+                    tie_plan(ui, id, None);
+                } else {
+                    ui.ask.set(ask_for(&id));
+                }
+            });
             match total {
                 Some(total) => view! {
-                    <BoardColumn title=title tone=tone count=count total=total>{cards}</BoardColumn>
+                    <BoardColumn title=title tone=tone count=count total=total accepts=accepts on_drop=on_drop>{cards}</BoardColumn>
                 }
                 .into_any(),
-                None => {
-                    view! { <BoardColumn title=title tone=tone count=count>{cards}</BoardColumn> }
-                        .into_any()
+                None => view! {
+                    <BoardColumn title=title tone=tone count=count accepts=accepts on_drop=on_drop>{cards}</BoardColumn>
                 }
+                .into_any(),
             }
         })
         .collect_view();
@@ -528,8 +569,23 @@ fn page(ui: Ui, report: &Dashboard) -> impl IntoView + use<> {
                     <Eyebrow>"PAYMENTS"</Eyebrow>
                     <h2 class="mt-1 text-lg font-semibold">{active_label.clone()}</h2>
                 </div>
+                <p class="text-xs text-fg-muted">"Open a box for its details. Drag one to Paid to name the payment that paid it."</p>
+                {feedback(ui, "board".into())}
                 <div class=BOARD>{board}</div>
             </section>
+            {move || {
+                let id = ui.open_plan.get()?;
+                let plan = plans.with_value(|all| all.iter().find(|p| p.plan_id == id).cloned())?;
+                Some(plan_popup(ui, plan))
+            }}
+            <PaymentPicker
+                ask=ui.ask
+                busy=ui.plan_busy
+                on_pick=Callback::new(move |(ask, row): (Ask, finance_types::report::review::SearchRow)| {
+                    tie_plan(ui, ask.id, Some(row.transaction_id));
+                })
+                otherwise="Newest first, the ones of the same amount on top. No payment yet? Close this: the box stays where it is."
+            />
             <Card>
                 <Eyebrow>"NEW"</Eyebrow>
                 <h2 class="mt-2 text-lg font-semibold">"Add a payment or income"</h2>
@@ -983,42 +1039,227 @@ fn box_head(name: String, amount: String, tag: (Tone, &'static str), day: String
     }
 }
 
-fn plan_card(ui: Ui, plan: PlannedPaymentView) -> Boxed {
+/// `tie_planned_payment(plan_id, transaction_id)`.
+#[derive(Serialize)]
+struct TieArgs {
+    plan_id: String,
+    transaction_id: Option<String>,
+}
+
+/// Tie a payment to a plan by hand, or (`None`) leave it to matching again.
+fn tie_plan(ui: Ui, plan_id: String, transaction_id: Option<String>) {
+    if ui.plan_busy.get_untracked() {
+        return;
+    }
+    ui.plan_busy.set(true);
+    ui.plan_action.set("tie".into());
+    ui.set_message("board", "", false);
+    let tied = transaction_id.is_some();
+    spawn_local(async move {
+        let args = TieArgs {
+            plan_id,
+            transaction_id,
+        };
+        match invoke::<IgnoredAny>("tie_planned_payment", &args).await {
+            Ok(_) => {
+                ui.ask.set(None);
+                ui.saved(
+                    "board",
+                    if tied {
+                        "Marked paid."
+                    } else {
+                        "Waiting for its payment again."
+                    },
+                );
+            }
+            Err(e) => {
+                ui.ask.set(None);
+                ui.set_message("board", error_or(e, "Could not save."), true);
+            }
+        }
+        ui.plan_busy.set(false);
+    });
+}
+
+/// A plan the owner may move by hand: salary is generated, not stored.
+fn stored(plan: &PlannedPaymentView) -> bool {
+    !plan.plan_id.starts_with("recurring-")
+}
+
+/// A plan as a box on the board: click opens it over the page; an unpaid
+/// one can be dragged to Paid, one paid by hand back to To pay.
+fn plan_card(ui: Ui, plan: &PlannedPaymentView) -> Boxed {
     let inflow = plan.direction == Direction::Inflow;
     let column = plan_column(plan.status);
     let day = plan.paid_on.clone().unwrap_or_else(|| plan.due_on.clone());
-    let mut detail = vec![(
-        "Group".to_owned(),
-        plan.match_description
-            .clone()
-            .unwrap_or_else(|| plan.match_category.clone()),
-    )];
-    match plan.status {
-        PlanStatus::Pending => detail.push(("Card".to_owned(), "Reserved".to_owned())),
-        PlanStatus::NeedsReview => {
-            detail.push((
-                "Possible matches".to_owned(),
-                plan.candidate_count.to_string(),
-            ));
-        }
-        PlanStatus::Paid => {
-            detail.push(("Planned for".to_owned(), format::day_month(&plan.due_on)))
-        }
-        _ => {}
+    let paid = plan.status == PlanStatus::Paid;
+    let by_hand = plan.by_hand;
+    let movable = stored(plan) && (!paid || by_hand);
+    let tag = if inflow {
+        (Tone::Positive, "Income")
+    } else {
+        (Tone::Neutral, "One-off")
+    };
+    let amount = crate::ds::money(plan.amount.amount, &plan.amount.currency);
+    let head = box_head(
+        plan.name.clone(),
+        if inflow { format!("+{amount}") } else { amount },
+        tag,
+        format::day_month(&day),
+    );
+    let (open_id, drag_id) = (plan.plan_id.clone(), plan.plan_id.clone());
+    let view = view! {
+        <button
+            type="button"
+            class=cn([
+                BOARD_CARD,
+                "text-left transition-colors hover:border-over",
+                if movable { "cursor-grab active:cursor-grabbing" } else { "" },
+            ])
+            draggable=movable.to_string()
+            on:dragstart=move |e| {
+                if let Some(data) = e.data_transfer() {
+                    let _ = data.set_data("text/plain", &drag_id);
+                }
+                ui.dragging.set(Some((drag_id.clone(), by_hand)));
+            }
+            on:dragend=move |_| ui.dragging.set(None)
+            on:click=move |_| {
+                ui.archive_id.set(None);
+                ui.open_plan.set(Some(open_id.clone()));
+            }
+        >
+            {head}
+        </button>
+    }
+    .into_any();
+    // Income is not part of what a column still costs.
+    let counted = if inflow {
+        Decimal::ZERO
+    } else {
+        plan.amount.amount
+    };
+    (column, day, counted, view)
+}
+
+/// A plan opened over the page: what it is, how it stands, and what can be
+/// done with it.
+fn plan_popup(ui: Ui, plan: PlannedPaymentView) -> impl IntoView {
+    let inflow = plan.direction == Direction::Inflow;
+    let paid = plan.status == PlanStatus::Paid;
+    let amount = crate::ds::money(plan.amount.amount, &plan.amount.currency);
+    let standing = match plan.status {
+        PlanStatus::Paid if inflow => "Received",
+        PlanStatus::Paid => "Paid",
+        PlanStatus::Pending => "Reserved on the card",
+        PlanStatus::NeedsReview => "To check",
+        PlanStatus::Overdue => "Late",
+        PlanStatus::Upcoming if inflow => "Expected",
+        PlanStatus::Upcoming => "To pay",
+    };
+    let mut detail = vec![
+        (
+            "Amount".to_owned(),
+            if inflow { format!("+{amount}") } else { amount },
+        ),
+        ("Standing".to_owned(), standing.to_owned()),
+        (
+            if paid { "Planned for" } else { "Due" }.to_owned(),
+            format::day_month(&plan.due_on),
+        ),
+        (
+            "Group".to_owned(),
+            plan.match_description
+                .clone()
+                .unwrap_or_else(|| plan.match_category.clone()),
+        ),
+    ];
+    if let Some(day) = &plan.paid_on {
+        detail.push((
+            if inflow { "Received on" } else { "Paid on" }.to_owned(),
+            format::day_month(day),
+        ));
+    }
+    if plan.by_hand {
+        detail.push(("Payment".to_owned(), "Picked by hand".to_owned()));
     }
     let id = plan.plan_id.clone();
-    let action = if id.starts_with("recurring-salary-") {
-        view! {
-            <a
-                class="text-accent underline underline-offset-2"
-                href="#"
-                on:click=move |e| {
-                    e.prevent_default();
-                    ui.app.go_manage(ManageSection::Settings);
+    // The payments that could be it: naming one settles the plan.
+    let candidates = (plan.status == PlanStatus::NeedsReview).then(|| {
+        let rows = plan
+            .candidates
+            .iter()
+            .map(|c| {
+                let (plan_id, tx) = (id.clone(), c.transaction_id.clone());
+                let value = crate::ds::money(c.amount.amount, &c.amount.currency);
+                view! {
+                    <li class="grid grid-cols-[6.5rem_1fr_auto_auto] items-center gap-x-3 border-t border-line py-1.5 text-sm first:border-t-0">
+                        <span class="text-fg-muted tabular-nums">{format::date(&c.occurred_on)}</span>
+                        <span class="min-w-0 truncate" title=c.description.clone()>{c.description.clone()}</span>
+                        <span class="tabular-nums">{value}</span>
+                        <Button
+                            size=Size::Sm
+                            variant=Variant::Secondary
+                            disabled=Signal::derive(move || ui.plan_busy.get())
+                            on_click=Callback::new(move |_| tie_plan(ui, plan_id.clone(), Some(tx.clone())))
+                        >
+                            "This one"
+                        </Button>
+                    </li>
                 }
+            })
+            .collect_view();
+        view! {
+            <div>
+                <Eyebrow>"COULD BE"</Eyebrow>
+                <ul class="mt-1">{rows}</ul>
+            </div>
+        }
+    });
+    let salary = !stored(&plan);
+    let pick = (!salary && !paid).then(|| {
+        let ask = Ask {
+            id: id.clone(),
+            name: plan.name.clone(),
+            currency: plan.amount.currency.code.clone(),
+            incoming: inflow,
+            amount: plan.amount.amount,
+        };
+        view! {
+            <Button
+                size=Size::Sm
+                variant=Variant::Secondary
+                on_click=Callback::new(move |_| ui.ask.set(Some(ask.clone())))
+            >
+                {if inflow { "Pick the money received" } else { "Pick the payment" }}
+            </Button>
+        }
+    });
+    let untie = plan.by_hand.then(|| {
+        let plan_id = id.clone();
+        view! {
+            <Button
+                size=Size::Sm
+                variant=Variant::Secondary
+                disabled=Signal::derive(move || ui.plan_busy.get())
+                on_click=Callback::new(move |_| tie_plan(ui, plan_id.clone(), None))
+            >
+                "Not this payment"
+            </Button>
+        }
+    });
+    let action = if salary {
+        view! {
+            <Button
+                size=Size::Sm
+                variant=Variant::Ghost
+                on_click=Callback::new(move |_| {
+                    ui.open_plan.set(None);
+                    ui.app.go_manage(ManageSection::Settings);
+                })
             >
                 "Edit salary"
-            </a>
+            </Button>
         }
         .into_any()
     } else {
@@ -1070,34 +1311,19 @@ fn plan_card(ui: Ui, plan: PlannedPaymentView) -> Boxed {
         }
         .into_any()
     };
-    let tag = if inflow {
-        (Tone::Positive, "Income")
-    } else {
-        (Tone::Neutral, "One-off")
-    };
-    let amount = crate::ds::money(plan.amount.amount, &plan.amount.currency);
-    let head = box_head(
-        plan.name.clone(),
-        if inflow { format!("+{amount}") } else { amount },
-        tag,
-        format::day_month(&day),
-    );
-    let view = view! {
-        <details class=BOARD_CARD>
-            <summary class="grid cursor-pointer list-none gap-1.5">{head}</summary>
-            <Facts rows=detail class="mt-1" />
-            <div class="mt-1 flex justify-end">{action}</div>
-            {feedback_in(ui, format!("plan:{id}"), "")}
-        </details>
+    let close = Callback::new(move |()| {
+        ui.archive_id.set(None);
+        ui.open_plan.set(None);
+    });
+    view! {
+        <Popup title=plan.name.clone() on_close=close>
+            <Facts rows=detail />
+            {candidates}
+            <div class="flex flex-wrap items-center justify-end gap-2">{pick}{untie}{action}</div>
+            {feedback(ui, "board".into())}
+            {feedback(ui, format!("plan:{id}"))}
+        </Popup>
     }
-    .into_any();
-    // Income is not part of what a column still costs.
-    let counted = if inflow {
-        Decimal::ZERO
-    } else {
-        plan.amount.amount
-    };
-    (column, day, counted, view)
 }
 
 /// One bill: its amount, editor, removal, automatic matching, schedule and

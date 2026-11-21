@@ -8,6 +8,7 @@ pub mod goals;
 pub mod manage;
 pub mod organise;
 pub mod overview;
+pub mod payment_pick;
 pub mod plan;
 pub mod spending;
 pub mod transactions;

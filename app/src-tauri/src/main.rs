@@ -114,6 +114,18 @@ fn archive_planned_payment(service: State<'_, Service>, plan_id: String) -> Resu
     )
 }
 
+#[tauri::command(async, rename_all = "snake_case")]
+fn tie_planned_payment(
+    service: State<'_, Service>,
+    plan_id: String,
+    transaction_id: Option<String>,
+) -> Result<finance_types::gateway::PlannedPayment, String> {
+    traced(
+        "tie_planned_payment",
+        service.tie_planned_payment(&plan_id, transaction_id.as_deref()),
+    )
+}
+
 #[tauri::command(async)]
 fn closure(service: State<'_, Service>, month: String) -> Result<ClosureView, String> {
     traced("closure", service.closure(&month))
@@ -550,6 +562,7 @@ fn main() {
             decline_bill_match,
             create_planned_payment,
             archive_planned_payment,
+            tie_planned_payment,
             closure,
             closure_action,
             wishes,
