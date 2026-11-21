@@ -808,27 +808,6 @@ impl Inputs<'_> {
     }
 }
 
-/// The wishes screen, judged against one currency's allocation.
-pub fn view_from(
-    alloc: Option<&CurrencyAllocation>,
-    plans: &[BudgetPlan],
-    card_bills: Vec<(String, Decimal)>,
-    wishes: &[Wish],
-    settings: &WishSettings,
-    bills: &HashMap<String, BillNow>,
-) -> WishesView {
-    Inputs {
-        alloc,
-        today: None,
-        plans: plans.to_vec(),
-        card_bills,
-        bills,
-        habits: Vec::new(),
-        events: Vec::new(),
-    }
-    .view(wishes, settings)
-}
-
 fn sort_by_due(wishes: &mut [&Wish]) {
     wishes.sort_by(|a, b| (&a.due_on, &a.created_at).cmp(&(&b.due_on, &b.created_at)));
 }
@@ -999,6 +978,27 @@ pub fn month_zero_cuts(view: &WishesView, wish_id: &str) -> Vec<Cut> {
 
 #[cfg(test)]
 mod tests {
+    /// The wishes screen, judged against one currency's allocation.
+    fn view_from(
+        alloc: Option<&CurrencyAllocation>,
+        plans: &[BudgetPlan],
+        card_bills: Vec<(String, Decimal)>,
+        wishes: &[Wish],
+        settings: &WishSettings,
+        bills: &HashMap<String, BillNow>,
+    ) -> WishesView {
+        Inputs {
+            alloc,
+            today: None,
+            plans: plans.to_vec(),
+            card_bills,
+            bills,
+            habits: Vec::new(),
+            events: Vec::new(),
+        }
+        .view(wishes, settings)
+    }
+
     use super::baseline::tests::{alloc, d, plan, plan_group, row};
     use super::*;
     use finance_types::gateway::{CardSettings, WishPurchase, WishSource, WishStatus};

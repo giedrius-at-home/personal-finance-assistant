@@ -731,12 +731,6 @@ impl Service {
         self.write(|w, snap| crate::writes::review::review_batch(w, snap, items))
     }
 
-    pub fn review_category_options(&self, proposal: &str) -> Result<rv::CategoryOptions, String> {
-        self.read(|store, snap| {
-            crate::writes::review::category_options(store.connection(), snap, proposal)
-        })
-    }
-
     pub fn save_review_details(
         &self,
         details: rv::DetailsSave,

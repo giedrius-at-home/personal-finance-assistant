@@ -8,7 +8,6 @@ use finance_types::report::reporting::{
     CurrencySpending, GroupSpending, MonthlySpending, StoreSpending,
 };
 use jiff::Zoned;
-use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 use crate::load::Bill;
@@ -199,10 +198,6 @@ fn gross(rows: &[&Tx]) -> Decimal {
         .sum()
 }
 
-fn days_in_month(month: Date) -> i8 {
-    month.days_in_month()
-}
-
 /// This calendar month through today against the same days of last month,
 /// by reviewed group and category. Dates are local to `now`'s time zone.
 pub fn monthly_spending(
@@ -214,7 +209,7 @@ pub fn monthly_spending(
     let today = now.date();
     let start = today.first_of_month();
     let previous_start = shift_month(start, -1);
-    let day = today.day().min(days_in_month(previous_start));
+    let day = today.day().min(previous_start.days_in_month());
     let comparison_through = today.with().day(day).build().unwrap_or(today);
     let previous_through = previous_start
         .with()

@@ -205,7 +205,7 @@ fn save_rule(
         params![
             saved.bill_id,
             saved.revision,
-            column_stamp(w),
+            super::transactions::iso_now(w),
             json,
             expected_revision
         ],
@@ -217,13 +217,6 @@ fn save_rule(
 }
 
 /// Python wrote timestamp columns with `isoformat()` (`+00:00`).
-fn column_stamp(w: &Writer<'_>) -> String {
-    let stamp = w.stamp();
-    stamp
-        .strip_suffix('Z')
-        .map_or(stamp.clone(), |s| format!("{s}+00:00"))
-}
-
 fn record(w: &Writer<'_>, action: &str, bill_id: &str) -> Result<()> {
     w.record(
         "bills",
@@ -420,7 +413,11 @@ pub fn decline_bill_match(
     w.tx.execute(
         "INSERT OR REPLACE INTO declined_bill_matches (bill_id, transaction_id, updated_at) \
          VALUES (?1, ?2, ?3)",
-        params![request.bill_id, request.transaction_id, column_stamp(w)],
+        params![
+            request.bill_id,
+            request.transaction_id,
+            super::transactions::iso_now(w)
+        ],
     )?;
     Ok(())
 }

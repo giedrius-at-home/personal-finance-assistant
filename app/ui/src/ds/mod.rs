@@ -832,11 +832,6 @@ pub const TCELL_NUM: &str =
     "px-2 py-2.5 align-top group-data-[density=sm]/table:py-1.5 text-right tabular-nums";
 pub const TABLE_CONTAINER: &str = "w-full overflow-x-auto rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
 
-/// `YYYY-MM` → "October 2026".
-pub fn format_month(month: &str) -> String {
-    format::month_long(month)
-}
-
 #[component]
 pub fn MonthSwitcher(
     month: Signal<String>,
@@ -859,7 +854,7 @@ pub fn MonthSwitcher(
                 <Lucide icon=Icon::ChevronLeft size=16 />
             </button>
             <span aria-live="polite" class="min-w-32 text-center text-sm font-semibold">
-                {move || format_month(&month.get())}
+                {move || format::month_long(&month.get())}
             </span>
             <button
                 type="button"
@@ -871,23 +866,5 @@ pub fn MonthSwitcher(
                 <Lucide icon=Icon::ChevronRight size=16 />
             </button>
         </div>
-    }
-}
-
-/// `<details>` disclosure styled like the site's rows.
-#[component]
-pub fn Disclosure(
-    summary: Children,
-    children: Children,
-    #[prop(optional, into)] class: String,
-    #[prop(optional)] open: bool,
-) -> impl IntoView {
-    view! {
-        <details class=cn(["group border-t border-line py-3.5", class.as_str()]) open=open>
-            <summary class="flex cursor-pointer list-none items-center justify-between gap-3 text-sm [&::-webkit-details-marker]:hidden">
-                {summary()}
-            </summary>
-            {children()}
-        </details>
     }
 }

@@ -20,6 +20,7 @@ use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 use crate::Ctx;
+use crate::closure::day_of;
 use crate::model::Account;
 use crate::period::shift_month;
 use crate::reporting::py_div;
@@ -77,10 +78,6 @@ pub fn savings_roles(ctx: &Ctx) -> (HashSet<String>, HashSet<String>) {
     (accounts, goals)
 }
 
-fn parse_date(text: &str) -> Option<Date> {
-    text.get(..10)?.parse().ok()
-}
-
 fn is_salary(payment: &PlannedPaymentView) -> bool {
     casefold(payment.match_category.trim()) == "salary"
 }
@@ -134,7 +131,7 @@ pub fn monthly_allocation(inputs: &AllocationInputs) -> MonthlyAllocation {
                     && p.direction == Direction::Outflow
                     && p.account_id.as_deref() == Some(account.account_id.as_str())
                     && &p.amount.currency == account.currency()
-                    && parse_date(&p.due_on).is_some_and(|d| d <= through_date)
+                    && day_of(&p.due_on).is_some_and(|d| d <= through_date)
             })
             .map(|p| p.amount.amount)
             .sum();
@@ -174,7 +171,7 @@ pub fn monthly_allocation(inputs: &AllocationInputs) -> MonthlyAllocation {
     let mut salary: HashMap<Currency, Decimal> = HashMap::new();
     let mut salary_received_on = None;
     if let Some(status) = inputs.payday_status
-        && let Some(received_on) = status.received_on.as_deref().and_then(parse_date)
+        && let Some(received_on) = status.received_on.as_deref().and_then(day_of)
         && in_current_period(received_on)
     {
         salary_received_on = Some(received_on);
@@ -188,7 +185,7 @@ pub fn monthly_allocation(inputs: &AllocationInputs) -> MonthlyAllocation {
             .iter()
             .filter(|p| p.direction == Direction::Inflow && is_salary(p))
             .filter(|p| p.status == PlanStatus::Paid)
-            .filter_map(|p| Some((p, p.paid_on.as_deref().and_then(parse_date)?)))
+            .filter_map(|p| Some((p, p.paid_on.as_deref().and_then(day_of)?)))
             .filter(|(_, paid_on)| in_current_period(*paid_on))
             .collect();
         for (p, _) in &paid_income {
@@ -206,7 +203,7 @@ pub fn monthly_allocation(inputs: &AllocationInputs) -> MonthlyAllocation {
     let mut next_income: HashMap<Currency, Decimal> = HashMap::new();
     let mut expected_salary: HashMap<Currency, Decimal> = HashMap::new();
     for p in inputs.planned_payments {
-        let Some(due_on) = parse_date(&p.due_on) else {
+        let Some(due_on) = day_of(&p.due_on) else {
             continue;
         };
         if p.direction != Direction::Inflow
@@ -231,7 +228,7 @@ pub fn monthly_allocation(inputs: &AllocationInputs) -> MonthlyAllocation {
     let mut current_plans: HashMap<Currency, Decimal> = HashMap::new();
     let mut next_plans: HashMap<Currency, Decimal> = HashMap::new();
     for p in inputs.planned_payments {
-        let Some(due_on) = parse_date(&p.due_on) else {
+        let Some(due_on) = day_of(&p.due_on) else {
             continue;
         };
         if p.direction != Direction::Outflow || p.status == PlanStatus::Paid {
@@ -287,7 +284,7 @@ pub fn monthly_allocation(inputs: &AllocationInputs) -> MonthlyAllocation {
     let mut next_group_rows: HashMap<Currency, Vec<GroupAllocation>> = HashMap::new();
     for budget in inputs.budgets.unwrap_or_default() {
         let currency = &budget.plan.currency;
-        let month = parse_date(&budget.plan.month);
+        let month = day_of(&budget.plan.month);
         if month == Some(current_month) {
             group_remaining.insert(currency.clone(), budget.reserved);
             group_rows.insert(currency.clone(), budget_rows(&budget.groups));

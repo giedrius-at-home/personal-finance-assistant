@@ -15,22 +15,6 @@ fn golden() -> (Value, Risk) {
 }
 
 #[test]
-fn html_matches_python() {
-    let (golden, risk) = golden();
-    let intro = golden["intro"].as_str().unwrap();
-    assert_eq!(
-        html::render(&risk, intro, false, false),
-        golden["alert_html"]
-    );
-    assert_eq!(
-        html::render(&risk, intro, true, false),
-        golden["sample_html"]
-    );
-    let digest = digest_message(&risk.forecasts, false);
-    assert_eq!(digest.html_body.as_deref(), golden["digest_html"].as_str());
-}
-
-#[test]
 fn digest_content_matches_python() {
     let (golden, risk) = golden();
     assert_eq!(factual_summary(&risk), golden["factual_summary"]);

@@ -16,12 +16,14 @@ use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 use crate::Ctx;
+use crate::closure::day_of;
 use crate::events::{self, EventClaim};
 use crate::groups::{
     fixed_category_names, fixed_transaction_ids, group_index, predicted_category_names,
     without_settlements,
 };
 use crate::model::{Kind, Tx};
+use crate::outlook::days_between;
 use crate::period::{PeriodResolver, shift_month};
 use crate::personal::apply_personal_spending;
 use crate::plans::net_spending_transactions;
@@ -102,7 +104,7 @@ pub fn plan_for(saved: &[BudgetPlan], month: Date, currency: &Currency) -> Budge
     let earlier = saved
         .iter()
         .filter(|p| p.currency == *currency)
-        .filter_map(|p| Some((parse_date(&p.month)?, p)))
+        .filter_map(|p| Some((day_of(&p.month)?, p)))
         .filter(|(on, _)| *on <= month)
         .max_by_key(|(on, _)| *on);
     match earlier {
@@ -269,14 +271,6 @@ pub(crate) fn signed(t: &Tx) -> Decimal {
     }
 }
 
-fn days_between(from: Date, to: Date) -> i64 {
-    i64::from((to - from).get_days())
-}
-
-pub(crate) fn parse_date(text: &str) -> Option<Date> {
-    text.get(..10)?.parse().ok()
-}
-
 /// Budget one month. `period_start` is the local day a closed month's cutoff
 /// hands over to the plan's month (its first day by default).
 pub fn monthly_budget(
@@ -287,7 +281,7 @@ pub fn monthly_budget(
 ) -> MonthlyBudget {
     let now = inputs.now;
     let today = now.date();
-    let month = parse_date(&plan.month).unwrap_or_else(|| today.first_of_month());
+    let month = day_of(&plan.month).unwrap_or_else(|| today.first_of_month());
     let current_month = inputs
         .current_month
         .unwrap_or_else(|| today.first_of_month());
@@ -359,7 +353,7 @@ pub fn monthly_budget(
     let mut extra_pending = Decimal::ZERO;
     let mut pending: HashMap<&str, Decimal> = HashMap::new();
     for p in inputs.payments {
-        let Some(due_on) = parse_date(&p.due_on) else {
+        let Some(due_on) = day_of(&p.due_on) else {
             continue;
         };
         if p.direction != Direction::Outflow
@@ -755,13 +749,13 @@ pub fn apply_estimates(
     bill_currency: &str,
 ) {
     for budget in budgets {
-        let Some(month) = parse_date(&budget.plan.month) else {
+        let Some(month) = day_of(&budget.plan.month) else {
             continue;
         };
         if budget.plan.currency.code == bill_currency {
             for bill in predicted_bills.iter().filter(|b| {
                 b.amount > Decimal::ZERO
-                    && parse_date(&b.due_on).is_some_and(|d| d.first_of_month() == month)
+                    && day_of(&b.due_on).is_some_and(|d| d.first_of_month() == month)
             }) {
                 budget.fixed.planned += bill.amount;
                 budget.fixed.remaining += bill.amount;

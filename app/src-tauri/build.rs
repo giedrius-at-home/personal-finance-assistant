@@ -50,7 +50,6 @@ const COMMANDS: &[&str] = &[
     "set_transaction_category",
     "review_decisions",
     "review_batch",
-    "review_category_options",
     "save_review_details",
     "audit_daily_review",
     "preview_consolidation",

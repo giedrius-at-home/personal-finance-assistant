@@ -329,13 +329,6 @@ pub fn preview(
 }
 
 /// `2026-10-02T14:45:01.572332+00:00`, as Python's `isoformat()` wrote it.
-fn iso(w: &Writer<'_>) -> String {
-    w.now
-        .timestamp()
-        .strftime("%Y-%m-%dT%H:%M:%S%.6f+00:00")
-        .to_string()
-}
-
 /// Apply exactly the previewed settings if nothing changed since; returns
 /// the new revision id.
 pub fn apply(w: &Writer<'_>, request: &SettingsApply, accounts: &HashSet<String>) -> Result<i64> {
@@ -363,7 +356,7 @@ pub fn apply(w: &Writer<'_>, request: &SettingsApply, accounts: &HashSet<String>
     } else {
         format!("{expected}-{used}")
     };
-    let stamp = iso(w);
+    let stamp = super::transactions::iso_now(w);
     let after_json = serde_json::to_string(&after).map_err(|e| Error::Invalid(e.to_string()))?;
     let before_json = serde_json::to_string(&before).map_err(|e| Error::Invalid(e.to_string()))?;
     w.tx.execute(
@@ -413,7 +406,7 @@ pub fn rollback(w: &Writer<'_>, revision_id: i64) -> Result<()> {
     if content_hash(&current(&w.tx)?) != after_hash {
         return Err(invalid("Newer settings prevent rollback of this revision."));
     }
-    let stamp = iso(w);
+    let stamp = super::transactions::iso_now(w);
     w.tx.execute(
         "UPDATE owner_settings SET content_hash = ?1, payload_json = ?2, updated_at = ?3 \
          WHERE singleton = 1",

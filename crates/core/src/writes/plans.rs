@@ -153,11 +153,7 @@ pub fn archive_planned_payment(w: &Writer<'_>, plan_id: &str) -> Result<()> {
     if !length_between(plan_id, 1, 64) {
         return Err(invalid(MALFORMED));
     }
-    let stamp = w
-        .now
-        .timestamp()
-        .strftime("%Y-%m-%dT%H:%M:%S%.6f+00:00")
-        .to_string();
+    let stamp = super::transactions::iso_now(w);
     let changed = w.tx.execute(
         "UPDATE planned_payments SET archived_at = ?1 WHERE plan_id = ?2 AND archived_at IS NULL",
         params![stamp, plan_id],

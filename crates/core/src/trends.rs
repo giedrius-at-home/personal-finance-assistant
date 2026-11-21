@@ -15,10 +15,11 @@ use jiff::civil::Date;
 use jiff::tz::TimeZone;
 use rust_decimal::{Decimal, RoundingStrategy};
 
+use crate::forecast::signed;
 use crate::groups::{group_index, net};
 use crate::model::{Kind, Tx};
 use crate::period::{month_start, shift_month};
-use crate::reporting::{py_div, py_round};
+use crate::reporting::{digit_count, py_div, py_round};
 use crate::text::casefold;
 
 const WEEKDAYS: [&str; 7] = [
@@ -72,15 +73,6 @@ pub(crate) fn py_mul(a: Decimal, b: Decimal) -> Decimal {
     } else {
         magnitude
     }
-}
-
-fn digit_count(mut n: u128) -> u32 {
-    let mut count = 0;
-    while n > 0 {
-        n /= 10;
-        count += 1;
-    }
-    count
 }
 
 /// `digits × 10^exp` cut to 28 significant digits, half-even; `sticky` says
@@ -174,10 +166,6 @@ pub(crate) fn cents(d: Decimal) -> Decimal {
 
 fn local_day(t: &Tx, zone: &TimeZone) -> Date {
     t.occurred_at.with_time_zone(zone.clone()).date()
-}
-
-fn month_end(start: Date) -> Date {
-    start.last_of_month()
 }
 
 /// Six calendar months (the current one partial) of spending and refunds,
@@ -312,7 +300,7 @@ fn currency_trends(
             through: if *start == current_start {
                 today
             } else {
-                month_end(*start)
+                start.last_of_month()
             }
             .to_string(),
             partial_month: *start == current_start,
@@ -423,14 +411,6 @@ fn trend(
         },
         history_month_count: previous.len(),
         purchase_count: current.iter().filter(|t| t.kind == Kind::Outflow).count(),
-    }
-}
-
-fn signed(t: &Tx) -> Decimal {
-    if t.kind == Kind::Outflow {
-        t.amount
-    } else {
-        -t.amount
     }
 }
 

@@ -307,9 +307,6 @@ fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
         }
         "review_decisions" => ok(service.review_decisions(arg(args.clone(), "decisions")?)),
         "review_batch" => ok(service.review_batch(arg(args.clone(), "items")?)),
-        "review_category_options" => {
-            ok(service.review_category_options(&arg::<String>(args.clone(), "proposal")?))
-        }
         "save_review_details" => ok(service.save_review_details(arg(args.clone(), "details")?)),
         "audit_daily_review" => {
             ok(service.audit_daily_review(&arg::<String>(args.clone(), "transaction")?))

@@ -19,7 +19,7 @@ use finance_types::report::outlook::{DailySpendingForecast, ThreeDaySignal};
 use finance_types::report::trends::SpendingRisk;
 use jiff::civil::{Date, Time};
 use jiff::tz::TimeZone;
-use jiff::{SignedDuration, Timestamp, ToSpan, Zoned};
+use jiff::{SignedDuration, Timestamp, Zoned};
 use regex::Regex;
 use rusqlite::{Connection, OptionalExtension, params};
 use rust_decimal::Decimal;
@@ -125,14 +125,6 @@ pub trait Sender {
     fn send(&self, message: &Message) -> std::result::Result<(), String>;
 }
 
-fn first_of_next_month(month: Date) -> Date {
-    month
-        .first_of_month()
-        .checked_add(1.month())
-        .unwrap_or(month)
-        .first_of_month()
-}
-
 fn chars(text: &str, n: usize) -> String {
     text.chars().take(n).collect()
 }
@@ -144,7 +136,7 @@ pub fn spending_risk(report: &Dashboard, snap: &Snapshot, now: &Zoned) -> Option
     let ctx = Ctx::new(snap, now);
     let local_day = ctx.today();
     let this_month = ctx.current_month();
-    let next_month = first_of_next_month(this_month);
+    let next_month = crate::period::shift_month(this_month, 1);
     let days_left = i64::from((next_month - local_day).get_days()).max(1);
     let salary_risk: Vec<(String, Decimal)> = allocation
         .currencies
