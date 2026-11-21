@@ -437,6 +437,7 @@ mod tests {
             transaction_id: paid.then(|| "sale".into()),
             candidate_count: 0,
             candidates: Vec::new(),
+            by_hand: false,
         }
     }
 

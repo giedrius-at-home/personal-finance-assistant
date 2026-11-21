@@ -317,10 +317,16 @@ pub fn plan_items_with(
             continue;
         }
         let mut rest = w.amount;
+        // An event's amount on top of its parts is not their cap.
+        let within = if w.event.as_ref().is_some_and(|e| e.on_top) {
+            Decimal::ZERO
+        } else {
+            Decimal::ONE
+        };
         for sub in subs {
             match sub.status {
                 WishStatus::Planned => {
-                    rest -= sub.amount;
+                    rest -= sub.amount * within;
                     items.push(leaf(
                         sub,
                         sub.name.clone(),
@@ -330,7 +336,7 @@ pub fn plan_items_with(
                     ));
                 }
                 WishStatus::Bought => {
-                    rest -= sub.bought.as_ref().map_or(sub.amount, |b| b.amount);
+                    rest -= sub.bought.as_ref().map_or(sub.amount, |b| b.amount) * within;
                 }
                 WishStatus::Dropped | WishStatus::Started => {}
             }

@@ -455,6 +455,7 @@ fn record_side_effects(
             pending: false,
             account_id: Some(line.from_account_id.clone()),
             match_description: line.plan_match_description.clone(),
+            paid_by: None,
         };
         w.put_json(
             "INSERT INTO planned_payments(plan_id, payload_json) VALUES (?2, ?1) \

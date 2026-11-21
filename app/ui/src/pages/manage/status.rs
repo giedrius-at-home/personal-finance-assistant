@@ -5,7 +5,6 @@
 
 use finance_types::manage::{ImportRun, ManageWorkspace};
 use finance_types::report::ReviewReport;
-use finance_types::report::review::{CategorisationMethod, ProposalStatus};
 use leptos::prelude::*;
 
 use super::ui::{FEEDBACK, Ops, PREVIEW, frame, load_workspace, local_date};
@@ -212,83 +211,32 @@ fn Connections(ws: ManageWorkspace, ops: Ops) -> impl IntoView {
     }
 }
 
-fn method(m: CategorisationMethod) -> &'static str {
-    match m {
-        CategorisationMethod::Baseline => "baseline",
-        CategorisationMethod::Model => "model",
-        CategorisationMethod::Abstain => "abstain",
-        CategorisationMethod::Unsupported => "unsupported",
-    }
-}
-
-fn status(s: ProposalStatus) -> String {
-    format!("{s:?}").to_lowercase()
-}
-
-/// The queue lives on the Transactions tab; this card only previews it.
-const SHOWN: usize = 8;
-
+/// The queue lives on the Transactions tab; this card only counts it.
 #[component]
 fn CategoryReview(review: crate::api::Loaded<ReviewReport>) -> impl IntoView {
     let app = state();
     view! {
         <Card>
             {move || {
-                let items = review.data.get().and_then(Result::ok).map(|r| r.review_items).unwrap_or_default();
-                let count = items.len();
+                let count = review
+                    .data
+                    .with(|d| d.as_ref().and_then(|r| r.as_ref().ok()).map_or(0, |r| r.review_items.len()));
                 view! {
                     <CardHeader class="mb-2">
                         <CardTitle level=Heading::H2>"Category review"</CardTitle>
                         <Badge tone=Tone::Outline>{format!("{count} proposals")}</Badge>
                     </CardHeader>
-                    <p class="text-sm text-fg-muted">
-                        "Read-only summary. Approve or correct categories on the "
-                        <button
-                            type="button"
-                            class="underline underline-offset-2 hover:no-underline"
-                            on:click=move |_| app.go(crate::Tab::Transactions)
-                        >
-                            "Transactions"
-                        </button>
-                        " tab."
-                    </p>
-                    <div class="mt-3">
-                        {items
-                            .into_iter()
-                            .take(SHOWN)
-                            .map(|item| {
-                                view! {
-                                    <details class=cn(["group", super::ui::DETAILS])>
-                                        <summary class=cn([super::ui::SUMMARY, "flex list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden"])>
-                                            <span>
-                                                {item.merchant}
-                                                <small class="mt-1 block text-xs text-fg-muted">
-                                                    {format!(
-                                                        "{} · {}",
-                                                        item.proposed_category.as_deref().unwrap_or("Abstained"),
-                                                        method(item.method),
-                                                    )}
-                                                </small>
-                                            </span>
-                                            <span aria-hidden="true" class="shrink-0 text-fg-muted transition-transform group-open:rotate-180">
-                                                <Lucide icon=Icon::ChevronDown size=15 />
-                                            </span>
-                                        </summary>
-                                        <p class="mt-3 text-sm leading-relaxed text-fg-muted">{item.reasons.join(" ")}</p>
-                                        <FactsRow class="mt-2" rows=vec![("Status".to_owned(), status(item.status).to_string())] />
-                                    </details>
-                                }
-                            })
-                            .collect_view()}
-                    </div>
-                    {(count > SHOWN)
-                        .then(|| {
-                            view! {
-                                <p class="border-t border-line pt-4 text-xs text-fg-muted">
-                                    {format!("{SHOWN} / {count}")}
-                                </p>
-                            }
-                        })}
+                    <h3 class="text-base font-semibold">
+                        {if count == 0 { "Nothing to review" } else { "Waiting for you" }}
+                    </h3>
+                    <button
+                        type="button"
+                        class=cn([crate::ds::button_class(Variant::Ghost, Size::Sm).as_str(), "-ml-3 mt-2 text-accent"])
+                        on:click=move |_| app.go(crate::Tab::Transactions)
+                    >
+                        "Review in Transactions "
+                        <Lucide icon=Icon::ArrowRight size=14 />
+                    </button>
                 }
             }}
         </Card>

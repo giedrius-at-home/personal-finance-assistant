@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tie-planned-payment"
+description = "Enables the tie_planned_payment command without any pre-configured scope."
+commands.allow = ["tie_planned_payment"]
+
+[[permission]]
+identifier = "deny-tie-planned-payment"
+description = "Denies the tie_planned_payment command without any pre-configured scope."
+commands.deny = ["tie_planned_payment"]
