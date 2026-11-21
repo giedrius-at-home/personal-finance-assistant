@@ -571,6 +571,16 @@ impl Service {
         self.write(|w, _| crate::writes::plans::archive_planned_payment(w, plan_id))
     }
 
+    pub fn tie_planned_payment(
+        &self,
+        plan_id: &str,
+        transaction_id: Option<&str>,
+    ) -> Result<finance_types::gateway::PlannedPayment, String> {
+        self.write(|w, snap| {
+            crate::writes::plans::tie_planned_payment(w, snap, plan_id, transaction_id)
+        })
+    }
+
     /// The closure screen of `month` (`YYYY-MM-01`).
     pub fn closure(&self, month: &str) -> Result<ClosureView, String> {
         self.read_forecast(|store, snap, now, model| {

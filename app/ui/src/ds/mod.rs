@@ -358,6 +358,12 @@ pub fn BoardColumn(
     tone: Tone,
     count: usize,
     #[prop(optional, into)] total: Option<String>,
+    /// A box being dragged may be let go here.
+    #[prop(optional, into)]
+    accepts: Signal<bool>,
+    /// A box was let go here.
+    #[prop(optional, into)]
+    on_drop: Option<Callback<()>>,
     children: Children,
 ) -> impl IntoView {
     let dot = match tone {
@@ -368,7 +374,26 @@ pub fn BoardColumn(
     };
     let label = title.clone();
     view! {
-        <section aria-label=label class="grid min-w-0 content-start gap-2 rounded-xl bg-soft/70 p-2.5">
+        <section
+            aria-label=label
+            class=move || cn([
+                "grid min-w-0 content-start gap-2 rounded-xl bg-soft/70 p-2.5 transition-shadow",
+                if accepts.get() { "ring-2 ring-over/50" } else { "" },
+            ])
+            on:dragover=move |e| {
+                if accepts.get_untracked() {
+                    e.prevent_default();
+                }
+            }
+            on:drop=move |e| {
+                e.prevent_default();
+                if accepts.get_untracked()
+                    && let Some(on_drop) = on_drop
+                {
+                    on_drop.run(());
+                }
+            }
+        >
             <header class="flex items-center gap-2 px-1 pt-0.5">
                 <i aria-hidden="true" class=cn(["size-2 rounded-pill", dot])></i>
                 <h3 class="text-eyebrow font-bold uppercase tracking-eyebrow text-fg-muted">{title}</h3>
@@ -819,6 +844,55 @@ pub fn Dialog(
                 </button>
             </div>
         </Show>
+    }
+}
+
+/// A box opened over the page: `on_close` runs on the backdrop, the close
+/// button and Escape. The caller renders it only while it is open.
+#[component]
+pub fn Popup(
+    #[prop(into)] title: String,
+    #[prop(optional, into)] description: Option<String>,
+    #[prop(optional, into)] class: String,
+    on_close: Callback<()>,
+    children: Children,
+) -> impl IntoView {
+    let label = title.clone();
+    view! {
+        <div
+            class="fixed inset-0 z-50 flex overflow-y-auto bg-contrast/40 p-4"
+            on:click=move |_| on_close.run(())
+            on:keydown=move |e| {
+                if e.key() == "Escape" {
+                    on_close.run(());
+                }
+            }
+        >
+            <div
+                role="dialog"
+                aria-modal="true"
+                aria-label=label
+                class=cn([
+                    "relative m-auto grid w-[min(94vw,36rem)] gap-4 rounded-xl border border-border bg-card-strong p-6 text-fg shadow-pop",
+                    class.as_str(),
+                ])
+                on:click=move |e| e.stop_propagation()
+            >
+                <div class="grid gap-1.5 pr-10">
+                    <h2 class="text-lg font-semibold">{title}</h2>
+                    {description.map(|d| view! { <p class="text-sm text-fg-muted">{d}</p> })}
+                </div>
+                {children()}
+                <button
+                    type="button"
+                    aria-label="Close"
+                    class=format!("absolute right-4 top-4 {}", button_class(Variant::Ghost, Size::IconSm))
+                    on:click=move |_| on_close.run(())
+                >
+                    <Lucide icon=Icon::X size=16 />
+                </button>
+            </div>
+        </div>
     }
 }
 

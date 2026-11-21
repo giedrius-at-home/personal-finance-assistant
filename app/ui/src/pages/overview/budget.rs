@@ -26,7 +26,7 @@ use crate::format;
 use crate::pages::{f, with_report};
 use crate::{Tab, state};
 
-use super::extras::{BudgetExtras, ExtrasState};
+use super::extras::BudgetExtras;
 use super::forecast::DailyForecastPanel;
 use super::month_label;
 use super::outlook::SavingsOutlookPanel;
@@ -169,7 +169,6 @@ struct PanelState {
     notice: RwSignal<String>,
     confirm_remove: RwSignal<bool>,
     add_button: NodeRef<html::Button>,
-    extras: ExtrasState,
     /// The spending trajectory's group (`all` for every group).
     trajectory: RwSignal<String>,
 }
@@ -293,7 +292,6 @@ pub fn MonthlyBudgetPanel() -> impl IntoView {
         notice: RwSignal::new(String::new()),
         confirm_remove: RwSignal::new(false),
         add_button: NodeRef::new(),
-        extras: ExtrasState::new(),
         trajectory: RwSignal::new("all".to_owned()),
     };
     with_report(move |report| {
@@ -403,7 +401,6 @@ fn panel(report: &Dashboard, selection: &str, s: PanelState) -> AnyView {
             s.selection.set(value);
             s.notice.set(String::new());
             s.error.set(String::new());
-            s.extras.reset();
         }
     });
 
@@ -563,7 +560,7 @@ fn panel(report: &Dashboard, selection: &str, s: PanelState) -> AnyView {
             </div>
             {rows}
             {totals_row}
-            <BudgetExtras report=report.clone() budget=budget.clone() available=savings state=s.extras />
+            <BudgetExtras report=report.clone() budget=budget.clone() available=savings />
         </section>
     }
     .into_any()

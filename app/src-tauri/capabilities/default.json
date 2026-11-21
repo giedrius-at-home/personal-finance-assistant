@@ -43,6 +43,7 @@
     "allow-decline-bill-match",
     "allow-create-planned-payment",
     "allow-archive-planned-payment",
+    "allow-tie-planned-payment",
     "allow-closure",
     "allow-closure-action",
     "allow-save-account-role",

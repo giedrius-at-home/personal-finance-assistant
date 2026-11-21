@@ -19,7 +19,7 @@ use serde::Serialize;
 use crate::api::{NoArgs, invoke, load};
 use crate::ds::{
     BOARD_CARD, Badge, BoardColumn, Button, CONTROL, Card, Checkbox, Dialog, Eyebrow, Facts,
-    FactsRow, Field, Icon, Lucide, Size, Skeleton, Tone, Variant, cn,
+    FactsRow, Field, Icon, Lucide, Popup, Size, Skeleton, Tone, Variant, cn,
 };
 use crate::format;
 use crate::pages::Problem;
@@ -27,13 +27,6 @@ use crate::pages::wishes::{
     AMOUNT_PATTERN, Context, Draft, DraftArgs, Fact, Ui, WishIdArgs, amount, feedback,
     parse_amount, today, wish_row,
 };
-
-#[derive(Serialize)]
-struct DatesArgs {
-    wish_id: String,
-    starts_on: String,
-    ends_on: String,
-}
 
 #[derive(Serialize)]
 struct PickArgs {
@@ -50,12 +43,66 @@ struct SearchArgs {
 /// How many payments the list offers at once, newest first.
 const FOUND: u32 = 200;
 
+/// How an event's amount counts: `total` (its parts come out of it) or
+/// `extra` (on top of its parts).
+const MODES: [(&str, &str); 2] = [
+    ("total", "In total, parts included"),
+    ("extra", "Extra, on top of the parts"),
+];
+
+fn mode_select(id: String, value: RwSignal<String>) -> impl IntoView {
+    view! {
+        <select
+            id=id
+            class=CONTROL
+            prop:value=move || value.get()
+            on:change=move |e| value.set(event_target_value(&e))
+        >
+            {MODES
+                .into_iter()
+                .map(|(v, label)| {
+                    let selected = v == value.get_untracked();
+                    view! { <option value=v selected=selected>{label}</option> }
+                })
+                .collect_view()}
+        </select>
+    }
+}
+
+fn on_top(e: &EventRow) -> bool {
+    e.row.wish.event.as_ref().is_some_and(|d| d.on_top)
+}
+
+/// Everything the event is planned to cost: its amount, and its parts too
+/// when the amount is on top of them.
+pub fn planned_total(e: &EventRow) -> Decimal {
+    let parts: Decimal = if on_top(e) {
+        e.row
+            .children
+            .iter()
+            .map(|c| match c.wish.status {
+                finance_types::gateway::WishStatus::Planned => c.wish.amount,
+                finance_types::gateway::WishStatus::Bought => {
+                    c.wish.bought.as_ref().map_or(c.wish.amount, |p| p.amount)
+                }
+                _ => Decimal::ZERO,
+            })
+            .sum()
+    } else {
+        Decimal::ZERO
+    };
+    e.row.wish.amount + parts
+}
+
 /// The event's own numbers, one value per fact, only those that apply.
 pub fn event_facts(e: &EventRow, code: &str) -> Vec<Fact> {
     let m = |value: Decimal| amount(value, code);
     let wish = &e.row.wish;
-    let mut facts = vec![("Planned".to_owned(), m(wish.amount))];
+    let mut facts = vec![("Planned".to_owned(), m(planned_total(e)))];
     let mut push = |label: &str, value: String| facts.push((label.to_owned(), value));
+    if on_top(e) {
+        push("Of it, for the days", m(wish.amount));
+    }
     let parts: Decimal = e
         .row
         .children
@@ -118,6 +165,10 @@ struct Own {
     found: RwSignal<Vec<(String, String, String, String)>>,
     new_starts: RwSignal<String>,
     new_ends: RwSignal<String>,
+    new_amount: RwSignal<String>,
+    /// `total` or `extra`: the add form's, and the change form's.
+    mode: RwSignal<String>,
+    new_mode: RwSignal<String>,
 }
 
 impl Own {
@@ -137,6 +188,9 @@ impl Own {
             found: RwSignal::new(Vec::new()),
             new_starts: text(),
             new_ends: text(),
+            new_amount: text(),
+            mode: RwSignal::new("total".into()),
+            new_mode: RwSignal::new("total".into()),
         }
     }
 
@@ -232,7 +286,18 @@ fn page(ui: Ui, own: Own, view: &EventsView, ctx: Context) -> impl IntoView + us
         let id = ui.selected.get()?;
         let event =
             events.with_value(|all| all.iter().find(|e| e.row.wish.wish_id == id).cloned())?;
-        Some(event_block(ui, own, &event, months, ctx, &currency))
+        let title = event.row.wish.name.clone();
+        let close = Callback::new(move |()| {
+            ui.close_forms();
+            own.open.set(None);
+            ui.selected.set(None);
+        });
+        let block = event_block(ui, own, &event, months, ctx, &currency);
+        Some(view! {
+            <Popup title=title class="w-[min(94vw,60rem)]" on_close=close>
+                {block}
+            </Popup>
+        })
     };
     let empty = view.events.is_empty().then(|| {
         view! { <p class="text-sm text-fg-muted">"No events yet."</p> }
@@ -256,9 +321,10 @@ fn page(ui: Ui, own: Own, view: &EventsView, ctx: Context) -> impl IntoView + us
     }
 }
 
-/// What an event has used of its plan, 0–100: what is spent and paid ahead.
+/// What an event has used of its plan, 0–100. What is spent already holds
+/// what was paid ahead.
 pub fn used_percent(e: &EventRow) -> u32 {
-    crate::pages::wishes::saved_percent(e.spent + e.paid_ahead, e.row.wish.amount)
+    crate::pages::wishes::saved_percent(e.spent, planned_total(e))
 }
 
 /// An event as a box on the board: name, plan, days, how it stands, what
@@ -299,7 +365,7 @@ fn event_box(ui: Ui, event: &EventRow, code: &str) -> impl IntoView + use<> {
         EventPhase::Past => vec![("Spent".to_owned(), m(event.spent))],
     };
     let percent = used_percent(event);
-    let used = m(event.spent + event.paid_ahead);
+    let used = m(event.spent);
     let parts = (!event.row.children.is_empty()).then(|| {
         let boxes = event
             .row
@@ -320,22 +386,19 @@ fn event_box(ui: Ui, event: &EventRow, code: &str) -> impl IntoView + use<> {
             .collect_view();
         view! { <ul class="grid gap-1">{boxes}</ul> }
     });
-    let pick = id.clone();
-    let is_picked = move || ui.selected.get().as_deref() == Some(id.as_str());
+    let total = m(planned_total(event));
     view! {
         <button
             type="button"
-            class=cn([BOARD_CARD, "text-left transition-colors hover:border-over aria-pressed:border-over aria-pressed:ring-2 aria-pressed:ring-over/30"])
-            aria-pressed=move || is_picked().to_string()
+            class=cn([BOARD_CARD, "text-left transition-colors hover:border-over"])
             on:click=move |_| {
-                ui.selected.update(|s| {
-                    *s = if s.as_deref() == Some(pick.as_str()) { None } else { Some(pick.clone()) };
-                });
+                ui.close_forms();
+                ui.selected.set(Some(id.clone()));
             }
         >
             <span class="flex items-baseline justify-between gap-3">
                 <strong class="min-w-0 truncate font-semibold">{wish.name.clone()}</strong>
-                <strong class="whitespace-nowrap tabular-nums">{m(wish.amount)}</strong>
+                <strong class="whitespace-nowrap tabular-nums">{total}</strong>
             </span>
             <span class="flex flex-wrap items-center justify-between gap-1.5 text-xs text-fg-muted">
                 <span class="flex items-center gap-1.5">
@@ -380,6 +443,7 @@ fn add_form(ui: Ui, own: Own, currency: Currency) -> impl IntoView + use<> {
             event: Some(EventDetails {
                 starts_on: starts,
                 ends_on: own.ends.get_untracked(),
+                on_top: own.mode.get_untracked() == "extra",
                 ..EventDetails::default()
             }),
         };
@@ -401,8 +465,11 @@ fn add_form(ui: Ui, own: Own, currency: Currency) -> impl IntoView + use<> {
             <Field label="Name" id="event-name">{text_input("event-name".into(), own.name, "text")}</Field>
             <Field label="First day" id="event-starts">{text_input("event-starts".into(), own.starts, "date")}</Field>
             <Field label="Last day" id="event-ends">{text_input("event-ends".into(), own.ends, "date")}</Field>
-            <Field label="To spend" id="event-amount" hint="Everything those days, not only the extra.">
+            <Field label="To spend" id="event-amount" hint="Everything those days, not only what is above the usual.">
                 {text_input("event-amount".into(), own.amount, "amount")}
+            </Field>
+            <Field label="The amount is" id="event-mode" hint="In total: wishes put into the event come out of it. Extra: it is for the days, and those wishes come on top.">
+                {mode_select("event-mode".into(), own.mode)}
             </Field>
             <label class="flex items-center gap-2.5 text-sm sm:col-start-1">
                 <Checkbox
@@ -634,19 +701,40 @@ fn event_block(
             .collect_view()
     };
 
-    // New dates, or back to a plain wish while it has not started.
+    // New dates, amount or way of counting; or back to a plain wish while
+    // it has not started.
     let dates_target = target.clone();
+    let kept = StoredValue::new(wish.clone());
     let save_dates = move |ev: SubmitEvent| {
         ev.prevent_default();
+        let Ok(value) = parse_amount(&own.new_amount.get_untracked()) else {
+            ui.set_message(&dates_target, "Enter what you want to spend.", true);
+            return;
+        };
+        let wish = kept.get_value();
+        let starts = own.new_starts.get_untracked();
+        let draft = Draft {
+            wish_id: Some(wish.wish_id),
+            parent_id: None,
+            name: wish.name,
+            amount: value,
+            currency: wish.currency,
+            due_on: starts.clone(),
+            source: wish.source,
+            kind: wish.kind,
+            must: wish.must,
+            event: Some(EventDetails {
+                starts_on: starts,
+                ends_on: own.new_ends.get_untracked(),
+                on_top: own.new_mode.get_untracked() == "extra",
+                ..EventDetails::default()
+            }),
+        };
         ui.write(
             dates_target.clone(),
-            "plan_wish_as_event",
-            DatesArgs {
-                wish_id: id.get_value(),
-                starts_on: own.new_starts.get_untracked(),
-                ends_on: own.new_ends.get_untracked(),
-            },
-            "Dates saved.",
+            "save_wish",
+            DraftArgs { draft },
+            "Saved.",
             move || own.open.set(None),
         );
     };
@@ -662,11 +750,16 @@ fn event_block(
             || {},
         );
     };
+    let planned_amount = wish.amount.normalize().to_string();
+    let extra = details.on_top;
     let open_dates = {
         let (starts, ends) = (details.starts_on.clone(), details.ends_on.clone());
         move |_| {
             own.new_starts.set(starts.clone());
             own.new_ends.set(ends.clone());
+            own.new_amount.set(planned_amount.clone());
+            own.new_mode
+                .set(if extra { "extra" } else { "total" }.into());
             id.with_value(|id| own.toggle(id, "dates"));
         }
     };
@@ -684,7 +777,7 @@ fn event_block(
     let found = StoredValue::new(found);
 
     view! {
-        <Card>
+        <div>
             <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
                 {chip}
                 <FactsRow rows=facts />
@@ -707,7 +800,7 @@ fn event_block(
                 >
                     "Add a payment"
                 </Button>
-                <Button size=Size::Sm variant=Variant::Ghost on_click=Callback::new(open_dates)>"Change dates"</Button>
+                <Button size=Size::Sm variant=Variant::Ghost on_click=Callback::new(open_dates)>"Change dates or amount"</Button>
                 {upcoming.then(|| view! {
                     <Button size=Size::Sm variant=Variant::Ghost disabled=Signal::derive(move || ui.busy.get()) on_click=Callback::new(back)>
                         "Back to wishes"
@@ -757,11 +850,13 @@ fn event_block(
                 >
                     <Field label="First day" id=field_id("new-starts")>{text_input(field_id("new-starts"), own.new_starts, "date")}</Field>
                     <Field label="Last day" id=field_id("new-ends")>{text_input(field_id("new-ends"), own.new_ends, "date")}</Field>
-                    <Button submit=true size=Size::Sm disabled=Signal::derive(move || ui.busy.get())>"Save dates"</Button>
+                    <Field label="To spend" id=field_id("new-amount")>{text_input(field_id("new-amount"), own.new_amount, "amount")}</Field>
+                    <Field label="The amount is" id=field_id("new-mode")>{mode_select(field_id("new-mode"), own.new_mode)}</Field>
+                    <Button submit=true size=Size::Sm disabled=Signal::derive(move || ui.busy.get())>"Save"</Button>
                 </form>
             </Show>
             {feedback(ui, target)}
-        </Card>
+        </div>
     }
 }
 
@@ -841,6 +936,20 @@ mod tests {
             ]
         );
         assert_eq!(standing(&event(EventPhase::Upcoming)), None);
+    }
+
+    #[test]
+    fn an_amount_on_top_of_the_parts_adds_them_to_the_plan() {
+        let mut e = event(EventPhase::Upcoming);
+        let own = e.row.wish.amount;
+        e.row.children.push(row("Zoo", "18", Some("Parents")));
+        // In total: the part comes out of the amount.
+        assert_eq!(planned_total(&e), own);
+        e.row.wish.event = Some(EventDetails {
+            on_top: true,
+            ..EventDetails::default()
+        });
+        assert_eq!(planned_total(&e), own + d("18"));
     }
 
     #[test]

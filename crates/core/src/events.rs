@@ -51,14 +51,20 @@ pub fn claims(wishes: &[Wish]) -> Vec<EventClaim> {
                 return None;
             }
             let mut rest = w.amount;
+            // An amount on top of the parts is all for the days.
+            let within = if event.on_top {
+                Decimal::ZERO
+            } else {
+                Decimal::ONE
+            };
             let mut tied = HashMap::new();
             for part in wishes.iter().filter(|p| {
                 p.parent_id.as_deref() == Some(&w.wish_id) && p.kind == WishKind::OneOff
             }) {
                 match part.status {
-                    WishStatus::Planned => rest -= part.amount,
+                    WishStatus::Planned => rest -= part.amount * within,
                     WishStatus::Bought => {
-                        rest -= part.bought.as_ref().map_or(part.amount, |b| b.amount);
+                        rest -= part.bought.as_ref().map_or(part.amount, |b| b.amount) * within;
                         if let Some(id) =
                             part.bought.as_ref().and_then(|b| b.transaction_id.clone())
                         {
@@ -132,6 +138,9 @@ pub fn usual_estimate(groups: &[GroupUsual], month: Date, days: u32, share: Deci
         .sum::<Decimal>()
         .min(share.max(Decimal::ZERO))
 }
+
+/// A euro or two over is not over: a plan is not that exact.
+pub const SLACK: Decimal = Decimal::TWO;
 
 /// What an event still asks of each calendar month, from the running one.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -299,7 +308,7 @@ pub fn facts(
         days,
         days_left,
         per_day,
-        pace: pace(money, on_days, days_gone, days, left < Decimal::ZERO),
+        pace: pace(money, on_days, days_gone, days, left < -SLACK),
         months,
     }
 }
@@ -372,7 +381,7 @@ pub fn pace(
         return Pace::Over;
     }
     let allowed = days_money * Decimal::from(days_gone) / Decimal::from(days.max(1));
-    if spent_on_days > allowed {
+    if spent_on_days > allowed + SLACK {
         Pace::Fast
     } else {
         Pace::OnTrack
@@ -527,6 +536,10 @@ pub(crate) mod tests {
         let over = facts(&e, Some(&much), d("28"), &usual, date(2026, 12, 2));
         assert_eq!((over.pace, over.per_day), (Pace::Over, d("0")));
         assert_eq!(over.left, d("-146"));
+        // A euro or two over is still inside the plan.
+        let bit = spend("0", &[("2026-12-01", "355.50")]);
+        let near = facts(&e, Some(&bit), d("28"), &usual, date(2026, 12, 6));
+        assert_eq!((near.left, near.pace), (d("-1.50"), Pace::OnTrack));
     }
 
     #[test]
@@ -694,6 +707,11 @@ pub(crate) mod tests {
             vec!["a", "e"]
         );
         assert_eq!(got[1].rest, d("354"));
+        // On top of its parts: the whole amount is for the days.
+        let mut extra = event("e", "400", "2026-11-30", "2026-12-05");
+        extra.event.as_mut().unwrap().on_top = true;
+        let top = claims(&[extra, wish("zoo", Some("e"), "18")]);
+        assert_eq!(top[0].rest, d("400"));
         assert_eq!(got[1].tied.get("n1").map(String::as_str), Some("naturalis"));
         assert_eq!(got[1].key, "event:e");
     }

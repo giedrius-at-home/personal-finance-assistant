@@ -1,4 +1,4 @@
-//! Spending → Plan & patterns, "Goals": what the wishes and the emergency
+//! Spending → Habits & goals, "Goals": what the wishes and the emergency
 //! fund need a month, what current habits leave, and where to spend less.
 //! The emergency fund's settings are edited on the Wishes page.
 
@@ -250,7 +250,7 @@ fn card(view: &WishesView) -> Option<AnyView> {
     )
 }
 
-/// Spending → Plan & patterns: the goals against current habits.
+/// Spending → Habits & goals: the goals against current habits.
 #[component]
 pub fn GoalsCard() -> impl IntoView {
     let revision = state().revision;

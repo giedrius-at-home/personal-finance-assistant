@@ -149,9 +149,10 @@ pub fn save_wish(w: &Writer<'_>, snap: &Snapshot, mut draft: WishDraft) -> Resul
                     (Some(new), Some(kept)) => Some(EventDetails {
                         starts_on: new.starts_on,
                         ends_on: new.ends_on,
+                        on_top: new.on_top,
                         ..kept
                     }),
-                    (Some(new), None) => Some(new_event(&new.starts_on, &new.ends_on)),
+                    (Some(new), None) => Some(new_event(&new)),
                     (None, kept) => kept,
                 },
                 must: draft.must,
@@ -184,7 +185,7 @@ pub fn save_wish(w: &Writer<'_>, snap: &Snapshot, mut draft: WishDraft) -> Resul
                 kind: draft.kind,
                 must: draft.must,
                 created_at: w.stamp(),
-                event: draft.event.map(|e| new_event(&e.starts_on, &e.ends_on)),
+                event: draft.event.as_ref().map(new_event),
             }
         }
     };
@@ -208,10 +209,13 @@ fn event_dates(starts_on: &str, ends_on: &str) -> Result<(Date, Date)> {
     Ok((starts, ends))
 }
 
-fn new_event(starts_on: &str, ends_on: &str) -> EventDetails {
+/// A new event keeps only what a draft may set: its dates and how its
+/// amount counts.
+fn new_event(draft: &EventDetails) -> EventDetails {
     EventDetails {
-        starts_on: starts_on.to_owned(),
-        ends_on: ends_on.to_owned(),
+        starts_on: draft.starts_on.clone(),
+        ends_on: draft.ends_on.clone(),
+        on_top: draft.on_top,
         ..EventDetails::default()
     }
 }
@@ -665,6 +669,7 @@ fn store_purchase_plan(
         pending: false,
         account_id,
         match_description: None,
+        paid_by: purchase.transaction_id.clone(),
     };
     w.put_json(
         "INSERT INTO planned_payments (plan_id, payload_json) VALUES (?2, ?1) \

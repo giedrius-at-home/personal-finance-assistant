@@ -1,4 +1,4 @@
-//! Spending → Plan & patterns, "Adjustments": every spending group against
+//! Spending → Habits & goals, "Adjustments": every spending group against
 //! the owner's own typical month, what drives a group that runs above it,
 //! one budget action, and how often the owner goes where.
 
@@ -738,7 +738,7 @@ fn card(report: &Adjustments, dashboard: &Dashboard, state: CardState) -> Option
     )
 }
 
-/// Spending → Plan & patterns: every group against the owner's own norm.
+/// Spending → Habits & goals: every group against the owner's own norm.
 #[component]
 pub fn AdjustmentsCard() -> impl IntoView {
     let state = CardState {

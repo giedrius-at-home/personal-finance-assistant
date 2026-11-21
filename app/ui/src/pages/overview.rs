@@ -30,14 +30,9 @@ pub fn Overview() -> impl IntoView {
         <kpis::OverviewKpis />
         <nudges::OverviewNudges />
         <monthly::OwnerMonthlyOverview />
-        {budget_panel()}
+        <budget::MonthlyBudgetPanel />
         <trends::OverviewTrends />
     }
-}
-
-/// The monthly budget panel, shared with Spending → Plan & patterns.
-pub fn budget_panel() -> impl IntoView {
-    view! { <budget::MonthlyBudgetPanel /> }
 }
 
 /// `2026-10-01` → `October` (en-GB long month).

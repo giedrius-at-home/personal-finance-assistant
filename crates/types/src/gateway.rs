@@ -146,6 +146,10 @@ pub struct PlannedPayment {
     pub account_id: Option<String>,
     #[serde(default)]
     pub match_description: Option<String>,
+    /// The payment the owner tied to this plan by hand: it paid the plan,
+    /// whatever its category, amount or date.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paid_by: Option<String>,
 }
 
 /// `spending_group_history`: the reviewed group of one category.
@@ -470,6 +474,10 @@ pub struct EventDetails {
     /// Transactions inside the dates that are not part of the event.
     #[serde(default)]
     pub excluded_ids: Vec<String>,
+    /// The amount is for the days alone, on top of the event's parts;
+    /// otherwise it is the whole event and the parts come out of it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub on_top: bool,
 }
 
 /// What to do with a payment on an event.
@@ -697,6 +705,7 @@ mod tests {
                 ends_on: "2026-12-05".into(),
                 transaction_ids: Vec::new(),
                 excluded_ids: Vec::new(),
+                on_top: false,
             })
         );
         let kind: WishKind =

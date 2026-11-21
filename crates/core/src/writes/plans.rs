@@ -7,6 +7,7 @@ use std::str::FromStr;
 
 use finance_types::gateway::{Direction, PlannedPayment, PlannedPaymentRequest};
 use finance_types::report::UnitMoney;
+use finance_types::report::plans::PlannedPaymentView;
 use jiff::civil::Date;
 use rusqlite::params;
 use rust_decimal::Decimal;
@@ -120,6 +121,7 @@ pub fn build_planned_payment(
         pending: false,
         account_id: Some(request.account_id.clone()),
         match_description: match_description.map(str::to_owned),
+        paid_by: None,
     })
 }
 
@@ -162,6 +164,76 @@ pub fn archive_planned_payment(w: &Writer<'_>, plan_id: &str) -> Result<()> {
         return Err(invalid("This entry was already removed. Refresh."));
     }
     Ok(())
+}
+
+/// The payment `id` names, if it may pay `plan` by hand: it runs the
+/// plan's way in the plan's currency and pays no bill and no plan in
+/// `views` (the reconciled plans) but this one.
+fn payment_to_tie(
+    plan: &PlannedPayment,
+    id: &str,
+    transactions: &[Tx],
+    views: &[PlannedPaymentView],
+) -> Result<String> {
+    // The transaction search names a payment by its bare ledger id.
+    let ledger = format!("firefly:{id}");
+    let paid = transactions
+        .iter()
+        .find(|t| t.transaction_id == ledger || t.transaction_id == id)
+        .ok_or_else(|| invalid("Payment not found. Refresh."))?;
+    let right_way = match plan.direction {
+        Direction::Outflow => paid.kind == Kind::Outflow,
+        Direction::Inflow => matches!(paid.kind, Kind::Inflow | Kind::Refund),
+    };
+    if !right_way || paid.currency != plan.amount.currency {
+        return Err(invalid(match plan.direction {
+            Direction::Outflow => "Pick a payment in the plan's currency.",
+            Direction::Inflow => "Pick money received in the plan's currency.",
+        }));
+    }
+    if paid.subscription_id.is_some() {
+        return Err(invalid("That payment already pays a bill."));
+    }
+    // Whether tied by hand or matched: it is the other plan's.
+    if let Some(other) = views.iter().find(|v| {
+        v.plan_id != plan.plan_id && v.transaction_id.as_deref() == Some(&paid.transaction_id)
+    }) {
+        return Err(invalid(format!(
+            "That payment already pays {}.",
+            other.name
+        )));
+    }
+    Ok(paid.transaction_id.clone())
+}
+
+/// Tie a payment to a plan by hand (it then paid the plan, whatever its
+/// category, amount or date), or with `None` leave the plan to matching
+/// again.
+pub fn tie_planned_payment(
+    w: &Writer<'_>,
+    snap: &Snapshot,
+    plan_id: &str,
+    transaction_id: Option<&str>,
+) -> Result<PlannedPayment> {
+    let mut plan = snap
+        .planned_payments
+        .iter()
+        .find(|p| p.plan_id == plan_id)
+        .cloned()
+        .ok_or_else(|| invalid("This entry was already removed. Refresh."))?;
+    plan.paid_by = match transaction_id {
+        None => None,
+        Some(id) => {
+            let views = crate::plans::planned_payment_views(&crate::Ctx::new(snap, &w.now));
+            Some(payment_to_tie(&plan, id, &snap.transactions, &views)?)
+        }
+    };
+    w.put_json(
+        "UPDATE planned_payments SET payload_json = ?1 WHERE plan_id = ?2 AND archived_at IS NULL",
+        &plan,
+        &[&plan.plan_id],
+    )?;
+    Ok(plan)
 }
 
 #[cfg(test)]
@@ -330,6 +402,44 @@ mod tests {
         )
         .unwrap();
         conn
+    }
+
+    #[test]
+    fn a_payment_is_tied_only_when_it_is_free_and_runs_the_plans_way() {
+        let plan = build(&request(), &[], &[]).unwrap();
+        let bike = purchase("firefly:7", "61.20", Kind::Outflow);
+        let tie = |txs: &[Tx], views: &[PlannedPaymentView]| {
+            payment_to_tie(&plan, "7", txs, views).map_err(|e| e.to_string())
+        };
+        // Any amount and category, named by its bare ledger id.
+        assert_eq!(tie(std::slice::from_ref(&bike), &[]).unwrap(), "firefly:7");
+        assert!(tie(&[], &[]).is_err());
+        // Money received does not pay a payment to make.
+        assert!(tie(&[purchase("firefly:7", "61.20", Kind::Inflow)], &[]).is_err());
+        let mut billed = bike.clone();
+        billed.subscription_id = Some("bill".into());
+        assert_eq!(
+            tie(&[billed], &[]).unwrap_err(),
+            "That payment already pays a bill."
+        );
+        // Another plan has it, matched or tied.
+        let other = PlannedPayment {
+            plan_id: "other".into(),
+            name: "Chair".into(),
+            paid_by: Some("firefly:7".into()),
+            ..plan.clone()
+        };
+        let views = crate::plans::reconcile_planned_payments(
+            std::slice::from_ref(&other),
+            &[],
+            std::slice::from_ref(&bike),
+            &now(),
+            &std::collections::HashMap::new(),
+        );
+        assert_eq!(
+            tie(std::slice::from_ref(&bike), &views).unwrap_err(),
+            "That payment already pays Chair."
+        );
     }
 
     #[test]
