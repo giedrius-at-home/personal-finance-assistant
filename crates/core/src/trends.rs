@@ -164,8 +164,11 @@ pub(crate) fn cents(d: Decimal) -> Decimal {
     rounded
 }
 
+/// The day a payment counts on: a card purchase's own day, as the budget
+/// counts it, else its local booking day.
 fn local_day(t: &Tx, zone: &TimeZone) -> Date {
-    t.occurred_at.with_time_zone(zone.clone()).date()
+    t.purchased_on
+        .unwrap_or_else(|| t.occurred_at.with_time_zone(zone.clone()).date())
 }
 
 /// Six calendar months (the current one partial) of spending and refunds,

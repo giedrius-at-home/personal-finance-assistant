@@ -22,7 +22,7 @@ use rust_decimal::Decimal;
 use crate::Ctx;
 use crate::closure::day_of;
 use crate::model::Account;
-use crate::period::shift_month;
+use crate::period::{plan_month, shift_month};
 use crate::reporting::py_div;
 use crate::text::casefold;
 
@@ -213,7 +213,7 @@ pub fn monthly_allocation(inputs: &AllocationInputs) -> MonthlyAllocation {
             continue;
         }
         let currency = &p.amount.currency;
-        let month = due_on.first_of_month();
+        let month = plan_month(due_on, current_month, inputs.period_start);
         if is_salary(p) {
             // This month's payday funds next month. A paid salary is already reserved.
             if month == current_month && salary_of(currency).is_zero() {
@@ -234,7 +234,7 @@ pub fn monthly_allocation(inputs: &AllocationInputs) -> MonthlyAllocation {
         if p.direction != Direction::Outflow || p.status == PlanStatus::Paid {
             continue;
         }
-        let month = due_on.first_of_month();
+        let month = plan_month(due_on, current_month, inputs.period_start);
         if month == current_month || (p.pending && due_on < current_month) {
             add(&mut current_plans, &p.amount.currency, p.amount.amount);
         } else if month == funded_month {
@@ -470,6 +470,37 @@ mod tests {
 
     fn d(n: i64) -> Decimal {
         Decimal::from(n)
+    }
+
+    #[test]
+    fn a_plan_due_after_an_early_close_counts_in_the_running_month() {
+        // October closed on the 28th: from the 29th the budget runs November.
+        let rent = PlannedPaymentView {
+            direction: Direction::Outflow,
+            ..income(PlanStatus::Upcoming, "2026-10-30")
+        };
+        let empty = empty();
+        let (none, accounts) = (HashSet::new(), [account("bank", "1000")]);
+        let row = monthly_allocation(&AllocationInputs {
+            through_date: date(2026, 10, 29),
+            accounts: &accounts,
+            goals: &[],
+            goal_evaluations: &[],
+            payday_status: None,
+            current_subscriptions: &empty,
+            next_subscriptions: &empty,
+            planned_payments: std::slice::from_ref(&rent),
+            spending_limits: &[],
+            spending_nudges: &[],
+            budgets: None,
+            savings_account_ids: &none,
+            current_month: Some(date(2026, 11, 1)),
+            savings_goal_ids: &none,
+            period_start: Some(date(2026, 10, 29)),
+        })
+        .currencies
+        .remove(0);
+        assert_eq!(row.current_plans_remaining, d(100));
     }
 
     #[test]

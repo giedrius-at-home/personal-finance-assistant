@@ -311,8 +311,10 @@ pub fn edit_bill(w: &Writer<'_>, checks: &Checks<'_>, request: BillEditRequest) 
         return Err(invalid(INVALID));
     };
     let (minimum, maximum) = (request.amount_min, request.amount_max);
+    // A bill of nothing is archived, not kept at 0.
     if !valid_amount(minimum)
         || !valid_amount(maximum)
+        || maximum <= Decimal::ZERO
         || maximum < minimum
         || !valid_frequency(&request.repeat_freq)
     {
@@ -694,6 +696,11 @@ mod tests {
             date: date.map(str::to_owned),
         };
         with_writer(&mut store, |w| edit_bill(w, &checks, edit(None))).unwrap();
+        let nothing = BillEditRequest {
+            amount_max: Decimal::ZERO,
+            ..edit(None)
+        };
+        assert!(with_writer(&mut store, |w| edit_bill(w, &checks, nothing)).is_err());
         let read = |store: &Store| -> (String, String, String, String) {
             store
                 .connection()

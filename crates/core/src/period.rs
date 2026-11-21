@@ -13,6 +13,16 @@ use crate::load::parse_instant;
 use crate::model::Tx;
 
 /// `month` moved by `offset` months; always the first of the month.
+/// The budget month a plan due on `day` falls in, seen from `month`: a day
+/// after an early month close (`start`, the first day of `month`'s period)
+/// still in the calendar month before belongs to `month`.
+pub fn plan_month(day: Date, month: Date, start: Option<Date>) -> Date {
+    match start {
+        Some(start) if start <= day && day < month => month,
+        _ => day.first_of_month(),
+    }
+}
+
 pub fn shift_month(month: Date, offset: i32) -> Date {
     let index = i32::from(month.year()) * 12 + i32::from(month.month()) - 1 + offset;
     Date::new(

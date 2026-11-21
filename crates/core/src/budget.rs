@@ -24,7 +24,7 @@ use crate::groups::{
 };
 use crate::model::{Kind, Tx};
 use crate::outlook::days_between;
-use crate::period::{PeriodResolver, shift_month};
+use crate::period::{PeriodResolver, plan_month, shift_month};
 use crate::personal::apply_personal_spending;
 use crate::plans::net_spending_transactions;
 use finance_types::report::events::{EventSpend, EventTransaction};
@@ -359,7 +359,7 @@ pub fn monthly_budget(
         if p.direction != Direction::Outflow
             || p.status == PlanStatus::Paid
             || p.amount.currency != plan.currency
-            || !(due_on.first_of_month() == month
+            || !(plan_month(due_on, month, period_start) == month
                 || (p.pending && due_on < month && month == current_month))
         {
             continue;
@@ -467,7 +467,9 @@ pub fn monthly_budget(
         let ahead = picked_ahead
             .get(claim.key.as_str())
             .copied()
-            .unwrap_or_default();
+            .unwrap_or_default()
+            // As in `events::days_money`: refunds never count for more than they undo.
+            .max(Decimal::ZERO);
         let days_money = (claim.rest - ahead).max(Decimal::ZERO);
         let share = events::shares(claim, days_money)
             .into_iter()
@@ -1021,6 +1023,19 @@ pub(crate) mod tests {
         assert_eq!(view.events[0].planned, d(300));
         assert!(view.events[0].spent.is_zero());
         assert_eq!(view.groups[0].history[4], d(0));
+    }
+
+    #[test]
+    fn a_refund_picked_in_ahead_does_not_add_to_the_money_for_the_days() {
+        let mut claim = parents();
+        claim.picked.insert("refund".into());
+        let refund = Tx {
+            kind: Kind::Refund,
+            ..on(tx("refund", "50"), "2026-08-01")
+        };
+        let view = report_with_events(None, &[refund], &[], &[], &[claim]);
+        // The days' €400 as planned, not €450.
+        assert_eq!(view.events[0].planned, d(400));
     }
 
     #[test]

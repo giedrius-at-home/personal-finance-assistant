@@ -691,10 +691,14 @@ impl Service {
         &self,
         commit: finance_types::manage::CsvCommit,
     ) -> Result<finance_types::manage::CsvCommitResult, String> {
-        self.write(|w, snap| {
+        let result = self.write(|w, snap| {
             let targets = crate::manage::import_targets(&w.tx, snap)?;
             crate::writes::csv_import::commit(w, &targets, &commit)
-        })
+        });
+        if result.is_ok() {
+            crate::writes::csv_import::spend(&commit.preview_id);
+        }
+        result
     }
 
     pub fn preview_settings(

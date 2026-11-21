@@ -132,6 +132,9 @@ pub fn save_wish(w: &Writer<'_>, snap: &Snapshot, mut draft: WishDraft) -> Resul
         if draft.wish_id.as_deref() == Some(parent_id.as_str()) {
             return Err(invalid("a wish cannot be its own parent"));
         }
+        if parent.currency != draft.currency {
+            return Err(invalid("the parent wish is in another currency"));
+        }
         if draft.must && !parent.must {
             return Err(invalid(MUST_PARENT));
         }
@@ -144,6 +147,11 @@ pub fn save_wish(w: &Writer<'_>, snap: &Snapshot, mut draft: WishDraft) -> Resul
     let wish = match &draft.wish_id {
         Some(id) => {
             let old = planned(find(&wishes, id)?)?;
+            // An event kept as it was stays a one-off of its own.
+            if old.event.is_some() && (draft.kind != WishKind::OneOff || draft.parent_id.is_some())
+            {
+                return Err(invalid(EVENT_KIND));
+            }
             Wish {
                 // New dates keep the payments picked in or taken out.
                 event: match (draft.event, old.event.clone()) {
@@ -1061,6 +1069,35 @@ mod tests {
                 EventPick::Pick
             ))
             .is_err()
+        );
+    }
+
+    #[test]
+    fn a_part_shares_its_parents_currency_and_an_event_stays_on_top() {
+        let mut db = db();
+        let new = WishDraft {
+            event: dates("2026-11-30", "2026-12-05"),
+            ..draft("Parents")
+        };
+        let event = db.write(|w, s| save_wish(w, s, new)).unwrap();
+        let dollars = WishDraft {
+            parent_id: Some(event.wish_id.clone()),
+            currency: Currency::new("USD"),
+            ..draft("Zoo")
+        };
+        assert_eq!(
+            message(db.write(|w, s| save_wish(w, s, dollars))),
+            "the parent wish is in another currency"
+        );
+        let trip = db.write(|w, s| save_wish(w, s, draft("Trip"))).unwrap();
+        let nested = WishDraft {
+            wish_id: Some(event.wish_id.clone()),
+            parent_id: Some(trip.wish_id.clone()),
+            ..draft("Parents")
+        };
+        assert_eq!(
+            message(db.write(|w, s| save_wish(w, s, nested))),
+            EVENT_KIND
         );
     }
 
