@@ -307,28 +307,16 @@ pub fn plan_items_with(
             continue;
         }
         let mut rest = w.amount;
-        // An event's amount on top of its parts is not their cap.
-        let within = if w.event.as_ref().is_some_and(|e| e.on_top) {
-            Decimal::ZERO
-        } else {
-            Decimal::ONE
-        };
         for sub in subs {
-            match sub.status {
-                WishStatus::Planned => {
-                    rest -= sub.amount * within;
-                    items.push(leaf(
-                        sub,
-                        sub.name.clone(),
-                        sub.amount - sub.saved,
-                        current_month,
-                        sub.must || w.must,
-                    ));
-                }
-                WishStatus::Bought => {
-                    rest -= sub.bought.as_ref().map_or(sub.amount, |b| b.amount) * within;
-                }
-                WishStatus::Dropped | WishStatus::Started => {}
+            rest -= super::part_cost(w, sub);
+            if sub.status == WishStatus::Planned {
+                items.push(leaf(
+                    sub,
+                    sub.name.clone(),
+                    sub.amount - sub.saved,
+                    current_month,
+                    sub.must || w.must,
+                ));
             }
         }
         let over_cap = rest < Decimal::ZERO;

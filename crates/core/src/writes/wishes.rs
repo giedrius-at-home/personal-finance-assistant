@@ -12,7 +12,8 @@ use rust_decimal::Decimal;
 
 use super::bills::{Checks, archive_bill, create_bill, edit_bill};
 use super::budget::save_budget_plan;
-use super::{Writer, invalid};
+use super::plans::payment_to_tie;
+use super::{Writer, invalid, ledger_id};
 use crate::budget::plan_for;
 use crate::model::Kind;
 use crate::plans::WISH_PLAN_PREFIX;
@@ -346,13 +347,7 @@ pub fn set_event_transaction(
     pick: EventPick,
 ) -> Result<Wish> {
     let mut wish = event_wish(&load_wishes(&w.tx)?, wish_id)?;
-    // The transaction search names a payment by its bare ledger id.
-    let ledger = format!("firefly:{transaction_id}");
-    let transaction_id = if snap.transactions.iter().any(|t| t.transaction_id == ledger) {
-        ledger.as_str()
-    } else {
-        transaction_id
-    };
+    let transaction_id = &ledger_id(&snap.transactions, transaction_id);
     known_payment(snap, transaction_id, &wish.currency)?;
     if let Some(event) = &mut wish.event {
         event.transaction_ids.retain(|id| id != transaction_id);
@@ -535,6 +530,12 @@ pub fn mark_bought(
     if purchase.amount <= Decimal::ZERO {
         return Err(invalid("purchase amount must be positive"));
     }
+    let purchase = WishPurchase {
+        transaction_id: purchase
+            .transaction_id
+            .map(|id| ledger_id(&snap.transactions, &id)),
+        ..purchase
+    };
     let on: Date = purchase
         .on
         .parse()
@@ -654,7 +655,7 @@ fn store_purchase_plan(
         .and_then(|t| t.category.clone())
         .filter(|c| !c.trim().is_empty())
         .unwrap_or_else(|| WISH_PLAN_CATEGORY.to_owned());
-    let plan = PlannedPayment {
+    let mut plan = PlannedPayment {
         plan_id: format!("{WISH_PLAN_PREFIX}{}", wish.wish_id),
         name: wish.name.clone(),
         match_category: category,
@@ -669,8 +670,13 @@ fn store_purchase_plan(
         pending: false,
         account_id,
         match_description: None,
-        paid_by: purchase.transaction_id.clone(),
+        paid_by: None,
     };
+    // A named payment must be free to pay it, as when tying one by hand.
+    if let Some(id) = &purchase.transaction_id {
+        let views = crate::plans::planned_payment_views(&Ctx::new(snap, &w.now));
+        plan.paid_by = Some(payment_to_tie(&plan, id, &snap.transactions, &views)?);
+    }
     w.put_json(
         "INSERT INTO planned_payments (plan_id, payload_json) VALUES (?2, ?1) \
          ON CONFLICT(plan_id) DO UPDATE SET payload_json = excluded.payload_json",
@@ -1106,6 +1112,14 @@ mod tests {
             db.write(|w, s| mark_bought(w, s, &other.wish_id, ghost, &[]))
                 .is_err()
         );
+        // The part's plan is paid by it, so another wish cannot take it too,
+        // even named by its bare ledger id.
+        let twice = WishPurchase {
+            transaction_id: Some("13".into()),
+            ..purchase(7, "2026-10-23", WishSource::Card)
+        };
+        let refused = db.write(|w, s| mark_bought(w, s, &other.wish_id, twice, &[]));
+        assert_eq!(message(refused), "That payment already pays Zoo.");
     }
 
     fn message<T>(result: Result<T>) -> String {

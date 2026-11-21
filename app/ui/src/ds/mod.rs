@@ -800,53 +800,6 @@ pub fn step_class(state: StepState) -> String {
     ])
 }
 
-/// A modal dialog over a dimmed backdrop; `open` controls it.
-#[component]
-pub fn Dialog(
-    open: RwSignal<bool>,
-    #[prop(into)] title: String,
-    #[prop(optional, into)] description: Option<String>,
-    #[prop(optional, into)] class: String,
-    children: ChildrenFn,
-) -> impl IntoView {
-    let description = StoredValue::new(description);
-    let title = StoredValue::new(title);
-    let class = StoredValue::new(class);
-    view! {
-        <Show when=move || open.get()>
-            <div class="fixed inset-0 z-50 bg-contrast/40 backdrop-blur-sm" on:click=move |_| open.set(false)></div>
-            <div
-                role="dialog"
-                aria-modal="true"
-                aria-label=title.get_value()
-                class=cn([
-                    "glass-card fixed left-1/2 top-1/2 z-50 grid max-h-[90vh] w-[min(92vw,32rem)] -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto rounded-xl border border-border bg-card-strong p-6 text-fg shadow-pop",
-                    class.get_value().as_str(),
-                ])
-                on:keydown=move |e| {
-                    if e.key() == "Escape" {
-                        open.set(false);
-                    }
-                }
-            >
-                <div class="grid gap-1.5 pr-10">
-                    <h2 class="text-lg font-semibold">{title.get_value()}</h2>
-                    {description.get_value().map(|d| view! { <p class="text-sm text-fg-muted">{d}</p> })}
-                </div>
-                {children()}
-                <button
-                    type="button"
-                    aria-label="Close"
-                    class=format!("absolute right-4 top-4 {}", button_class(Variant::Ghost, Size::IconSm))
-                    on:click=move |_| open.set(false)
-                >
-                    <Lucide icon=Icon::X size=16 />
-                </button>
-            </div>
-        </Show>
-    }
-}
-
 /// A box opened over the page: `on_close` runs on the backdrop, the close
 /// button and Escape. The caller renders it only while it is open.
 #[component]

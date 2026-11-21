@@ -24,8 +24,10 @@ pub struct Ask {
     pub currency: String,
     /// Money received, not paid.
     pub incoming: bool,
-    /// What it was planned to cost.
+    /// What it was planned to cost; zero when there is nothing to compare.
     pub amount: Decimal,
+    /// Payments to leave out; `None`: those that already pay a plan.
+    pub taken: Option<Vec<String>>,
 }
 
 #[derive(Serialize)]
@@ -38,7 +40,7 @@ const FOUND: u32 = 200;
 
 /// A plan is not exact to the cent: this near counts as the same amount.
 pub fn close(planned: Decimal, paid: Decimal) -> bool {
-    (planned - paid).abs() <= Decimal::TWO
+    !planned.is_zero() && (planned - paid).abs() <= Decimal::TWO
 }
 
 /// The payments to offer: those in `currency`, the close ones first, each
@@ -107,16 +109,18 @@ pub fn PaymentPicker(
                 Ok(result) => {
                     error.set(String::new());
                     // What pays a plan already is not offered again.
-                    let taken: Vec<String> = app.report.data.with_untracked(|d| {
-                        d.as_ref()
-                            .and_then(|r| r.as_ref().ok())
-                            .map(|r| {
-                                r.planned_payments
-                                    .iter()
-                                    .filter_map(|p| p.transaction_id.clone())
-                                    .collect()
-                            })
-                            .unwrap_or_default()
+                    let taken: Vec<String> = a.taken.clone().unwrap_or_else(|| {
+                        app.report.data.with_untracked(|d| {
+                            d.as_ref()
+                                .and_then(|r| r.as_ref().ok())
+                                .map(|r| {
+                                    r.planned_payments
+                                        .iter()
+                                        .filter_map(|p| p.transaction_id.clone())
+                                        .collect()
+                                })
+                                .unwrap_or_default()
+                        })
                     });
                     found.set(offered(result.items, &a.currency, a.amount, &taken));
                 }

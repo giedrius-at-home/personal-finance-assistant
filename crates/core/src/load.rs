@@ -80,6 +80,9 @@ pub struct Snapshot {
 impl Snapshot {
     pub fn load(store: &Store) -> Result<Self> {
         let conn = store.connection();
+        // One read transaction: every query below sees the same moment, even
+        // while another process commits.
+        let _read = conn.unchecked_transaction()?;
         let settings: OwnerSettings = optional_payload(
             conn,
             "SELECT payload_json FROM owner_settings WHERE singleton = 1",

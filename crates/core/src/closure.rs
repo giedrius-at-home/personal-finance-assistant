@@ -528,17 +528,8 @@ pub fn wish_caps(wishes: &[Wish], previous: &[AllocationLine]) -> WishCaps {
             let need = if subs.is_empty() {
                 w.amount
             } else {
-                let mut rest = w.amount;
-                for sub in subs {
-                    match sub.status {
-                        WishStatus::Planned => rest -= sub.amount,
-                        WishStatus::Bought => {
-                            rest -= sub.bought.as_ref().map_or(sub.amount, |b| b.amount);
-                        }
-                        WishStatus::Dropped | WishStatus::Started => {}
-                    }
-                }
-                rest.max(Decimal::ZERO)
+                let taken: Decimal = subs.iter().map(|s| crate::wishes::part_cost(w, s)).sum();
+                (w.amount - taken).max(Decimal::ZERO)
             };
             let earlier = sum(previous
                 .iter()

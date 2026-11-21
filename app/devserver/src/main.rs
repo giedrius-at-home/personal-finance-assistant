@@ -131,11 +131,11 @@ fn main() -> Result<()> {
     eprintln!("finance-devserver on http://127.0.0.1:{port}");
     for stream in listener.incoming() {
         let mut stream = stream?;
-        let (store, dist) = (Arc::clone(&store), Arc::clone(&dist));
+        let (store, dist, port) = (Arc::clone(&store), Arc::clone(&dist), port.clone());
         // One thread per connection, so an idle pre-connect cannot block others.
         std::thread::spawn(move || {
             stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
-            if let Err(e) = handle(&mut stream, &store, &dist) {
+            if let Err(e) = handle(&mut stream, &store, &dist, &port) {
                 eprintln!("request failed: {e}");
             }
         });
@@ -143,20 +143,39 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn handle(stream: &mut TcpStream, store: &Service, dist: &Path) -> Result<()> {
+/// Requests larger than this are refused before reading the body.
+const MAX_BODY: usize = 8 << 20;
+
+fn handle(stream: &mut TcpStream, store: &Service, dist: &Path, port: &str) -> Result<()> {
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut request_line = String::new();
     reader.read_line(&mut request_line)?;
-    let mut length = 0;
+    let (mut length, mut host, mut origin) = (0, String::new(), None);
     loop {
         let mut line = String::new();
         reader.read_line(&mut line)?;
         if line.trim().is_empty() {
             break;
         }
-        if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+        let lower = line.to_ascii_lowercase();
+        if let Some(v) = lower.strip_prefix("content-length:") {
             length = v.trim().parse().unwrap_or(0);
+        } else if let Some(v) = lower.strip_prefix("host:") {
+            host = v.trim().to_owned();
+        } else if let Some(v) = lower.strip_prefix("origin:") {
+            origin = Some(v.trim().to_owned());
         }
+    }
+    // Only this machine's own pages: other sites (or DNS rebinding) must
+    // not drive writes against the real ledger.
+    let local = [format!("127.0.0.1:{port}"), format!("localhost:{port}")];
+    let trusted = local.contains(&host)
+        && origin.as_deref().is_none_or(|o| {
+            o.strip_prefix("http://")
+                .is_some_and(|o| local.iter().any(|l| l == o))
+        });
+    if !trusted || length > MAX_BODY {
+        return respond(stream, "403 Forbidden", "text/plain", b"forbidden");
     }
     let mut body = vec![0; length];
     reader.read_exact(&mut body)?;

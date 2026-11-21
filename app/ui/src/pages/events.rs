@@ -6,23 +6,21 @@
 use finance_types::gateway::{EventDetails, EventPick, WishKind, WishSource};
 use finance_types::report::Currency;
 use finance_types::report::events::{EventPhase, EventRow, EventsView, Pace};
-use finance_types::report::review::{
-    SearchDirection, TransactionSearchQuery, TransactionSearchResult,
-};
+use finance_types::report::review::SearchRow;
 use finance_types::report::wishes::WishMonth;
 use leptos::ev::SubmitEvent;
 use leptos::prelude::*;
-use leptos::task::spawn_local;
 use rust_decimal::Decimal;
 use serde::Serialize;
 
-use crate::api::{NoArgs, invoke, load};
+use crate::api::{NoArgs, load};
 use crate::ds::{
-    BOARD_CARD, Badge, BoardColumn, Button, CONTROL, Card, Checkbox, Dialog, Eyebrow, Facts,
-    FactsRow, Field, Icon, Lucide, Popup, Size, Skeleton, Tone, Variant, cn,
+    BOARD_CARD, Badge, BoardColumn, Button, CONTROL, Card, Checkbox, Eyebrow, Facts, FactsRow,
+    Field, Icon, Lucide, Popup, Size, Skeleton, Tone, Variant, cn,
 };
 use crate::format;
 use crate::pages::Problem;
+use crate::pages::payment_pick::{Ask, PaymentPicker};
 use crate::pages::wishes::{
     AMOUNT_PATTERN, Context, Draft, DraftArgs, Fact, Ui, WishIdArgs, amount, feedback,
     parse_amount, today, wish_row,
@@ -34,14 +32,6 @@ struct PickArgs {
     transaction_id: String,
     pick: EventPick,
 }
-
-#[derive(Serialize)]
-struct SearchArgs {
-    query: TransactionSearchQuery,
-}
-
-/// How many payments the list offers at once, newest first.
-const FOUND: u32 = 200;
 
 /// How an event's amount counts: `total` (its parts come out of it) or
 /// `extra` (on top of its parts).
@@ -160,9 +150,6 @@ struct Own {
     part_name: RwSignal<String>,
     part_amount: RwSignal<String>,
     part_on: RwSignal<String>,
-    query: RwSignal<String>,
-    /// Payments found: (id, day, text, amount).
-    found: RwSignal<Vec<(String, String, String, String)>>,
     new_starts: RwSignal<String>,
     new_ends: RwSignal<String>,
     new_amount: RwSignal<String>,
@@ -184,8 +171,6 @@ impl Own {
             part_name: text(),
             part_amount: text(),
             part_on: text(),
-            query: text(),
-            found: RwSignal::new(Vec::new()),
             new_starts: text(),
             new_ends: text(),
             new_amount: text(),
@@ -201,7 +186,6 @@ impl Own {
 
     fn toggle(self, id: &str, form: &'static str) {
         let open = self.is_open(id, form);
-        self.found.set(Vec::new());
         self.open.set((!open).then(|| (id.to_owned(), form)));
     }
 }
@@ -592,114 +576,40 @@ fn event_block(
         );
     };
 
-    // Add a payment: the ledger's payments in a popup, newest first; typing
-    // narrows them.
-    let pay_open = RwSignal::new(false);
-    let taken: std::collections::HashSet<String> = event
-        .transactions
-        .iter()
-        .map(|t| t.transaction_id.clone())
-        .collect();
-    let taken = StoredValue::new(taken);
-    let list_target = target.clone();
-    let list_code = code.clone();
-    let list = move || {
-        let q = own.query.get_untracked();
-        let query = TransactionSearchQuery {
-            q: q.clone(),
-            account: None,
-            from: None,
-            to: None,
-            direction: Some(SearchDirection::Out),
-            min: None,
-            max: None,
-            page: 1,
-            page_size: FOUND,
-        };
-        let target = list_target.clone();
-        let code = list_code.clone();
-        spawn_local(async move {
-            let result =
-                invoke::<TransactionSearchResult>("search_transactions", &SearchArgs { query })
-                    .await;
-            // A later keystroke has asked again: its answer is the one to show.
-            if own.query.get_untracked() != q {
-                return;
-            }
-            match result {
-                Ok(result) => own.found.set(
-                    result
-                        .items
-                        .into_iter()
-                        .filter(|row| row.amount.currency.code == code)
-                        .filter(|row| {
-                            let id = format!("firefly:{}", row.transaction_id);
-                            taken.with_value(|t| !t.contains(&id))
-                        })
-                        .map(|row| {
-                            let text = [row.counterparty, row.description]
-                                .into_iter()
-                                .flatten()
-                                .find(|s| !s.is_empty())
-                                .unwrap_or_else(|| "Payment".to_owned());
-                            (
-                                row.transaction_id,
-                                format::date(&row.occurred_on),
-                                text,
-                                amount(row.amount.amount, &code),
-                            )
-                        })
-                        .collect(),
-                ),
-                Err(e) => {
-                    pay_open.set(false);
-                    ui.set_message(&target, e, true);
-                }
-            }
-        });
-    };
-    let list = StoredValue::new(list);
+    // Add a payment: the shared picker, leaving out what the event holds.
+    let pay_ask = RwSignal::new(None::<Ask>);
+    let ask = StoredValue::new(Ask {
+        id: wish.wish_id.clone(),
+        name: wish.name.clone(),
+        currency: code.clone(),
+        incoming: false,
+        amount: Decimal::ZERO,
+        taken: Some(
+            event
+                .transactions
+                .iter()
+                .map(|t| t.transaction_id.clone())
+                .collect(),
+        ),
+    });
     let open_pay = move |_| {
         own.open.set(None);
-        own.query.set(String::new());
-        own.found.set(Vec::new());
-        pay_open.set(true);
-        list.with_value(|f| f());
+        pay_ask.set(Some(ask.get_value()));
     };
     let pick_target = target.clone();
-    let found = move || {
-        own.found
-            .get()
-            .into_iter()
-            .map(|(tx, day, text, value)| {
-                let title = text.clone();
-                let target = pick_target.clone();
-                let pick = move |_| {
-                    ui.write(
-                        target.clone(),
-                        "set_event_transaction",
-                        PickArgs {
-                            wish_id: id.get_value(),
-                            transaction_id: tx.clone(),
-                            pick: EventPick::Pick,
-                        },
-                        "Payment added.",
-                        move || pay_open.set(false),
-                    );
-                };
-                view! {
-                    <li class="grid grid-cols-[6.5rem_1fr_auto_auto] items-center gap-x-3 border-t border-line py-1.5 text-sm first:border-t-0">
-                        <span class="text-fg-muted tabular-nums">{day}</span>
-                        <span class="min-w-0 truncate" title=title>{text}</span>
-                        <span class="tabular-nums">{value}</span>
-                        <Button size=Size::Sm variant=Variant::Secondary disabled=Signal::derive(move || ui.busy.get()) on_click=Callback::new(pick)>
-                            "Add"
-                        </Button>
-                    </li>
-                }
-            })
-            .collect_view()
-    };
+    let on_pick = Callback::new(move |(a, row): (Ask, SearchRow)| {
+        ui.write(
+            pick_target.clone(),
+            "set_event_transaction",
+            PickArgs {
+                wish_id: a.id,
+                transaction_id: row.transaction_id,
+                pick: EventPick::Pick,
+            },
+            "Payment added.",
+            move || pay_ask.set(None),
+        );
+    });
 
     // New dates, amount or way of counting; or back to a plain wish while
     // it has not started.
@@ -774,7 +684,6 @@ fn event_block(
     let field_id = move |name: &str| format!("{name}-{}", ids.get_value());
     let add_part = StoredValue::new(add_part);
     let save_dates = StoredValue::new(save_dates);
-    let found = StoredValue::new(found);
 
     view! {
         <div>
@@ -818,31 +727,12 @@ fn event_block(
                     <Button submit=true size=Size::Sm disabled=Signal::derive(move || ui.busy.get())>"Add part"</Button>
                 </form>
             </Show>
-            <Dialog
-                open=pay_open
-                title="Add a payment"
-                description="Newest first. Type a shop, a name or a description to narrow them."
-                class="w-[min(92vw,44rem)]"
-            >
-                <input
-                    type="text"
-                    aria-label="Narrow the payments"
-                    placeholder="Narrow the payments"
-                    maxlength="128"
-                    class=CONTROL
-                    prop:value=move || own.query.get()
-                    on:input=move |e| {
-                        own.query.set(event_target_value(&e));
-                        list.with_value(|f| f());
-                    }
-                />
-                <ul class="max-h-[55vh] overflow-y-auto">
-                    {move || found.with_value(|f| f())}
-                    <Show when=move || own.found.with(Vec::is_empty)>
-                        <li class="py-2 text-sm text-fg-muted">"No payment to add."</li>
-                    </Show>
-                </ul>
-            </Dialog>
+            <PaymentPicker
+                ask=pay_ask
+                busy=Signal::derive(move || ui.busy.get())
+                on_pick=on_pick
+                otherwise="Newest first. Type a shop, a name or a description to narrow them."
+            />
             <Show when=move || is("dates")>
                 <form
                     class="mt-3 grid items-end gap-2 sm:grid-cols-4"

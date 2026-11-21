@@ -976,6 +976,20 @@ pub fn month_zero_cuts(view: &WishesView, wish_id: &str) -> Vec<Cut> {
         .unwrap_or_default()
 }
 
+/// What a one-off `part` takes out of its parent's amount: its price while
+/// planned, what it cost once bought, nothing when dropped or started. An
+/// event counting its amount on top of the parts gives them nothing.
+pub(crate) fn part_cost(parent: &Wish, part: &Wish) -> Decimal {
+    if parent.event.as_ref().is_some_and(|e| e.on_top) {
+        return Decimal::ZERO;
+    }
+    match part.status {
+        WishStatus::Planned => part.amount,
+        WishStatus::Bought => part.bought.as_ref().map_or(part.amount, |b| b.amount),
+        WishStatus::Dropped | WishStatus::Started => Decimal::ZERO,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     /// The wishes screen, judged against one currency's allocation.

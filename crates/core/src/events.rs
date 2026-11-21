@@ -51,27 +51,15 @@ pub fn claims(wishes: &[Wish]) -> Vec<EventClaim> {
                 return None;
             }
             let mut rest = w.amount;
-            // An amount on top of the parts is all for the days.
-            let within = if event.on_top {
-                Decimal::ZERO
-            } else {
-                Decimal::ONE
-            };
             let mut tied = HashMap::new();
             for part in wishes.iter().filter(|p| {
                 p.parent_id.as_deref() == Some(&w.wish_id) && p.kind == WishKind::OneOff
             }) {
-                match part.status {
-                    WishStatus::Planned => rest -= part.amount * within,
-                    WishStatus::Bought => {
-                        rest -= part.bought.as_ref().map_or(part.amount, |b| b.amount) * within;
-                        if let Some(id) =
-                            part.bought.as_ref().and_then(|b| b.transaction_id.clone())
-                        {
-                            tied.insert(id, part.wish_id.clone());
-                        }
-                    }
-                    WishStatus::Dropped | WishStatus::Started => {}
+                rest -= crate::wishes::part_cost(w, part);
+                if part.status == WishStatus::Bought
+                    && let Some(id) = part.bought.as_ref().and_then(|b| b.transaction_id.clone())
+                {
+                    tied.insert(id, part.wish_id.clone());
                 }
             }
             Some(EventClaim {

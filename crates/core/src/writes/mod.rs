@@ -47,6 +47,17 @@ impl Writer<'_> {
     }
 }
 
+/// A payment id as the ledger keeps it: the transaction search names a
+/// payment by its bare ledger id, the ledger as `firefly:<id>`.
+pub(crate) fn ledger_id(transactions: &[crate::model::Tx], id: &str) -> String {
+    let ledger = format!("firefly:{id}");
+    if transactions.iter().any(|t| t.transaction_id == ledger) {
+        ledger
+    } else {
+        id.to_owned()
+    }
+}
+
 /// `2026-10-26T20:00:00.123456Z`, the format the gateway tables hold.
 pub fn utc_stamp(t: Timestamp) -> String {
     t.strftime("%Y-%m-%dT%H:%M:%S%.6fZ").to_string()

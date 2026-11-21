@@ -685,6 +685,19 @@ fn parent_cap_is_its_rest_and_earlier_lines_count_back() {
 }
 
 #[test]
+fn an_event_on_top_of_its_parts_keeps_its_whole_amount() {
+    let event = Wish {
+        event: Some(finance_types::gateway::EventDetails {
+            on_top: true,
+            ..Default::default()
+        }),
+        ..wish("trip", "400", "0", None)
+    };
+    let caps = wish_caps(&[event, wish("zoo", "18", "0", Some("trip"))], &[]);
+    assert_eq!(caps["trip"].room, d("400"));
+}
+
+#[test]
 fn a_sub_wish_needs_a_planned_parent() {
     let planned = [
         wish("trip", "500", "0", None),

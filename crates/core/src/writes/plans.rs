@@ -12,7 +12,7 @@ use jiff::civil::Date;
 use rusqlite::params;
 use rust_decimal::Decimal;
 
-use super::{Writer, invalid};
+use super::{Writer, invalid, ledger_id};
 use crate::model::{Account, Kind, Tx};
 use crate::{Result, Snapshot};
 
@@ -169,17 +169,16 @@ pub fn archive_planned_payment(w: &Writer<'_>, plan_id: &str) -> Result<()> {
 /// The payment `id` names, if it may pay `plan` by hand: it runs the
 /// plan's way in the plan's currency and pays no bill and no plan in
 /// `views` (the reconciled plans) but this one.
-fn payment_to_tie(
+pub(crate) fn payment_to_tie(
     plan: &PlannedPayment,
     id: &str,
     transactions: &[Tx],
     views: &[PlannedPaymentView],
 ) -> Result<String> {
-    // The transaction search names a payment by its bare ledger id.
-    let ledger = format!("firefly:{id}");
+    let id = ledger_id(transactions, id);
     let paid = transactions
         .iter()
-        .find(|t| t.transaction_id == ledger || t.transaction_id == id)
+        .find(|t| t.transaction_id == id)
         .ok_or_else(|| invalid("Payment not found. Refresh."))?;
     let right_way = match plan.direction {
         Direction::Outflow => paid.kind == Kind::Outflow,
@@ -228,11 +227,15 @@ pub fn tie_planned_payment(
             Some(payment_to_tie(&plan, id, &snap.transactions, &views)?)
         }
     };
-    w.put_json(
+    let json = serde_json::to_string(&plan).map_err(|e| crate::Error::Invalid(e.to_string()))?;
+    // The snapshot can be older than the table: a plan archived since is gone.
+    let changed = w.tx.execute(
         "UPDATE planned_payments SET payload_json = ?1 WHERE plan_id = ?2 AND archived_at IS NULL",
-        &plan,
-        &[&plan.plan_id],
+        rusqlite::params![json, plan.plan_id],
     )?;
+    if changed != 1 {
+        return Err(invalid("This entry was already removed. Refresh."));
+    }
     Ok(plan)
 }
 
