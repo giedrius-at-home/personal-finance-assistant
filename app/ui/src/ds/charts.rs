@@ -300,7 +300,7 @@ pub fn BarChart(
             view! {
                 <div class="absolute inset-x-0 border-t border-chart-grid" style:top=top.clone()></div>
                 <span
-                    class="absolute -translate-y-1/2 pr-2 text-right text-[11px] text-chart-axis tabular-nums"
+                    class="absolute -translate-y-1/2 pr-2 text-right text-eyebrow text-chart-axis tabular-nums"
                     style=format!("top:{top};right:100%;width:{y_axis_width}px")
                 >
                     {text}
@@ -357,7 +357,7 @@ pub fn BarChart(
                         })
                 }}
             </div>
-            <div class="flex text-[11px] text-chart-axis" style=format!("margin-left:{y_axis_width}px;margin-right:8px")>
+            <div class="flex text-eyebrow text-chart-axis" style=format!("margin-left:{y_axis_width}px;margin-right:8px")>
                 {categories
                     .iter()
                     .map(|c| view! { <span class="flex-1 truncate pt-2 text-center">{c.clone()}</span> })
@@ -455,9 +455,9 @@ pub fn LineChart(
         view! {
             <div class="absolute inset-y-0 border-l border-dashed border-fg-muted/60" style:left=pct(x(i))>
                 <span class=if flip {
-                    "absolute -top-1.5 right-1.5 whitespace-nowrap text-[10px] leading-none text-fg-muted"
+                    "absolute -top-1.5 right-1.5 whitespace-nowrap text-eyebrow leading-none text-fg-muted"
                 } else {
-                    "absolute -top-1.5 left-1.5 whitespace-nowrap text-[10px] leading-none text-fg-muted"
+                    "absolute -top-1.5 left-1.5 whitespace-nowrap text-eyebrow leading-none text-fg-muted"
                 }>{text}</span>
             </div>
         }
@@ -470,7 +470,7 @@ pub fn LineChart(
             view! {
                 <div class="absolute inset-x-0 border-t border-chart-grid" style:top=top.clone()></div>
                 <span
-                    class="absolute -translate-y-1/2 pr-2 text-right text-[11px] text-chart-axis tabular-nums"
+                    class="absolute -translate-y-1/2 pr-2 text-right text-eyebrow text-chart-axis tabular-nums"
                     style=format!("top:{top};right:100%;width:{y_axis_width}px")
                 >
                     {text}
@@ -538,7 +538,7 @@ pub fn LineChart(
                         .collect_view()}
                 </div>
             </div>
-            <div class="relative h-6 text-[11px] text-chart-axis" style=format!("margin-left:{y_axis_width}px;margin-right:8px")>
+            <div class="relative h-6 text-eyebrow text-chart-axis" style=format!("margin-left:{y_axis_width}px;margin-right:8px")>
                 {categories
                     .iter()
                     .enumerate()

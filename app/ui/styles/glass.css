@@ -126,13 +126,14 @@ html.glass [role="tooltip"] {
       0 8px 24px -10px oklch(0.15 0 0 / 0.35);
   }
   /* Controls: fields, dropdowns, secondary buttons and the selected
-     segment are frosted too. */
+     segment get a near-solid fill instead of their own blur: hundreds of
+     blurred controls made long lists heavy and hard to read. Glass stays
+     for the window, the tab bar, cards and popups. */
   html.glass :is(input:not([type="checkbox"], [type="radio"], [type="file"]), select, textarea),
   html.glass button.bg-card-strong,
   html.glass button[class*="border-border"][class*="bg-card"],
   html.glass [data-state="on"].rounded-pill {
-    backdrop-filter: blur(18px) saturate(1.6);
-    -webkit-backdrop-filter: blur(18px) saturate(1.6);
+    background-color: light-dark(oklch(1 0 0 / 0.86), oklch(0.2947 0.0072 118.26 / 0.9));
     box-shadow: var(--glass-edge);
   }
   .drag-region {

@@ -598,31 +598,31 @@ fn habits_view(report: &Adjustments) -> Option<AnyView> {
     if often.is_empty() {
         return None;
     }
-    let rows = often
-        .into_iter()
-        .map(|row| {
-            let stores: Vec<_> = row.stores.iter().filter(|s| shown(&s.habit)).collect();
-            view! {
-                <details class="border-t border-border py-2">
-                    <summary class=format!("{HABIT_GRID} cursor-pointer")>
-                        <strong class="font-semibold">{row.row.name.clone()}</strong>
-                        {habit_cells(&row.habit, unit)}
-                    </summary>
-                    {stores
-                        .into_iter()
-                        .map(|store| {
-                            view! {
-                                <div class=format!("{HABIT_GRID} pt-1.5 text-fg-muted")>
-                                    <span class="pl-4 text-fg">{store.category.clone()}</span>
-                                    {habit_cells(&store.habit, unit)}
-                                </div>
-                            }
-                        })
-                        .collect_view()}
-                </details>
-            }
-        })
-        .collect_view();
+    let render = |row: &AdjustmentRow| {
+        let stores: Vec<_> = row.stores.iter().filter(|s| shown(&s.habit)).collect();
+        view! {
+            <details class="border-t border-border py-2">
+                <summary class=format!("{HABIT_GRID} cursor-pointer")>
+                    <strong class="font-semibold">{row.row.name.clone()}</strong>
+                    {habit_cells(&row.habit, unit)}
+                </summary>
+                {stores
+                    .into_iter()
+                    .map(|store| {
+                        view! {
+                            <div class=format!("{HABIT_GRID} pt-1.5 text-fg-muted")>
+                                <span class="pl-4 text-fg">{store.category.clone()}</span>
+                                {habit_cells(&store.habit, unit)}
+                            </div>
+                        }
+                    })
+                    .collect_view()}
+            </details>
+        }
+    };
+    let rows = often.iter().map(|row| render(row)).collect_view();
+    let seldom_count = seldom.len();
+    let seldom_rows = seldom.iter().map(|row| render(row)).collect_view();
     Some(
         view! {
             <section class="min-w-0" aria-label="Habits">
@@ -641,8 +641,14 @@ fn habits_view(report: &Adjustments) -> Option<AnyView> {
                         {rows}
                     </div>
                 </div>
-                {(!seldom.is_empty())
-                    .then(|| view! { <Badge tone=Tone::Outline class="mt-3">{format!("{} more, less often", seldom.len())}</Badge> })}
+                {(seldom_count > 0).then(|| view! {
+                    <details class="mt-3">
+                        <summary class="cursor-pointer text-sm text-accent">{format!("{seldom_count} more, less often")}</summary>
+                        <div class="mt-2 overflow-x-auto">
+                            <div class="min-w-[44rem] text-sm tabular-nums">{seldom_rows}</div>
+                        </div>
+                    </details>
+                })}
             </section>
         }
         .into_any(),

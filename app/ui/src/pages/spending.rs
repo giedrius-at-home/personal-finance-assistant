@@ -25,6 +25,13 @@ pub fn PlanPatterns() -> impl IntoView {
         >
             "Review shared spending & money back →"
         </button>
+        {with_report(|report| {
+            report
+                .savings_outlooks
+                .iter()
+                .map(|o| view! { <crate::pages::overview::outlook::SavingsOutlookPanel report=report.clone() currency_code=o.currency.code.clone() /> })
+                .collect_view()
+        })}
         <crate::pages::goals::GoalsCard />
         <crate::pages::adjustments::AdjustmentsCard />
         {with_report(move |report| {

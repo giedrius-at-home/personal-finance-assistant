@@ -480,7 +480,7 @@ pub fn AllocationList(
                                     disabled=true
                                     label=if leg_done { "Hop done" } else { "Hop not found yet" }
                                 />
-                                <span class=cn(["min-w-0 flex-1 basis-48", if leg_done { "text-fg-muted line-through" } else { "" }])>{text}</span>
+                                <span class=cn(["min-w-0 flex-1 basis-48", if leg_done { "text-fg-muted" } else { "" }])>{text}</span>
                                 <LegStatus line=line.get_value() leg=leg hop=Hop::Index(index as u32) names=names actions=actions />
                             </li>
                         }
@@ -498,7 +498,7 @@ pub fn AllocationList(
                             label=if done { "Transfer found" } else { "Transfer not found yet" }
                         />
                     })}
-                    <span class=cn(["min-w-0 flex-1 basis-48", if done { "text-fg-muted line-through" } else { "" }])>{text}</span>
+                    <span class=cn(["min-w-0 flex-1 basis-48", if done { "text-fg-muted" } else { "" }])>{text}</span>
                     {direct}
                     {routed}
                 </li>

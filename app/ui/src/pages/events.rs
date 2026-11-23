@@ -133,7 +133,7 @@ pub fn standing(e: &EventRow) -> Option<(Tone, &'static str)> {
         (EventPhase::Past, _) => Some((Tone::Outline, "Done")),
         (EventPhase::Running, Pace::OnTrack) => Some((Tone::Positive, "On track")),
         (EventPhase::Running, Pace::Fast) => Some((Tone::Warning, "Spending fast")),
-        (EventPhase::Running, Pace::Over) => Some((Tone::Warning, "Over")),
+        (EventPhase::Running, Pace::Over) => Some((Tone::Negative, "Over")),
     }
 }
 
@@ -305,10 +305,23 @@ fn page(ui: Ui, own: Own, view: &EventsView, ctx: Context) -> impl IntoView + us
     }
 }
 
-/// What an event has used of its plan, 0–100. What is spent already holds
-/// what was paid ahead.
+/// What an event has used of its plan, past 100 when over. What is spent
+/// already holds what was paid ahead.
 pub fn used_percent(e: &EventRow) -> u32 {
-    crate::pages::wishes::saved_percent(e.spent, planned_total(e))
+    use rust_decimal::prelude::ToPrimitive;
+    let plan = planned_total(e);
+    if plan <= Decimal::ZERO {
+        return 0;
+    }
+    (e.spent.max(Decimal::ZERO) / plan * Decimal::ONE_HUNDRED)
+        .floor()
+        .to_u32()
+        .unwrap_or(u32::MAX)
+}
+
+/// How much an event spent past its plan; zero when inside it.
+pub fn overspent(e: &EventRow) -> Decimal {
+    (e.spent - planned_total(e)).max(Decimal::ZERO)
 }
 
 /// An event as a box on the board: name, plan, days, how it stands, what
@@ -328,16 +341,20 @@ fn event_box(ui: Ui, event: &EventRow, code: &str) -> impl IntoView + use<> {
             )
         }
     });
-    let chip = standing(event).or_else(|| {
-        Some(if event.row.short > Decimal::ZERO {
-            (Tone::Warning, "Short")
-        } else if event.row.tradeoffs {
-            (Tone::Warning, "With trade-offs")
-        } else {
-            (Tone::Positive, "Affordable")
-        })
-    });
-    let facts = match event.phase {
+    let over = overspent(event);
+    let chip = (over > Decimal::ZERO)
+        .then_some((Tone::Negative, "Over"))
+        .or_else(|| standing(event))
+        .or_else(|| {
+            Some(if event.row.short > Decimal::ZERO {
+                (Tone::Negative, "Short")
+            } else if event.row.tradeoffs {
+                (Tone::Warning, "With trade-offs")
+            } else {
+                (Tone::Positive, "Affordable")
+            })
+        });
+    let mut facts = match event.phase {
         EventPhase::Upcoming => vec![("Extra to find".to_owned(), m(event.extra))],
         EventPhase::Running => {
             let mut rows = vec![("Left".to_owned(), m(event.left))];
@@ -348,6 +365,9 @@ fn event_box(ui: Ui, event: &EventRow, code: &str) -> impl IntoView + use<> {
         }
         EventPhase::Past => vec![("Spent".to_owned(), m(event.spent))],
     };
+    if over > Decimal::ZERO {
+        facts.insert(0, ("Over plan".to_owned(), m(over)));
+    }
     let percent = used_percent(event);
     let used = m(event.spent);
     let parts = (!event.row.children.is_empty()).then(|| {
@@ -360,8 +380,8 @@ fn event_box(ui: Ui, event: &EventRow, code: &str) -> impl IntoView + use<> {
                 let cost = part.wish.bought.as_ref().map_or(part.wish.amount, |p| p.amount);
                 view! {
                     <li class="flex items-baseline justify-between gap-2 rounded-sm bg-soft px-2 py-1 text-xs">
-                        <span class=cn(["min-w-0 truncate", if bought { "text-fg-muted line-through" } else { "" }])>
-                            {part.wish.name.clone()}
+                        <span class=cn(["min-w-0 truncate", if bought { "text-fg-muted" } else { "" }])>
+                            {if bought { "\u{2713} " } else { "" }}{part.wish.name.clone()}
                         </span>
                         <span class="whitespace-nowrap tabular-nums">{m(cost)}</span>
                     </li>
@@ -374,7 +394,7 @@ fn event_box(ui: Ui, event: &EventRow, code: &str) -> impl IntoView + use<> {
     view! {
         <button
             type="button"
-            class=cn([BOARD_CARD, "text-left transition-colors hover:border-over"])
+            class=cn([BOARD_CARD, "text-left transition-colors hover:border-accent"])
             on:click=move |_| {
                 ui.close_forms();
                 ui.selected.set(Some(id.clone()));
@@ -393,11 +413,16 @@ fn event_box(ui: Ui, event: &EventRow, code: &str) -> impl IntoView + use<> {
             </span>
             <span class="grid gap-1">
                 <span role="img" aria-label=format!("{used} used") class="block h-1.5 overflow-hidden rounded-pill bg-soft">
-                    <i class="block h-full rounded-pill bg-over" style:width=format!("{percent}%")></i>
+                    <i
+                        class=cn(["block h-full rounded-pill", if over > Decimal::ZERO { "bg-negative" } else { "bg-accent" }])
+                        style:width=format!("{}%", percent.min(100))
+                    ></i>
                 </span>
                 <span class="flex justify-between text-xs text-fg-muted">
                     <span>{format!("{used} used")}</span>
-                    <span class="tabular-nums">{format!("{percent}%")}</span>
+                    <span class=cn(["tabular-nums", if over > Decimal::ZERO { "font-semibold text-negative-fg" } else { "" }])>
+                        {format!("{percent}%")}
+                    </span>
                 </span>
             </span>
             <Facts rows=facts />
@@ -829,6 +854,17 @@ mod tests {
     }
 
     #[test]
+    fn an_event_spent_past_its_plan_reads_over_not_full() {
+        let e = EventRow {
+            spent: d("794"),
+            ..event(EventPhase::Past)
+        };
+        assert_eq!(used_percent(&e), 198);
+        assert_eq!(overspent(&e), d("394"));
+        assert_eq!(overspent(&event(EventPhase::Past)), Decimal::ZERO);
+    }
+
+    #[test]
     fn an_amount_on_top_of_the_parts_adds_them_to_the_plan() {
         let mut e = event(EventPhase::Upcoming);
         let own = e.row.wish.amount;
@@ -875,6 +911,6 @@ mod tests {
             ..running
         };
         assert!(!labels(&event_facts(&over, "EUR")).contains(&"A day, to stay inside"));
-        assert_eq!(standing(&over), Some((Tone::Warning, "Over")));
+        assert_eq!(standing(&over), Some((Tone::Negative, "Over")));
     }
 }

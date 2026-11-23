@@ -123,7 +123,7 @@ pub fn verdict(budget: &MonthlyBudget, days: usize) -> Verdict {
     let net = budget.planned - budget.spent;
     let ahead = month_end_total(budget, days).map(|total| total - budget.planned);
     let (tone, word) = if net < Decimal::ZERO {
-        (Tone::Warning, "Over plan")
+        (Tone::Negative, "Over plan")
     } else if ahead.is_some_and(|a| a > Decimal::ZERO) {
         (Tone::Warning, "Over pace")
     } else {
@@ -137,12 +137,15 @@ pub fn verdict(budget: &MonthlyBudget, days: usize) -> Verdict {
     }
 }
 
-/// `+€5.00` over the plan, `−€5.00` under it.
+/// `€5.00 over` the plan, `€5.00 under` it: words, since a bare sign reads
+/// as good in one place and bad in another.
 pub fn signed(value: Decimal, unit: &finance_types::report::Currency) -> String {
     if value > Decimal::ZERO {
-        format!("+{}", money(value, unit))
+        format!("{} over", money(value, unit))
+    } else if value < Decimal::ZERO {
+        format!("{} under", money(-value, unit))
     } else {
-        money(value, unit)
+        "On plan".to_owned()
     }
 }
 
@@ -346,7 +349,7 @@ pub fn BudgetVisuals(
                     center=Box::new(move || {
                         view! {
                             <span class="grid gap-0.5">
-                                <small class="text-[0.65rem] font-normal leading-tight text-fg-muted">"Planned allocation"</small>
+                                <small class="text-eyebrow font-normal leading-tight text-fg-muted">"Planned allocation"</small>
                                 <Money value=total_value unit=center_unit.clone() neutral=true class="text-lg" />
                             </span>
                         }

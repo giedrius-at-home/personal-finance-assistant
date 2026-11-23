@@ -363,7 +363,26 @@ fn page(ui: Ui, report: &Dashboard) -> impl IntoView + use<> {
                 (Tone::Outline, "Bill"),
                 format::day_month(&day),
             );
-            let view = view! { <div class=BOARD_CARD>{head}</div> }.into_any();
+            // A bill opens in place: its dates and matches; it is edited under Bills.
+            let mut rows = vec![("Due".to_owned(), format::day_month(&payment.due_on))];
+            rows.push(match &payment.paid_on {
+                Some(on) => ("Paid on".to_owned(), format::day_month(on)),
+                None => ("Paid".to_owned(), "Not yet".to_owned()),
+            });
+            if payment.paid_on.is_none() && !payment.candidate_ids.is_empty() {
+                rows.push((
+                    "Possible payments".to_owned(),
+                    payment.candidate_ids.len().to_string(),
+                ));
+            }
+            let view = view! {
+                <details class=BOARD_CARD>
+                    <summary class="grid cursor-pointer list-none gap-1.5">{head}</summary>
+                    <Facts class="mt-1" rows=rows />
+                    <p class="text-xs text-fg-muted">"Change it under Bills below."</p>
+                </details>
+            }
+            .into_any();
             (column, day, payment.amount.amount, view)
         })
         .collect();
@@ -458,7 +477,13 @@ fn page(ui: Ui, report: &Dashboard) -> impl IntoView + use<> {
             ("Until".to_owned(), format::day_month(&dates.ends_on)),
             ("Spent".to_owned(), crate::ds::money(month.spent, unit)),
         ];
-        let view = view! { <div class=BOARD_CARD>{head}<Facts rows=rows /></div> }.into_any();
+        let view = view! {
+            <details class=BOARD_CARD>
+                <summary class="grid cursor-pointer list-none gap-1.5">{head}</summary>
+                <Facts class="mt-1" rows=rows />
+            </details>
+        }
+        .into_any();
         boxes.push((Column::Due, dates.starts_on.clone(), month.share, view));
     }
     boxes.extend(plans.iter().map(|plan| plan_card(ui, plan)));
@@ -496,6 +521,10 @@ fn page(ui: Ui, report: &Dashboard) -> impl IntoView + use<> {
             }
             boxes = rest;
             let count = cards.len();
+            // Late and To check only show when something is in them.
+            if count == 0 && matches!(column, Column::Late | Column::Check) {
+                return ().into_any();
+            }
             // What is paid matters least: the latest few, the rest folded.
             if column == Column::Done {
                 cards.reverse();
@@ -570,7 +599,7 @@ fn page(ui: Ui, report: &Dashboard) -> impl IntoView + use<> {
                     <Eyebrow>"PAYMENTS"</Eyebrow>
                     <h2 class="mt-1 text-lg font-semibold">{active_label.clone()}</h2>
                 </div>
-                <p class="text-xs text-fg-muted">"Open a box for its details. Drag one to Paid to name the payment that paid it."</p>
+                <p class="text-xs text-fg-muted">"Open a box for its details. Drag a payment to Paid to link the bank payment."</p>
                 {feedback(ui, "board".into())}
                 <div class=BOARD>{board}</div>
             </section>
@@ -654,6 +683,20 @@ fn create_form(
                 c if c.is_empty() => first.clone(),
                 c => c,
             };
+            // Say what is missing instead of only moving the focus.
+            let missing = if ui.name.get_untracked().trim().is_empty() {
+                Some("Enter a name.")
+            } else if ui.match_category.get_untracked().trim().is_empty() {
+                Some("Choose a category.")
+            } else if ui.account_id.get_untracked().is_empty() {
+                Some("Choose an account.")
+            } else {
+                None
+            };
+            if let Some(text) = missing {
+                ui.set_message("create", text, true);
+                return;
+            }
             let Ok(amount) = ui.amount.get_untracked().trim().parse::<Decimal>() else {
                 ui.set_message("create", "Enter an amount.", true);
                 return;
@@ -772,7 +815,7 @@ fn create_form(
     let min = format!("{active_month}-01");
     let max = active_end.to_owned();
     view! {
-        <form class="my-5 grid items-end gap-3 sm:grid-cols-2 lg:grid-cols-3" on:submit=submit>
+        <form class="my-5 grid items-end gap-3 sm:grid-cols-2 lg:grid-cols-3" novalidate on:submit=submit>
             <Field label="Repeat" id="plan-repeat">
                 {select_wrap(view! {
                     <select
@@ -1114,7 +1157,7 @@ fn plan_card(ui: Ui, plan: &PlannedPaymentView) -> Boxed {
             type="button"
             class=cn([
                 BOARD_CARD,
-                "text-left transition-colors hover:border-over",
+                "text-left transition-colors hover:border-accent",
                 if movable { "cursor-grab active:cursor-grabbing" } else { "" },
             ])
             draggable=movable.to_string()
@@ -1319,7 +1362,7 @@ fn plan_popup(ui: Ui, plan: PlannedPaymentView) -> impl IntoView {
     });
     view! {
         <Popup title=plan.name.clone() on_close=close>
-            <Facts rows=detail />
+            <Facts rows=detail class="max-w-none" />
             {candidates}
             <div class="flex flex-wrap items-center justify-end gap-2">{pick}{untie}{action}</div>
             {feedback(ui, "board".into())}
@@ -1373,6 +1416,11 @@ fn BillCard(ui: Ui, bill: SubscriptionRow, shared: StoredValue<Shared>) -> impl 
         move || ui.removing_bill.get().as_deref() == Some(id.as_str())
     };
     let remove_target = format!("bill:{id}:remove");
+    // A card bill owes what its statement used, not the bill's own amount.
+    let owed = scheduled
+        .iter()
+        .find(|p| p.paid_on.is_none())
+        .map(|p| p.amount.amount);
     let schedule = (!scheduled.is_empty()).then(|| {
         let lines = scheduled
             .into_iter()
@@ -1401,8 +1449,13 @@ fn BillCard(ui: Ui, bill: SubscriptionRow, shared: StoredValue<Shared>) -> impl 
             .collect_view();
         view! { <div class="mt-3 border-t border-line">{lines}</div> }
     });
-    let (name, amount_max, currency) =
-        bill.with_value(|b| (b.name.clone(), b.amount_max, b.currency.clone()));
+    let (name, amount_max, currency) = bill.with_value(|b| {
+        (
+            b.name.clone(),
+            owed.unwrap_or(b.amount_max),
+            b.currency.clone(),
+        )
+    });
     let toggle_editor = {
         let id = id.clone();
         move |_| {
@@ -1778,7 +1831,7 @@ fn matching(
                         disabled=Signal::derive(move || blocked || busy())
                     />
                     <span class="min-w-0 truncate">{category}</span>
-                    {elsewhere.map(|name| view! { <small class="col-start-2 text-[0.65rem] text-fg-muted">{name}</small> })}
+                    {elsewhere.map(|name| view! { <small class="col-start-2 text-eyebrow text-fg-muted">{name}</small> })}
                 </label>
             }
         })

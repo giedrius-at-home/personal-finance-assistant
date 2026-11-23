@@ -209,7 +209,7 @@ pub fn Badge(
         Tone::Accent => "border-transparent bg-accent-soft text-accent",
         Tone::Positive => "border-positive/30 bg-positive/10 text-positive-fg",
         Tone::Negative => "border-negative/30 bg-negative/10 text-negative-fg",
-        Tone::Warning => "border-over/30 bg-over/10 text-over-fg",
+        Tone::Warning => "border-warning/30 bg-warning/10 text-warning-fg",
         Tone::Outline => "border-border text-fg",
     };
     view! {
@@ -369,7 +369,8 @@ pub fn BoardColumn(
     let dot = match tone {
         Tone::Positive => "bg-positive",
         Tone::Negative => "bg-negative",
-        Tone::Warning | Tone::Accent => "bg-over",
+        Tone::Warning => "bg-warning",
+        Tone::Accent => "bg-accent",
         _ => "bg-fg-muted/50",
     };
     let label = title.clone();
@@ -378,7 +379,7 @@ pub fn BoardColumn(
             aria-label=label
             class=move || cn([
                 "grid min-w-0 content-start gap-2 rounded-xl bg-soft/70 p-2.5 transition-shadow",
-                if accepts.get() { "ring-2 ring-over/50" } else { "" },
+                if accepts.get() { "ring-2 ring-accent/50" } else { "" },
             ])
             on:dragover=move |e| {
                 if accepts.get_untracked() {
@@ -811,15 +812,17 @@ pub fn Popup(
     children: Children,
 ) -> impl IntoView {
     let label = title.clone();
+    // Escape closes it wherever focus is, not only inside the box.
+    let handle = window_event_listener(leptos::ev::keydown, move |e| {
+        if e.key() == "Escape" {
+            on_close.run(());
+        }
+    });
+    on_cleanup(move || handle.remove());
     view! {
         <div
-            class="fixed inset-0 z-50 flex overflow-y-auto bg-contrast/40 p-4"
+            class="fixed inset-0 z-50 flex overflow-y-auto overscroll-contain bg-contrast/40 p-4"
             on:click=move |_| on_close.run(())
-            on:keydown=move |e| {
-                if e.key() == "Escape" {
-                    on_close.run(());
-                }
-            }
         >
             <div
                 role="dialog"
@@ -855,8 +858,7 @@ pub const TH: &str =
 pub const TH_NUM: &str = "px-2 pb-2 text-eyebrow font-semibold uppercase tracking-eyebrow text-fg-muted text-right tabular-nums";
 pub const TROW: &str = "border-t border-line";
 pub const TCELL: &str = "px-2 py-2.5 align-top group-data-[density=sm]/table:py-1.5";
-pub const TCELL_NUM: &str =
-    "px-2 py-2.5 align-top group-data-[density=sm]/table:py-1.5 text-right tabular-nums";
+pub const TCELL_NUM: &str = "px-2 py-2.5 align-top group-data-[density=sm]/table:py-1.5 text-right tabular-nums whitespace-nowrap";
 pub const TABLE_CONTAINER: &str = "w-full overflow-x-auto rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
 
 #[component]

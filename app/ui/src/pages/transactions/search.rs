@@ -1,6 +1,7 @@
 //! "All transactions": search with filters, totals, the newest hundred rows
 //! with more loaded on scroll, and an inline category editor (personal-site `transaction-search.tsx`).
 
+use crate::format;
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -85,7 +86,16 @@ impl Filters {
         storage_get(STORAGE_KEY)
             .and_then(|s| js_sys::JSON::parse(&s).ok())
             .and_then(|v| serde_wasm_bindgen::from_value(v).ok())
-            .unwrap_or_default()
+            .unwrap_or_else(Self::this_month)
+    }
+
+    /// The first look: this month, not every row ever booked.
+    fn this_month() -> Self {
+        let now = js_sys::Date::new_0();
+        Self {
+            from: format!("{:04}-{:02}-01", now.get_full_year(), now.get_month() + 1),
+            ..Self::default()
+        }
     }
 
     fn query(&self, page: u32) -> Result<TransactionSearchQuery, String> {
@@ -326,7 +336,7 @@ pub fn TransactionSearch() -> impl IntoView {
         query.set(String::new());
         min.set(String::new());
         max.set(String::new());
-        filters.set(Filters::default());
+        filters.set(Filters::this_month());
     };
     let accounts = Signal::derive(move || {
         let mut list = options([("", "All accounts")]);
@@ -529,7 +539,7 @@ pub fn TransactionSearch() -> impl IntoView {
                                                 let amount_class = cn([TCELL_NUM, if row.direction == SearchDirection::In { "text-positive-fg" } else { "" }]);
                                                 view! {
                                                     <tr class=TROW>
-                                                        <td class=cn([TCELL, "whitespace-nowrap"])>{row.occurred_on.clone()}</td>
+                                                        <td class=cn([TCELL, "whitespace-nowrap"])>{format::date(&row.occurred_on)}</td>
                                                         <td class=TCELL>
                                                             <span class="font-medium">{title(&row)}</span>
                                                             {detail.map(|d| view! { <small class="block text-xs text-fg-muted">{d}</small> })}

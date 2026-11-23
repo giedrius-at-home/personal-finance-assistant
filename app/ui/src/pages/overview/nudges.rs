@@ -171,7 +171,7 @@ pub fn event_nudge(event: &EventRow, unit: &Currency) -> Nudge {
     let (chip, action) = match event.pace {
         Pace::OnTrack => ((Tone::Positive, "On track"), "Keep going"),
         Pace::Fast => ((Tone::Warning, "Spending fast"), "Slow down"),
-        Pace::Over => ((Tone::Warning, "Over"), "Stop spending"),
+        Pace::Over => ((Tone::Negative, "Over"), "Stop spending"),
     };
     let mut key = Vec::new();
     if event.left > Decimal::ZERO {
@@ -194,8 +194,39 @@ pub fn event_nudge(event: &EventRow, unit: &Currency) -> Nudge {
     }
 }
 
+const STOP: &str = "Stop for this month";
+
+/// Two or more groups over their limit read as one tile, not the same
+/// command again and again: each group and its overrun inside it.
+fn merge_stops(rest: Vec<Nudge>) -> Vec<Nudge> {
+    let (stops, mut rest): (Vec<Nudge>, Vec<Nudge>) =
+        rest.into_iter().partition(|n| n.action == STOP);
+    if stops.len() < 2 {
+        rest.extend(stops);
+        return rest;
+    }
+    let mut stops = stops;
+    stops.sort_by_key(|a| std::cmp::Reverse(a.weight));
+    let lines: Vec<(String, String)> = stops
+        .iter()
+        .map(|n| (n.label.clone(), n.value.clone()))
+        .collect();
+    rest.push(Nudge {
+        label: format!("Over budget in {} groups", stops.len()),
+        action: STOP.to_owned(),
+        key: lines.iter().take(2).cloned().collect(),
+        value: format!("{} groups", stops.len()),
+        bad: true,
+        chip: Some((Tone::Negative, "Over".to_owned())),
+        facts: lines.into_iter().skip(2).collect(),
+        weight: stops.iter().map(|n| n.weight).sum(),
+    });
+    rest
+}
+
 /// The running events first, then the [`MOST`] heaviest of the rest.
-fn ordered(events: Vec<Nudge>, mut rest: Vec<Nudge>) -> Vec<Nudge> {
+fn ordered(events: Vec<Nudge>, rest: Vec<Nudge>) -> Vec<Nudge> {
+    let mut rest = merge_stops(rest);
     rest.sort_by(|a, b| b.weight.cmp(&a.weight).then_with(|| a.label.cmp(&b.label)));
     rest.truncate(MOST);
     events.into_iter().chain(rest).collect()
@@ -259,8 +290,8 @@ pub fn nudges(report: &Dashboard) -> Vec<Nudge> {
                 (Some(_), Some(over)) => (
                     format!("{} over", m(over)),
                     true,
-                    (Tone::Warning, format!("Over {}", cap_label.to_lowercase())),
-                    "Stop for this month",
+                    (Tone::Negative, format!("Over {}", cap_label.to_lowercase())),
+                    STOP,
                 ),
                 (Some(rest), None) => (
                     format!("{} left", m(rest.left)),
@@ -525,6 +556,36 @@ fn tile(n: Nudge) -> impl IntoView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn groups_over_their_limit_merge_into_one_tile() {
+        let stop = |label: &str, weight: u32| Nudge {
+            label: label.into(),
+            action: STOP.into(),
+            value: format!("€{weight} over"),
+            weight: Decimal::from(weight),
+            ..Nudge::default()
+        };
+        let other = Nudge {
+            label: "Last three days".into(),
+            action: "Slow down".into(),
+            ..Nudge::default()
+        };
+        let out = merge_stops(vec![
+            stop("Fun", 50),
+            other.clone(),
+            stop("Food", 200),
+            stop("Gifts", 10),
+        ]);
+        assert_eq!(out.len(), 2);
+        let merged = &out[1];
+        assert_eq!(merged.label, "Over budget in 3 groups");
+        assert_eq!(merged.key[0], ("Food".to_owned(), "€200 over".to_owned()));
+        assert_eq!(merged.facts, [("Gifts".to_owned(), "€10 over".to_owned())]);
+        assert_eq!(merged.weight, Decimal::from(260));
+        // One group alone keeps its own tile.
+        assert_eq!(merge_stops(vec![stop("Fun", 50)])[0].label, "Fun");
+    }
 
     fn d(text: &str) -> Decimal {
         text.parse().unwrap()

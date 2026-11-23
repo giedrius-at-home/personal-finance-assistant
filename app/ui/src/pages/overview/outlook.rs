@@ -224,7 +224,10 @@ pub fn SavingsOutlookPanel(report: Dashboard, currency_code: String) -> impl Int
         .unwrap_or(1);
     let title = format!("Your money by {}", format::day_month(&outlook.through));
     let planned = amount(outlook.planned_savings, "");
-    let planned_facts = vec![("Final balance".to_owned(), m(outlook.planned_final))];
+    let planned_facts = vec![
+        ("Cash now".to_owned(), m(outlook.starting_balance)),
+        ("Final balance".to_owned(), m(outlook.planned_final)),
+    ];
     let expected = amount(outlook.expected_savings, "");
     let expected_facts = vec![
         ("Final balance".to_owned(), m(outlook.expected_final)),
@@ -233,7 +236,12 @@ pub fn SavingsOutlookPanel(report: Dashboard, currency_code: String) -> impl Int
             format!("{} – {}", m(outlook.lower_final), m(outlook.upper_final)),
         ),
     ];
-    let frame = chart_frame("Balance projection", String::new(), 340, chart);
+    let frame = chart_frame(
+        "Balance projection",
+        "Spending accounts, savings excluded".to_owned(),
+        340,
+        chart,
+    );
     let recent = amount(outlook.signal.spending, "");
     let recent_facts = vec![
         (
@@ -302,8 +310,8 @@ pub fn SavingsOutlookPanel(report: Dashboard, currency_code: String) -> impl Int
             </header>
             <div class="grid gap-x-10 gap-y-6 lg:grid-cols-[minmax(240px,.4fr)_minmax(0,1.6fr)]">
                 <div class="grid content-start gap-6">
-                    <Metric label="Following your plan" facts=planned_facts>{planned}</Metric>
-                    <Metric label="Spending like now" facts=expected_facts>{expected}</Metric>
+                    <Metric label="Gain following your plan" facts=planned_facts>{planned}</Metric>
+                    <Metric label="Gain spending like now" facts=expected_facts>{expected}</Metric>
                     {salary_line}
                 </div>
                 {frame}
