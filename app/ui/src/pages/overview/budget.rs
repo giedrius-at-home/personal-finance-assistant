@@ -29,7 +29,6 @@ use crate::{Tab, state};
 use super::extras::BudgetExtras;
 use super::forecast::DailyForecastPanel;
 use super::month_label;
-use super::outlook::SavingsOutlookPanel;
 use super::visuals::{BudgetVisuals, row_color};
 
 #[wasm_bindgen(inline_js = "
@@ -482,6 +481,8 @@ fn panel(report: &Dashboard, selection: &str, s: PanelState) -> AnyView {
             budget
                 .events
                 .iter()
+                // An event with nothing this month is an empty row.
+                .filter(|row| row.planned != Decimal::ZERO || row.spent != Decimal::ZERO)
                 .map(|row| budget_row(budget, row, Kind::Event, s)),
         );
         rows.push(budget_row(budget, &budget.unplanned, Kind::Unplanned, s));
@@ -531,13 +532,14 @@ fn panel(report: &Dashboard, selection: &str, s: PanelState) -> AnyView {
                     {add_button}
                 </div>
             </header>
-            <div class=cn([METRIC_STRIP, "xl:grid-cols-[repeat(auto-fit,minmax(11rem,1fr))]"])>
-                {totals}
-            </div>
-            <div class="grid gap-8 py-8">
-                {daily}
-                <SavingsOutlookPanel report=report.clone() currency_code=code.clone() />
-            </div>
+            // This month's totals are the top strip and the outlook lives
+            // under Spending; another month still shows its own totals.
+            {(!is_current).then(|| view! {
+                <div class=cn([METRIC_STRIP, "pb-8 xl:grid-cols-[repeat(auto-fit,minmax(11rem,1fr))]"])>
+                    {totals}
+                </div>
+            })}
+            <div class="grid gap-8 pb-8">{daily}</div>
             <BudgetVisuals budget=budget.clone() allocation=allocation.clone() current_month=current_month.clone() selection=s.trajectory />
             {move || {
                 let notice = s.notice.get();
@@ -836,7 +838,7 @@ fn budget_row(budget: &MonthlyBudget, row: &BudgetRow, kind: Kind, s: PanelState
 }
 
 const CHOICE: &str = "flex items-start gap-2 rounded-md border border-border p-2 text-xs has-[button:disabled]:opacity-45";
-const CHOICE_HINT: &str = "mt-1 block text-[0.68rem] text-fg-muted";
+const CHOICE_HINT: &str = "mt-1 block text-eyebrow text-fg-muted";
 
 /// One checkbox choice of the editor; `other` names the group that already has it.
 fn choice(

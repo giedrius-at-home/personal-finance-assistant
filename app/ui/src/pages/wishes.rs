@@ -1183,6 +1183,11 @@ pub(crate) fn can_buy(row: &WishRow) -> bool {
         && row.children.is_empty()
 }
 
+/// What a row has saved, its sub-wishes included (as the header counts it).
+pub(crate) fn row_saved(row: &WishRow) -> Decimal {
+    row.wish.saved + row.children.iter().map(|c| c.wish.saved).sum::<Decimal>()
+}
+
 pub(crate) fn wish_stage(row: &WishRow) -> Stage {
     let wish = &row.wish;
     if wish.status != WishStatus::Planned {
@@ -1190,9 +1195,9 @@ pub(crate) fn wish_stage(row: &WishRow) -> Stage {
     } else if wish.kind != WishKind::OneOff {
         // A repeating wish or bill change is not saved for: it waits to start.
         Stage::Someday
-    } else if wish.amount > Decimal::ZERO && wish.saved >= wish.amount {
+    } else if wish.amount > Decimal::ZERO && row_saved(row) >= wish.amount {
         Stage::Ready
-    } else if wish.saved > Decimal::ZERO || row.monthly_set_aside > Decimal::ZERO {
+    } else if row_saved(row) > Decimal::ZERO || row.monthly_set_aside > Decimal::ZERO {
         Stage::Saving
     } else {
         Stage::Someday
@@ -1223,7 +1228,7 @@ fn wish_box(ui: Ui, row: &WishRow, ctx: &Context) -> impl IntoView + use<> {
         let (tone, chip) = if row.not_judged.is_some() {
             (Tone::Outline, "Not judged")
         } else if row.short > Decimal::ZERO {
-            (Tone::Warning, "Short")
+            (Tone::Negative, "Short")
         } else if row.tradeoffs {
             (Tone::Warning, "With trade-offs")
         } else {
@@ -1241,13 +1246,14 @@ fn wish_box(ui: Ui, row: &WishRow, ctx: &Context) -> impl IntoView + use<> {
         let (tone, chip, facts) = done_facts(wish, ctx);
         (tone, chip, facts.into_iter().skip(1).take(1).collect())
     };
-    let percent = saved_percent(wish.saved, wish.amount);
+    let saved = row_saved(row);
+    let percent = saved_percent(saved, wish.amount);
     let progress = (planned && wish.kind == WishKind::OneOff).then(|| {
-        let label = format!("{} saved", amount(wish.saved, &code));
+        let label = format!("{} saved", amount(saved, &code));
         view! {
             <span class="grid gap-1">
                 <span role="img" aria-label=label.clone() class="block h-1.5 overflow-hidden rounded-pill bg-soft">
-                    <i class="block h-full rounded-pill bg-over" style:width=format!("{percent}%")></i>
+                    <i class="block h-full rounded-pill bg-positive" style:width=format!("{percent}%")></i>
                 </span>
                 <span class="flex justify-between text-xs text-fg-muted">
                     <span>{label}</span>
@@ -1289,7 +1295,7 @@ fn wish_box(ui: Ui, row: &WishRow, ctx: &Context) -> impl IntoView + use<> {
                 type="button"
                 class=cn([
                     BOARD_CARD,
-                    "text-left transition-colors hover:border-over",
+                    "text-left transition-colors hover:border-accent",
                     if movable { "cursor-grab active:cursor-grabbing" } else { "" },
                 ])
                 draggable=movable.to_string()
@@ -2012,7 +2018,7 @@ fn wish_body(
     let (chip_tone, chip) = if row.not_judged.is_some() {
         (Tone::Outline, "Not judged")
     } else if row.short > Decimal::ZERO {
-        (Tone::Warning, "Short")
+        (Tone::Negative, "Short")
     } else if row.tradeoffs {
         (Tone::Warning, "With trade-offs")
     } else {
@@ -3609,6 +3615,16 @@ mod tests {
         let options = changeable_bills(&bills, &changeable, "EUR");
         assert_eq!(options.len(), 1);
         assert_eq!(options[0].1, "Therapy · €80 per 2 weeks");
+    }
+
+    #[test]
+    fn a_card_counts_what_its_sub_wishes_saved() {
+        let mut parent = row("trip");
+        let mut dinner = row("dinner");
+        dinner.wish.saved = d(300, 0);
+        parent.children.push(dinner);
+        assert_eq!(row_saved(&parent), d(300, 0));
+        assert_eq!(wish_stage(&parent), Stage::Ready);
     }
 
     #[test]

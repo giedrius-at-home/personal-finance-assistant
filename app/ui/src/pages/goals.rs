@@ -43,8 +43,12 @@ pub fn fewer_visits(cut: &HabitCut) -> Option<u32> {
 /// A wish when nothing changes: the status word, the amount behind it and
 /// whether that is bad.
 pub fn goal_status(goal: &GoalStatus) -> (&'static str, Option<Decimal>, bool) {
-    if goal.short > Decimal::ZERO {
-        ("Short", Some(goal.short), true)
+    if goal.plan_short > Decimal::ZERO {
+        // The same verdict as Wishes: short with budgets kept.
+        ("Short", Some(goal.plan_short), true)
+    } else if goal.short > Decimal::ZERO {
+        // Fine on budget, short only if spending stays as usual.
+        ("Needs cuts", Some(goal.short), true)
     } else if goal.card_short > Decimal::ZERO {
         // Paid by card: the card's charge the month after is what lacks.
         ("Card bill short", Some(goal.card_short), true)
@@ -129,9 +133,6 @@ fn card(view: &WishesView) -> Option<AnyView> {
                     <td class=num.clone()>{whole(goal.amount, unit)}</td>
                     <td class=num.clone()>{month_year(&goal.due_on)}</td>
                     <td class=num.clone()>{amount.map_or_else(dash, |a| whole(a, unit))}</td>
-                    <td class=num.clone()>
-                        {if goal.plan_short > zero { whole(goal.plan_short, unit) } else { dash() }}
-                    </td>
                     <td class=cn([TCELL, "text-right"])><Badge tone=tone>{word}</Badge></td>
                 </tr>
             }
@@ -232,8 +233,7 @@ fn card(view: &WishesView) -> Option<AnyView> {
                                             <th class=cn([TH, "text-left"])>"Goal"</th>
                                             <th class=TH_NUM>"Amount"</th>
                                             <th class=TH_NUM>"Due"</th>
-                                            <th class=TH_NUM>"Short"</th>
-                                            <th class=TH_NUM>"Short on budget"</th>
+                                            <th class=TH_NUM>"Gap"</th>
                                             <th class=TH_NUM>"Status"</th>
                                         </tr>
                                     </thead>

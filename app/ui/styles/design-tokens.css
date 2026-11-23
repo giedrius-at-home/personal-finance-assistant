@@ -13,7 +13,7 @@
   --ds-card-muted: light-dark(oklch(0.9301 0.0081 98.88), oklch(0.3223 0.0088 116.08));
   --ds-contrast: light-dark(oklch(0.2852 0.0056 271.22), oklch(0.9545 0.0067 97.35));
   --ds-fg: light-dark(oklch(0.2508 0.0055 106.79), oklch(0.9545 0.0067 97.35));
-  --ds-fg-muted: light-dark(oklch(0.5125 0.0106 100.12), oklch(0.7336 0.01 100.04));
+  --ds-fg-muted: light-dark(oklch(0.45 0.0103 108), oklch(0.7336 0.01 100.04));
   --ds-fg-on-contrast: light-dark(oklch(0.9638 0.0054 95.1), oklch(0.2371 0.0058 121.89));
   --ds-border: light-dark(oklch(0.8997 0.0082 98.89), oklch(0.3535 0.0086 116.02));
   --ds-line: light-dark(oklch(0.8997 0.0082 98.89), oklch(0.3535 0.0086 116.02));
@@ -21,8 +21,8 @@
   --ds-positive: light-dark(oklch(0.5819 0.0828 159.1), oklch(0.741 0.0922 157.16));
   --ds-negative: light-dark(oklch(0.6683 0.183 35.3), oklch(0.7272 0.1714 35.7));
   --ds-warning: light-dark(oklch(0.5503 0.1128 84.58), oklch(0.6003 0.1231 84.74));
-  --ds-over: light-dark(oklch(0.56 0.13 262), oklch(0.72 0.12 262));
-  --ds-over-fg: light-dark(oklch(0.47 0.135 262), oklch(0.76 0.11 262));
+  --ds-over: light-dark(oklch(0.6683 0.183 35.3), oklch(0.7272 0.1714 35.7));
+  --ds-over-fg: light-dark(oklch(0.5343 0.183 35.3), oklch(0.7272 0.1714 35.7));
   --ds-positive-fg: light-dark(oklch(0.5039 0.0828 159.1), oklch(0.741 0.0922 157.16));
   --ds-negative-fg: light-dark(oklch(0.5343 0.183 35.3), oklch(0.7272 0.1714 35.7));
   --ds-warning-fg: light-dark(oklch(0.5 0.1128 84.58), oklch(0.6983 0.1231 84.74));
@@ -72,8 +72,8 @@
   --radius-xl: 20px;
   --radius-2xl: 30px;
   --radius-pill: 9999px;
-  --text-eyebrow: 0.62rem;
-  --text-xs: 0.72rem;
+  --text-eyebrow: 0.6875rem;
+  --text-xs: 0.75rem;
   --text-sm: 0.82rem;
   --text-base: 0.9rem;
   --text-lg: 1.05rem;

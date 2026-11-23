@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 
+use finance_types::report::allocation::spare_split;
 use finance_types::report::closure::{AccountRoleKind, MoneyPlan, PlanAccount, PlanMove};
 use leptos::prelude::*;
 use rust_decimal::Decimal;
@@ -171,12 +172,14 @@ pub fn MoneyPlanFields(
             .into_any()
     };
     let savings = plan.savings.as_ref().map(|s| {
-        // The room before the unplanned estimate is the number Overview
-        // and Wishes call wiggle room; what the estimate leaves is below.
+        // Wiggle room as Overview counts it: what the open wishes take
+        // comes off first. shortcut: no next-month gap here (MoneyPlan lacks
+        // the allocation); move the split into core if the two still differ.
         let set_aside: Decimal = s.expected.iter().map(|(_, v)| *v).sum();
-        let before_estimate = s.wiggle_room + set_aside;
+        let (_, to_wishes, before_estimate) =
+            spare_split(s.wiggle_room + set_aside, Decimal::ZERO, s.wishes_open);
         let negative = before_estimate < Decimal::ZERO;
-        let after_estimate = money(s.wiggle_room, &unit);
+        let after_estimate = money(s.wiggle_room - to_wishes, &unit);
         let (name, balance, incoming, must_keep, room) = (
             s.name.clone(),
             money(s.balance, &unit),

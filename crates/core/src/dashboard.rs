@@ -140,9 +140,13 @@ pub fn dashboard(
     });
 
     // Forecast horizons run from today, so they keep calendar months.
-    let future_subscriptions = (0..4)
+    let mut future_subscriptions = (0..4)
         .map(|offset| subscription_report(&ctx, BillWindow::CalendarMonth(offset)))
         .collect::<Result<Vec<_>>>()?;
+    // The card bill owes its statement here too: forecasts and Coming up.
+    for report in &mut future_subscriptions {
+        crate::subscriptions::apply_card_usage(report, &cards);
+    }
     let budget_fixed_ids = groups::fixed_transaction_ids(&spending, &fixed_categories);
     let savings_outlooks = outlook::savings_outlooks(&outlook::OutlookInputs {
         transactions: &spending,

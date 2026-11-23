@@ -9,8 +9,7 @@ mod forecast;
 mod kpis;
 mod monthly;
 mod nudges;
-mod outlook;
-mod trends;
+pub mod outlook;
 pub mod visuals;
 
 use leptos::prelude::*;
@@ -31,7 +30,6 @@ pub fn Overview() -> impl IntoView {
         <nudges::OverviewNudges />
         <monthly::OwnerMonthlyOverview />
         <budget::MonthlyBudgetPanel />
-        <trends::OverviewTrends />
     }
 }
 

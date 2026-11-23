@@ -98,7 +98,15 @@ fn BankBalanceBreakdown(allocation: CurrencyAllocation) -> impl IntoView {
         .map(|(label, value, deducted)| {
             (
                 label.to_owned(),
-                format!("{}{}", if deducted { "− " } else { "" }, m(value)),
+                format!(
+                    "{}{}",
+                    if deducted && !value.is_zero() {
+                        "− "
+                    } else {
+                        ""
+                    },
+                    m(value)
+                ),
             )
         })
         .collect();
@@ -647,16 +655,16 @@ fn CurrencyOverview(
 
     let section_label = format!("{} monthly plan", unit.code);
     let this_month = format!("SPENDABLE · {}", month_name(&a.current_month));
-    let funds = format!("FUNDS {}", month_name(&a.funded_month));
+    let funds = format!(
+        "{} · FROM SALARY",
+        month_name(&a.funded_month).to_uppercase()
+    );
     let bank_facts = vec![
         ("Bank".to_owned(), money(a.bank_balance, &unit)),
-        (
-            "Savings".to_owned(),
-            format!("− {}", money(a.protected_savings, &unit)),
-        ),
+        ("Savings".to_owned(), deduct(a.protected_savings, &unit)),
         (
             "Salary set aside".to_owned(),
-            format!("− {}", money(a.salary_reserved, &unit)),
+            deduct(a.salary_reserved, &unit),
         ),
     ];
     let next_funds = money(a.next_planned_funds, &unit);
@@ -730,5 +738,14 @@ fn CurrencyOverview(
             </div>
             {forecast_card}
         </section>
+    }
+}
+
+/// `− €5.00` taken off a total; zero has no sign.
+fn deduct(value: Decimal, unit: &Currency) -> String {
+    if value.is_zero() {
+        money(value, unit)
+    } else {
+        format!("\u{2212} {}", money(value, unit))
     }
 }

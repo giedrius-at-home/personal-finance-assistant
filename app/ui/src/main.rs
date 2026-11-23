@@ -285,7 +285,7 @@ fn Tabs() -> impl IntoView {
         <div
             role="tablist"
             aria-label="Finance sections"
-            class=cn([TABS_LIST, "glass-bar mb-4 flex w-full gap-0.5 sm:mb-6 sm:inline-flex sm:w-auto sm:gap-1"])
+            class=cn([TABS_LIST, "glass-bar sticky top-10 z-30 mb-4 flex w-full gap-0.5 sm:mb-6 sm:inline-flex sm:w-auto sm:gap-1"])
         >
             {Tab::ALL
                 .into_iter()

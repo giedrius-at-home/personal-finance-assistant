@@ -11,8 +11,8 @@
     },
     "text": {
       "$type": "dimension",
-      "eyebrow": { "$value": { "value": 0.62, "unit": "rem" } },
-      "xs":      { "$value": { "value": 0.72, "unit": "rem" } },
+      "eyebrow": { "$value": { "value": 0.6875, "unit": "rem" } },
+      "xs":      { "$value": { "value": 0.75, "unit": "rem" } },
       "sm":      { "$value": { "value": 0.82, "unit": "rem" } },
       "base":    { "$value": { "value": 0.9, "unit": "rem" } },
       "lg":      { "$value": { "value": 1.05, "unit": "rem" } },
