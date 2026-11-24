@@ -458,6 +458,12 @@ pub const PLOT_INSIGHT: &str = "text-sm text-fg";
 /// A saved plot that can't be drawn: a quiet card in its place.
 pub const PLOT_UNREADABLE: &str = "rounded-lg bg-card-muted px-4 py-3 text-sm text-fg-muted";
 
+/// Under a plot: its period over the insight sentence.
+pub const PLOT_CAPTION: &str = "grid gap-1";
+
+/// A popup wide enough for a builder or an editor with a preview.
+pub const WIDE_POPUP: &str = "w-[min(94vw,60rem)]";
+
 /// The plot builder's body: its rows, preview and name, one under another.
 pub const BUILDER: &str = "grid min-w-0 gap-5";
 

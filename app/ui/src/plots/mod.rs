@@ -20,7 +20,9 @@ use crate::ds::charts::{
     BarChart, DataTable, Donut, Fmt, Heatmap, Line, LineChart, Ranked, Scatter, Series, Slice, fmt,
     label_step, series_color,
 };
-use crate::ds::patterns::{ERROR_LINE, MUTED, PLOT_FOOT, PLOT_INSIGHT, SKELETON_CARD};
+use crate::ds::patterns::{
+    ERROR_LINE, MUTED, PLOT_CAPTION, PLOT_FOOT, PLOT_INSIGHT, SKELETON_CARD,
+};
 use crate::ds::{EmptyState, Skeleton, money};
 use crate::pages::{f, plural};
 
@@ -527,7 +529,7 @@ pub fn PlotView(
                     <div>
                         {body}
                         <div class=PLOT_FOOT>
-                            <div class="grid gap-1">
+                            <div class=PLOT_CAPTION>
                                 <p class=MUTED>{subtitle}</p>
                                 {insight}
                             </div>

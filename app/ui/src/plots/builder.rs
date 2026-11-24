@@ -15,9 +15,13 @@ use super::choice::{
     default_title, filter_count, from_id, id_of, name_of, options, period_from, period_id,
     turned_off, with_choice,
 };
-use crate::ds::builder::{ChartChips, ChipPick, DrawChoice, MeasureRow, SelectField, SwitchField};
+use crate::ds::builder::{
+    ChartChips, ChipPick, DrawChoice, InlineSelect, MeasureRow, RemoveMeasure, SelectField,
+    SwitchField, ToggleButton,
+};
 use crate::ds::patterns::{
-    BUILDER, BUILDER_FIELD, CONTROL_ROW, ERROR_LINE, FIELD_ROW, MUTED, SUBPANEL,
+    BUILDER, BUILDER_FIELD, CONTROL_GROUP, CONTROL_ROW, ERROR_LINE, FIELD_ROW, MUTED, SUBPANEL,
+    WIDE_POPUP,
 };
 use crate::ds::{
     Button, Confirm, Field, Icon, Input, Lucide, Popup, SegmentedControl, Size, Variant,
@@ -37,6 +41,18 @@ pub struct FilterOptions {
     pub categories: Vec<(String, String)>,
     pub groups: Vec<(String, String)>,
     pub accounts: Vec<(String, String)>,
+    /// The report's currencies, the main one first, as the pages list them.
+    pub currencies: Vec<String>,
+}
+
+/// "Show the top" and "Series" choices, with `now` added when it is another.
+fn counts(choices: &[u8], now: u8) -> Vec<(String, String)> {
+    let mut all = choices.to_vec();
+    if !all.contains(&now) {
+        all.push(now);
+        all.sort_unstable();
+    }
+    all.iter().map(|n| (n.to_string(), n.to_string())).collect()
 }
 
 /// The wait after the last change before the preview reloads.
@@ -122,6 +138,9 @@ pub fn PlotBuilder(
     /// Follows the report, which may still be loading when the builder opens.
     filter_options: Signal<FilterOptions>,
     on_save: Callback<(Saving, String, PlotSpec), Result<(), String>>,
+    /// Why the backend refused the last save; the builder stays open.
+    #[prop(optional, into)]
+    save_refused: Signal<Option<String>>,
     on_delete: Callback<()>,
     on_close: Callback<()>,
 ) -> impl IntoView {
@@ -242,6 +261,67 @@ pub fn PlotBuilder(
         })
     };
 
+    // How many items or series show, and the currency when there are several.
+    let top = bound(spec, |s| s.top.to_string());
+    let split_top = bound(spec, |s| s.split_top.to_string());
+    let how_many = move || {
+        let (named, split, now_top, now_split) =
+            spec.with(|s| (s.named_axis(), s.split.is_some(), s.top, s.split_top));
+        view! {
+            {named.then(|| view! {
+                <SelectField
+                    label="Show the top"
+                    id="plot-top"
+                    value=top
+                    options=counts(&[5, 10, 15, 20], now_top)
+                    on_change=Callback::new(move |v: String| {
+                        if let Ok(n) = v.parse() {
+                            choose(Choice::Top(n));
+                        }
+                    })
+                />
+            })}
+            {split.then(|| view! {
+                <SelectField
+                    label="Series"
+                    id="plot-split-top"
+                    value=split_top
+                    options=counts(&[3, 4, 5, 6], now_split)
+                    on_change=Callback::new(move |v: String| {
+                        if let Ok(n) = v.parse() {
+                            choose(Choice::SplitTop(n));
+                        }
+                    })
+                />
+            })}
+        }
+    };
+    let currencies = Memo::new(move |_| filter_options.with(|o| o.currencies.clone()));
+    let currency = bound(spec, |s| s.currency.clone().unwrap_or_default());
+    let currency_field = move || {
+        let all = currencies.get();
+        (all.len() > 1).then(|| {
+            let main = all[0].clone();
+            // The main currency is no choice at all: the spec keeps None.
+            let options: Vec<(String, String)> = all
+                .iter()
+                .enumerate()
+                .map(|(i, c)| (if i == 0 { String::new() } else { c.clone() }, c.clone()))
+                .collect();
+            view! {
+                <SelectField
+                    label="Currency"
+                    id="plot-currency"
+                    value=currency
+                    options=options
+                    on_change=Callback::new(move |v: String| {
+                        choose(Choice::Currency((!v.is_empty() && v != main).then_some(v)));
+                    })
+                />
+            }
+        })
+    };
+
     // Under it: the first measure's drawing, the other measures, "Add a measure".
     let shape = Memo::new(move |_| {
         spec.with(|s| (s.measures.len(), s.split.is_none(), s.chart == Chart::Bars))
@@ -308,10 +388,23 @@ pub fn PlotBuilder(
                 </Button>
             }
         });
+        // With several measures any can go, the first too.
+        let first = (n > 1).then(|| {
+            view! {
+                <span class=CONTROL_GROUP>
+                    {if lines {
+                        view! { <DrawChoice index=0 value=draw_of(0) on_change=on_draw(0) named=first_name /> }.into_any()
+                    } else {
+                        view! { <span class=MUTED>{first_name}</span> }.into_any()
+                    }}
+                    <RemoveMeasure index=0 on_remove=Callback::new(move |()| choose(Choice::RemoveMeasure(0))) />
+                </span>
+            }
+        });
         (n > 1 || add.is_some()).then(|| {
             view! {
                 <div class=CONTROL_ROW>
-                    {lines.then(|| view! { <DrawChoice index=0 value=draw_of(0) on_change=on_draw(0) named=first_name /> })}
+                    {first}
                     {rest}
                     {add}
                 </div>
@@ -426,21 +519,17 @@ pub fn PlotBuilder(
                 />
                 {move || comparable.get().then(|| {
                     view! {
-                        <span class=CONTROL_ROW>
-                            <label for="plot-compare" class=MUTED>"Compare with"</label>
-                            <span class="w-48">
-                                <crate::ds::Select
-                                    id="plot-compare"
-                                    value=compare
-                                    options=compare_options.clone()
-                                    on_change=Callback::new(move |v: String| {
-                                        if let Some(c) = from_id(&COMPARES, &v) {
-                                            choose(Choice::Compare(c));
-                                        }
-                                    })
-                                />
-                            </span>
-                        </span>
+                        <InlineSelect
+                            label="Compare with"
+                            id="plot-compare"
+                            value=compare
+                            options=compare_options.clone()
+                            on_change=Callback::new(move |v: String| {
+                                if let Some(c) = from_id(&COMPARES, &v) {
+                                    choose(Choice::Compare(c));
+                                }
+                            })
+                        />
                     }
                 })}
             }
@@ -459,7 +548,7 @@ pub fn PlotBuilder(
         }
     });
     view! {
-        <Popup title=heading_id class="w-[min(94vw,60rem)]" on_close=on_close>
+        <Popup title=heading_id class=WIDE_POPUP on_close=on_close>
             <div class=BUILDER>
                 <div class=FIELD_ROW node_ref=first_control>
                     <SelectField
@@ -503,6 +592,8 @@ pub fn PlotBuilder(
                         })
                     />
                     {date_fields}
+                    {how_many}
+                    {currency_field}
                 </div>
                 {measures}
                 <div class=CONTROL_ROW>
@@ -516,15 +607,10 @@ pub fn PlotBuilder(
                             }
                         })
                     />
-                    <button
-                        type="button"
-                        class=crate::ds::button_class(Variant::Secondary, Size::Sm)
-                        aria-expanded=move || filters_open.get().to_string()
-                        on:click=move |_| filters_open.update(|o| *o = !*o)
-                    >
+                    <ToggleButton open=filters_open>
                         <Lucide icon=Icon::SlidersHorizontal size=14 />
                         {only_text}
-                    </button>
+                    </ToggleButton>
                 </div>
                 {filter_fields}
                 <div class=CONTROL_ROW>
@@ -558,7 +644,7 @@ pub fn PlotBuilder(
                             <Input id="plot-title" value=title />
                         </span>
                     </Field>
-                    {move || refused.get().map(|why| view! { <p role="alert" class=ERROR_LINE>{why}</p> })}
+                    {move || refused.get().or_else(|| save_refused.get()).map(|why| view! { <p role="alert" class=ERROR_LINE>{why}</p> })}
                     <div class=CONTROL_ROW>
                         <Button variant=Variant::Primary size=Size::Sm on_click=Callback::new(move |_| save(Saving::Over))>
                             "Save"

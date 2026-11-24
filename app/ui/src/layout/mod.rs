@@ -269,6 +269,10 @@ pub struct LayoutState {
     load: RwSignal<Load>,
     editing: RwSignal<bool>,
     save_failed: RwSignal<bool>,
+    /// Why the last save was refused.
+    save_error: RwSignal<Option<String>>,
+    /// A save is under way.
+    busy: RwSignal<bool>,
     /// The panel being dragged, with the page it is on.
     carried: RwSignal<Option<(PageRef, String)>>,
 }
@@ -282,6 +286,8 @@ impl LayoutState {
             load: RwSignal::new(Load::Loading),
             editing: RwSignal::new(false),
             save_failed: RwSignal::new(false),
+            save_error: RwSignal::new(None),
+            busy: RwSignal::new(false),
             carried: RwSignal::new(None),
         };
         spawn_local(async move {
@@ -409,11 +415,13 @@ impl LayoutState {
 
     /// A failed save keeps the state as clicked and sets `save_failed`.
     fn save(self) {
+        self.busy.set(true);
         spawn_local(async move {
             loop {
                 let layout = self.layout.get_untracked();
                 let saved = api::invoke::<UiLayout>("save_ui_layout", &SaveArgs { layout }).await;
                 self.save_failed.try_set(saved.is_err());
+                self.save_error.try_set(saved.err());
                 if !self
                     .queue
                     .try_update_value(SaveQueue::finished)
@@ -422,6 +430,7 @@ impl LayoutState {
                     break;
                 }
             }
+            self.busy.try_set(false);
         });
     }
 }
@@ -467,6 +476,12 @@ fn filter_options() -> FilterOptions {
                 .accounts
                 .iter()
                 .map(|a| (a.account_id.clone(), a.name.clone()))
+                .collect(),
+            currencies: r
+                .time_trends
+                .currencies
+                .iter()
+                .map(|c| c.currency.code.clone())
                 .collect(),
         }
     })
@@ -699,10 +714,9 @@ pub fn PageView(
             })
         });
         // A plot's "Edit plot", in and out of Edit layout, while the layout can be saved.
+        let editable_plot = Signal::derive(move || state.editable() && readable.get());
         let action = move || {
-            let plot = plot
-                .get_value()
-                .filter(|_| state.editable() && readable.get())?;
+            let plot = plot.get_value().filter(|_| editable_plot.get())?;
             let aria = edit_label(&title.get());
             let opener = id.with_value(|panel| in_panel(panel, &aria));
             Some(view! {
@@ -729,6 +743,7 @@ pub fn PageView(
                     editing=editing
                     edit=bar
                     action=action
+                    has_action=editable_plot
                     drop=drop
                     quiet=quiet.get()
                 >
@@ -782,6 +797,25 @@ pub fn PageView(
             let editing = editing.get_untracked();
             opener.with_value(|o| focus_on(focus_after_builder(&closed, o, editing)));
         };
+        // A save waits for the backend: it closes once written; refused, the
+        // layout goes back to how it was and the builder says why.
+        let waiting = RwSignal::new(None::<(Closed, UiLayout)>);
+        let refused = RwSignal::new(None::<String>);
+        Effect::new(move |_| {
+            if state.busy.get() || waiting.with(Option::is_none) {
+                return;
+            }
+            let Some((closed, before)) = waiting.try_update(Option::take).flatten() else {
+                return;
+            };
+            match state.save_error.get_untracked() {
+                None => close(closed),
+                Some(why) => {
+                    state.change(|l| *l = before);
+                    refused.set(Some(format!("Not saved: {why}")));
+                }
+            }
+        });
         Some(view! {
             <PlotBuilder
                 heading=heading
@@ -789,10 +823,16 @@ pub fn PageView(
                 spec=spec
                 existing=existing
                 filter_options=Signal::from(options)
+                save_refused=refused
                 on_save=Callback::new(move |(how, title, spec): (Saving, String, PlotSpec)| {
                     if !state.load.get_untracked().may_save() {
                         return Err(NOTHING_SAVED.to_owned());
                     }
+                    if waiting.with_untracked(Option::is_some) {
+                        return Ok(());
+                    }
+                    refused.set(None);
+                    let before = state.layout.get_untracked();
                     let over = match how {
                         Saving::Over => plot.get_value(),
                         Saving::New => None,
@@ -802,7 +842,7 @@ pub fn PageView(
                     if over.is_none() {
                         edit(&|l, d, a| edit::panel_added(l, d, a, &panel));
                     }
-                    close(Closed::Saved { panel, title: title.trim().to_owned() });
+                    waiting.set(Some((Closed::Saved { panel, title: title.trim().to_owned() }, before)));
                     Ok(())
                 })
                 on_delete=Callback::new(move |()| {

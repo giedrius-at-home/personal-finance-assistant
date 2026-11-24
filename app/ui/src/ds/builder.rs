@@ -7,8 +7,8 @@ use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 
 use super::patterns::{
-    BUILDER_FIELD, CHIP, CHIP_OFF, CHIP_ON, CHIPS, CONTROL_GROUP, CONTROL_ROW, GROUP_SELECT, MUTED,
-    SWITCH_FIELD,
+    BUILDER_FIELD, CHIP, CHIP_OFF, CHIP_ON, CHIPS, CONTROL_GROUP, CONTROL_ROW, FIELD, FIELD_LABEL,
+    GROUP_SELECT, MUTED, SWITCH_FIELD,
 };
 use super::{
     CONTROL, Field, Icon, LONG_LIST, Lucide, SegmentedControl, Select, Size, Switch, Variant,
@@ -118,16 +118,56 @@ pub fn MeasureRow(
                 />
             </span>
             {draw.map(|d| view! { <DrawChoice index=index value=d on_change=on_draw /> })}
-            {removable.then(|| view! {
-                <button
-                    type="button"
-                    class=button_class(Variant::Ghost, Size::IconSm)
-                    aria-label=format!("Remove measure {n}")
-                    on:click=move |_| on_remove.run(())
-                >
-                    <Lucide icon=Icon::X size=14 />
-                </button>
-            })}
+            {removable.then(|| view! { <RemoveMeasure index=index on_remove=on_remove /> })}
+        </span>
+    }
+}
+
+/// The × that removes measure `index` (0-based).
+#[component]
+pub fn RemoveMeasure(index: usize, on_remove: Callback<()>) -> impl IntoView {
+    view! {
+        <button
+            type="button"
+            class=button_class(Variant::Ghost, Size::IconSm)
+            aria-label=format!("Remove measure {}", index + 1)
+            on:click=move |_| on_remove.run(())
+        >
+            <Lucide icon=Icon::X size=14 />
+        </button>
+    }
+}
+
+/// A button that opens and closes the section under it (`aria-expanded`).
+#[component]
+pub fn ToggleButton(open: RwSignal<bool>, children: Children) -> impl IntoView {
+    view! {
+        <button
+            type="button"
+            class=button_class(Variant::Secondary, Size::Sm)
+            aria-expanded=move || open.get().to_string()
+            on:click=move |_| open.update(|o| *o = !*o)
+        >
+            {children()}
+        </button>
+    }
+}
+
+/// A muted label and a select, on one middle line in a `CONTROL_ROW`.
+#[component]
+pub fn InlineSelect(
+    #[prop(into)] label: String,
+    #[prop(into)] id: String,
+    value: RwSignal<String>,
+    #[prop(into)] options: Signal<Vec<(String, String)>>,
+    on_change: Callback<String>,
+) -> impl IntoView {
+    view! {
+        <span class=CONTROL_GROUP>
+            <label for=id.clone() class=MUTED>{label}</label>
+            <span class=GROUP_SELECT>
+                <Select id=id value=value options=options on_change=on_change />
+            </span>
         </span>
     }
 }
@@ -240,9 +280,11 @@ pub fn ChipPick(
             .collect_view()
     };
     let search_label = format!("Search {label}");
+    let label_id = format!("{id}-label");
     view! {
-        <Field label=label.clone() id=id.clone()>
-            <div id=id role="group" aria-label=label class=CHIPS>
+        <div class=FIELD>
+            <span id=label_id.clone() class=FIELD_LABEL>{label.clone()}</span>
+            <div id=id role="group" aria-label=label aria-labelledby=label_id class=CHIPS>
                 {move || long().then(|| view! {
                     <input
                         type="search"
@@ -259,6 +301,6 @@ pub fn ChipPick(
                         .then(|| view! { <p class=MUTED>"Nothing to choose from yet."</p> })
                 }}
             </div>
-        </Field>
+        </div>
     }
 }

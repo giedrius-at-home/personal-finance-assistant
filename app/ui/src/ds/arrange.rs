@@ -6,7 +6,9 @@ use leptos::html;
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 
-use super::patterns::{ACTIONS, CONTROL_ROW, ERROR_LINE, FIELD_LABEL, GALLERY_GROUP, MUTED};
+use super::patterns::{
+    ACTIONS, CHIPS, CONTROL_GROUP, CONTROL_ROW, ERROR_LINE, FIELD_LABEL, GALLERY_GROUP, MUTED,
+};
 use super::{Button, CardTitle, Heading, Icon, Input, Lucide, Size, Variant, button_class, cn};
 
 /// The edit controls, in the frame's tools above its top rule.
@@ -193,7 +195,7 @@ pub fn Gallery(
                     view! { <p class=MUTED>"Every panel is on this page."</p> }.into_any()
                 } else {
                     view! {
-                        <div class=CONTROL_ROW>
+                        <div class=CHIPS>
                             {items
                                 .into_iter()
                                 .map(|(id, title)| {
@@ -222,7 +224,7 @@ pub fn Gallery(
                                         add_chip(None, title.clone(), None, Callback::new(move |()| on_add.run(add.clone()))).into_any()
                                     };
                                     view! {
-                                        <span class=CONTROL_ROW data-panel=id>
+                                        <span class=CONTROL_GROUP data-panel=id>
                                             {name}
                                             <Confirm
                                                 label="Delete"

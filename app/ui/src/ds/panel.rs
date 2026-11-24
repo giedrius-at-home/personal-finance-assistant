@@ -56,6 +56,10 @@ pub fn PanelFrame(
     /// The panel's own action (a [`PanelAction`]), left of Edit layout's controls.
     #[prop(optional, into)]
     action: ViewFn,
+    /// `action` draws something now; with Edit layout off and no action,
+    /// no tools are drawn at all.
+    #[prop(optional, into)]
+    has_action: Signal<bool>,
     /// A dragged panel may be let go here.
     #[prop(optional)]
     drop: Option<DropTarget>,
@@ -95,7 +99,10 @@ pub fn PanelFrame(
             d.on_drop.run(());
         }
     };
-    let edit = move || view! { <div class=PANEL_TOOLS>{action.run()}{edit.run()}</div> };
+    let edit = move || {
+        (editing.get() || has_action.get())
+            .then(|| view! { <div class=PANEL_TOOLS>{action.run()}{edit.run()}</div> })
+    };
     if quiet {
         return view! {
             <section class=class data-panel=panel.clone() on:dragover=on_dragover on:dragleave=on_dragleave on:drop=on_drop>
