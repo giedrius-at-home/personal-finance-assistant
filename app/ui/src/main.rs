@@ -420,6 +420,17 @@ fn TabEditor(tabs: Memo<Vec<TabView>>) -> impl IntoView {
     let renaming = RwSignal::new(None::<String>);
     let draft = RwSignal::new(String::new());
     let refused = RwSignal::new(None::<String>);
+    // A tab deleted (or dropped by "Reset everything") mid-rename ends the rename.
+    Effect::new(move |_| {
+        let gone = renaming.with(|r| {
+            r.as_ref()
+                .is_some_and(|r| tabs.with(|t| t.iter().all(|t| &t.id != r)))
+        });
+        if gone {
+            renaming.set(None);
+            refused.set(None);
+        }
+    });
     // The tab being dragged, and the tab under the pointer (with "after").
     let dragging = RwSignal::new(None::<String>);
     let over = RwSignal::new(None::<(String, bool)>);
