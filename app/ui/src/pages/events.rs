@@ -20,10 +20,11 @@ use crate::ds::patterns::{
     SKELETON_CARD, SKELETON_HEADER, STACK, TRUNCATE,
 };
 use crate::ds::{
-    BOARD_CARD, Badge, BoardColumn, Button, CONTROL, Card, Checkbox, Eyebrow, Facts, FactsRow,
-    Field, Icon, Lucide, Popup, Size, Skeleton, Tone, Variant, cn,
+    BOARD_CARD, Badge, BoardColumn, Button, CONTROL, Card, CardTone, Checkbox, Eyebrow, Facts,
+    FactsRow, Field, Icon, Lucide, Popup, Size, Skeleton, Tone, Variant, card_class, cn,
 };
 use crate::format;
+use crate::layout::{Initial, PageView, PanelDef};
 use crate::pages::Problem;
 use crate::pages::payment_pick::{Ask, PaymentPicker};
 use crate::pages::wishes::{
@@ -216,6 +217,55 @@ fn text_input(id: String, value: RwSignal<String>, kind: &'static str) -> impl I
     }
 }
 
+/// Events' panels, in their first-run order.
+pub const PANELS: &[PanelDef] = &[
+    PanelDef {
+        id: "events.board",
+        title: "Events",
+        page: PAGE,
+        movable: false,
+        initial: Initial::Open,
+        half: false,
+        render: || with_data(board).into_any(),
+        summary: None,
+        shown: None,
+    },
+    PanelDef {
+        id: "events.add",
+        title: "New event",
+        page: PAGE,
+        movable: false,
+        initial: Initial::Folded,
+        half: false,
+        render: || {
+            with_data(|ui, own, d| {
+                let form = add_form(ui, own, d.view.currency.clone());
+                view! {
+                    <Card>
+                        <Eyebrow>"NEW EVENT"</Eyebrow>
+                        {form}
+                    </Card>
+                }
+                .into_any()
+            })
+            .into_any()
+        },
+        summary: None,
+        shown: None,
+    },
+];
+
+const PAGE: &str = "events";
+
+/// One load of the view, with what the page reads from the report.
+#[derive(Clone)]
+struct Data {
+    view: EventsView,
+    ctx: Context,
+}
+
+/// The page state and each load by context; the picked event opens over the
+/// page, outside the panels.
 #[component]
 pub fn Events() -> impl IntoView {
     let ui = Ui::new();
@@ -225,34 +275,99 @@ pub fn Events() -> impl IntoView {
         revision.track();
         NoArgs {}
     });
-    move || {
-        let ctx = ui.app.report.data.with(|d| {
-            d.as_ref()
-                .and_then(|r| r.as_ref().ok())
-                .map(Context::from)
-                .unwrap_or_default()
+    // Every panel redrawn on each load or report change, as the whole page was.
+    let data = Memo::new_with_compare(
+        move |_| {
+            let ctx = ui.app.report.data.with(|d| {
+                d.as_ref()
+                    .and_then(|r| r.as_ref().ok())
+                    .map(Context::from)
+                    .unwrap_or_default()
+            });
+            view_data.data.with(|d| {
+                d.as_ref()?.as_ref().ok().map(|view| Data {
+                    view: view.clone(),
+                    ctx,
+                })
+            })
+        },
+        |_, _| true,
+    );
+    provide_context(ui);
+    provide_context(own);
+    provide_context(data);
+    let picked = move || {
+        let id = ui.selected.get()?;
+        let (event, months, ctx, currency) = data.with(|d| {
+            let d = d.as_ref()?;
+            let event = d
+                .view
+                .events
+                .iter()
+                .find(|e| e.row.wish.wish_id == id)
+                .cloned()?;
+            Some((
+                event,
+                d.view.months.clone(),
+                d.ctx.clone(),
+                d.view.currency.clone(),
+            ))
+        })?;
+        let title = event.row.wish.name.clone();
+        let close = Callback::new(move |()| {
+            ui.close_forms();
+            own.open.set(None);
+            ui.selected.set(None);
         });
-        view_data.data.with(|data| match data {
-            None => view! {
-                <div class=STACK>
-                    <Skeleton class=SKELETON_HEADER />
-                    <Skeleton class=SKELETON_CARD />
-                </div>
-            }
-            .into_any(),
-            Some(Err(e)) => view! { <Problem error=e.clone() /> }.into_any(),
-            Some(Ok(view)) => page(ui, own, view, ctx).into_any(),
+        let block = event_block(
+            ui,
+            own,
+            &event,
+            StoredValue::new(months),
+            StoredValue::new(ctx),
+            &currency,
+        );
+        Some(view! {
+            <Popup title=title class="w-[min(94vw,60rem)]" on_close=close>
+                {block}
+            </Popup>
         })
+    };
+    // None while loading, then the error, if any.
+    let status = Memo::new(move |_| {
+        view_data
+            .data
+            .with(|d| d.as_ref().map(|r| r.as_ref().err().cloned()))
+    });
+    move || match status.get() {
+        None => view! {
+            <div class=STACK>
+                <Skeleton class=SKELETON_HEADER />
+                <Skeleton class=SKELETON_CARD />
+            </div>
+        }
+        .into_any(),
+        Some(Some(e)) => view! { <Problem error=e /> }.into_any(),
+        Some(None) => view! {
+            <PageView tab="events" tab_name="Events" page=PAGE />
+            {picked}
+        }
+        .into_any(),
     }
 }
 
-fn page(ui: Ui, own: Own, view: &EventsView, ctx: Context) -> impl IntoView + use<> {
-    let months = StoredValue::new(view.months.clone());
-    let ctx = StoredValue::new(ctx);
-    let currency = view.currency.clone();
-    let form = add_form(ui, own, currency.clone());
-    // The board: every event a box under its phase; the one picked opens
-    // with its numbers, parts and payments under the board.
+/// `f` over the page state and the loaded view.
+fn with_data(f: fn(Ui, Own, &Data) -> AnyView) -> impl IntoView {
+    let ui = expect_context::<Ui>();
+    let own = expect_context::<Own>();
+    let data = expect_context::<Memo<Option<Data>>>();
+    move || data.with(|d| d.as_ref().map(|d| f(ui, own, d)))
+}
+
+/// The board: every event a box under its phase; the one picked opens with
+/// its numbers, parts and payments over the page.
+fn board(ui: Ui, _: Own, d: &Data) -> AnyView {
+    let view = &d.view;
     let board = [
         ("Upcoming", Tone::Accent, EventPhase::Upcoming),
         ("Running", Tone::Positive, EventPhase::Running),
@@ -264,50 +379,26 @@ fn page(ui: Ui, own: Own, view: &EventsView, ctx: Context) -> impl IntoView + us
             .events
             .iter()
             .filter(|e| e.phase == phase)
-            .map(|e| event_box(ui, e, &currency.code))
+            .map(|e| event_box(ui, e, &view.currency.code))
             .collect();
         let count = boxes.len();
         view! { <BoardColumn title=title tone=tone count=count>{boxes}</BoardColumn> }
     })
     .collect_view();
-    let events = StoredValue::new(view.events.clone());
-    let picked = move || {
-        let id = ui.selected.get()?;
-        let event =
-            events.with_value(|all| all.iter().find(|e| e.row.wish.wish_id == id).cloned())?;
-        let title = event.row.wish.name.clone();
-        let close = Callback::new(move |()| {
-            ui.close_forms();
-            own.open.set(None);
-            ui.selected.set(None);
-        });
-        let block = event_block(ui, own, &event, months, ctx, &currency);
-        Some(view! {
-            <Popup title=title class="w-[min(94vw,60rem)]" on_close=close>
-                {block}
-            </Popup>
-        })
-    };
     let empty = view.events.is_empty().then(|| {
         view! { <p class=MUTED>"No events yet."</p> }
     });
     view! {
-        <div class=STACK>
-            <section aria-label="Events board" class=BOARD_SECTION>
-                <div>
-                    <Eyebrow>"EVENTS"</Eyebrow>
-                    <h2 class=BOARD_TITLE>"Planned days and trips"</h2>
-                </div>
-                <div class="grid items-start gap-3 md:grid-cols-3">{board}</div>
-                {empty}
-            </section>
-            {picked}
-            <Card>
-                <Eyebrow>"NEW EVENT"</Eyebrow>
-                {form}
-            </Card>
-        </div>
+        <section aria-label="Events board" class=cn([card_class(CardTone::Default), BOARD_SECTION])>
+            <div>
+                <Eyebrow>"EVENTS"</Eyebrow>
+                <h2 class=BOARD_TITLE>"Planned days and trips"</h2>
+            </div>
+            <div class="grid items-start gap-3 md:grid-cols-3">{board}</div>
+            {empty}
+        </section>
     }
+    .into_any()
 }
 
 /// What an event has used of its plan, past 100 when over. What is spent
