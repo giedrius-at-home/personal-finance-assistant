@@ -5,8 +5,8 @@ use finance_types::plot::{Axis, Compare, Insight, InsightKind, Measure, PlotSpec
 use finance_types::report::Currency;
 use rust_decimal::{Decimal, RoundingStrategy};
 
-use super::Column;
 use super::options::mean;
+use super::{Column, measure_name};
 use crate::closure::short_money;
 
 /// `totals`: per column, the plain (not running) value; `reference`: the
@@ -27,13 +27,18 @@ pub(super) fn insight(
         Unit::Money => short_money(v, currency),
         Unit::Count => v.normalize().to_string(),
     };
-    let insight = |kind, label: &str, value, against, text| {
+    // With several measures the sentence names the one it is about.
+    let measure = (spec.measures.len() > 1).then(|| measure_name(spec.measures[0].measure).1);
+    let insight = |kind, label: &str, value, against, text: String| {
         Some(Insight {
             kind,
             label: label.into(),
             value,
             against: Some(against),
-            text,
+            text: match measure {
+                Some(m) => format!("{m}, {text}"),
+                None => text,
+            },
         })
     };
     // Sums and shares only mean something for a measure that adds up.
@@ -113,7 +118,10 @@ pub(super) fn insight(
             let (top, value) = done
                 .iter()
                 .copied()
-                .filter(|(i, _)| !columns[*i].other)
+                // Neither "Other" nor the merchant with no name ("Unknown").
+                .filter(|(i, _)| {
+                    !columns[*i].other && !(spec.by == Axis::Merchant && columns[*i].keys == [""])
+                })
                 .reduce(highest)
                 .filter(|(_, v)| *v > Decimal::ZERO)?;
             let total: Decimal = positive().map(|(_, v)| v).sum();

@@ -1332,3 +1332,40 @@ fn a_day_or_weekday_occurring_only_today_is_not_named() {
     assert_eq!(insight.label, "Friday");
     assert_eq!(insight.against, Some(dec("10")));
 }
+
+#[test]
+fn the_insight_of_several_measures_names_its_measure() {
+    let data = query(
+        &snap(ledger()),
+        &spec(
+            Axis::Month,
+            Period::Last6Months,
+            &[Measure::Income, Measure::Spent],
+        ),
+    );
+    let text = data.insight.unwrap().text;
+    assert!(text.starts_with("Income, October 2026: "), "{text}");
+    let one = query(
+        &snap(ledger()),
+        &spec(Axis::Month, Period::Last6Months, &[Measure::Spent]),
+    );
+    assert!(one.insight.unwrap().text.starts_with("October 2026: "));
+}
+
+#[test]
+fn largest_share_on_merchants_is_never_unknown() {
+    let rows = vec![
+        out("u", "100", None, "2026-11-02"),
+        named(out("a", "40", None, "2026-11-03"), "Albert Heijn"),
+        named(out("b", "20", None, "2026-11-04"), "Bakker"),
+    ];
+    let data = query(
+        &snap(rows),
+        &spec(Axis::Merchant, Period::ThisMonth, &[Measure::Spent]),
+    );
+    let insight = data.insight.unwrap();
+    assert_eq!(insight.label, "Albert Heijn");
+    assert_eq!(insight.value, dec("40"));
+    // The total still holds Unknown.
+    assert_eq!(insight.against, Some(dec("160")));
+}
