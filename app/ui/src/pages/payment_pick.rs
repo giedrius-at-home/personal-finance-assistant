@@ -11,6 +11,7 @@ use rust_decimal::Decimal;
 use serde::Serialize;
 
 use crate::api::invoke;
+use crate::ds::patterns::{BADGE_TIGHT, DATE, PAYMENT_ROW, TRUNCATE, WARN};
 use crate::ds::{Badge, Button, CONTROL, Popup, Size, Tone, Variant, money};
 use crate::format;
 
@@ -157,7 +158,7 @@ pub fn PaymentPicker(
                 />
                 {move || {
                     let text = error.get();
-                    (!text.is_empty()).then(|| view! { <p role="alert" class="text-sm text-negative-fg">{text}</p> })
+                    (!text.is_empty()).then(|| view! { <p role="alert" class=WARN>{text}</p> })
                 }}
                 <ul class="max-h-[55vh] overflow-y-auto">
                     {move || {
@@ -176,11 +177,11 @@ pub fn PaymentPicker(
                                 let title = text.clone();
                                 let pick = move |_| on_pick.run((a.get_value(), row.clone()));
                                 view! {
-                                    <li class="grid grid-cols-[6.5rem_1fr_auto_auto] items-center gap-x-3 border-t border-line py-1.5 text-sm first:border-t-0">
-                                        <span class="text-fg-muted tabular-nums">{day}</span>
+                                    <li class=PAYMENT_ROW>
+                                        <span class=DATE>{day}</span>
                                         <span class="flex min-w-0 items-center gap-2">
-                                            <span class="min-w-0 truncate" title=title>{text}</span>
-                                            {near.then(|| view! { <Badge tone=Tone::Positive class="px-2 py-0">"Same amount"</Badge> })}
+                                            <span class=TRUNCATE title=title>{text}</span>
+                                            {near.then(|| view! { <Badge tone=Tone::Positive class=BADGE_TIGHT>"Same amount"</Badge> })}
                                         </span>
                                         <span class="tabular-nums">{value}</span>
                                         <Button size=Size::Sm variant=Variant::Secondary disabled=busy on_click=Callback::new(pick)>

@@ -23,6 +23,12 @@ use serde::de::IgnoredAny;
 
 use crate::api::invoke;
 use crate::ds::money_plan::MoneyPlanFields;
+use crate::ds::patterns::{
+    ADD_FORM, BADGE_TIGHT, BOARD_TITLE, CARD_NAME, DATE, Disclosure, DisclosureKind, FEEDBACK_LINE,
+    FIGURE, HINT, INLINE_TOOLS, LIST_STACK, META_LINE, MUTED, NAME_ROW, PAIR, PANEL_TITLE,
+    PAYMENT_ROW, RULED_LOOSE, SELECT_CHEVRON, SELECT_WRAP, STACK, STACK_MD, STACK_SM, TRUNCATE,
+    WARNING_TEXT,
+};
 use crate::ds::sync_value;
 use crate::ds::{
     BOARD, BOARD_CARD, Badge, BoardColumn, Button, CONTROL, Card, CardTone, Eyebrow, Facts,
@@ -147,7 +153,7 @@ fn feedback(ui: Ui, target: String) -> impl IntoView {
         ui.messages.with(|m| {
             m.get(&target).filter(|(text, _)| !text.is_empty()).map(|(text, error)| {
                 let class = cn([
-                    "mt-2 break-words text-sm",
+                    FEEDBACK_LINE,
                     if *error { "text-negative-fg" } else { "text-positive-fg" },
                 ]);
                 view! { <p role=if *error { "alert" } else { "status" } class=class>{text.clone()}</p> }
@@ -226,9 +232,9 @@ fn unique_categories(categories: impl IntoIterator<Item = String>) -> Vec<String
 
 fn select_wrap(select: impl IntoView) -> impl IntoView {
     view! {
-        <div class="relative w-full">
+        <div class=SELECT_WRAP>
             {select}
-            <span aria-hidden="true" class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-fg-muted">
+            <span aria-hidden="true" class=SELECT_CHEVRON>
                 <Lucide icon=Icon::ChevronDown size=16 />
             </span>
         </div>
@@ -376,11 +382,10 @@ fn page(ui: Ui, report: &Dashboard) -> impl IntoView + use<> {
                 ));
             }
             let view = view! {
-                <details class=BOARD_CARD>
-                    <summary class="grid cursor-pointer list-none gap-1.5">{head}</summary>
+                <Disclosure kind=DisclosureKind::Card class=BOARD_CARD summary=head>
                     <Facts class="mt-1" rows=rows />
-                    <p class="text-xs text-fg-muted">"Change it under Bills below."</p>
-                </details>
+                    <p class=HINT>"Change it under Bills below."</p>
+                </Disclosure>
             }
             .into_any();
             (column, day, payment.amount.amount, view)
@@ -435,7 +440,7 @@ fn page(ui: Ui, report: &Dashboard) -> impl IntoView + use<> {
         view! {
             <Card>
                 <Eyebrow>"SALARY"</Eyebrow>
-                <h2 class="mt-2 text-lg font-semibold">{title}</h2>
+                <h2 class=PANEL_TITLE>{title}</h2>
                 {body}
                 {plan_fields}
             </Card>
@@ -478,10 +483,9 @@ fn page(ui: Ui, report: &Dashboard) -> impl IntoView + use<> {
             ("Spent".to_owned(), crate::ds::money(month.spent, unit)),
         ];
         let view = view! {
-            <details class=BOARD_CARD>
-                <summary class="grid cursor-pointer list-none gap-1.5">{head}</summary>
+            <Disclosure kind=DisclosureKind::Card class=BOARD_CARD summary=head>
                 <Facts class="mt-1" rows=rows />
-            </details>
+            </Disclosure>
         }
         .into_any();
         boxes.push((Column::Due, dates.starts_on.clone(), month.share, view));
@@ -533,10 +537,9 @@ fn page(ui: Ui, report: &Dashboard) -> impl IntoView + use<> {
                     let label = format!("{} earlier", older.len());
                     cards.push(
                         view! {
-                            <details class="grid gap-2">
-                                <summary class="cursor-pointer px-1 text-xs text-fg-muted">{label}</summary>
+                            <Disclosure class=STACK_SM summary_class="px-1 text-xs text-fg-muted" summary=label>
                                 <div class="mt-2 grid gap-2">{older}</div>
-                            </details>
+                            </Disclosure>
                         }
                         .into_any(),
                     );
@@ -584,7 +587,7 @@ fn page(ui: Ui, report: &Dashboard) -> impl IntoView + use<> {
         .collect_view();
 
     view! {
-        <div class="grid gap-4">
+        <div class=STACK>
             {payday}
             <div role="group" aria-label="Planning month" class="justify-self-start">
                 <MonthSwitcher
@@ -594,12 +597,12 @@ fn page(ui: Ui, report: &Dashboard) -> impl IntoView + use<> {
                     max=next_month.clone()
                 />
             </div>
-            <section aria-label="Payments board" class="grid gap-3">
+            <section aria-label="Payments board" class=STACK_MD>
                 <div>
                     <Eyebrow>"PAYMENTS"</Eyebrow>
-                    <h2 class="mt-1 text-lg font-semibold">{active_label.clone()}</h2>
+                    <h2 class=BOARD_TITLE>{active_label.clone()}</h2>
                 </div>
-                <p class="text-xs text-fg-muted">"Open a box for its details. Drag a payment to Paid to link the bank payment."</p>
+                <p class=HINT>"Open a box for its details. Drag a payment to Paid to link the bank payment."</p>
                 {feedback(ui, "board".into())}
                 <div class=BOARD>{board}</div>
             </section>
@@ -618,20 +621,20 @@ fn page(ui: Ui, report: &Dashboard) -> impl IntoView + use<> {
             />
             <Card>
                 <Eyebrow>"NEW"</Eyebrow>
-                <h2 class="mt-2 text-lg font-semibold">"Add a payment or income"</h2>
+                <h2 class=PANEL_TITLE>"Add a payment or income"</h2>
                 {create_form(ui, &available, &owners, &accounts, &currencies, &active_month, &active_end, reimbursable)}
                 {feedback(ui, "plan-removed".into())}
             </Card>
-            <section aria-label="Bills" class="grid gap-3">
+            <section aria-label="Bills" class=STACK_MD>
                 <div>
                     <Eyebrow>"EVERY MONTH"</Eyebrow>
-                    <h2 class="mt-1 text-lg font-semibold">"Bills"</h2>
+                    <h2 class=BOARD_TITLE>"Bills"</h2>
                 </div>
                 {stale.then(|| view! {
-                    <p role="status" class="text-sm text-warning-fg">"Out of date. Refresh first."</p>
+                    <p role="status" class=WARNING_TEXT>"Out of date. Refresh first."</p>
                 })}
                 {feedback(ui, "bill-removed".into())}
-                {no_bills.then(|| view! { <p class="text-sm text-fg-muted">"No bills this month."</p> })}
+                {no_bills.then(|| view! { <p class=MUTED>"No bills this month."</p> })}
                 <div class="grid items-start gap-3 sm:grid-cols-2 xl:grid-cols-4">{bill_cards}</div>
             </section>
         </div>
@@ -815,7 +818,7 @@ fn create_form(
     let min = format!("{active_month}-01");
     let max = active_end.to_owned();
     view! {
-        <form class="my-5 grid items-end gap-3 sm:grid-cols-2 lg:grid-cols-3" novalidate on:submit=submit>
+        <form class=ADD_FORM novalidate on:submit=submit>
             <Field label="Repeat" id="plan-repeat">
                 {select_wrap(view! {
                     <select
@@ -1072,12 +1075,12 @@ type Boxed = (Column, String, Decimal, AnyView);
 /// The head of a box: name, amount, a kind tag and the day.
 fn box_head(name: String, amount: String, tag: (Tone, &'static str), day: String) -> impl IntoView {
     view! {
-        <span class="flex items-baseline justify-between gap-3">
-            <strong class="min-w-0 truncate font-semibold">{name}</strong>
-            <strong class="whitespace-nowrap tabular-nums">{amount}</strong>
+        <span class=NAME_ROW>
+            <strong class=CARD_NAME>{name}</strong>
+            <strong class=FIGURE>{amount}</strong>
         </span>
-        <span class="flex items-center justify-between gap-3 text-xs text-fg-muted">
-            <Badge tone=tag.0 class="px-2 py-0">{tag.1}</Badge>
+        <span class=META_LINE>
+            <Badge tone=tag.0 class=BADGE_TIGHT>{tag.1}</Badge>
             <span class="whitespace-nowrap">{day}</span>
         </span>
     }
@@ -1237,9 +1240,9 @@ fn plan_popup(ui: Ui, plan: PlannedPaymentView) -> impl IntoView {
                 let (plan_id, tx) = (id.clone(), c.transaction_id.clone());
                 let value = crate::ds::money(c.amount.amount, &c.amount.currency);
                 view! {
-                    <li class="grid grid-cols-[6.5rem_1fr_auto_auto] items-center gap-x-3 border-t border-line py-1.5 text-sm first:border-t-0">
-                        <span class="text-fg-muted tabular-nums">{format::date(&c.occurred_on)}</span>
-                        <span class="min-w-0 truncate" title=c.description.clone()>{c.description.clone()}</span>
+                    <li class=PAYMENT_ROW>
+                        <span class=DATE>{format::date(&c.occurred_on)}</span>
+                        <span class=TRUNCATE title=c.description.clone()>{c.description.clone()}</span>
                         <span class="tabular-nums">{value}</span>
                         <Button
                             size=Size::Sm
@@ -1316,7 +1319,7 @@ fn plan_popup(ui: Ui, plan: PlannedPaymentView) -> impl IntoView {
                 if removing {
                     let (id, name, target) = (confirm_id.clone(), name.clone(), target.clone());
                     view! {
-                        <span class="flex gap-2">
+                        <span class=PAIR>
                             <Button
                                 size=Size::Sm
                                 variant=Variant::Danger
@@ -1474,7 +1477,7 @@ fn BillCard(ui: Ui, bill: SubscriptionRow, shared: StoredValue<Shared>) -> impl 
             if removing_this() {
                 let (id, target) = (id.clone(), target.clone());
                 view! {
-                    <div class="flex flex-wrap items-center gap-2 text-sm">
+                    <div class=INLINE_TOOLS>
                         <span>"Remove future payments? Past transactions stay linked."</span>
                         <Button
                             size=Size::Sm
@@ -1515,19 +1518,22 @@ fn BillCard(ui: Ui, bill: SubscriptionRow, shared: StoredValue<Shared>) -> impl 
     let editing_label = editing_this.clone();
     let editor = move || editing_this().then(|| bill_editor(ui, bill));
     view! {
-        <details class=cn([BOARD_CARD, "open:col-span-full"])>
-            <summary class="grid cursor-pointer list-none gap-1.5">
-                <span class="flex items-baseline justify-between gap-3">
-                    <h3 class="min-w-0 truncate font-semibold">{name}</h3>
-                    <strong class="whitespace-nowrap tabular-nums">
+        <Disclosure
+            kind=DisclosureKind::Card
+            class=cn([BOARD_CARD, "open:col-span-full"])
+            summary=view! {
+                <span class=NAME_ROW>
+                    <h3 class=CARD_NAME>{name}</h3>
+                    <strong class=FIGURE>
                         <Money value=amount_max unit=currency neutral=true />
                     </strong>
                 </span>
-                <span class="flex items-center justify-between gap-3 text-xs text-fg-muted">
+                <span class=META_LINE>
                     <span>{frequency}</span>
                     <span class="whitespace-nowrap">{next_day}</span>
                 </span>
-            </summary>
+            }
+        >
             <FactsRow class="mt-2" rows=subtitle />
             <div class="mt-3 flex flex-wrap items-center gap-2">
                 <Button
@@ -1546,7 +1552,7 @@ fn BillCard(ui: Ui, bill: SubscriptionRow, shared: StoredValue<Shared>) -> impl 
             {schedule}
             {feedback(ui, format!("bill:{id}:link"))}
             {candidates(ui, bill, stale)}
-        </details>
+        </Disclosure>
     }
 }
 
@@ -1632,7 +1638,7 @@ fn bill_editor(ui: Ui, bill: StoredValue<SubscriptionRow>) -> impl IntoView {
         })
         .collect_view();
     view! {
-        <form class="my-5 grid items-end gap-3 sm:grid-cols-2 lg:grid-cols-3" on:submit=submit>
+        <form class=ADD_FORM on:submit=submit>
             <Field label="Name" id=f_name.clone()>
                 <input
                     id=f_name
@@ -1830,7 +1836,7 @@ fn matching(
                         })
                         disabled=Signal::derive(move || blocked || busy())
                     />
-                    <span class="min-w-0 truncate">{category}</span>
+                    <span class=TRUNCATE>{category}</span>
                     {elsewhere.map(|name| view! { <small class="col-start-2 text-eyebrow text-fg-muted">{name}</small> })}
                 </label>
             }
@@ -1838,8 +1844,7 @@ fn matching(
         .collect_view();
     let busy_label = busy.clone();
     view! {
-        <details class="mt-4 border-t border-line pt-3">
-            <summary class="cursor-pointer text-sm font-semibold">{summary}</summary>
+        <Disclosure class=RULED_LOOSE summary_class="text-sm font-semibold" summary=summary>
             <form class="grid gap-3 pt-3" on:submit=submit>
                 <Help text="Choose the transaction categories that belong to this subscription. A matching amount in the billing window can then be marked paid automatically. One category can belong to only one subscription." />
                 <div class="grid grid-cols-[repeat(auto-fit,minmax(145px,1fr))] gap-2">{boxes}</div>
@@ -1853,7 +1858,7 @@ fn matching(
                 </div>
                 {feedback(ui, target)}
             </form>
-        </details>
+        </Disclosure>
     }
 }
 
@@ -1949,7 +1954,7 @@ fn candidates(ui: Ui, bill: StoredValue<SubscriptionRow>, stale: bool) -> impl I
                 })
                 .collect_view();
             view! {
-                <div class="mt-4 grid gap-3">
+                <div class=LIST_STACK>
                     <strong>"Possible payments to link"</strong>
                     {cards}
                 </div>
