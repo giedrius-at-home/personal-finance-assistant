@@ -16,10 +16,10 @@ use leptos::prelude::*;
 use leptos::tachys::reactive_graph::OwnedView;
 
 use crate::api::{Loaded, NoArgs, load};
-use crate::ds::patterns::TAB_SCROLL;
+use crate::ds::patterns::{ERROR_LINE, TAB_ROW, TAB_SCROLL};
 use crate::ds::{
-    Eyebrow, Heading, Icon, Lucide, SegmentedControl, Size, TABS_LIST, TABS_TRIGGER, Variant,
-    button_class, cn,
+    Button, Eyebrow, Heading, Icon, Lucide, SegmentedControl, Size, TABS_LIST, TABS_TRIGGER,
+    Variant, button_class, cn,
 };
 use crate::layout::PageView;
 use crate::layout::edit::TabView;
@@ -246,8 +246,14 @@ fn App() -> impl IntoView {
     api::listen("daily-forecast", &on_forecast);
     on_forecast.forget();
 
-    // ⌘1–9 pick a tab of the bar by position, ⌘R refreshes.
+    // ⌘1–9 pick a tab of the bar by position, ⌘R refreshes, Esc leaves Edit layout.
     let handle = window_event_listener(ev::keydown, move |e| {
+        if e.key() == "Escape" {
+            if layout.editing().get_untracked() && !escape_taken() {
+                layout.set_editing(false);
+            }
+            return;
+        }
         if !e.meta_key() || e.shift_key() || e.alt_key() || e.ctrl_key() {
             return;
         }
@@ -273,6 +279,9 @@ fn App() -> impl IntoView {
             <div class="w-full min-w-0 px-5 pb-12 pt-12 sm:px-8 sm:pt-14 xl:px-12">
                 <Header />
                 <Tabs visible />
+                {move || (layout.editing().get() && layout.save_failed().get()).then(|| view! {
+                    <p role="alert" class=ERROR_LINE>"Could not save the layout. Your changes are kept until you close the app."</p>
+                })}
                 <div role="tabpanel" class="page-stack mt-0 min-w-0">
                     {move || {
                         owned(|| match app.own_tab.get() {
@@ -340,11 +349,14 @@ fn Header() -> impl IntoView {
 #[component]
 fn Tabs(visible: Memo<Vec<TabView>>) -> impl IntoView {
     let app = state();
+    let layout = expect_context::<layout::LayoutState>();
+    let editing = layout.editing();
     view! {
+        <div class=TAB_ROW>
         <div
             role="tablist"
             aria-label="Finance sections"
-            class=cn([TABS_LIST, "glass-bar sticky top-10 z-30 mb-4 flex w-full gap-0.5 sm:mb-6 sm:inline-flex sm:w-auto sm:gap-1"])
+            class=cn([TABS_LIST, "glass-bar flex w-full min-w-0 gap-0.5 sm:inline-flex sm:w-auto sm:gap-1"])
         >
             {move || visible
                 .get()
@@ -370,7 +382,31 @@ fn Tabs(visible: Memo<Vec<TabView>>) -> impl IntoView {
                 })
                 .collect_view()}
         </div>
+        // Hidden while nothing could be saved: the layout is loading or its read failed.
+        {move || layout.editable().then(|| view! {
+            <Button
+                variant=Variant::Secondary
+                size=Size::Sm
+                on_click=Callback::new(move |_| layout.set_editing(!editing.get_untracked()))
+            >
+                {move || if editing.get() { "Done" } else { "Edit layout" }}
+            </Button>
+        })}
+        </div>
     }
+}
+
+/// Esc belongs to something else: a popup is open or focus is in a text field.
+fn escape_taken() -> bool {
+    let doc = document();
+    let popup = doc.query_selector("[role=dialog]").ok().flatten().is_some();
+    let typing = doc.active_element().is_some_and(|el| {
+        matches!(el.tag_name().as_str(), "INPUT" | "TEXTAREA" | "SELECT")
+            || el
+                .get_attribute("contenteditable")
+                .is_some_and(|v| v != "false")
+    });
+    popup || typing
 }
 
 #[component]

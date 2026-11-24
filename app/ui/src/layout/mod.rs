@@ -8,7 +8,11 @@ use leptos::task::spawn_local;
 use serde::Serialize;
 
 use crate::api::{self, NoArgs};
-use crate::ds::{Button, PanelFrame, PanelList, Size, Variant};
+use crate::ds::arrange::{drop_index, moves};
+use crate::ds::{
+    Button, Confirm, DropTarget, EditBar, Gallery, PanelFrame, PanelList, Size, Variant,
+};
+use edit::PageRef;
 
 pub mod edit;
 
@@ -241,6 +245,8 @@ pub struct LayoutState {
     layout: RwSignal<UiLayout>,
     queue: StoredValue<SaveQueue>,
     load: RwSignal<Load>,
+    editing: RwSignal<bool>,
+    save_failed: RwSignal<bool>,
 }
 
 impl LayoutState {
@@ -250,6 +256,8 @@ impl LayoutState {
             layout: RwSignal::new(UiLayout::default()),
             queue: StoredValue::new(SaveQueue::default()),
             load: RwSignal::new(Load::Loading),
+            editing: RwSignal::new(false),
+            save_failed: RwSignal::new(false),
         };
         spawn_local(async move {
             match api::invoke::<UiLayout>("ui_layout", &NoArgs {}).await {
@@ -266,6 +274,30 @@ impl LayoutState {
     /// The tab bar's tabs; reactive.
     pub fn tabs(&self) -> Vec<edit::TabView> {
         self.layout.with(edit::tabs)
+    }
+
+    /// Edit layout is on.
+    pub fn editing(&self) -> ReadSignal<bool> {
+        self.editing.read_only()
+    }
+
+    pub fn set_editing(&self, on: bool) {
+        self.editing.set(on);
+    }
+
+    /// The layout was read, so edits can be saved; reactive.
+    pub fn editable(&self) -> bool {
+        self.load.get().may_save()
+    }
+
+    /// Applies `f`, then saves through the queue (same rules as `toggle`).
+    pub fn edit(&self, f: impl FnOnce(&mut UiLayout)) {
+        self.change(f);
+    }
+
+    /// True after a save returned Err; cleared by the next Ok.
+    pub fn save_failed(&self) -> ReadSignal<bool> {
+        self.save_failed.read_only()
     }
 
     pub fn toggle(&self, tab: &str, tab_name: &str, page: &str, panel: &str) {
@@ -305,12 +337,13 @@ impl LayoutState {
         }
     }
 
-    /// A failed save is ignored on screen; the state stays as clicked.
+    /// A failed save keeps the state as clicked and sets `save_failed`.
     fn save(self) {
         spawn_local(async move {
             loop {
                 let layout = self.layout.get_untracked();
-                let _ = api::invoke::<UiLayout>("save_ui_layout", &SaveArgs { layout }).await;
+                let saved = api::invoke::<UiLayout>("save_ui_layout", &SaveArgs { layout }).await;
+                self.save_failed.try_set(saved.is_err());
                 if !self
                     .queue
                     .try_update_value(SaveQueue::finished)
@@ -323,7 +356,8 @@ impl LayoutState {
     }
 }
 
-/// A page's panels, as its saved layout says, with "Fold all / Open all".
+/// A page's panels, as its saved layout says, with "Fold all / Open all"; in
+/// Edit layout also each panel's controls, "Add a panel" and "Reset this tab".
 #[component]
 pub fn PageView(
     #[prop(into)] tab: String,
@@ -332,16 +366,40 @@ pub fn PageView(
 ) -> impl IntoView {
     let state = expect_context::<LayoutState>();
     let report = crate::state().report;
-    let at = StoredValue::new((tab, tab_name, page));
-    let items = Memo::new(move |_| {
-        at.with_value(|(_, _, page)| state.layout.with(|l| resolve(&defs(), page, l.page(page))))
+    let at = StoredValue::new(PageRef {
+        tab,
+        tab_name,
+        page,
     });
+    let items = Memo::new(move |_| {
+        at.with_value(|a| {
+            state
+                .layout
+                .with(|l| resolve(&defs(), &a.page, l.page(&a.page)))
+        })
+    });
+    let editing = state.editing;
     // Read inside reactive closures, so `shown` may track signals.
     let visible = move || items.with(|v| drawn(v, is_shown));
+    // Edit layout lists every item: one with nothing to show is a muted row.
+    let listed = move || {
+        if editing.get() {
+            items.get()
+        } else {
+            visible()
+        }
+    };
     let all_folded = move || visible().iter().all(|i| i.folded);
     // Nothing drawn (e.g. a Manage workspace still loading): no "Fold all".
     // A memo, so only the control redraws when the first panel shows.
     let any_drawn = Memo::new(move |_| !visible().is_empty());
+    let edit = move |f: &dyn Fn(&mut UiLayout, &[&PanelDef], &PageRef)| {
+        at.with_value(|a| state.edit(|l| f(l, &defs(), a)));
+    };
+    let position = move |id: &str| items.with(|v| v.iter().position(|i| i.panel == id));
+    // The panel being dragged, and the one under the pointer (with "after").
+    let dragging = RwSignal::new(None::<&'static str>);
+    let target = RwSignal::new(None::<(&'static str, bool)>);
     let panel = move |item: PanelItem| {
         let def = registry().find(|d| d.id == item.panel)?;
         let id = def.id;
@@ -352,18 +410,98 @@ pub fn PageView(
             report.data.with(|d| d.as_ref()?.as_ref().ok().and_then(f))
         });
         let render = def.render;
-        Some(view! {
-            <PanelFrame
-                title=def.title
-                summary=summary
-                folded=folded
-                on_toggle=Callback::new(move |()| at.with_value(|(t, n, p)| state.toggle(t, n, p, id)))
-                half=item.half
-            >
-                {render()}
-            </PanelFrame>
+        let half = item.half;
+        let ends = Memo::new(move |_| {
+            let len = items.with(Vec::len);
+            position(id).map_or((None, None), |p| moves(p, len))
+        });
+        let moved = move |to: Option<usize>| {
+            if let Some(to) = to {
+                edit(&|l, d, a| edit::panel_moved(l, d, a, id, to));
+            }
+        };
+        let bar = move || {
+            editing.get().then(|| {
+                view! {
+                    <EditBar
+                        title=def.title
+                        first=Signal::derive(move || ends.get().0.is_none())
+                        last=Signal::derive(move || ends.get().1.is_none())
+                        half=half
+                        on_grab=Callback::new(move |on: bool| {
+                            dragging.set(on.then_some(id));
+                            target.set(None);
+                        })
+                        on_up=Callback::new(move |()| moved(ends.get_untracked().0))
+                        on_down=Callback::new(move |()| moved(ends.get_untracked().1))
+                        on_half=Callback::new(move |()| {
+                            edit(&|l, d, a| edit::panel_half_set(l, d, a, id, !half));
+                        })
+                        on_remove=Callback::new(move |()| {
+                            edit(&|l, d, a| edit::panel_removed(l, d, a, id));
+                        })
+                    />
+                }
+            })
+        };
+        let drop = DropTarget {
+            accepts: Signal::derive(move || dragging.get().is_some()),
+            over: Signal::derive(move || {
+                target.get().is_some_and(|(t, _)| t == id) && dragging.get() != Some(id)
+            }),
+            on_over: Callback::new(move |after: bool| {
+                if target.get_untracked() != Some((id, after)) {
+                    target.set(Some((id, after)));
+                }
+            }),
+            on_leave: Callback::new(move |()| {
+                if target.get_untracked().is_some_and(|(t, _)| t == id) {
+                    target.set(None);
+                }
+            }),
+            on_drop: Callback::new(move |()| {
+                let (Some(from), Some((_, after))) =
+                    (dragging.get_untracked(), target.get_untracked())
+                else {
+                    return;
+                };
+                if let (Some(f), Some(o)) = (position(from), position(id)) {
+                    let to = drop_index(f, o, after);
+                    edit(&|l, d, a| edit::panel_moved(l, d, a, from, to));
+                }
+                dragging.set(None);
+                target.set(None);
+            }),
+        };
+        // Only Edit layout makes a panel quiet, so outside it a frame is never redrawn.
+        let quiet = Memo::new(move |_| editing.get() && !is_shown(id));
+        Some(move || {
+            view! {
+                <PanelFrame
+                    title=def.title
+                    summary=summary
+                    folded=folded
+                    on_toggle=Callback::new(move |()| at.with_value(|a| state.toggle(&a.tab, &a.tab_name, &a.page, id)))
+                    half=half
+                    edit=bar
+                    drop=drop
+                    quiet=quiet.get()
+                >
+                    {render()}
+                </PanelFrame>
+            }
         })
     };
+    let addable = Signal::derive(move || {
+        at.with_value(|a| {
+            state.layout.with(|l| {
+                edit::addable(l, &defs(), a)
+                    .into_iter()
+                    .map(|d| (d.id.to_owned(), d.title.to_owned()))
+                    .collect()
+            })
+        })
+    });
     // Panels wait for the saved layout, so one saved folded never mounts.
     let ready = move || state.load.get() != Load::Loading;
     move || {
@@ -376,7 +514,7 @@ pub fn PageView(
                             size=Size::Sm
                             on_click=Callback::new(move |_| {
                                 let folded = !all_folded();
-                                at.with_value(|(t, n, p)| state.set_all(t, n, p, folded));
+                                at.with_value(|a| state.set_all(&a.tab, &a.tab_name, &a.page, folded));
                             })
                         >
                             {move || if all_folded() { "Open all" } else { "Fold all" }}
@@ -384,8 +522,21 @@ pub fn PageView(
                     </div>
                 })}
                 <PanelList>
-                    <For each=visible key=|i| (i.panel.clone(), i.half) children=panel />
+                    <For each=listed key=|i| (i.panel.clone(), i.half) children=panel />
                 </PanelList>
+                {move || editing.get().then(|| view! {
+                    <Gallery
+                        items=addable
+                        on_add=Callback::new(move |id: String| edit(&|l, d, a| edit::panel_added(l, d, a, &id)))
+                    />
+                    <div>
+                        <Confirm
+                            label="Reset this tab"
+                            question="Put this tab back as it shipped?"
+                            on_yes=Callback::new(move |()| edit(&|l, _, a| edit::page_reset(l, a)))
+                        />
+                    </div>
+                })}
             }
         })
     }

@@ -82,6 +82,9 @@ pub enum Icon {
     CircleX,
     TriangleAlert,
     History,
+    GripVertical,
+    ArrowUp,
+    ArrowDown,
 }
 
 impl Icon {
@@ -239,6 +242,11 @@ impl Icon {
                 r#"<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>"#
             }
             Self::TriangleAlert => r#"<path d="M12 9v4"/><path d="M12 17h.01"/>"#,
+            Self::GripVertical => {
+                r#"<circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/>"#
+            }
+            Self::ArrowUp => r#"<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>"#,
+            Self::ArrowDown => r#"<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>"#,
             Self::History => {
                 r#"<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>"#
             }

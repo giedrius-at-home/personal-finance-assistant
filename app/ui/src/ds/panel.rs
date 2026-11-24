@@ -5,6 +5,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use leptos::prelude::*;
 
+use wasm_bindgen::JsCast;
+
+use super::arrange::{DROP_TARGET, DropTarget};
 use super::{CardTitle, Heading, Icon, Lucide, Size, Variant, button_class, cn};
 
 /// Two columns from `md`, one below; the gap is `.page-stack`'s 1.5rem.
@@ -19,6 +22,8 @@ const PANEL_HALF: &str = "relative min-w-0";
 const FOLD_BUTTON: &str = "absolute bottom-full right-0 size-6";
 /// Folded: the whole row on the rule is the button.
 const FOLDED_ROW: &str = "flat-section flex w-full min-w-0 items-center gap-3 text-left text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
+/// Edit layout, a panel with nothing to show now: one muted row on the rule.
+const QUIET_ROW: &str = "flat-section flex w-full min-w-0 items-center gap-3 text-fg-muted";
 
 #[component]
 pub fn PanelList(children: Children) -> impl IntoView {
@@ -34,8 +39,72 @@ pub fn PanelFrame(
     #[prop(into)] folded: Signal<bool>,
     on_toggle: Callback<()>,
     #[prop(optional)] half: bool,
+    /// Edit layout's controls, drawn above the top rule; empty outside it.
+    #[prop(optional, into)]
+    edit: ViewFn,
+    /// A dragged panel may be let go here.
+    #[prop(optional)]
+    drop: Option<DropTarget>,
+    /// Edit layout, nothing to show now: a muted row with `title`, no body.
+    #[prop(optional)]
+    quiet: bool,
     children: ChildrenFn,
 ) -> impl IntoView {
+    let base = cn([
+        if half { PANEL_HALF } else { PANEL_FULL },
+        EMPTY_OPEN_HIDDEN,
+    ]);
+    let over = move || drop.is_some_and(|d| d.over.get());
+    let class = move || cn([base.as_str(), if over() { DROP_TARGET } else { "" }]);
+    let accepts = move || drop.is_some_and(|d| d.accepts.get_untracked());
+    let on_dragover = move |e: leptos::ev::DragEvent| {
+        let Some(d) = drop.filter(|_| accepts()) else {
+            return;
+        };
+        e.prevent_default();
+        if let Some(frame) = e
+            .current_target()
+            .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+        {
+            let r = frame.get_bounding_client_rect();
+            d.on_over
+                .run(f64::from(e.client_y()) > r.top() + r.height() / 2.0);
+        }
+    };
+    let on_dragleave = move |e: leptos::ev::DragEvent| {
+        let Some(d) = drop.filter(|_| accepts()) else {
+            return;
+        };
+        // Moving onto a child of the frame is not leaving it.
+        let frame = e
+            .current_target()
+            .and_then(|t| t.dyn_into::<web_sys::Node>().ok());
+        let into = e
+            .related_target()
+            .and_then(|t| t.dyn_into::<web_sys::Node>().ok());
+        if frame.is_some_and(|f| !f.contains(into.as_ref())) {
+            d.on_leave.run(());
+        }
+    };
+    let on_drop = move |e: leptos::ev::DragEvent| {
+        if let Some(d) = drop.filter(|_| accepts()) {
+            e.prevent_default();
+            d.on_drop.run(());
+        }
+    };
+    let edit = move || edit.run();
+    if quiet {
+        return view! {
+            <section class=class on:dragover=on_dragover on:dragleave=on_dragleave on:drop=on_drop>
+                {edit.clone()}
+                <div class=QUIET_ROW>
+                    <CardTitle level=Heading::Span class="min-w-0 truncate">{title}</CardTitle>
+                    <span class="ml-auto truncate text-sm">"Nothing to show now"</span>
+                </div>
+            </section>
+        }
+        .into_any();
+    }
     static NEXT: AtomicU32 = AtomicU32::new(0);
     let body_id = format!("panel-{}", NEXT.fetch_add(1, Ordering::Relaxed));
     let mounted =
@@ -46,7 +115,8 @@ pub fn PanelFrame(
     ]);
     let label = format!("Fold {title}");
     view! {
-        <section class=cn([if half { PANEL_HALF } else { PANEL_FULL }, EMPTY_OPEN_HIDDEN])>
+        <section class=class on:dragover=on_dragover on:dragleave=on_dragleave on:drop=on_drop>
+            {edit.clone()}
             // One button for both states, so focus stays on it across a toggle.
             <button
                 type="button"
@@ -77,4 +147,5 @@ pub fn PanelFrame(
             </div>
         </section>
     }
+    .into_any()
 }
