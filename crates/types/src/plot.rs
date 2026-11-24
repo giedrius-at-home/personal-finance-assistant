@@ -235,6 +235,9 @@ impl PlotSpec {
         if self.cumulative && !self.time_axis() {
             return Err("A running total needs a time axis.".into());
         }
+        if self.cumulative && self.value == Value::Change {
+            return Err("A running total can't show change.".into());
+        }
         if self.compare != Compare::None && (!self.time_axis() || self.split.is_some()) {
             return Err("Comparing needs a time axis and no split.".into());
         }
@@ -261,12 +264,33 @@ impl PlotSpec {
             }
         }
         let one_unsplit = n == 1 && self.split.is_none();
+        let counts = self
+            .measures
+            .iter()
+            .filter(|m| m.measure == Measure::Count)
+            .count();
+        // Money and counts can't share one scale.
+        let mixed = counts > 0 && counts < n;
+        match self.chart {
+            Chart::Scatter | Chart::Table => {}
+            _ if mixed => return Err("Counts and amounts only go together in a scatter.".into()),
+            _ => {}
+        }
         match self.chart {
             Chart::Scatter if n != 2 || self.split.is_some() => {
                 Err("A scatter needs two measures and no split.".into())
             }
+            Chart::Scatter
+                if self.compare != Compare::None || self.cumulative || self.average_line =>
+            {
+                Err("A scatter can't compare, add up or draw an average.".into())
+            }
             Chart::Donut | Chart::Ranked if !self.named_axis() || !one_unsplit => {
                 Err("This chart needs a named axis, one measure and no split.".into())
+            }
+            Chart::Donut if self.value == Value::Change => Err("A donut can't show change.".into()),
+            Chart::Line | Chart::Area if self.named_axis() => {
+                Err("Lines need a time, weekday or day-of-month axis.".into())
             }
             Chart::Heatmap if self.split.is_none() || n != 1 => {
                 Err("A heatmap needs a split and one measure.".into())
@@ -366,6 +390,8 @@ pub struct PlotSeries {
     pub values: Vec<Option<Decimal>>,
     /// A comparison or average line, not one of the measured series.
     pub reference: bool,
+    /// Money or a count; series in one plot may differ (a scatter or table).
+    pub unit: Unit,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
@@ -403,6 +429,7 @@ pub struct PlotData {
     #[serde(default)]
     pub insight: Option<Insight>,
     pub currency: Currency,
+    /// The unit of the first series.
     #[serde(default)]
     pub unit: Unit,
     #[serde(default)]
@@ -742,7 +769,7 @@ mod tests {
                 ..spec()
             },
         ];
-        for s in samples {
+        for s in &samples {
             let offered = s.charts();
             assert_eq!(offered.last(), Some(&Chart::Table), "{s:?}");
             for chart in CHARTS {
@@ -750,21 +777,233 @@ mod tests {
                 assert_eq!(offered.contains(&chart), ok, "{chart:?} for {s:?}");
             }
         }
+        use Chart::*;
+        assert_eq!(samples[1].charts(), [Bars, Donut, Ranked, Table]);
         assert_eq!(
-            PlotSpec {
-                by: Axis::Category,
-                ..spec()
-            }
-            .charts(),
-            [
-                Chart::Bars,
-                Chart::Line,
-                Chart::Area,
-                Chart::Donut,
-                Chart::Ranked,
-                Chart::Table
-            ]
+            samples[2].charts(),
+            [Bars, StackedBars, Line, Area, Heatmap, Table]
         );
+        assert_eq!(samples[3].charts(), [Scatter, Table]);
+    }
+
+    #[test]
+    fn counts_mixed_with_money_only_scatter_or_table() {
+        let mixed = PlotSpec {
+            measures: vec![m(Measure::Spent), m(Measure::Count)],
+            ..spec()
+        };
+        assert_eq!(mixed.charts(), [Chart::Scatter, Chart::Table]);
+        let counts = PlotSpec {
+            measures: vec![m(Measure::Count), m(Measure::Count)],
+            ..spec()
+        };
+        assert!(counts.validate().is_ok());
+    }
+
+    #[test]
+    fn a_series_unit_defaults_to_money() {
+        let s: PlotSeries = serde_json::from_str("{}").unwrap();
+        assert_eq!(s.unit, Unit::Money);
+        let c: PlotSeries = serde_json::from_str(r#"{"unit":"count"}"#).unwrap();
+        assert_eq!(c.unit, Unit::Count);
+    }
+
+    #[test]
+    fn change_with_a_running_total_is_refused() {
+        let s = PlotSpec {
+            value: Value::Change,
+            cumulative: true,
+            ..spec()
+        };
+        assert!(s.validate().is_err());
+    }
+
+    #[test]
+    fn scatter_refuses_compare_running_total_and_average_line() {
+        let ok = PlotSpec {
+            measures: vec![m(Measure::Spent), m(Measure::Income)],
+            chart: Chart::Scatter,
+            ..spec()
+        };
+        assert!(ok.validate().is_ok());
+        for bad in [
+            PlotSpec {
+                compare: Compare::Previous,
+                ..ok.clone()
+            },
+            PlotSpec {
+                cumulative: true,
+                ..ok.clone()
+            },
+            PlotSpec {
+                average_line: true,
+                ..ok
+            },
+        ] {
+            assert!(bad.validate().is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn donut_refuses_change() {
+        let s = PlotSpec {
+            by: Axis::Category,
+            value: Value::Change,
+            chart: Chart::Donut,
+            ..spec()
+        };
+        assert!(s.validate().is_err());
+        assert!(
+            PlotSpec {
+                chart: Chart::Ranked,
+                ..s
+            }
+            .validate()
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn line_and_area_need_a_time_weekday_or_day_of_month_axis() {
+        for chart in [Chart::Line, Chart::Area] {
+            let with = |by| PlotSpec {
+                by,
+                chart,
+                ..spec()
+            };
+            for by in [Axis::Day, Axis::Quarter, Axis::Weekday, Axis::DayOfMonth] {
+                assert!(with(by).validate().is_ok(), "{chart:?} {by:?}");
+            }
+            for by in [
+                Axis::Category,
+                Axis::Group,
+                Axis::Merchant,
+                Axis::Account,
+                Axis::FixedOrVariable,
+            ] {
+                assert!(with(by).validate().is_err(), "{chart:?} {by:?}");
+            }
+        }
+    }
+
+    /// The ten ready-made plots (plan Task 8).
+    fn ready_made() -> Vec<(&'static str, PlotSpec)> {
+        let one = |measure| vec![m(measure)];
+        vec![
+            (
+                "Spending calendar",
+                PlotSpec {
+                    by: Axis::Week,
+                    split: Some(Split::Weekday),
+                    period: Period::Last3Months,
+                    chart: Chart::Heatmap,
+                    ..spec()
+                },
+            ),
+            (
+                "Weekday pattern",
+                PlotSpec {
+                    measures: one(Measure::AveragePerDay),
+                    by: Axis::Weekday,
+                    ..spec()
+                },
+            ),
+            (
+                "This month against usual",
+                PlotSpec {
+                    by: Axis::Day,
+                    period: Period::ThisMonth,
+                    chart: Chart::Line,
+                    cumulative: true,
+                    compare: Compare::AverageOf3,
+                    ..spec()
+                },
+            ),
+            (
+                "Top merchants",
+                PlotSpec {
+                    by: Axis::Merchant,
+                    period: Period::Last3Months,
+                    chart: Chart::Ranked,
+                    ..spec()
+                },
+            ),
+            (
+                "Where it went",
+                PlotSpec {
+                    split: Some(Split::Group),
+                    period: Period::Last12Months,
+                    chart: Chart::StackedBars,
+                    ..spec()
+                },
+            ),
+            (
+                "Income and spending",
+                PlotSpec {
+                    measures: vec![
+                        m(Measure::Income),
+                        m(Measure::Spent),
+                        MeasureSpec {
+                            measure: Measure::Net,
+                            draw: Draw::Line,
+                        },
+                    ],
+                    period: Period::Last12Months,
+                    ..spec()
+                },
+            ),
+            (
+                "Year on year",
+                PlotSpec {
+                    split: Some(Split::Year),
+                    period: Period::AllTime,
+                    chart: Chart::Line,
+                    ..spec()
+                },
+            ),
+            (
+                "Small payments",
+                PlotSpec {
+                    measures: one(Measure::Count),
+                    by: Axis::Merchant,
+                    filters: Filters {
+                        max: Some(Decimal::from(10)),
+                        ..Filters::default()
+                    },
+                    chart: Chart::Ranked,
+                    ..spec()
+                },
+            ),
+            (
+                "Fixed against variable",
+                PlotSpec {
+                    split: Some(Split::FixedOrVariable),
+                    period: Period::Last12Months,
+                    chart: Chart::StackedBars,
+                    ..spec()
+                },
+            ),
+            (
+                "Biggest changes",
+                PlotSpec {
+                    by: Axis::Category,
+                    period: Period::Last3Months,
+                    value: Value::Change,
+                    chart: Chart::Ranked,
+                    ..spec()
+                },
+            ),
+        ]
+    }
+
+    #[test]
+    fn every_ready_made_plot_validates_with_its_chart() {
+        let all = ready_made();
+        assert_eq!(all.len(), 10);
+        for (title, s) in all {
+            assert_eq!(s.validate(), Ok(()), "{title}");
+            assert!(s.charts().contains(&s.chart), "{title}");
+        }
     }
 
     #[test]

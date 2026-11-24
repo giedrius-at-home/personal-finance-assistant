@@ -29,6 +29,10 @@ pub fn load(conn: &Connection) -> Result<UiLayout> {
         .optional()?;
     Ok(payload
         .and_then(|p| serde_json::from_str::<UiLayout>(&p).ok())
+        .map(|mut l| {
+            l.drop_bad_plots();
+            l
+        })
         .filter(|l| l.validate().is_ok())
         .unwrap_or_default())
 }
@@ -140,6 +144,30 @@ mod tests {
         assert_eq!(load(db.store.connection()).unwrap(), UiLayout::default());
         db.write(|w, _| save(w, &layout())).unwrap();
         assert_eq!(load(db.store.connection()).unwrap(), layout());
+    }
+
+    #[test]
+    fn a_stored_layout_with_one_bad_plot_keeps_its_tabs_and_good_plots() {
+        let db = crate::writes::fixture::db();
+        let plot = |id: &str, title: &str| finance_types::ui::SavedPlot {
+            id: id.into(),
+            title: title.into(),
+            spec: serde_json::json!({}),
+        };
+        let stored = UiLayout {
+            plots: vec![plot("good", "Good"), plot("bad", "")],
+            ..layout()
+        };
+        db.store
+            .connection()
+            .execute(
+                "INSERT OR REPLACE INTO ui_layout (singleton, payload_json) VALUES (1, ?1)",
+                [serde_json::to_string(&stored).unwrap()],
+            )
+            .unwrap();
+        let loaded = load(db.store.connection()).unwrap();
+        assert_eq!(loaded.tabs, layout().tabs);
+        assert_eq!(loaded.plots, [plot("good", "Good")]);
     }
 
     #[test]

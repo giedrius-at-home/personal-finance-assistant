@@ -251,8 +251,12 @@ pub fn page_reset(l: &mut UiLayout, at: &PageRef) {
     }
 }
 
+/// Saved plots stay: only their panels leave the tabs.
 pub fn all_reset(l: &mut UiLayout) {
-    *l = UiLayout::default();
+    *l = UiLayout {
+        plots: std::mem::take(&mut l.plots),
+        ..Default::default()
+    };
 }
 
 /// The tab bar: saved tabs in saved order (when `tabs_ordered`; else saved
@@ -786,6 +790,25 @@ mod tests {
         tab_hidden_set(&mut l, "plan", true);
         all_reset(&mut l);
         assert_eq!(l, UiLayout::default());
+        assert_eq!(tab_ids(&l), defaults());
+    }
+
+    #[test]
+    fn saved_plots_survive_reset_and_tab_delete() {
+        let plots = vec![finance_types::ui::SavedPlot {
+            id: "p".into(),
+            title: "P".into(),
+            spec: Default::default(),
+        }];
+        let mut l = UiLayout {
+            plots: plots.clone(),
+            ..Default::default()
+        };
+        let own = tab_added(&mut l, "Trips").unwrap();
+        tab_deleted(&mut l, &own);
+        assert_eq!(l.plots, plots);
+        all_reset(&mut l);
+        assert_eq!(l.plots, plots);
         assert_eq!(tab_ids(&l), defaults());
     }
 

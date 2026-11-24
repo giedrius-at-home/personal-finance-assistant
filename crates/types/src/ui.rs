@@ -97,6 +97,34 @@ impl UiLayout {
         &mut pages[pi]
     }
 
+    /// Drops saved plots that break a rule (empty or repeated id, bad title,
+    /// past `MAX_PLOTS`) and the panels showing them, so one bad plot can't
+    /// reset the whole layout on load.
+    pub fn drop_bad_plots(&mut self) {
+        let before: Vec<String> = self.plots.iter().map(|p| p.id.clone()).collect();
+        let mut kept: Vec<SavedPlot> = Vec::new();
+        for p in std::mem::take(&mut self.plots) {
+            let title = p.title.chars().count();
+            if !p.id.is_empty()
+                && (1..=MAX_NAME).contains(&title)
+                && !kept.iter().any(|o| o.id == p.id)
+            {
+                kept.push(p);
+            }
+        }
+        kept.truncate(MAX_PLOTS);
+        let gone: Vec<String> = before
+            .into_iter()
+            .filter(|id| !kept.iter().any(|p| &p.id == id))
+            .map(|id| format!("plot:{id}"))
+            .collect();
+        self.plots = kept;
+        for page in self.tabs.iter_mut().flat_map(|t| &mut t.pages) {
+            page.items.retain(|it| !gone.contains(&it.panel));
+            page.removed.retain(|panel| !gone.contains(panel));
+        }
+    }
+
     /// `Err` with a short reason when the layout breaks a rule.
     pub fn validate(&self) -> Result<(), String> {
         if self.tabs.len() > MAX_TABS {
@@ -126,6 +154,9 @@ impl UiLayout {
             return Err(format!("at most {MAX_PLOTS} plots"));
         }
         for (i, p) in self.plots.iter().enumerate() {
+            if p.id.is_empty() {
+                return Err("a plot needs an id".into());
+            }
             if self.plots[..i].iter().any(|o| o.id == p.id) {
                 return Err(format!("plot id {} used twice", p.id));
             }
@@ -273,10 +304,70 @@ mod tests {
                 .is_err()
         );
         assert!(with(vec![plot("a", "")]).validate().is_err());
+        assert!(with(vec![plot("", "A")]).validate().is_err());
         assert!(with(vec![plot("a", &"x".repeat(41))]).validate().is_err());
         let many = (0..=MAX_PLOTS)
             .map(|i| plot(&format!("p{i}"), "P"))
             .collect();
         assert!(with(many).validate().is_err());
+    }
+
+    #[test]
+    fn drop_bad_plots_keeps_the_good_ones_and_their_panels() {
+        let plot = |id: &str, title: &str| SavedPlot {
+            id: id.into(),
+            title: title.into(),
+            spec: serde_json::json!({}),
+        };
+        let item = |p: &str| PanelItem {
+            panel: p.into(),
+            folded: false,
+            half: false,
+        };
+        let mut l = UiLayout {
+            plots: vec![
+                plot("a", "A"),
+                plot("", "No id"),
+                plot("b", ""),
+                plot("a", "Again"),
+                plot("c", &"x".repeat(41)),
+                plot("d", "D"),
+            ],
+            ..Default::default()
+        };
+        let page = l.page_mut("t", "T", "t");
+        page.items = vec![
+            item("plot:a"),
+            item("plot:b"),
+            item("other"),
+            item("plot:d"),
+        ];
+        page.removed = vec!["plot:c".into()];
+        l.drop_bad_plots();
+        let ids: Vec<_> = l
+            .plots
+            .iter()
+            .map(|p| (p.id.as_str(), p.title.as_str()))
+            .collect();
+        assert_eq!(ids, [("a", "A"), ("d", "D")]);
+        let panels: Vec<_> = l
+            .page("t")
+            .unwrap()
+            .items
+            .iter()
+            .map(|i| i.panel.as_str())
+            .collect();
+        assert_eq!(panels, ["plot:a", "other", "plot:d"]);
+        assert!(l.page("t").unwrap().removed.is_empty());
+        assert!(l.validate().is_ok());
+
+        let mut many = UiLayout {
+            plots: (0..MAX_PLOTS + 5)
+                .map(|i| plot(&format!("p{i}"), "P"))
+                .collect(),
+            ..Default::default()
+        };
+        many.drop_bad_plots();
+        assert_eq!(many.plots.len(), MAX_PLOTS);
     }
 }
