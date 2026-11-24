@@ -28,6 +28,8 @@ pub enum Item {
     SmtpPassword,
     /// The TypeSafe API key for Jev category suggestions.
     TypeSafeApiKey,
+    /// The token the Finance server asks of the app and the phone.
+    ServerToken,
 }
 
 /// The banks with a stored consent.
@@ -61,6 +63,7 @@ impl Item {
             Self::BankConsent(Bank::Swedbank) => "bank-consent-swedbank",
             Self::SmtpPassword => "smtp-password",
             Self::TypeSafeApiKey => "typesafe-api-key",
+            Self::ServerToken => "server-token",
         }
     }
 }

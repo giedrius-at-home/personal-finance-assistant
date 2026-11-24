@@ -52,6 +52,17 @@ cores; Oracle's Ampere cores are slower per core, so expect worse (not
 measured). Network time from the Mac or phone to the VM is not included.
 The copies were deleted after the test.
 
+### Step 2 built (2026-11-24)
+
+`app/server` (`finance-server`), with setup in `app/server/README.md`.
+The devserver now uses the same command table (`finance_server::commands`).
+Tried locally on a copy, with a scratch secrets folder: login and token
+checks, origin and path checks, every screen at phone width, a forecast
+run. What it does not do yet: show alerts (no desktop; they are recorded),
+open the bank's approval page (the address comes back to the UI, which
+does not show it in a browser), write the email copy with Ollama (none on
+the VM; the plain copy is sent), take over the old importer's consents.
+
 Offline work on the laptop is given up (the owner's main work is still on
 the laptop, but online). Viewing the last nightly copy offline could come
 later.
