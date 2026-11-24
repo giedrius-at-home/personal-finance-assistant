@@ -7,6 +7,7 @@ mod api;
 #[allow(dead_code)]
 mod ds;
 mod format;
+mod layout;
 mod pages;
 
 use finance_types::report::Dashboard;
