@@ -20,8 +20,8 @@ use super::{
 };
 use crate::api::invoke;
 use crate::ds::patterns::{
-    COMPACT_FIELD, FILTER_ROW, HEADER_ROW, MUTED, ROW_LIST, SECTION_HEADING, SMALL, TRAILING,
-    WRAP_TEXT,
+    COMPACT_FIELD, FILTER_ROW, HEADER_ROW, MUTED, ROW_LIST, SECTION_GRID, SECTION_HEADING, SMALL,
+    TRAILING, WRAP_TEXT,
 };
 use crate::ds::{
     CardTone, EmptyState, Eyebrow, Field, Heading, Icon, Lucide, METRIC_STRIP, Metric, Money, Size,
@@ -374,7 +374,7 @@ pub fn TransactionSearch() -> impl IntoView {
     });
 
     view! {
-        <section class=cn([card_class(CardTone::Default), "my-5 grid min-w-0 gap-4"]) aria-label="All transactions">
+        <section class=cn([card_class(CardTone::Default), SECTION_GRID]) aria-label="All transactions">
             <div>
                 <Eyebrow level=Heading::P>"SEARCH"</Eyebrow>
                 <h2 class=SECTION_HEADING>"All transactions"</h2>

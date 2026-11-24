@@ -47,6 +47,14 @@ pub fn with_report<V: IntoView + 'static>(
     }
 }
 
+/// Whether the loaded report passes `f`; nothing that asks draws before it loads.
+pub fn report_is(f: impl FnOnce(&Dashboard) -> bool) -> bool {
+    crate::state()
+        .report
+        .data
+        .with(|d| matches!(d, Some(Ok(r)) if f(r)))
+}
+
 /// Explains a failed load in plain words.
 #[component]
 pub fn Problem(#[prop(into)] error: String) -> impl IntoView {

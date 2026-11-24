@@ -116,7 +116,11 @@ impl SaveQueue {
 
 /// Every page's panels, in registry order.
 pub fn registry() -> impl Iterator<Item = &'static PanelDef> {
-    crate::pages::overview::PANELS.iter()
+    crate::pages::overview::PANELS
+        .iter()
+        .chain(crate::pages::transactions::PANELS)
+        .chain(crate::pages::spending::PANELS)
+        .chain(crate::pages::organise::PANELS)
 }
 
 fn home_defs(page: &str) -> Vec<&'static PanelDef> {

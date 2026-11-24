@@ -12,11 +12,11 @@ mod nudges;
 pub mod outlook;
 pub mod visuals;
 
-use finance_types::report::Dashboard;
 use leptos::prelude::*;
 
 use crate::format;
 use crate::layout::{Initial, PageView, PanelDef};
+use crate::pages::report_is;
 
 /// Where the site shows `MonthClosureBanner` (`month-closure.tsx`): the nudge
 /// to close last month, above the Overview.
@@ -117,14 +117,6 @@ pub const PANELS: &[PanelDef] = &[
 ];
 
 const PAGE: &str = "overview";
-
-/// Whether the loaded report passes `f`; nothing that asks draws before it loads.
-fn report_is(f: impl FnOnce(&Dashboard) -> bool) -> bool {
-    crate::state()
-        .report
-        .data
-        .with(|d| matches!(d, Some(Ok(r)) if f(r)))
-}
 
 #[component]
 pub fn Overview() -> impl IntoView {

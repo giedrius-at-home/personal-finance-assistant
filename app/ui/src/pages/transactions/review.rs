@@ -23,7 +23,7 @@ use super::{Choice, clean_error, focus_id, options, region_name};
 use crate::api::{NoArgs, invoke, load};
 use crate::ds::patterns::{
     BATCH_TITLE, BUTTON_GROUP, CHIPS, Disclosure, HINT, INSET, ITEM_HEADING, ITEM_SUMMARY, MUTED,
-    QUEUE_TITLE, STACK, SUGGESTION_BADGE, WARNING_LINE,
+    QUEUE_TITLE, SECTION_GRID, STACK, SUGGESTION_BADGE, WARNING_LINE,
 };
 use crate::ds::{
     Badge, CONTROL, CardTone, EmptyState, Eyebrow, FactsRow, Field, Heading, Money, Size, Skeleton,
@@ -1015,7 +1015,7 @@ pub fn OwnerReview() -> impl IntoView {
     });
 
     view! {
-        <article class=cn([card_class(CardTone::Default), "grid min-w-0 gap-4"])>
+        <article class=cn([card_class(CardTone::Default), SECTION_GRID])>
             <div>
                 <Eyebrow level=Heading::P>"TRANSACTION INBOX"</Eyebrow>
                 <h2 class="mt-1 text-2xl font-semibold">{heading}</h2>

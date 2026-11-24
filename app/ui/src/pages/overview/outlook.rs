@@ -8,14 +8,14 @@ use rust_decimal::{Decimal, RoundingStrategy};
 use crate::ds::charts::{LineChart, Series, fmt, series_color};
 use crate::ds::patterns::{
     ACTION_NAME, CARD_LABEL, COLUMN, Disclosure, EXPLAINER, INSIGHT_CARD, PENDING_CARD,
-    SECTION_BODY, TOOLBAR,
+    REPEAT_STACK, SECTION_BODY, TOOLBAR,
 };
 use crate::ds::{
     Badge, Card, CardDescription, CardHeader, CardTitle, Eyebrow, Facts, Heading, METRIC_STRIP,
     Metric, Money, TABLE, TABLE_CONTAINER, TCELL_NUM, TH, TH_NUM, TROW, Tone, cn, money,
 };
 use crate::format;
-use crate::pages::f;
+use crate::pages::{f, with_report};
 use crate::{ManageSection, state};
 
 /// Days since 0000-03-01 (proleptic Gregorian), for date differences.
@@ -59,6 +59,35 @@ pub fn chart_frame(
 pub const ROW_HEADER: &str =
     "py-2.5 text-left text-sm font-medium normal-case tracking-normal text-fg";
 pub const CAPTION: &str = "caption-top pb-2 pt-0 text-left text-sm font-semibold text-fg";
+
+/// The `spending.habits.outlook` panel: one card per currency.
+pub fn panel() -> AnyView {
+    with_report(|report| {
+        let cards = report
+            .savings_outlooks
+            .iter()
+            .map(|o| view! { <SavingsOutlookPanel report=report.clone() currency_code=o.currency.code.clone() /> })
+            .collect_view();
+        view! { <div class=REPEAT_STACK>{cards}</div> }
+    })
+    .into_any()
+}
+
+/// The planned final balance each card shows under its "Your money by" headline.
+pub fn summary(report: &Dashboard) -> Option<String> {
+    let parts: Vec<String> = report
+        .savings_outlooks
+        .iter()
+        .map(|o| {
+            format!(
+                "{} by {}",
+                money(o.planned_final, &o.currency),
+                format::day_month(&o.through)
+            )
+        })
+        .collect();
+    (!parts.is_empty()).then(|| parts.join(" · "))
+}
 
 #[component]
 pub fn SavingsOutlookPanel(report: Dashboard, currency_code: String) -> impl IntoView {
