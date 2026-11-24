@@ -1,8 +1,60 @@
 # Cloud hosting on Oracle's free tier: study and proposal
 
 Date: 2026-11-24
-Status: proposal. Nothing is built, no account or cloud resource exists, the
-ledger has not been copied anywhere. Waiting for the owner to pick a way.
+Status: owner chose option A on Oracle (see Decision). Nothing is deployed
+and no account exists yet.
+
+## Decision
+
+Owner: "I also want to have an app that i could use/see on my phone but main
+work is in the laptop. so I need to host the app somewhere. and I dont wanna
+pay for now. and I also want the syncs happening when the laptop is offline.
+home server is not an option at the momement … so I will try this one now".
+
+So: option A on Oracle's Always Free ARM VM. The server owns the ledger and
+runs the schedulers; the Mac app and the phone are both windows onto it. The
+phone needs no app: the server already serves the same UI to a browser
+(`app/ui/dist`, as the devserver does). Both reach it only through a private
+network (Tailscale's free personal plan is the least work), never a public
+port. The Mac keeps a nightly copy of the ledger so nothing is lost if
+Oracle takes the VM back.
+
+Build order, each step usable on its own and tried on a copy first:
+
+1. **Speed test, no account.** The server built for Linux ARM, run on this
+   Mac in a container held to 2 cores and 12 GB, against a copy of the
+   ledger. Measures whether the free VM is fast enough.
+2. **Headless server.** `finance-server`: the devserver's command table plus
+   the bank, email, AI and forecast schedulers moved out of the Tauri shell,
+   secrets from `FINANCE_SECRETS_DIR`, a bearer token on every call,
+   listening on the private network only.
+3. **Oracle VM.** The owner creates the account and VM (Amsterdam or
+   Frankfurt); I write the setup script. Still against a copy.
+4. **Clients.** The Mac app and the phone pointed at the server; the Mac
+   pulls a nightly copy.
+5. **Move the real ledger and secrets**, with the owner, once 1–4 hold.
+
+### Step 1 result (2026-11-24)
+
+`crates/timesfm/examples/dashboard` on a copy of today's backup, Linux ARM
+in a colima VM and container held to 2 cores and 12 GB, against the Mac:
+
+| | Mac (Accelerate) | 2 cores, Linux |
+|---|---|---|
+| Dashboard, no model | 0.15 s | 0.13 s |
+| Dashboard with TimesFM, model loaded | 2.7 s | 15–17 s |
+| Peak memory, model run | 1.5 GB | 2.6 GB |
+
+Screens are as fast as today (they never wait for the model). The forecast
+run is about 6× slower without Accelerate but runs in the background, and
+memory fits easily in 12 GB. Caveat: the container ran on this Mac's own
+cores; Oracle's Ampere cores are slower per core, so expect worse (not
+measured). Network time from the Mac or phone to the VM is not included.
+The copies were deleted after the test.
+
+Offline work on the laptop is given up (the owner's main work is still on
+the laptop, but online). Viewing the last nightly copy offline could come
+later.
 
 ## Intent
 
@@ -273,8 +325,8 @@ three days.
 - Oracle's contract terms on closing accounts (not read).
 - That Oracle encrypts block volumes and buckets at rest by default: from
   memory, not re-read today.
-- Speed of the dashboard and of TimesFM on 2 ARM cores without Accelerate.
-  Not measured; nothing was built or run.
+- Speed on Oracle's own Ampere cores and the network round trip. Measured
+  only on this Mac's cores under the same limits (Step 1 result).
 - That the bank consents are read-only: taken from what the code asks for,
   not checked against Enable Banking's terms. Also whether Enable Banking
   minds the same application calling from a new IP address.
