@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/types", "crates/storage", "crates/migrate", "app/src-tauri", "app/ui", "app/devserver", "crates/secrets", "crates/core", "crates/bank", "crates/notify", "crates/timesfm", "crates/ai"]
+members = ["crates/types", "crates/storage", "crates/migrate", "app/src-tauri", "app/ui", "app/devserver", "app/server", "crates/secrets", "crates/core", "crates/bank", "crates/notify", "crates/timesfm", "crates/ai"]
 
 [workspace.package]
 version = "0.3.0"
@@ -18,6 +18,7 @@ finance-bank = { path = "crates/bank" }
 finance-notify = { path = "crates/notify" }
 finance-timesfm = { path = "crates/timesfm" }
 finance-ai = { path = "crates/ai" }
+finance-server = { path = "app/server" }
 anyhow = "1.0.104"
 clap = { version = "4.6.7", features = ["derive"] }
 dirs = "7.0.0"

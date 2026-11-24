@@ -10,12 +10,11 @@ publish.workspace = true
 [dependencies]
 finance-ai.workspace = true
 finance-core.workspace = true
+finance-server.workspace = true
 finance-storage.workspace = true
 finance-types.workspace = true
 anyhow.workspace = true
-serde.workspace = true
 serde_json.workspace = true
-rust_decimal.workspace = true
 
 [lints]
 workspace = true
