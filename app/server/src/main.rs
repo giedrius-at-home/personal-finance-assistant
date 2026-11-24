@@ -176,9 +176,29 @@ fn login(stream: &mut TcpStream, app: &App, request: &Request) -> Result<()> {
             LOGIN_PAGE.as_bytes(),
         );
     }
-    let right = auth::login_token(&request.body)
-        .is_some_and(|t| auth::token_matches(t, app.token.expose()));
-    if !auth::same_origin(request) || !right {
+    // Why a login was refused goes to the log (never the token itself), so a
+    // failure behind a proxy can be told apart from a mistyped token.
+    let refused = if !auth::same_origin(request) {
+        Some(format!(
+            "origin {:?} is not host {:?}",
+            request.header("origin").unwrap_or(""),
+            request.header("host").unwrap_or("")
+        ))
+    } else {
+        match auth::login_token(&request.body) {
+            None => Some(format!(
+                "no usable token in a {}-byte form (64 letters and digits expected)",
+                request.body.len()
+            )),
+            Some(t) if !auth::token_matches(t, app.token.expose()) => Some(format!(
+                "a well-formed {}-character token did not match",
+                t.len()
+            )),
+            Some(_) => None,
+        }
+    };
+    if let Some(reason) = refused {
+        eprintln!("login refused: {reason}");
         std::thread::sleep(WRONG_LOGIN);
         return respond_with(
             stream,
