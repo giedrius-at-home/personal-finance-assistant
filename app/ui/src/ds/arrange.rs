@@ -6,11 +6,11 @@ use leptos::html;
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 
-use super::patterns::{ACTIONS, CHIPS, ERROR_LINE, MUTED};
+use super::patterns::{ACTIONS, CHIPS, ERROR_LINE, FIELD_LABEL, GALLERY_GROUP, MUTED};
 use super::{Button, CardTitle, Heading, Icon, Input, Lucide, Size, Variant, button_class, cn};
 
-/// The edit controls: in the gap above the section's top rule, left of the fold button.
-const EDIT_BAR: &str = "absolute bottom-full right-7 flex items-center gap-0.5";
+/// The edit controls, in the frame's tools above its top rule.
+const EDIT_BAR: &str = "flex items-center gap-0.5";
 /// An icon control of the edit bar, as small as the fold button.
 const EDIT_ICON: &str = "size-6";
 /// A word control of the edit bar ("Half" / "Full").
@@ -135,9 +135,45 @@ pub fn EditBar(
     }
 }
 
-/// The dashed "Add a panel" box: one button per panel that may be added.
+/// One "Add …" chip; its panel id (if any) as `data-panel`, so focus can find it.
+fn add_chip(panel: Option<String>, title: String, on: Callback<()>) -> impl IntoView {
+    view! {
+        <span class="contents" data-panel=panel>
+            <Button
+                variant=Variant::Secondary
+                size=Size::Sm
+                label=format!("Add {title}")
+                on_click=Callback::new(move |_| on.run(()))
+            >
+                <Lucide icon=Icon::Plus size=14 />
+                {title}
+            </Button>
+        </span>
+    }
+}
+
+/// The dashed "Add a panel" box: the panels that may be added, the owner's
+/// plots (added from here when not on this page; each with Delete), the
+/// ready-made plots and "New plot".
 #[component]
-pub fn Gallery(items: Signal<Vec<(String, String)>>, on_add: Callback<String>) -> impl IntoView {
+pub fn Gallery(
+    /// Registry panels: (panel id, title).
+    items: Signal<Vec<(String, String)>>,
+    on_add: Callback<String>,
+    /// Every saved plot: (panel id, title, already on this page).
+    plots: Signal<Vec<(String, String, bool)>>,
+    /// Deletes the plot of a panel id.
+    on_delete: Callback<String>,
+    /// Ready-made plot names; empty hides the group.
+    ready: Signal<Vec<String>>,
+    /// Adds a copy of the ready-made plot at this index.
+    on_ready: Callback<usize>,
+    /// The "New plot" button's label, also its `aria-label`.
+    #[prop(into)]
+    new_label: String,
+    on_new: Callback<()>,
+) -> impl IntoView {
+    let new_label = StoredValue::new(new_label);
     view! {
         <section aria-label="Add a panel" class=GALLERY>
             <CardTitle level=Heading::H3>"Add a panel"</CardTitle>
@@ -152,19 +188,7 @@ pub fn Gallery(items: Signal<Vec<(String, String)>>, on_add: Callback<String>) -
                                 .into_iter()
                                 .map(|(id, title)| {
                                     let panel = id.clone();
-                                    view! {
-                                        <span class="contents" data-panel=panel>
-                                            <Button
-                                                variant=Variant::Secondary
-                                                size=Size::Sm
-                                                label=format!("Add {title}")
-                                                on_click=Callback::new(move |_| on_add.run(id.clone()))
-                                            >
-                                                <Lucide icon=Icon::Plus size=14 />
-                                                {title}
-                                            </Button>
-                                        </span>
-                                    }
+                                    add_chip(Some(panel), title, Callback::new(move |()| on_add.run(id.clone())))
                                 })
                                 .collect_view()}
                         </div>
@@ -172,6 +196,64 @@ pub fn Gallery(items: Signal<Vec<(String, String)>>, on_add: Callback<String>) -
                         .into_any()
                 }
             }}
+            {move || {
+                let plots = plots.get();
+                (!plots.is_empty()).then(|| view! {
+                    <div class=GALLERY_GROUP>
+                        <h4 class=FIELD_LABEL>"Your plots"</h4>
+                        <div class=CHIPS>
+                            {plots
+                                .into_iter()
+                                .map(|(id, title, here)| {
+                                    let (add, delete) = (id.clone(), id.clone());
+                                    let name = if here {
+                                        view! { <span class=MUTED>{title.clone()}</span> }.into_any()
+                                    } else {
+                                        add_chip(None, title.clone(), Callback::new(move |()| on_add.run(add.clone()))).into_any()
+                                    };
+                                    view! {
+                                        <span class=ACTIONS data-panel=id>
+                                            {name}
+                                            <Confirm
+                                                label="Delete"
+                                                aria=format!("Delete {title}")
+                                                question="Delete this plot? It leaves every tab."
+                                                on_yes=Callback::new(move |()| on_delete.run(delete.clone()))
+                                            />
+                                        </span>
+                                    }
+                                })
+                                .collect_view()}
+                        </div>
+                    </div>
+                })
+            }}
+            {move || {
+                let ready = ready.get();
+                (!ready.is_empty()).then(|| view! {
+                    <div class=GALLERY_GROUP>
+                        <h4 class=FIELD_LABEL>"Ready-made plots"</h4>
+                        <div class=CHIPS>
+                            {ready
+                                .into_iter()
+                                .enumerate()
+                                .map(|(i, name)| add_chip(None, name, Callback::new(move |()| on_ready.run(i))))
+                                .collect_view()}
+                        </div>
+                    </div>
+                })
+            }}
+            <div>
+                <Button
+                    variant=Variant::Secondary
+                    size=Size::Sm
+                    label=new_label.get_value()
+                    on_click=Callback::new(move |_| on_new.run(()))
+                >
+                    <Lucide icon=Icon::Plus size=14 />
+                    {new_label.get_value()}
+                </Button>
+            </div>
         </section>
     }
 }

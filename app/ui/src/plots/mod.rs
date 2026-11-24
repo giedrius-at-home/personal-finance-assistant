@@ -1,6 +1,8 @@
 //! A saved plot on screen: `plot_query` for its spec, drawn with the chart
 //! the spec names, or as a table of its numbers.
 
+pub mod builder;
+
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use finance_types::plot::{

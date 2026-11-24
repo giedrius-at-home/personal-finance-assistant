@@ -1,7 +1,7 @@
 //! Panel registry types and the pure logic that turns a saved layout into the
 //! panels a page shows.
 
-use finance_types::plot::PlotSpec;
+use finance_types::plot::{PlotSpec, ready_made};
 use finance_types::report::Dashboard;
 use finance_types::ui::{PageLayout, PanelItem, SavedPlot, UiLayout};
 use leptos::prelude::*;
@@ -9,13 +9,17 @@ use leptos::task::spawn_local;
 use serde::Serialize;
 
 use crate::api::{self, NoArgs};
-use crate::ds::arrange::{Edited, drop_move, focus_after, focus_on, moves};
+use crate::ds::arrange::{Edited, drop_move, focus_after, focus_on, in_panel, moves};
 use crate::ds::patterns::{ACTIONS, PLOT_UNREADABLE};
 use crate::ds::{
     Button, Card, CardHeader, CardTitle, Confirm, DropTarget, EditBar, EmptyState, Gallery,
-    PanelFrame, PanelList, Size, Variant,
+    PanelAction, PanelFrame, PanelList, Size, Variant,
 };
 use crate::plots::PlotView;
+use crate::plots::builder::{
+    Closed, FilterOptions, NEW_PLOT, PlotBuilder, Saving, copy_title, edit_label,
+    focus_after_builder,
+};
 use edit::PageRef;
 
 pub mod edit;
@@ -314,13 +318,11 @@ impl LayoutState {
     }
 
     /// The saved plots; reactive.
-    #[allow(dead_code)] // Called by the plot builder (Task 7).
     pub fn plots(&self) -> Vec<SavedPlot> {
         self.layout.with(|l| l.plots.clone())
     }
 
     /// Saves a plot over `id`, or as a new one; returns its id (see `edit::plot_saved`).
-    #[allow(dead_code)] // Called by the plot builder (Task 7).
     pub fn save_plot(
         &self,
         id: Option<String>,
@@ -338,7 +340,6 @@ impl LayoutState {
     }
 
     /// Deletes a plot and its panel from every page.
-    #[allow(dead_code)] // Called by the plot builder (Task 7).
     pub fn delete_plot(&self, id: &str) {
         self.change(|l| edit::plot_deleted(l, id));
     }
@@ -430,6 +431,51 @@ impl LayoutState {
             }
         });
     }
+}
+
+/// The plot builder is open on a saved plot (its id) or a new one; `opener`
+/// is the selector of the control that opened it.
+#[derive(Clone)]
+struct Building {
+    plot: Option<String>,
+    opener: String,
+}
+
+/// The builder's Save after the saved layout could not be read.
+const NOTHING_SAVED: &str =
+    "Nothing can be saved right now: your layout could not be read. Restart the app and try again.";
+
+/// What the builder's filters pick from: the categories, groups and accounts
+/// the pages already use.
+fn filter_options() -> FilterOptions {
+    crate::state().report.data.with_untracked(|r| {
+        let Some(Ok(r)) = r else {
+            return FilterOptions::default();
+        };
+        let mut groups: Vec<String> = r
+            .monthly_budgets
+            .iter()
+            .flat_map(|b| b.plan.groups.iter().map(|g| g.name.clone()))
+            .chain(r.custom_spending_groups.iter().cloned())
+            .collect();
+        groups.sort_by_key(|n| n.to_lowercase());
+        groups.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+        FilterOptions {
+            categories: r
+                .category_catalog
+                .entries
+                .iter()
+                .map(|e| e.name.clone())
+                .collect(),
+            groups,
+            accounts: r
+                .cash_overview
+                .accounts
+                .iter()
+                .map(|a| (a.account_id.clone(), a.name.clone()))
+                .collect(),
+        }
+    })
 }
 
 /// A saved plot's panel body: the plot under its title, or a muted card when
@@ -537,6 +583,8 @@ pub fn PageView(
         })
     };
     let target = RwSignal::new(None::<(String, bool)>);
+    // The plot builder, while open.
+    let building = RwSignal::new(None::<Building>);
     let panel = move |item: PanelItem| {
         let def = registry().find(|d| d.id == item.panel);
         let plot = edit::plot_id_of(&item.panel).map(str::to_owned);
@@ -641,6 +689,21 @@ pub fn PageView(
         // Only Edit layout makes a panel quiet, so outside it a frame is never redrawn.
         let quiet = Memo::new(move |_| editing.get() && !id.with_value(|id| is_shown(id)));
         let plot = StoredValue::new(plot);
+        // A plot's "Edit plot", in and out of Edit layout, while the layout can be saved.
+        let action = move || {
+            let plot = plot.get_value().filter(|_| state.editable())?;
+            let aria = edit_label(&title.get());
+            let opener = id.with_value(|panel| in_panel(panel, &aria));
+            Some(view! {
+                <PanelAction
+                    text="Edit plot"
+                    aria=aria
+                    on_click=Callback::new(move |()| {
+                        building.set(Some(Building { plot: Some(plot.clone()), opener: opener.clone() }));
+                    })
+                />
+            })
+        };
         Some(move || {
             view! {
                 <PanelFrame
@@ -654,6 +717,7 @@ pub fn PageView(
                     half=half
                     editing=editing
                     edit=bar
+                    action=action
                     drop=drop
                     quiet=quiet.get()
                 >
@@ -668,6 +732,86 @@ pub fn PageView(
     let addable = Signal::derive(move || {
         at.with_value(|a| state.layout.with(|l| edit::addable(l, &defs(), a)))
     });
+    let own_plots = Signal::derive(move || {
+        let here = items.get();
+        state
+            .plots()
+            .into_iter()
+            .map(|p| {
+                let panel = edit::plot_panel_id(&p.id);
+                let on_page = here.iter().any(|i| i.panel == panel);
+                (panel, p.title, on_page)
+            })
+            .collect::<Vec<_>>()
+    });
+    let ready_plots = Signal::derive(move || {
+        if state.editable() {
+            ready_made()
+                .into_iter()
+                .map(|(name, _)| name.to_owned())
+                .collect()
+        } else {
+            Vec::new()
+        }
+    });
+    let builder = move || {
+        let b = building.get()?;
+        let saved = b.plot.as_ref().and_then(|id| {
+            state.layout.with_untracked(|l| {
+                l.plots.iter().find(|p| p.id == *id).map(|p| {
+                    let spec =
+                        serde_json::from_value::<PlotSpec>(p.spec.clone()).unwrap_or_default();
+                    (p.title.clone(), spec)
+                })
+            })
+        });
+        let existing = saved.is_some();
+        let (name, spec) = saved.unwrap_or_default();
+        let heading = if existing {
+            name.clone()
+        } else {
+            NEW_PLOT.to_owned()
+        };
+        let (plot, opener) = (StoredValue::new(b.plot), StoredValue::new(b.opener));
+        // Closed after the callback that closes it has returned.
+        let close = move |closed: Closed| {
+            set_timeout(move || building.set(None), std::time::Duration::ZERO);
+            let editing = editing.get_untracked();
+            opener.with_value(|o| focus_on(focus_after_builder(&closed, o, editing)));
+        };
+        Some(view! {
+            <PlotBuilder
+                heading=heading
+                name=name
+                spec=spec
+                existing=existing
+                filter_options=filter_options()
+                on_save=Callback::new(move |(how, title, spec): (Saving, String, PlotSpec)| {
+                    if !state.load.get_untracked().may_save() {
+                        return Err(NOTHING_SAVED.to_owned());
+                    }
+                    let over = match how {
+                        Saving::Over => plot.get_value(),
+                        Saving::New => None,
+                    };
+                    let id = state.save_plot(over.clone(), title.clone(), spec)?;
+                    let panel = edit::plot_panel_id(&id);
+                    if over.is_none() {
+                        edit(&|l, d, a| edit::panel_added(l, d, a, &panel));
+                    }
+                    close(Closed::Saved { panel, title: title.trim().to_owned() });
+                    Ok(())
+                })
+                on_delete=Callback::new(move |()| {
+                    if let Some(id) = plot.get_value() {
+                        state.delete_plot(&id);
+                    }
+                    close(Closed::Deleted);
+                })
+                on_close=Callback::new(move |()| close(Closed::Cancelled))
+            />
+        })
+    };
     // Panels wait for the saved layout, so one saved folded never mounts.
     let ready = move || state.load.get() != Load::Loading;
     move || {
@@ -690,6 +834,7 @@ pub fn PageView(
                 <PanelList>
                     <For each=listed key=|i| i.panel.clone() children=panel />
                 </PanelList>
+                {builder}
                 {move || (own && !editing.get() && items.with(Vec::is_empty)).then(|| view! {
                     <EmptyState
                         title="Nothing on this tab yet"
@@ -703,6 +848,29 @@ pub fn PageView(
                             edit(&|l, d, a| edit::panel_added(l, d, a, &id));
                             refocus(Edited::Added, &id);
                         })
+                        plots=own_plots
+                        on_delete=Callback::new(move |panel: String| {
+                            if let Some(id) = edit::plot_id_of(&panel) {
+                                state.delete_plot(id);
+                            }
+                            focus_on(focus_after_builder(&Closed::Deleted, "", true));
+                        })
+                        ready=ready_plots
+                        on_ready=Callback::new(move |i: usize| {
+                            let Some((name, spec)) = ready_made().into_iter().nth(i) else { return };
+                            let taken: Vec<String> =
+                                state.layout.with_untracked(|l| l.plots.iter().map(|p| p.title.clone()).collect());
+                            if let Ok(id) = state.save_plot(None, copy_title(name, &taken), spec) {
+                                let panel = edit::plot_panel_id(&id);
+                                edit(&|l, d, a| edit::panel_added(l, d, a, &panel));
+                                refocus(Edited::Added, &panel);
+                            }
+                        })
+                        new_label=NEW_PLOT
+                        on_new=Callback::new(move |()| building.set(Some(Building {
+                            plot: None,
+                            opener: focus_after_builder(&Closed::Deleted, "", true),
+                        })))
                     />
                     <div class=ACTIONS>
                         <Confirm

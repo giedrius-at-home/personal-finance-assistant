@@ -2,6 +2,7 @@
 //! the same Tailwind classes so screens look the same as the web finance UI.
 
 pub mod arrange;
+pub mod builder;
 pub mod charts;
 mod cn;
 pub mod icons;
@@ -12,7 +13,7 @@ pub mod patterns;
 pub use arrange::{Confirm, DropTarget, EditBar, Gallery, TabChip};
 pub use cn::cn;
 pub use icons::{Icon, Lucide};
-pub use panel::{PanelFrame, PanelList};
+pub use panel::{PanelAction, PanelFrame, PanelList};
 
 use finance_types::report::Currency;
 use leptos::html;
@@ -529,6 +530,9 @@ pub fn Select(
     #[prop(optional, into)] id: Option<String>,
     #[prop(optional, into)] label: Option<String>,
     #[prop(optional, into)] disabled: Signal<bool>,
+    /// Runs with the picked value, after `value` is set.
+    #[prop(optional)]
+    on_change: Option<Callback<String>>,
 ) -> impl IntoView {
     view! {
         <div class="relative w-full">
@@ -537,7 +541,13 @@ pub fn Select(
                 aria-label=label
                 class=cn([CONTROL, "appearance-none pr-9", class.as_str()])
                 disabled=move || disabled.get()
-                on:change=move |e| value.set(event_target_value(&e))
+                on:change=move |e| {
+                    let v = event_target_value(&e);
+                    value.set(v.clone());
+                    if let Some(f) = on_change {
+                        f.run(v);
+                    }
+                }
                 prop:value=move || value.get()
             >
                 {move || {

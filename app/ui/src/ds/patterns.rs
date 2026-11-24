@@ -457,3 +457,15 @@ pub const PLOT_INSIGHT: &str = "text-sm text-fg";
 
 /// A saved plot that can't be drawn: a quiet card in its place.
 pub const PLOT_UNREADABLE: &str = "rounded-lg bg-card-muted px-4 py-3 text-sm text-fg-muted";
+
+/// The plot builder's body: its rows, preview and name, one under another.
+pub const BUILDER: &str = "grid min-w-0 gap-5";
+
+/// One labelled control in a row of the plot builder; rows wrap.
+pub const BUILDER_FIELD: &str = "min-w-0 flex-1 basis-40";
+
+/// A group of "Add a panel": its name over its chips.
+pub const GALLERY_GROUP: &str = "grid gap-2";
+
+/// The plot builder's first row: fields of different heights, tops aligned.
+pub const BUILDER_ROW: &str = "flex flex-wrap items-start gap-3";

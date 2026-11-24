@@ -69,7 +69,7 @@ pub enum Split {
 
 impl Split {
     /// The axis that shows the same thing.
-    fn axis(self) -> Axis {
+    pub fn axis(self) -> Axis {
         match self {
             Self::Category => Axis::Category,
             Self::Group => Axis::Group,

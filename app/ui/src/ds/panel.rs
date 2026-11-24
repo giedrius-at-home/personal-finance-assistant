@@ -16,6 +16,11 @@ const EMPTY_OPEN_HIDDEN: &str = "has-[>[aria-expanded=true]+div:empty]:hidden";
 /// A full-width panel spans both columns; a half one takes one.
 const PANEL_FULL: &str = "relative min-w-0 md:col-span-2";
 const PANEL_HALF: &str = "relative min-w-0";
+/// A panel's own action and Edit layout's controls: in the gap above the
+/// section's top rule, left of the fold button.
+const PANEL_TOOLS: &str = "absolute bottom-full right-7 flex items-center gap-0.5";
+/// A word button among the tools ("Edit plot"), as small as the fold button.
+const TOOL_WORD: &str = "h-6 px-2";
 /// Open: a small button at the right end of the section's top rule, in the gap above it.
 const FOLD_BUTTON: &str = "absolute bottom-full right-0 size-6";
 /// Folded: the whole row on the rule is the button.
@@ -48,6 +53,9 @@ pub fn PanelFrame(
     /// Edit layout's controls, drawn above the top rule; empty outside it.
     #[prop(optional, into)]
     edit: ViewFn,
+    /// The panel's own action (a [`PanelAction`]), left of Edit layout's controls.
+    #[prop(optional, into)]
+    action: ViewFn,
     /// A dragged panel may be let go here.
     #[prop(optional)]
     drop: Option<DropTarget>,
@@ -87,7 +95,7 @@ pub fn PanelFrame(
             d.on_drop.run(());
         }
     };
-    let edit = move || edit.run();
+    let edit = move || view! { <div class=PANEL_TOOLS>{action.run()}{edit.run()}</div> };
     if quiet {
         return view! {
             <section class=class data-panel=panel.clone() on:dragover=on_dragover on:dragleave=on_dragleave on:drop=on_drop>
@@ -141,4 +149,25 @@ pub fn PanelFrame(
         </section>
     }
     .into_any()
+}
+
+/// A small word button among a panel's tools, such as "Edit plot".
+#[component]
+pub fn PanelAction(
+    #[prop(into)] text: String,
+    /// The `aria-label`: the text plus what it acts on.
+    #[prop(into)]
+    aria: String,
+    on_click: Callback<()>,
+) -> impl IntoView {
+    view! {
+        <button
+            type="button"
+            class=cn([button_class(Variant::Ghost, Size::Sm).as_str(), TOOL_WORD])
+            aria-label=aria
+            on:click=move |_| on_click.run(())
+        >
+            {text}
+        </button>
+    }
 }
