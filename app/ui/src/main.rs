@@ -16,13 +16,16 @@ use leptos::prelude::*;
 use leptos::tachys::reactive_graph::OwnedView;
 
 use crate::api::{Loaded, NoArgs, load};
+use crate::ds::arrange::{
+    DropTarget, TAB_ALERT, TAB_EDITOR, drop_index, drop_move, focus_label, focus_on,
+};
 use crate::ds::patterns::{ERROR_LINE, TAB_ROW, TAB_SCROLL};
 use crate::ds::{
     Button, Eyebrow, Heading, Icon, Lucide, SegmentedControl, Size, TABS_LIST, TABS_TRIGGER,
-    Variant, button_class, cn,
+    TabChip, Variant, button_class, cn,
 };
-use crate::layout::PageView;
-use crate::layout::edit::TabView;
+use crate::layout::edit::{self, PageRef, TabView};
+use crate::layout::{LayoutState, PageView};
 
 /// The seven primary sections (the site's top tabs).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -278,7 +281,7 @@ fn App() -> impl IntoView {
             <div class="fixed inset-x-0 top-0 z-40 h-10" data-tauri-drag-region=""></div>
             <div class="w-full min-w-0 px-5 pb-12 pt-12 sm:px-8 sm:pt-14 xl:px-12">
                 <Header />
-                <Tabs visible />
+                <Tabs tabs visible />
                 {move || (layout.editing().get() && layout.save_failed().get()).then(|| view! {
                     <p role="alert" class=ERROR_LINE>"Could not save the layout. Your changes are kept until you close the app."</p>
                 })}
@@ -347,41 +350,51 @@ fn Header() -> impl IntoView {
 }
 
 #[component]
-fn Tabs(visible: Memo<Vec<TabView>>) -> impl IntoView {
+fn Tabs(tabs: Memo<Vec<TabView>>, visible: Memo<Vec<TabView>>) -> impl IntoView {
     let app = state();
-    let layout = expect_context::<layout::LayoutState>();
+    let layout = expect_context::<LayoutState>();
     let editing = layout.editing();
+    let bar = move || {
+        visible
+            .get()
+            .into_iter()
+            .enumerate()
+            .map(|(i, tab)| {
+                let id = StoredValue::new(tab.id);
+                let on = move || id.with_value(|id| app.shown_id() == *id);
+                let title = if i < 9 { format!("{} (⌘{})", tab.name, i + 1) } else { tab.name.clone() };
+                view! {
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected=move || on().to_string()
+                        data-state=move || if on() { "active" } else { "inactive" }
+                        title=title
+                        class=cn([TABS_TRIGGER, "min-w-0 grow justify-center truncate px-1.5 text-eyebrow sm:grow-0 sm:px-4 sm:text-xs"])
+                        on:click=move |_| id.with_value(|id| app.go_id(id))
+                    >
+                        {tab.name}
+                    </button>
+                }
+            })
+            .collect_view()
+    };
     view! {
         <div class=TAB_ROW>
-        <div
-            role="tablist"
-            aria-label="Finance sections"
-            class=cn([TABS_LIST, "glass-bar flex w-full min-w-0 gap-0.5 sm:inline-flex sm:w-auto sm:gap-1"])
-        >
-            {move || visible
-                .get()
-                .into_iter()
-                .enumerate()
-                .map(|(i, tab)| {
-                    let id = StoredValue::new(tab.id);
-                    let on = move || id.with_value(|id| app.shown_id() == *id);
-                    let title = if i < 9 { format!("{} (⌘{})", tab.name, i + 1) } else { tab.name.clone() };
-                    view! {
-                        <button
-                            type="button"
-                            role="tab"
-                            aria-selected=move || on().to_string()
-                            data-state=move || if on() { "active" } else { "inactive" }
-                            title=title
-                            class=cn([TABS_TRIGGER, "min-w-0 grow justify-center truncate px-1.5 text-eyebrow sm:grow-0 sm:px-4 sm:text-xs"])
-                            on:click=move |_| id.with_value(|id| app.go_id(id))
-                        >
-                            {tab.name}
-                        </button>
-                    }
-                })
-                .collect_view()}
-        </div>
+        {move || if editing.get() {
+            view! { <TabEditor tabs /> }.into_any()
+        } else {
+            view! {
+                <div
+                    role="tablist"
+                    aria-label="Finance sections"
+                    class=cn([TABS_LIST, "glass-bar flex w-full min-w-0 gap-0.5 sm:inline-flex sm:w-auto sm:gap-1"])
+                >
+                    {bar}
+                </div>
+            }
+            .into_any()
+        }}
         // Hidden while nothing could be saved: the layout is loading or its read failed.
         {move || layout.editable().then(|| view! {
             <Button
@@ -392,6 +405,169 @@ fn Tabs(visible: Memo<Vec<TabView>>) -> impl IntoView {
                 {move || if editing.get() { "Done" } else { "Edit layout" }}
             </Button>
         })}
+        </div>
+    }
+}
+
+/// The tab bar in Edit layout: every tab with its controls, hidden ones last,
+/// and "Add a tab". A tab is dragged by its name; a tab or a panel is dropped on one.
+#[component]
+fn TabEditor(tabs: Memo<Vec<TabView>>) -> impl IntoView {
+    let app = state();
+    let layout = expect_context::<LayoutState>();
+    let listed = Memo::new(move |_| tabs.with(|t| editor_tabs(t)));
+    // The own tab whose name is being edited, its text, and a refused name's message.
+    let renaming = RwSignal::new(None::<String>);
+    let draft = RwSignal::new(String::new());
+    let refused = RwSignal::new(None::<String>);
+    // The tab being dragged, and the tab under the pointer (with "after").
+    let dragging = RwSignal::new(None::<String>);
+    let over = RwSignal::new(None::<(String, bool)>);
+    let refocus = move |edited: TabEdited, id: &str| match untrack(|| {
+        tab_focus_after(edited, id, &layout.tabs())
+    }) {
+        Some(label) => focus_label(label),
+        None => focus_on("button[aria-current=page]".into()),
+    };
+    let chip = move |t: TabView| {
+        let id = StoredValue::new(t.id.clone());
+        let name = StoredValue::new(t.name.clone());
+        let hidden = t.hidden;
+        // Where a panel dropped on this tab goes: the page it shows.
+        let to = move || {
+            id.with_value(|id| PageRef {
+                tab: id.clone(),
+                tab_name: name.get_value(),
+                page: tab_page(id, app.spending.get_untracked(), app.manage.get_untracked()),
+            })
+        };
+        let ends = Memo::new(move |_| tabs.with(|v| id.with_value(|id| tab_moves(v, id))));
+        let moved = move |to: Option<usize>, edited: TabEdited| {
+            if let Some(to) = to {
+                id.with_value(|id| {
+                    layout.edit(|l| edit::tab_moved(l, id, to));
+                    refocus(edited, id);
+                });
+            }
+        };
+        let drop = DropTarget {
+            accepts: Signal::derive(move || {
+                if layout.carrying() {
+                    layout.may_send(&to())
+                } else {
+                    !hidden
+                        && dragging
+                            .with(|d| d.as_ref().is_some_and(|d| id.with_value(|id| d != id)))
+                }
+            }),
+            over: Signal::derive(move || {
+                over.with(|o| o.as_ref().is_some_and(|(o, _)| id.with_value(|id| o == id)))
+            }),
+            on_over: Callback::new(move |after: bool| {
+                let here = Some((id.get_value(), after));
+                if over.with_untracked(|o| *o != here) {
+                    over.set(here);
+                }
+            }),
+            on_leave: Callback::new(move |()| {
+                if over.with_untracked(|o| {
+                    o.as_ref().is_some_and(|(o, _)| id.with_value(|id| o == id))
+                }) {
+                    over.set(None);
+                }
+            }),
+            on_drop: Callback::new(move |()| {
+                if untrack(|| layout.carrying()) {
+                    layout.send(&to());
+                } else if let (Some(from), Some((_, after))) =
+                    (dragging.get_untracked(), over.get_untracked())
+                    && let Some(to) =
+                        id.with_value(|id| tabs.with_untracked(|v| tab_drop(v, &from, id, after)))
+                {
+                    layout.edit(|l| edit::tab_moved(l, &from, to));
+                }
+                dragging.set(None);
+                over.set(None);
+            }),
+        };
+        view! {
+            <TabChip
+                name=t.name.clone()
+                active=Signal::derive(move || id.with_value(|id| app.shown_id() == *id))
+                own=!t.built_in
+                hide=(t.built_in && t.id != Tab::Manage.id()).then_some(hidden)
+                first=Signal::derive(move || ends.get().0.is_none())
+                last=Signal::derive(move || ends.get().1.is_none())
+                renaming=Signal::derive(move || renaming.with(|r| id.with_value(|id| r.as_ref() == Some(id))))
+                draft
+                drop
+                on_grab=Callback::new(move |on: bool| {
+                    dragging.set(on.then(|| id.get_value()));
+                    over.set(None);
+                })
+                on_pick=Callback::new(move |()| id.with_value(|id| app.go_id(id)))
+                on_left=Callback::new(move |()| moved(ends.get_untracked().0, TabEdited::Left))
+                on_right=Callback::new(move |()| moved(ends.get_untracked().1, TabEdited::Right))
+                on_hide=Callback::new(move |h: bool| id.with_value(|id| {
+                    layout.edit(|l| edit::tab_hidden_set(l, id, h));
+                    refocus(if h { TabEdited::Hidden } else { TabEdited::Shown }, id);
+                }))
+                on_rename=Callback::new({
+                    let name = t.name.clone();
+                    move |()| {
+                        draft.set(name.clone());
+                        refused.set(None);
+                        renaming.set(Some(id.get_value()));
+                        focus_label(format!("Name of {name}"));
+                    }
+                })
+                on_save=Callback::new(move |()| id.with_value(|id| {
+                    let mut named = Ok(());
+                    layout.edit(|l| named = edit::tab_renamed(l, id, &draft.get_untracked()));
+                    match named {
+                        Ok(()) => {
+                            renaming.set(None);
+                            refused.set(None);
+                            refocus(TabEdited::Named, id);
+                        }
+                        Err(why) => refused.set(Some(why)),
+                    }
+                }))
+                on_cancel=Callback::new(move |()| {
+                    renaming.set(None);
+                    refused.set(None);
+                    id.with_value(|id| refocus(TabEdited::Named, id));
+                })
+                on_delete=Callback::new(move |()| id.with_value(|id| {
+                    layout.edit(|l| edit::tab_deleted(l, id));
+                    refocus(TabEdited::Deleted, id);
+                }))
+            />
+        }
+    };
+    let add = move |_| {
+        let mut added = Err(String::new());
+        layout.edit(|l| added = edit::tab_added(l, "New tab"));
+        match added {
+            Ok(id) => {
+                app.go_own(&id);
+                draft.set("New tab".into());
+                refused.set(None);
+                renaming.set(Some(id.clone()));
+                refocus(TabEdited::Added, &id);
+            }
+            Err(why) => refused.set(Some(why)),
+        }
+    };
+    view! {
+        <div role="group" aria-label="Edit tabs" class=TAB_EDITOR>
+            {move || listed.get().into_iter().map(chip).collect_view()}
+            <Button variant=Variant::Ghost size=Size::IconSm label="Add a tab" on_click=Callback::new(add)>
+                <Lucide icon=Icon::Plus size=14 />
+            </Button>
+            {move || refused.get().map(|why| view! {
+                <p role="alert" class=cn([ERROR_LINE, TAB_ALERT])>{why}</p>
+            })}
         </div>
     }
 }
@@ -480,6 +656,87 @@ pub fn must_leave(shown: &str, hidden: Option<bool>, prev: Option<&(String, bool
         None => true,
         Some(h) => h && prev.is_some_and(|(p, was)| p == shown && !was),
     }
+}
+
+/// The tab editor's order: the tabs that are not hidden, then the hidden ones.
+pub fn editor_tabs(tabs: &[TabView]) -> Vec<TabView> {
+    let (shown, hidden): (Vec<_>, Vec<_>) = tabs.iter().cloned().partition(|t| !t.hidden);
+    shown.into_iter().chain(hidden).collect()
+}
+
+/// The `to` for `tab_moved` of "Move left" and "Move right" of tab `id`: past
+/// the nearest tab that is not hidden; None at an end of the bar.
+pub fn tab_moves(tabs: &[TabView], id: &str) -> (Option<usize>, Option<usize>) {
+    let Some(from) = tabs.iter().position(|t| t.id == id) else {
+        return (None, None);
+    };
+    let left = tabs[..from]
+        .iter()
+        .rposition(|t| !t.hidden)
+        .map(|o| drop_index(from, o, false));
+    let right = tabs[from + 1..]
+        .iter()
+        .position(|t| !t.hidden)
+        .map(|o| drop_index(from, from + 1 + o, true));
+    (left, right)
+}
+
+/// The `to` for `tab_moved` of tab `from` dropped on tab `over` (`after`: on
+/// its right half); None when it would stay where it is.
+pub fn tab_drop(tabs: &[TabView], from: &str, over: &str, after: bool) -> Option<usize> {
+    let at = |id: &str| tabs.iter().position(|t| t.id == id);
+    drop_move(at(from)?, at(over)?, after)
+}
+
+/// The page tab `id` shows: for Spending and Manage the selected sub-section.
+pub fn tab_page(id: &str, spending: SpendingSection, manage: ManageSection) -> String {
+    let page = match id {
+        "spending" => match spending {
+            SpendingSection::PlanPatterns => "spending.habits",
+            SpendingSection::Organise => "spending.organise",
+            SpendingSection::History => "spending.history",
+        },
+        "manage" => match manage {
+            ManageSection::Banks => "manage.banks",
+            ManageSection::CloseMonth => "manage.close",
+            ManageSection::Import => "manage.import",
+            ManageSection::Status => "manage.status",
+            ManageSection::Settings => "manage.settings",
+        },
+        _ => id,
+    };
+    page.into()
+}
+
+/// What was just done to a tab, for `tab_focus_after`.
+#[derive(Clone, Copy, Debug)]
+pub enum TabEdited {
+    Left,
+    Right,
+    Hidden,
+    Shown,
+    /// Renamed, or the rename was cancelled.
+    Named,
+    Added,
+    Deleted,
+}
+
+/// The `aria-label` of the control that takes focus after an edit of tab
+/// `id`, from the tabs as the edit left them; None: the tab now shown.
+pub fn tab_focus_after(edited: TabEdited, id: &str, tabs: &[TabView]) -> Option<String> {
+    let name = &tabs.iter().find(|t| t.id == id)?.name;
+    let (left, right) = tab_moves(tabs, id);
+    Some(match edited {
+        TabEdited::Left if left.is_none() => format!("Move {name} right"),
+        TabEdited::Left => format!("Move {name} left"),
+        TabEdited::Right if right.is_none() => format!("Move {name} left"),
+        TabEdited::Right => format!("Move {name} right"),
+        TabEdited::Hidden => format!("Show {name}"),
+        TabEdited::Shown => format!("Hide {name}"),
+        TabEdited::Named => format!("Rename {name}"),
+        TabEdited::Added => format!("Name of {name}"),
+        TabEdited::Deleted => return None,
+    })
 }
 
 /// Renders `f` under its own owner: the contexts a page provides (Overview's
@@ -574,6 +831,77 @@ mod tests {
         let prev = ("plan".to_string(), false);
         assert!(must_leave("plan", Some(true), Some(&prev)));
         assert!(must_leave("own-1", None, Some(&prev)));
+    }
+
+    fn own(id: &str, name: &str) -> TabView {
+        TabView {
+            id: id.into(),
+            name: name.into(),
+            built_in: false,
+            hidden: false,
+        }
+    }
+
+    #[test]
+    fn hidden_tabs_come_last_in_the_editor() {
+        let tabs = [tab("a", false), tab("b", true), tab("c", false)];
+        assert_eq!(ids(&editor_tabs(&tabs)), ["a", "c", "b"]);
+    }
+
+    #[test]
+    fn move_left_and_right_skip_hidden_tabs() {
+        // Full order a, b(hidden), c, d.
+        let tabs = [
+            tab("a", false),
+            tab("b", true),
+            tab("c", false),
+            tab("d", false),
+        ];
+        assert_eq!(tab_moves(&tabs, "a"), (None, Some(2)));
+        // c left: before a; c right: after d.
+        assert_eq!(tab_moves(&tabs, "c"), (Some(0), Some(3)));
+        assert_eq!(tab_moves(&tabs, "d"), (Some(2), None));
+        assert_eq!(tab_moves(&tabs, "gone"), (None, None));
+    }
+
+    #[test]
+    fn a_tab_dropped_on_a_tab_lands_by_the_side_it_was_dropped_on() {
+        let tabs = [tab("a", false), tab("b", false), tab("c", false)];
+        assert_eq!(tab_drop(&tabs, "c", "a", false), Some(0));
+        assert_eq!(tab_drop(&tabs, "c", "a", true), Some(1));
+        assert_eq!(tab_drop(&tabs, "a", "c", true), Some(2));
+        assert_eq!(tab_drop(&tabs, "a", "b", false), None);
+        assert_eq!(tab_drop(&tabs, "b", "a", true), None);
+        assert_eq!(tab_drop(&tabs, "a", "gone", true), None);
+    }
+
+    #[test]
+    fn a_panel_dropped_on_a_tab_goes_to_the_page_it_shows() {
+        let (s, m) = (SpendingSection::History, ManageSection::CloseMonth);
+        assert_eq!(tab_page("spending", s, m), "spending.history");
+        assert_eq!(tab_page("manage", s, m), "manage.close");
+        assert_eq!(tab_page("plan", s, m), "plan");
+        assert_eq!(tab_page("own-2", s, m), "own-2");
+    }
+
+    #[test]
+    fn focus_after_a_tab_edit() {
+        let tabs = [
+            own("own-1", "Trips"),
+            tab("plan", false),
+            tab("wishes", true),
+        ];
+        let f = |e, id| tab_focus_after(e, id, &tabs);
+        assert_eq!(f(TabEdited::Left, "own-1").unwrap(), "Move Trips right");
+        assert_eq!(f(TabEdited::Right, "own-1").unwrap(), "Move Trips right");
+        // plan is the last tab shown: hidden wishes does not count.
+        assert_eq!(f(TabEdited::Right, "plan").unwrap(), "Move plan left");
+        assert_eq!(f(TabEdited::Left, "plan").unwrap(), "Move plan left");
+        assert_eq!(f(TabEdited::Hidden, "wishes").unwrap(), "Show wishes");
+        assert_eq!(f(TabEdited::Shown, "plan").unwrap(), "Hide plan");
+        assert_eq!(f(TabEdited::Named, "own-1").unwrap(), "Rename Trips");
+        assert_eq!(f(TabEdited::Added, "own-1").unwrap(), "Name of Trips");
+        assert_eq!(f(TabEdited::Deleted, "own-2"), None);
     }
 
     #[test]

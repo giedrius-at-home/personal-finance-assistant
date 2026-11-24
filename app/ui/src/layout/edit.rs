@@ -1,8 +1,6 @@
 //! Pure edits of the saved layout for Edit layout mode. Panel edits take the
 //! registry as `defs` and write the page's full resolved list, as `toggled` does.
 
-#![allow(dead_code)] // used by Edit layout mode; Task 3/4 remove this
-
 use finance_types::ui::{MAX_NAME, MAX_TABS, PageLayout, PanelItem, TabLayout, UiLayout};
 
 use super::{PanelDef, page_entry, resolve, write_page};
@@ -111,10 +109,27 @@ pub fn panel_half_set(l: &mut UiLayout, defs: &[&PanelDef], at: &PageRef, panel:
     });
 }
 
-/// `panel` taken off `from` and added to `to`; nothing when it may not move
-/// or either tab is gone.
+/// `panel` may be sent from `from` to `to`: it is movable, both tabs exist,
+/// `to` is another tab and the panel is not on its page yet.
+pub fn sendable(
+    l: &UiLayout,
+    defs: &[&PanelDef],
+    from: &PageRef,
+    to: &PageRef,
+    panel: &str,
+) -> bool {
+    def(defs, panel).is_some_and(|d| d.movable)
+        && from.tab != to.tab
+        && exists(l, from)
+        && exists(l, to)
+        && !resolve(defs, &to.page, l.page(&to.page))
+            .iter()
+            .any(|i| i.panel == panel)
+}
+
+/// `panel` taken off `from` and added to `to`; nothing unless `sendable`.
 pub fn panel_sent(l: &mut UiLayout, defs: &[&PanelDef], from: &PageRef, to: &PageRef, panel: &str) {
-    if !def(defs, panel).is_some_and(|d| d.movable) || !exists(l, from) || !exists(l, to) {
+    if !sendable(l, defs, from, to, panel) {
         return;
     }
     panel_removed(l, defs, from, panel);
@@ -431,6 +446,21 @@ mod tests {
         let d: Vec<&PanelDef> = r.iter().collect();
         let mut l = UiLayout::default();
         panel_sent(&mut l, &d, &p1(), &p2(), "b");
+        assert_eq!(l, UiLayout::default());
+    }
+
+    #[test]
+    fn a_panel_is_not_sent_to_its_own_tab_or_where_it_already_is() {
+        let r = reg();
+        let d: Vec<&PanelDef> = r.iter().collect();
+        let mut l = UiLayout::default();
+        let p1_other = at("overview", "p2");
+        assert!(sendable(&l, &d, &p1(), &p2(), "a"));
+        assert!(!sendable(&l, &d, &p1(), &p1_other, "a"));
+        assert!(!sendable(&l, &d, &p1(), &p2(), "b"));
+        assert!(!sendable(&l, &d, &p2(), &p1(), "a"), "a is on p1 already");
+        assert!(!sendable(&l, &d, &p1(), &at("own-9", "own-9"), "a"));
+        panel_sent(&mut l, &d, &p2(), &p1(), "a");
         assert_eq!(l, UiLayout::default());
     }
 

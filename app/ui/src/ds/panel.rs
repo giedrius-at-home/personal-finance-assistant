@@ -5,9 +5,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use leptos::prelude::*;
 
-use wasm_bindgen::JsCast;
-
-use super::arrange::{DROP_TARGET, DropTarget};
+use super::arrange::{DROP_TARGET, DropTarget, drag_after, drag_left};
 use super::{CardTitle, Heading, Icon, Lucide, Size, Variant, button_class, cn};
 
 /// Two columns from `md`, one below; the gap is `.page-stack`'s 1.5rem.
@@ -67,27 +65,14 @@ pub fn PanelFrame(
             return;
         };
         e.prevent_default();
-        if let Some(frame) = e
-            .current_target()
-            .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
-        {
-            let r = frame.get_bounding_client_rect();
-            d.on_over
-                .run(f64::from(e.client_y()) > r.top() + r.height() / 2.0);
+        if let Some(after) = drag_after(&e, false) {
+            d.on_over.run(after);
         }
     };
     let on_dragleave = move |e: leptos::ev::DragEvent| {
-        let Some(d) = drop.filter(|_| accepts()) else {
-            return;
-        };
-        // Moving onto a child of the frame is not leaving it.
-        let frame = e
-            .current_target()
-            .and_then(|t| t.dyn_into::<web_sys::Node>().ok());
-        let into = e
-            .related_target()
-            .and_then(|t| t.dyn_into::<web_sys::Node>().ok());
-        if frame.is_some_and(|f| !f.contains(into.as_ref())) {
+        if let Some(d) = drop.filter(|_| accepts())
+            && drag_left(&e)
+        {
             d.on_leave.run(());
         }
     };

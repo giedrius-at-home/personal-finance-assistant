@@ -8,7 +8,8 @@ use leptos::task::spawn_local;
 use serde::Serialize;
 
 use crate::api::{self, NoArgs};
-use crate::ds::arrange::{Edited, drop_move, focus_after, focus_label, moves};
+use crate::ds::arrange::{Edited, drop_move, focus_after, focus_label, focus_on, moves};
+use crate::ds::patterns::ACTIONS;
 use crate::ds::{
     Button, Confirm, DropTarget, EditBar, Gallery, PanelFrame, PanelList, Size, Variant,
 };
@@ -247,6 +248,8 @@ pub struct LayoutState {
     load: RwSignal<Load>,
     editing: RwSignal<bool>,
     save_failed: RwSignal<bool>,
+    /// The panel being dragged, with the page it is on.
+    carried: RwSignal<Option<(PageRef, &'static str)>>,
 }
 
 impl LayoutState {
@@ -258,6 +261,7 @@ impl LayoutState {
             load: RwSignal::new(Load::Loading),
             editing: RwSignal::new(false),
             save_failed: RwSignal::new(false),
+            carried: RwSignal::new(None),
         };
         spawn_local(async move {
             match api::invoke::<UiLayout>("ui_layout", &NoArgs {}).await {
@@ -298,6 +302,29 @@ impl LayoutState {
     /// True after a save returned Err; cleared by the next Ok.
     pub fn save_failed(&self) -> ReadSignal<bool> {
         self.save_failed.read_only()
+    }
+
+    /// A panel is being dragged; reactive.
+    pub fn carrying(&self) -> bool {
+        self.carried.with(Option::is_some)
+    }
+
+    /// The dragged panel may be dropped on the tab whose shown page is `to`; reactive.
+    pub fn may_send(&self, to: &PageRef) -> bool {
+        self.carried.with(|c| {
+            c.as_ref().is_some_and(|(from, panel)| {
+                self.layout
+                    .with(|l| edit::sendable(l, &defs(), from, to, panel))
+            })
+        })
+    }
+
+    /// Sends the dragged panel to `to` and ends the drag.
+    pub fn send(&self, to: &PageRef) {
+        if let Some((from, panel)) = self.carried.get_untracked() {
+            self.edit(|l| edit::panel_sent(l, &defs(), &from, to, panel));
+        }
+        self.carried.set(None);
     }
 
     pub fn toggle(&self, tab: &str, tab_name: &str, page: &str, panel: &str) {
@@ -410,8 +437,14 @@ pub fn PageView(
         });
         focus_label(focus_after(edited, title, &after));
     };
-    // The panel being dragged, and the one under the pointer (with "after").
-    let dragging = RwSignal::new(None::<&'static str>);
+    // The panel of this page being dragged, and the one under the pointer (with "after").
+    let dragging = move || {
+        state.carried.with(|c| {
+            c.as_ref()
+                .filter(|(a, _)| at.with_value(|at| a.page == at.page))
+                .map(|(_, id)| *id)
+        })
+    };
     let target = RwSignal::new(None::<(&'static str, bool)>);
     let panel = move |item: PanelItem| {
         let def = registry().find(|d| d.id == item.panel)?;
@@ -444,7 +477,7 @@ pub fn PageView(
                         last=Signal::derive(move || ends.get().1.is_none())
                         half=half
                         on_grab=Callback::new(move |on: bool| {
-                            dragging.set(on.then_some(id));
+                            state.carried.set(on.then(|| (at.get_value(), id)));
                             target.set(None);
                         })
                         on_up=Callback::new(move |()| moved(ends.get_untracked().0, Edited::Up))
@@ -464,9 +497,9 @@ pub fn PageView(
             })
         };
         let drop = DropTarget {
-            accepts: Signal::derive(move || dragging.get().is_some()),
+            accepts: Signal::derive(move || dragging().is_some()),
             over: Signal::derive(move || {
-                target.get().is_some_and(|(t, _)| t == id) && dragging.get() != Some(id)
+                target.get().is_some_and(|(t, _)| t == id) && dragging() != Some(id)
             }),
             on_over: Callback::new(move |after: bool| {
                 if target.get_untracked() != Some((id, after)) {
@@ -479,8 +512,7 @@ pub fn PageView(
                 }
             }),
             on_drop: Callback::new(move |()| {
-                let (Some(from), Some((_, after))) =
-                    (dragging.get_untracked(), target.get_untracked())
+                let (Some(from), Some((_, after))) = (untrack(dragging), target.get_untracked())
                 else {
                     return;
                 };
@@ -490,7 +522,7 @@ pub fn PageView(
                 {
                     edit(&|l, d, a| edit::panel_moved(l, d, a, from, to));
                 }
-                dragging.set(None);
+                state.carried.set(None);
                 target.set(None);
             }),
         };
@@ -556,11 +588,20 @@ pub fn PageView(
                             }
                         })
                     />
-                    <div>
+                    <div class=ACTIONS>
                         <Confirm
                             label="Reset this tab"
                             question="Put this tab back as it shipped?"
                             on_yes=Callback::new(move |()| edit(&|l, _, a| edit::page_reset(l, a)))
+                        />
+                        <Confirm
+                            label="Reset everything"
+                            question="Put every tab back as it shipped and delete your own tabs?"
+                            on_yes=Callback::new(move |()| {
+                                state.edit(edit::all_reset);
+                                // An own tab shown is gone: focus the tab shown instead.
+                                focus_on("button[aria-current=page]".into());
+                            })
                         />
                     </div>
                 })}

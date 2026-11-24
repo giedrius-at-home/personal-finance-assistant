@@ -1,12 +1,13 @@
-//! Edit layout parts: a panel's edit controls, the "Add a panel" gallery and
-//! an inline confirm button. Drawn only while Edit layout is on.
+//! Edit layout parts: a panel's edit controls, the "Add a panel" gallery, an
+//! inline confirm button and a tab of the tab editor. Drawn only while Edit
+//! layout is on.
 
 use leptos::html;
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 
 use super::patterns::{ACTIONS, CHIPS, MUTED};
-use super::{Button, CardTitle, Heading, Icon, Lucide, Size, Variant, button_class, cn};
+use super::{Button, CardTitle, Heading, Icon, Input, Lucide, Size, Variant, button_class, cn};
 
 /// The edit controls: in the gap above the section's top rule, left of the fold button.
 const EDIT_BAR: &str = "absolute bottom-full right-7 flex items-center gap-0.5";
@@ -19,6 +20,18 @@ const GRIP: &str = "size-6 cursor-grab active:cursor-grabbing";
 pub const DROP_TARGET: &str = "ring-2 ring-accent/50";
 /// The "Add a panel" box.
 const GALLERY: &str = "grid gap-3 rounded-xl border border-dashed border-border p-5";
+/// The tab bar while editing: each tab with its controls, wrapping.
+pub const TAB_EDITOR: &str = "flex w-full min-w-0 flex-wrap items-center gap-1 rounded-xl border border-dashed border-border bg-card-strong p-1";
+/// One tab of the tab editor with its controls.
+const TAB_CHIP: &str = "inline-flex flex-wrap items-center gap-0.5 rounded-pill";
+/// A hidden tab in the tab editor.
+const TAB_HIDDEN: &str = "opacity-60";
+/// A tab's name in the tab editor; it is also what a tab is dragged by.
+const TAB_NAME: &str = "data-[state=active]:bg-soft data-[state=active]:text-fg";
+/// The rename field of a tab.
+const TAB_NAME_FIELD: &str = "h-8 w-40";
+/// A refused tab name, on its own line under the tabs.
+pub const TAB_ALERT: &str = "basis-full px-2";
 
 /// A frame's part as a drop target while a panel is dragged.
 #[derive(Clone, Copy)]
@@ -165,17 +178,31 @@ pub fn Gallery(items: Signal<Vec<(String, String)>>, on_add: Callback<String>) -
 pub fn Confirm(
     #[prop(into)] label: String,
     #[prop(into)] question: String,
+    /// The button's `aria-label`, when `label` alone does not say what it acts on.
+    #[prop(optional, into)]
+    aria: Option<String>,
     on_yes: Callback<()>,
 ) -> impl IntoView {
     let asking = RwSignal::new(false);
     let cancel = NodeRef::<html::Button>::new();
+    let ask = NodeRef::<html::Button>::new();
+    let answered = StoredValue::new(false);
     // Focus follows the question, on the safe answer: a held Enter cannot repeat into "Yes".
     Effect::new(move |_| {
         if let Some(b) = cancel.get() {
             let _ = b.focus();
         }
     });
-    let text = StoredValue::new((label, question));
+    // After an answer, back on the button that asked (when it is still there).
+    Effect::new(move |_| {
+        if let Some(b) = ask.get()
+            && answered.get_value()
+        {
+            answered.set_value(false);
+            let _ = b.focus();
+        }
+    });
+    let text = StoredValue::new((label, question, aria));
     move || {
         if asking.get() {
             view! {
@@ -185,6 +212,7 @@ pub fn Confirm(
                         type="button"
                         class=button_class(Variant::Danger, Size::Sm)
                         on:click=move |_| {
+                            answered.set_value(true);
                             asking.set(false);
                             on_yes.run(());
                         }
@@ -195,7 +223,10 @@ pub fn Confirm(
                         type="button"
                         node_ref=cancel
                         class=button_class(Variant::Ghost, Size::Sm)
-                        on:click=move |_| asking.set(false)
+                        on:click=move |_| {
+                            answered.set_value(true);
+                            asking.set(false);
+                        }
                     >
                         "Cancel"
                     </button>
@@ -204,12 +235,177 @@ pub fn Confirm(
             .into_any()
         } else {
             view! {
-                <Button variant=Variant::Secondary size=Size::Sm on_click=Callback::new(move |_| asking.set(true))>
+                <button
+                    type="button"
+                    node_ref=ask
+                    class=button_class(Variant::Secondary, Size::Sm)
+                    aria-label=text.with_value(|t| t.2.clone())
+                    on:click=move |_| asking.set(true)
+                >
                     {text.with_value(|t| t.0.clone())}
-                </Button>
+                </button>
             }
-                .into_any()
+            .into_any()
         }
+    }
+}
+
+/// One tab of the tab editor: its name (click: show it; drag: move it, or drop
+/// a panel on it), "Move left"/"Move right", and Rename/Delete for an own tab
+/// or Hide for a built-in one. A hidden tab is muted and shows only "Show".
+#[component]
+pub fn TabChip(
+    #[prop(into)] name: String,
+    #[prop(into)] active: Signal<bool>,
+    /// An own tab: rename and delete.
+    own: bool,
+    /// Some(hidden): a built-in tab that may be hidden (every one but Manage).
+    hide: Option<bool>,
+    #[prop(into)] first: Signal<bool>,
+    #[prop(into)] last: Signal<bool>,
+    /// The rename field is open; its text is `draft`.
+    #[prop(into)]
+    renaming: Signal<bool>,
+    draft: RwSignal<String>,
+    drop: DropTarget,
+    on_grab: Callback<bool>,
+    on_pick: Callback<()>,
+    on_left: Callback<()>,
+    on_right: Callback<()>,
+    on_hide: Callback<bool>,
+    on_rename: Callback<()>,
+    on_save: Callback<()>,
+    on_cancel: Callback<()>,
+    on_delete: Callback<()>,
+) -> impl IntoView {
+    let hidden = hide == Some(true);
+    let icon = cn([
+        button_class(Variant::Ghost, Size::IconSm).as_str(),
+        EDIT_ICON,
+    ]);
+    let word = cn([button_class(Variant::Ghost, Size::Sm).as_str(), EDIT_WORD]);
+    let accepts = move || drop.accepts.get_untracked();
+    let on_dragover = move |e: leptos::ev::DragEvent| {
+        if accepts() {
+            e.prevent_default();
+            if let Some(after) = drag_after(&e, true) {
+                drop.on_over.run(after);
+            }
+        }
+    };
+    let on_dragleave = move |e: leptos::ev::DragEvent| {
+        if accepts() && drag_left(&e) {
+            drop.on_leave.run(());
+        }
+    };
+    let on_drop = move |e: leptos::ev::DragEvent| {
+        if accepts() {
+            e.prevent_default();
+            drop.on_drop.run(());
+        }
+    };
+    let class = move || {
+        cn([
+            TAB_CHIP,
+            if hidden { TAB_HIDDEN } else { "" },
+            if drop.over.get() { DROP_TARGET } else { "" },
+        ])
+    };
+    let name = StoredValue::new(name);
+    let label = move |verb: &str| name.with_value(|n| format!("{verb} {n}"));
+    let tab = move || {
+        if renaming.get() {
+            view! {
+                <span on:keydown=move |e: leptos::ev::KeyboardEvent| match e.key().as_str() {
+                    "Enter" => {
+                        e.prevent_default();
+                        on_save.run(());
+                    }
+                    // Esc closes the field only, not Edit layout.
+                    "Escape" => {
+                        e.stop_propagation();
+                        on_cancel.run(());
+                    }
+                    _ => {}
+                }>
+                    <Input value=draft class=TAB_NAME_FIELD label=label("Name of") />
+                </span>
+            }
+            .into_any()
+        } else {
+            view! {
+                <button
+                    type="button"
+                    class=cn([button_class(Variant::Ghost, Size::Sm).as_str(), TAB_NAME])
+                    data-state=move || if active.get() { "active" } else { "inactive" }
+                    aria-current=move || active.get().then_some("page")
+                    draggable=if hidden { "false" } else { "true" }
+                    on:dragstart=move |e| {
+                        if let Some(data) = e.data_transfer() {
+                            let _ = data.set_data("text/plain", "tab");
+                        }
+                        on_grab.run(true);
+                    }
+                    on:dragend=move |_| on_grab.run(false)
+                    on:click=move |_| on_pick.run(())
+                >
+                    {name.get_value()}
+                </button>
+            }
+            .into_any()
+        }
+    };
+    let tools = if hidden {
+        view! {
+            <button type="button" class=icon aria-label=label("Show") on:click=move |_| on_hide.run(false)>
+                <Lucide icon=Icon::Eye size=14 />
+            </button>
+        }
+        .into_any()
+    } else {
+        view! {
+            <button
+                type="button"
+                class=icon.clone()
+                aria-label=label("Move")+" left"
+                disabled=move || first.get()
+                on:click=move |_| on_left.run(())
+            >
+                <Lucide icon=Icon::ArrowLeft size=14 />
+            </button>
+            <button
+                type="button"
+                class=icon.clone()
+                aria-label=label("Move")+" right"
+                disabled=move || last.get()
+                on:click=move |_| on_right.run(())
+            >
+                <Lucide icon=Icon::ArrowRight size=14 />
+            </button>
+            {own.then(|| view! {
+                <button type="button" class=word.clone() aria-label=label("Rename") on:click=move |_| on_rename.run(())>
+                    "Rename"
+                </button>
+                <Confirm
+                    label="Delete"
+                    aria=label("Delete")
+                    question="Delete this tab? Its panels stay available."
+                    on_yes=on_delete
+                />
+            })}
+            {hide.is_some().then(|| view! {
+                <button type="button" class=icon.clone() aria-label=label("Hide") on:click=move |_| on_hide.run(true)>
+                    <Lucide icon=Icon::EyeOff size=14 />
+                </button>
+            })}
+        }
+        .into_any()
+    };
+    view! {
+        <span class=class on:dragover=on_dragover on:dragleave=on_dragleave on:drop=on_drop>
+            {tab}
+            {tools}
+        </span>
     }
 }
 
@@ -222,6 +418,37 @@ pub fn drop_index(from: usize, over: usize, after: bool) -> usize {
 /// The `to` for `panel_moved` of a drop; None when the panel would stay where it is.
 pub fn drop_move(from: usize, over: usize, after: bool) -> Option<usize> {
     Some(drop_index(from, over, after)).filter(|&to| to != from)
+}
+
+/// The pointer at `pos` is past the middle of the span from `start`, `size` long.
+pub fn past_middle(pos: f64, start: f64, size: f64) -> bool {
+    pos > start + size / 2.0
+}
+
+/// For a dragover on a drop target: whether the pointer is past the middle of
+/// the target (across: by X, else by Y).
+pub fn drag_after(e: &leptos::ev::DragEvent, across: bool) -> Option<bool> {
+    let r = e
+        .current_target()?
+        .dyn_into::<web_sys::Element>()
+        .ok()?
+        .get_bounding_client_rect();
+    Some(if across {
+        past_middle(f64::from(e.client_x()), r.left(), r.width())
+    } else {
+        past_middle(f64::from(e.client_y()), r.top(), r.height())
+    })
+}
+
+/// For a dragleave: the pointer left the target, not just moved onto one of its children.
+pub fn drag_left(e: &leptos::ev::DragEvent) -> bool {
+    let target = e
+        .current_target()
+        .and_then(|t| t.dyn_into::<web_sys::Node>().ok());
+    let into = e
+        .related_target()
+        .and_then(|t| t.dyn_into::<web_sys::Node>().ok());
+    target.is_some_and(|t| !t.contains(into.as_ref()))
 }
 
 /// The Half/Full control's label.
@@ -275,17 +502,26 @@ pub fn focus_after(edited: Edited, title: &str, items: &[(&str, bool)]) -> Strin
     }
 }
 
-/// Focuses the button labelled `label` once the edit is drawn.
+/// Focuses the button or field labelled `label` once the edit is drawn; a
+/// field's text is selected.
 pub fn focus_label(label: String) {
+    let label = label.replace('"', "\\\"");
+    focus_on(format!(
+        "button[aria-label=\"{label}\"], input[aria-label=\"{label}\"]"
+    ));
+}
+
+/// Focuses the first element matching `selector` once the edit is drawn.
+pub fn focus_on(selector: String) {
     set_timeout(
         move || {
-            let sel = format!("button[aria-label=\"{}\"]", label.replace('"', "\\\""));
-            if let Some(b) = document()
-                .query_selector(&sel)
-                .ok()
-                .flatten()
-                .and_then(|e| e.dyn_into::<web_sys::HtmlElement>().ok())
-            {
+            let Some(el) = document().query_selector(&selector).ok().flatten() else {
+                return;
+            };
+            if let Some(input) = el.dyn_ref::<web_sys::HtmlInputElement>() {
+                let _ = input.focus();
+                input.select();
+            } else if let Some(b) = el.dyn_ref::<web_sys::HtmlElement>() {
                 let _ = b.focus();
             }
         },
@@ -346,6 +582,14 @@ mod tests {
             focus_after(Edited::Added, "A", &[("A", true)]),
             "Make A full width"
         );
+    }
+
+    #[test]
+    fn the_far_half_of_a_target_drops_after_it() {
+        assert!(!past_middle(10.0, 0.0, 100.0));
+        assert!(!past_middle(50.0, 0.0, 100.0));
+        assert!(past_middle(51.0, 0.0, 100.0));
+        assert!(past_middle(190.0, 100.0, 100.0));
     }
 
     #[test]

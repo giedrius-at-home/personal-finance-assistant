@@ -9,7 +9,7 @@ pub mod money_plan;
 pub mod panel;
 pub mod patterns;
 
-pub use arrange::{Confirm, DropTarget, EditBar, Gallery};
+pub use arrange::{Confirm, DropTarget, EditBar, Gallery, TabChip};
 pub use cn::cn;
 pub use icons::{Icon, Lucide};
 pub use panel::{PanelFrame, PanelList};
