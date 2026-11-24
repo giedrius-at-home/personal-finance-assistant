@@ -80,3 +80,11 @@ on the server (use the refresh button), and alerts are not shown.
 
 Open the server's `https://` address in Chrome, sign in with the token once,
 then menu → "Install app" (the UI ships a web app manifest and icons).
+
+## Backups
+
+The server holds the ledger; the Mac keeps copies. `app/server/deploy/pull-backup.sh ubuntu@<tailnet host>`
+fetches a consistent copy into `~/Library/Application Support/Finance/server-backups/`
+(integrity-checked, last 14 kept). To go back to the Mac: quit the app, put a
+copy at `Finance/finance.sqlite3`, move `secrets/on-server/*` back into
+`secrets/`, delete `server-url`, and stop the server so only one side syncs.
