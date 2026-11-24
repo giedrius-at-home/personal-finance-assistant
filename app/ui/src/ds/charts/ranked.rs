@@ -5,7 +5,11 @@ use super::{Fmt, ValueTable, clamp_percent, pct};
 /// A bar's length: percent of its track (the half track when two-sided),
 /// by size, so a negative value is as long as its positive.
 pub fn ranked_width(value: f64, max_abs: f64) -> f64 {
-    clamp_percent(value.abs(), max_abs)
+    if value.is_finite() && max_abs.is_finite() {
+        clamp_percent(value.abs(), max_abs)
+    } else {
+        0.0
+    }
 }
 
 /// One row per item, in the order given: label, bar, value. Two-sided bars
@@ -18,7 +22,11 @@ pub fn Ranked(
     #[prop(optional, into)] label: String,
 ) -> impl IntoView {
     let caption = label.clone();
-    let max_abs = items.iter().map(|(_, v)| v.abs()).fold(0.0, f64::max);
+    let max_abs = items
+        .iter()
+        .map(|(_, v)| v.abs())
+        .filter(|v| v.is_finite())
+        .fold(0.0, f64::max);
     let rows = items
         .iter()
         .map(|(name, v)| {
@@ -48,7 +56,7 @@ pub fn Ranked(
     view! {
         <div role="figure" aria-label=label class="grid w-full gap-2.5">
             {rows}
-            <ValueTable caption=caption head=vec![String::new(), "Value".to_owned()] rows=table_rows />
+            <ValueTable caption=caption head=vec!["Name".to_owned(), "Value".to_owned()] rows=table_rows />
         </div>
     }
 }
@@ -63,5 +71,7 @@ mod tests {
         assert_eq!(ranked_width(40.0, 80.0), 50.0);
         assert_eq!(ranked_width(-40.0, 80.0), 50.0);
         assert_eq!(ranked_width(40.0, 0.0), 0.0);
+        assert_eq!(ranked_width(f64::NAN, 80.0), 0.0);
+        assert_eq!(ranked_width(40.0, f64::INFINITY), 0.0);
     }
 }

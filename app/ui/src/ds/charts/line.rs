@@ -1,6 +1,8 @@
 use leptos::prelude::*;
 
-use super::{Fmt, Legend, Line, Series, Tooltip, cn, nice_axis, pct};
+use super::{
+    Fmt, Legend, Line, Series, Tooltip, ValueTable, YTicks, cn, nice_axis, pct, series_table,
+};
 
 /// Lines or filled areas over a category axis (`LineChart` / `AreaChart`).
 #[component]
@@ -23,6 +25,9 @@ pub fn LineChart(
     /// The last category is unfinished (this month so far): its segment is dashed.
     #[prop(optional)]
     partial_last: bool,
+    /// Also a visually hidden table of the values, for screen readers.
+    #[prop(optional)]
+    table: bool,
 ) -> impl IntoView {
     let last = categories.len().checked_sub(1).filter(|_| partial_last);
     let n = categories.len().max(1);
@@ -117,22 +122,7 @@ pub fn LineChart(
             </div>
         }
     });
-    let tick_views = ticks
-        .iter()
-        .map(|t| {
-            let top = pct(y(*t));
-            let text = format(*t);
-            view! {
-                <div class="absolute inset-x-0 border-t border-chart-grid" style:top=top.clone()></div>
-                <span
-                    class="absolute -translate-y-1/2 pr-2 text-right text-eyebrow text-chart-axis tabular-nums"
-                    style=format!("top:{top};right:100%;width:{y_axis_width}px")
-                >
-                    {text}
-                </span>
-            }
-        })
-        .collect_view();
+    let tick_views = ticks.iter().map(|t| (y(*t), format(*t))).collect();
     let legend = (series.len() > 1).then(|| {
         let dashed = series
             .iter()
@@ -142,12 +132,16 @@ pub fn LineChart(
         view! { <Legend series=series.iter().map(|s| (s.label.clone(), s.color.clone())).collect() dashed=dashed /> }
     });
     let titles = titles.unwrap_or_else(|| categories.clone());
+    let table = table.then(|| {
+        let (head, rows) = series_table(&titles, &series, &format);
+        view! { <ValueTable caption=label.clone() head=head rows=rows /> }
+    });
     let hover_series = series.clone();
     let tip_format = format.clone();
     view! {
         <div role="figure" aria-label=label class=cn(["w-full", class.as_str()])>
             <div class="relative" style=format!("height:{plot_h}px;margin-left:{y_axis_width}px;margin-right:8px;margin-top:8px")>
-                {tick_views}
+                <YTicks ticks=tick_views width=y_axis_width />
                 <svg class="absolute inset-0 h-full w-full overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="none">
                     {paths}
                 </svg>
@@ -208,6 +202,7 @@ pub fn LineChart(
                     .collect_view()}
             </div>
             {legend}
+            {table}
         </div>
     }
 }

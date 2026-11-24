@@ -141,13 +141,33 @@ mod scatter;
 pub use bar::BarChart;
 pub use donut::{Donut, Slice};
 #[allow(unused_imports, reason = "plots use these from v0.3 Task 6")]
-pub use heatmap::{Heatmap, heat_level};
+pub use heatmap::Heatmap;
 pub use line::LineChart;
 pub use progress::{BarTone, BudgetBar, ProgressBar};
 #[allow(unused_imports, reason = "plots use these from v0.3 Task 6")]
-pub use ranked::{Ranked, ranked_width};
+pub use ranked::Ranked;
 #[allow(unused_imports, reason = "plots use these from v0.3 Task 6")]
 pub use scatter::Scatter;
+
+/// The value axis: grid lines with their labels, each at `top` percent.
+#[component]
+fn YTicks(ticks: Vec<(f64, String)>, width: u32) -> impl IntoView {
+    ticks
+        .into_iter()
+        .map(|(top, text)| {
+            let top = pct(top);
+            view! {
+                <div class="absolute inset-x-0 border-t border-chart-grid" style:top=top.clone()></div>
+                <span
+                    class="absolute -translate-y-1/2 pr-2 text-right text-eyebrow text-chart-axis tabular-nums"
+                    style=format!("top:{top};right:100%;width:{width}px")
+                >
+                    {text}
+                </span>
+            }
+        })
+        .collect_view()
+}
 
 #[component]
 fn Legend(
@@ -216,23 +236,63 @@ fn Tooltip(
     }
 }
 
-/// The chart's values as a visually hidden table, for screen readers.
+/// The chart's values as a visually hidden table, for screen readers: each
+/// row's first cell names it; nothing when there are no rows.
 #[component]
 fn ValueTable(caption: String, head: Vec<String>, rows: Vec<Vec<String>>) -> impl IntoView {
-    view! {
-        <table class="sr-only">
-            <caption>{caption}</caption>
-            <thead>
-                <tr>{head.into_iter().map(|h| view! { <th scope="col">{h}</th> }).collect_view()}</tr>
-            </thead>
-            <tbody>
-                {rows
-                    .into_iter()
-                    .map(|row| view! { <tr>{row.into_iter().map(|c| view! { <td>{c}</td> }).collect_view()}</tr> })
-                    .collect_view()}
-            </tbody>
-        </table>
-    }
+    (!rows.is_empty()).then(|| {
+        view! {
+            <table class="sr-only">
+                <caption>{caption}</caption>
+                <thead>
+                    <tr>{head.into_iter().map(|h| view! { <th scope="col">{h}</th> }).collect_view()}</tr>
+                </thead>
+                <tbody>
+                    {rows
+                        .into_iter()
+                        .map(|row| {
+                            let mut cells = row.into_iter();
+                            let name = cells.next().unwrap_or_default();
+                            view! {
+                                <tr>
+                                    <th scope="row">{name}</th>
+                                    {cells.map(|c| view! { <td>{c}</td> }).collect_view()}
+                                </tr>
+                            }
+                        })
+                        .collect_view()}
+                </tbody>
+            </table>
+        }
+    })
+}
+
+/// A bar or line chart's values for `ValueTable`: one row per category,
+/// one column per series.
+fn series_table(
+    titles: &[String],
+    series: &[Series],
+    format: &Fmt,
+) -> (Vec<String>, Vec<Vec<String>>) {
+    let head = std::iter::once("Name".to_owned())
+        .chain(series.iter().map(|s| s.label.clone()))
+        .collect();
+    let rows = titles
+        .iter()
+        .enumerate()
+        .map(|(i, t)| {
+            std::iter::once(t.clone())
+                .chain(series.iter().map(|s| {
+                    s.values
+                        .get(i)
+                        .copied()
+                        .flatten()
+                        .map_or_else(|| "No data".to_owned(), |v| format(v))
+                }))
+                .collect()
+        })
+        .collect();
+    (head, rows)
 }
 
 fn clamp_percent(value: f64, max: f64) -> f64 {

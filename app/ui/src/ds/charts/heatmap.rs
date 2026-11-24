@@ -31,15 +31,13 @@ pub fn Heatmap(
     #[prop(optional, into)] label: String,
 ) -> impl IntoView {
     let cell = |r: usize, c: usize| values.get(r).and_then(|row| row.get(c).copied().flatten());
-    let max = values
-        .iter()
-        .flatten()
-        .flatten()
-        .copied()
+    let n = columns.len();
+    // Only drawn cells set the scale: extra rows or columns in `values` are ignored.
+    let max = (0..rows.len())
+        .flat_map(|r| (0..n).filter_map(move |c| cell(r, c)))
         .fold(0.0, f64::max);
     let caption = label.clone();
     let hovered = RwSignal::new(None::<(usize, usize)>);
-    let n = columns.len();
     let grid = format!("grid-template-columns:auto repeat({n},minmax(0,40px))");
     let cells = rows
         .iter()
@@ -90,7 +88,7 @@ pub fn Heatmap(
                 .collect()
         })
         .collect();
-    let head = std::iter::once(String::new())
+    let head = std::iter::once("Name".to_owned())
         .chain(columns.iter().cloned())
         .collect();
     view! {
@@ -116,6 +114,7 @@ mod tests {
     fn heat_levels_are_quartiles_of_max() {
         assert_eq!(heat_level(f64::NAN, 100.0), 0, "no value");
         assert_eq!(heat_level(0.0, 100.0), 0);
+        assert_eq!(heat_level(-30.0, 100.0), 0, "negative is the lowest level");
         assert_eq!(heat_level(100.0, 100.0), 4);
         assert_eq!(heat_level(25.0, 100.0), 1);
         assert_eq!(heat_level(25.01, 100.0), 2);

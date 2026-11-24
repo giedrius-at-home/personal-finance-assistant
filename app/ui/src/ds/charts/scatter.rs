@@ -1,13 +1,14 @@
 use leptos::prelude::*;
 
-use super::{Fmt, Tooltip, ValueTable, nice_axis, pct};
+use super::{Fmt, Tooltip, ValueTable, YTicks, nice_axis, pct};
 
 /// The x and y axes `(start, end, ticks)`: each from zero to past its
 /// furthest point; an empty set gets the default 0..4 frame.
 fn scatter_axes(points: &[(String, f64, f64)]) -> [(f64, f64, Vec<f64>); 2] {
     let range = |values: Vec<f64>| {
-        let lo = values.iter().copied().fold(0.0, f64::min);
-        let hi = values.iter().copied().fold(0.0, f64::max);
+        let finite = || values.iter().copied().filter(|v| v.is_finite());
+        let lo = finite().fold(0.0, f64::min);
+        let hi = finite().fold(0.0, f64::max);
         nice_axis(lo, hi)
     };
     [
@@ -27,25 +28,16 @@ pub fn Scatter(
 ) -> impl IntoView {
     const Y_AXIS_WIDTH: u32 = 56;
     const PLOT_H: u32 = 216;
+    // A point without two finite values can't be placed.
+    let points: Vec<_> = points
+        .into_iter()
+        .filter(|p| p.1.is_finite() && p.2.is_finite())
+        .collect();
     let [(x0, x1, x_ticks), (y0, y1, y_ticks)] = scatter_axes(&points);
     let x = move |v: f64| (v - x0) / (x1 - x0).max(f64::EPSILON) * 100.0;
     let y = move |v: f64| 100.0 - (v - y0) / (y1 - y0).max(f64::EPSILON) * 100.0;
     let hovered = RwSignal::new(None::<usize>);
-    let tick_views = y_ticks
-        .iter()
-        .map(|t| {
-            let top = pct(y(*t));
-            view! {
-                <div class="absolute inset-x-0 border-t border-chart-grid" style:top=top.clone()></div>
-                <span
-                    class="absolute -translate-y-1/2 pr-2 text-right text-eyebrow text-chart-axis tabular-nums"
-                    style=format!("top:{top};right:100%;width:{Y_AXIS_WIDTH}px")
-                >
-                    {y_format(*t)}
-                </span>
-            }
-        })
-        .collect_view();
+    let y_ticks = y_ticks.iter().map(|t| (y(*t), y_format(*t))).collect();
     let dots = points
         .iter()
         .enumerate()
@@ -73,7 +65,7 @@ pub fn Scatter(
         .iter()
         .map(|(name, px, py)| vec![name.clone(), x_format(*px), y_format(*py)])
         .collect();
-    let head = vec![String::new(), x_name.clone(), y_name.clone()];
+    let head = vec!["Name".to_owned(), x_name.clone(), y_name.clone()];
     let table_caption = caption.clone();
     let tip_points = points.clone();
     let (tip_x, tip_y) = (x_format.clone(), y_format.clone());
@@ -82,7 +74,7 @@ pub fn Scatter(
             {(!y_label.is_empty())
                 .then(|| view! { <div class="text-eyebrow text-chart-axis" style=format!("margin-left:{Y_AXIS_WIDTH}px")>{y_label}</div> })}
             <div class="relative" style=format!("height:{PLOT_H}px;margin-left:{Y_AXIS_WIDTH}px;margin-right:8px;margin-top:8px")>
-                {tick_views}
+                <YTicks ticks=y_ticks width=Y_AXIS_WIDTH />
                 {dots}
                 {move || {
                     hovered
@@ -134,6 +126,9 @@ mod tests {
         for (_, x, y) in &points {
             assert!((x0..=x1).contains(x) && (y0..=y1).contains(y));
         }
+        let [(x0, x1, _), (y0, y1, _)] =
+            scatter_axes(&[("nan".to_owned(), f64::NAN, f64::INFINITY)]);
+        assert!(x0.is_finite() && x1.is_finite() && y0.is_finite() && y1.is_finite());
         let [(x0, x1, xt), (y0, y1, _)] = scatter_axes(&[]);
         assert!(
             x1 > x0 && y1 > y0 && xt.len() == 5,

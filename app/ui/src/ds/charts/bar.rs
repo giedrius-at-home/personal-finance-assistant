@@ -1,6 +1,6 @@
 use leptos::prelude::*;
 
-use super::{Fmt, Legend, Series, Tooltip, cn, nice_axis, pct};
+use super::{Fmt, Legend, Series, Tooltip, ValueTable, YTicks, cn, nice_axis, pct, series_table};
 
 /// Grouped or stacked bars along a category axis (`BarChart`, layout "horizontal").
 #[component]
@@ -19,6 +19,9 @@ pub fn BarChart(
     /// The last category is unfinished (this month so far): drawn lighter.
     #[prop(optional)]
     partial_last: bool,
+    /// Also a visually hidden table of the values, for screen readers.
+    #[prop(optional)]
+    table: bool,
 ) -> impl IntoView {
     let n = categories.len().max(1);
     let totals: Vec<(f64, f64)> = (0..categories.len())
@@ -107,32 +110,21 @@ pub fn BarChart(
                 .collect::<Vec<_>>()
         })
         .collect();
-    let tick_views = ticks
-        .iter()
-        .map(|t| {
-            let top = pct(y(*t));
-            let text = format(*t);
-            view! {
-                <div class="absolute inset-x-0 border-t border-chart-grid" style:top=top.clone()></div>
-                <span
-                    class="absolute -translate-y-1/2 pr-2 text-right text-eyebrow text-chart-axis tabular-nums"
-                    style=format!("top:{top};right:100%;width:{y_axis_width}px")
-                >
-                    {text}
-                </span>
-            }
-        })
-        .collect_view();
+    let tick_views = ticks.iter().map(|t| (y(*t), format(*t))).collect();
     let legend = (series.len() > 1).then(|| {
         view! { <Legend series=series.iter().map(|s| (s.label.clone(), s.color.clone())).collect() /> }
     });
     let titles = titles.unwrap_or_else(|| categories.clone());
+    let table = table.then(|| {
+        let (head, rows) = series_table(&titles, &series, &format);
+        view! { <ValueTable caption=label.clone() head=head rows=rows /> }
+    });
     let tooltip_series = series.clone();
     let tooltip_format = format.clone();
     view! {
         <div role="figure" aria-label=label class=cn(["w-full", class.as_str()])>
             <div class="relative" style=format!("height:{plot_h}px;margin-left:{y_axis_width}px;margin-right:8px;margin-top:8px")>
-                {tick_views}
+                <YTicks ticks=tick_views width=y_axis_width />
                 {bars}
                 <div class="absolute inset-0 flex" on:mouseleave=move |_| hovered.set(None)>
                     {(0..categories.len())
@@ -179,6 +171,7 @@ pub fn BarChart(
                     .collect_view()}
             </div>
             {legend}
+            {table}
         </div>
     }
 }
