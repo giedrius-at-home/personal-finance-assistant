@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use finance_types::plot::{Axis, Period};
+use finance_types::plot::{Axis, Period, Split};
 use jiff::Span;
 use jiff::civil::Date;
 use rust_decimal::Decimal;
@@ -41,12 +41,10 @@ impl Frame<'_> {
     }
 
     /// Month, Quarter and Year buckets of budget months follow the month a row counts in.
-    fn by_month(&self) -> bool {
+    pub(super) fn by_month(&self) -> bool {
         matches!(self.spec.by, Axis::Month | Axis::Quarter | Axis::Year)
     }
 
-    /// The plot's period (`back` 0), or the one of equal length `back`
-    /// periods before it.
     /// The month (budget or calendar) running today.
     pub(super) fn current(&self) -> Date {
         if self.budget {
@@ -56,6 +54,8 @@ impl Frame<'_> {
         }
     }
 
+    /// The plot's period (`back` 0), or the one of equal length `back`
+    /// periods before it.
     pub(super) fn window(&self, back: i32) -> Result<Window> {
         let today = self.today();
         let current = self.current();
@@ -215,10 +215,21 @@ impl Frame<'_> {
         starts.iter().map(|&s| s < today).collect()
     }
 
-    /// Per column, the days of the period up to today it covers: a bucket's
-    /// own days, a weekday's or day of month's occurrences, or every day.
-    pub(super) fn days(&self, w: &Window, columns: &[Column]) -> Vec<i64> {
-        let mut days = vec![0; columns.len()];
+    /// The split that divides the days themselves: each year or weekday
+    /// series has only its own days.
+    fn partition(&self) -> Option<Dim> {
+        match self.spec.split {
+            Some(Split::Year) => Some(Dim::Year),
+            Some(Split::Weekday) => Some(Dim::Weekday),
+            _ => None,
+        }
+    }
+
+    /// Per column, the days of the period up to today it covers (a bucket's
+    /// own days, a weekday's or day of month's occurrences, or every day),
+    /// by the split value that partitions them (`""` for none).
+    pub(super) fn days(&self, w: &Window, columns: &[Column]) -> Vec<HashMap<String, i64>> {
+        let mut days = vec![HashMap::new(); columns.len()];
         if !self
             .spec
             .measures
@@ -230,16 +241,20 @@ impl Frame<'_> {
         let index = column_index(columns);
         let dim = Dim::from(self.spec.by);
         let named = self.spec.named_axis();
+        let partition = self.partition();
         let mut day = w.from;
         while day <= w.to.min(self.today()) {
             let month = self.month_of_day(day);
             if w.months
                 .is_none_or(|(first, last)| first <= month && month <= last)
             {
+                let part = partition.map_or_else(String::new, |p| point_key(p, day, month));
                 if named {
-                    days.iter_mut().for_each(|n| *n += 1);
+                    for n in &mut days {
+                        *n.entry(part.clone()).or_default() += 1;
+                    }
                 } else if let Some(&i) = index.get(point_key(dim, day, month).as_str()) {
-                    days[i] += 1;
+                    *days[i].entry(part).or_default() += 1;
                 }
             }
             let Ok(next) = day.tomorrow() else { break };
@@ -258,19 +273,29 @@ impl Frame<'_> {
     ) -> Vec<Vec<Option<Decimal>>> {
         let index = column_index(columns);
         let axis = Dim::from(self.spec.by);
+        // As the budget counts it: a row of the window's months dated outside
+        // its days counts on its first (or last) day.
+        let clamp =
+            self.budget && w.months.is_some() && matches!(self.spec.by, Axis::Day | Axis::Week);
         let mut cells: Vec<Vec<&Row>> = vec![Vec::new(); columns.len()];
         for r in rows {
-            if let Some(&i) = index.get(self.names.key(axis, r).as_str()) {
+            let key = if clamp {
+                point_key(axis, r.day.clamp(w.from, w.to), r.month)
+            } else {
+                self.names.key(axis, r)
+            };
+            if let Some(&i) = index.get(key.as_str()) {
                 cells[i].push(r);
             }
         }
         let days = self.days(w, columns);
+        let partition = self.partition();
         defs.iter()
             .map(|def| {
                 cells
                     .iter()
                     .zip(&days)
-                    .map(|(cell, &days)| {
+                    .map(|(cell, days)| {
                         let txs: Vec<&Tx> = cell
                             .iter()
                             .filter(|r| {
@@ -280,6 +305,12 @@ impl Frame<'_> {
                             })
                             .map(|r| r.t)
                             .collect();
+                        let days = match (partition, &def.only) {
+                            (Some(_), Some((_, set))) => {
+                                set.iter().filter_map(|k| days.get(k)).sum()
+                            }
+                            _ => days.values().sum(),
+                        };
                         measure(def.m.measure, &txs, days)
                     })
                     .collect()

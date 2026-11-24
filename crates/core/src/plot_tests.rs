@@ -625,23 +625,53 @@ fn reference(data: &PlotData) -> &finance_types::plot::PlotSeries {
 
 #[test]
 fn budget_months_equal_the_monthly_budget_spent() {
-    let snap = closed_october();
-    let ctx = Ctx::new(&snap, &now());
+    let closed = closed_october();
+    let spent = budget_spent(&closed);
+    let mut s = spec(Axis::Month, Period::ThisMonth, &[Measure::Spent]);
+    s.period_basis = PeriodBasis::Budget;
+    assert_eq!(query(&closed, &s).series[0].values, [Some(spent)]);
+    assert_eq!(spent, dec("968"));
+    s.period_basis = PeriodBasis::Calendar;
+    assert_eq!(query(&closed, &s).series[0].values, [Some(dec("898"))]);
+    // Day by day, the budget month adds up to the same.
+    let mut days = spec(Axis::Day, Period::ThisMonth, &[Measure::Spent]);
+    days.period_basis = PeriodBasis::Budget;
+    assert_eq!(total(&query(&closed, &days)), spent);
+    days.cumulative = true;
+    let running = query(&closed, &days).series[0].values.clone();
+    assert_eq!(running[running.len() - 2], Some(spent));
+    // Booked in November in its own zone, 31 October here: the budget
+    // counts it in November, on its first day.
+    let mut rows = ledger();
+    rows.push(tx(
+        "hel",
+        "20",
+        Kind::Outflow,
+        None,
+        "2026-11-01T00:30:00+02:00[Europe/Helsinki]",
+    ));
+    let open = snap(rows);
+    let spent = budget_spent(&open);
+    assert_eq!(spent, dec("918"));
+    days.cumulative = false;
+    let data = query(&open, &days);
+    assert_eq!(total(&data), spent);
+    assert_eq!(data.series[0].values[0], Some(dec("820")));
+}
+
+/// The dashboard's spent of the current budget month, in euros.
+fn budget_spent(snap: &Snapshot) -> Decimal {
+    let ctx = Ctx::new(snap, &now());
     let payments = plans::planned_payment_views(&ctx);
     let spending = budget::spending_transactions(&ctx, &payments);
     let empty = budget::tests::empty_subscriptions();
     let budgets = budget::monthly_budgets(&ctx, &spending, &payments, &empty, &empty);
     let current = ctx.current_month().to_string();
-    let eur = budgets
+    budgets
         .iter()
         .find(|b| b.plan.month == current && b.plan.currency == Currency::eur())
-        .unwrap();
-    let mut s = spec(Axis::Month, Period::ThisMonth, &[Measure::Spent]);
-    s.period_basis = PeriodBasis::Budget;
-    assert_eq!(query(&snap, &s).series[0].values, [Some(eur.spent)]);
-    assert_eq!(eur.spent, dec("968"));
-    s.period_basis = PeriodBasis::Calendar;
-    assert_eq!(query(&snap, &s).series[0].values, [Some(dec("898"))]);
+        .unwrap()
+        .spent
 }
 
 #[test]
@@ -836,12 +866,200 @@ fn insight_with_compare_uses_matching_positions() {
     let mut rows = ledger();
     // After 24 October: no counterpart of the 24 days so far.
     rows.push(out("x", "100", None, "2026-10-28"));
+    // Today and its counterpart: today is not finished, so neither counts.
+    rows.push(tx(
+        "today",
+        "5",
+        Kind::Outflow,
+        None,
+        "2026-11-24T08:00:00+00:00[UTC]",
+    ));
+    rows.push(out("oct24", "200", None, "2026-10-24"));
     let mut s = spec(Axis::Day, Period::ThisMonth, &[Measure::Spent]);
     s.compare = Compare::Previous;
     let insight = query(&snap(rows), &s).insight.unwrap();
     assert_eq!(insight.kind, InsightKind::AgainstPrevious);
     assert_eq!(insight.value, dec("898"));
     assert_eq!(insight.against, Some(dec("37")));
+}
+
+#[test]
+fn insight_with_compare_on_a_month_axis_leaves_out_this_month() {
+    let snap = snap(ledger());
+    let mut s = spec(Axis::Month, Period::ThisMonth, &[Measure::Spent]);
+    s.compare = Compare::Previous;
+    assert_eq!(query(&snap, &s).insight, None);
+    s.period = Period::Last6Months;
+    let insight = query(&snap, &s).insight.unwrap();
+    // June to October against December to April.
+    assert_eq!(insight.value, dec("102"));
+    assert_eq!(insight.against, Some(dec("50")));
+}
+
+#[test]
+fn year_on_year_average_per_day_divides_by_each_years_days() {
+    let mut rows = two_years();
+    rows.push(out("n26", "48", None, "2026-11-05"));
+    let mut s = spec(
+        Axis::MonthOfYear,
+        Period::AllTime,
+        &[Measure::AveragePerDay],
+    );
+    s.split = Some(Split::Year);
+    let data = query(&snap(rows), &s);
+    let (last_year, this_year) = (&data.series[0].values, &data.series[1].values);
+    // All time starts on 10 January 2025: 10 over 22 days; then 20 over 31.
+    assert_eq!(last_year[0], Some(dec("0.45")));
+    assert_eq!(this_year[0], Some(dec("0.65")));
+    // November so far: 24 days.
+    assert_eq!(this_year[10], Some(dec("2.00")));
+}
+
+#[test]
+fn weekday_split_on_a_week_axis_divides_by_one_day() {
+    let mut s = spec(Axis::Week, Period::ThisMonth, &[Measure::AveragePerDay]);
+    s.split = Some(Split::Weekday);
+    let data = query(&snap(ledger()), &s);
+    let tuesday = &data.series[1];
+    assert_eq!(tuesday.label, "Tuesday");
+    // Week of 2 November: 40 on Tuesday the 3rd.
+    assert_eq!(tuesday.values[1], Some(dec("40.00")));
+}
+
+#[test]
+fn change_leaves_a_cut_first_bucket_empty() {
+    let snap = snap(ledger());
+    let mut quarters = spec(Axis::Quarter, Period::Last6Months, &[Measure::Spent]);
+    quarters.value = Value::Change;
+    let data = query(&snap, &quarters);
+    // June alone is cut out of Q2.
+    assert_eq!(data.series[0].values[0], None);
+    assert!(data.series[0].values[1].is_some());
+    let mut weeks = spec(Axis::Week, Period::ThisMonth, &[Measure::Spent]);
+    weeks.value = Value::Change;
+    let data = query(&snap, &weeks);
+    // 1 November is a Sunday.
+    assert_eq!(data.series[0].values[0], None);
+    assert!(data.series[0].values[1].is_some());
+}
+
+#[test]
+fn a_period_ending_after_today_stops_at_today() {
+    let mut s = spec(
+        Axis::Day,
+        Period::Between {
+            from: "2026-11-01".into(),
+            to: "2026-12-31".into(),
+        },
+        &[Measure::Spent],
+    );
+    let snap = snap(ledger());
+    let data = query(&snap, &s);
+    assert_eq!(data.categories.len(), 61);
+    assert_eq!(data.series[0].values[23], Some(Decimal::ZERO));
+    assert!(data.series[0].values[24..].iter().all(Option::is_none));
+    assert!(!data.partial_last);
+    s.cumulative = true;
+    let running = query(&snap, &s);
+    assert_eq!(running.series[0].values[23], Some(dec("898")));
+    assert!(running.series[0].values[24..].iter().all(Option::is_none));
+}
+
+#[test]
+fn usual_averages_only_periods_the_ledger_reaches() {
+    let rows = vec![
+        out("a", "30", None, "2026-10-05"),
+        out("b", "40", None, "2026-11-03"),
+    ];
+    let mut s = spec(Axis::Month, Period::ThisMonth, &[Measure::Spent]);
+    s.compare = Compare::AverageOf3;
+    let data = query(&snap(rows), &s);
+    assert_eq!(reference(&data).values, [Some(dec("30.00"))]);
+    let fresh = query(&snap(vec![out("b", "40", None, "2026-11-03")]), &s);
+    assert_eq!(reference(&fresh).values, [None]);
+}
+
+#[test]
+fn insight_sums_only_measures_that_add_up() {
+    let snap = snap(ledger());
+    let average = query(
+        &snap,
+        &spec(Axis::Month, Period::Last6Months, &[Measure::Average]),
+    );
+    assert_eq!(average.insight, None);
+    let per_day = query(
+        &snap,
+        &spec(Axis::Weekday, Period::ThisMonth, &[Measure::AveragePerDay]),
+    );
+    assert_eq!(
+        per_day.insight.unwrap().kind,
+        InsightKind::PeakAgainstLowest
+    );
+}
+
+#[test]
+fn peak_against_itself_is_no_insight() {
+    let data = query(
+        &snap(vec![out("a", "30", None, "2026-11-03")]),
+        &spec(Axis::Weekday, Period::ThisMonth, &[Measure::Spent]),
+    );
+    assert_eq!(data.insight, None);
+}
+
+#[test]
+fn an_average_line_with_a_running_total_is_refused() {
+    let mut s = spec(Axis::Month, Period::Last6Months, &[Measure::Spent]);
+    s.average_line = true;
+    s.cumulative = true;
+    assert!(plot_query(&Ctx::new(&snap(ledger()), &now()), &s).is_err());
+}
+
+#[test]
+fn the_average_line_follows_the_first_measure() {
+    let mut s = spec(
+        Axis::Month,
+        Period::Last6Months,
+        &[Measure::Spent, Measure::Income],
+    );
+    s.average_line = true;
+    let data = query(&snap(ledger()), &s);
+    assert_eq!(reference(&data).label, "Average spent");
+    assert_eq!(reference(&data).values[0], Some(dec("20.40")));
+}
+
+#[test]
+fn average_per_day_under_budget_months() {
+    let mut s = spec(Axis::Month, Period::ThisMonth, &[Measure::AveragePerDay]);
+    s.period_basis = PeriodBasis::Budget;
+    let data = query(&closed_october(), &s);
+    // 968 over 27 October to 24 November: 29 days.
+    assert_eq!(data.series[0].values, [Some(dec("33.38"))]);
+}
+
+#[test]
+fn usual_with_a_running_total_is_the_running_mean() {
+    let mut s = spec(Axis::Day, Period::ThisMonth, &[Measure::Spent]);
+    s.compare = Compare::AverageOf3;
+    s.cumulative = true;
+    let data = query(&snap(ledger()), &s);
+    let usual = &reference(&data).values;
+    // 2 October's 12 over three periods.
+    assert_eq!(usual[1], Some(dec("4.00")));
+    // October 37, September 35, August 30, by the 24th.
+    assert_eq!(usual[23], Some(dec("34.00")));
+}
+
+#[test]
+fn month_of_year_under_budget_months() {
+    let mut s = spec(Axis::MonthOfYear, Period::ThisYear, &[Measure::Spent]);
+    s.period_basis = PeriodBasis::Budget;
+    let snap = closed_october();
+    let data = query(&snap, &s);
+    assert_eq!(at(&data, "Oct"), Some(dec("37")));
+    assert_eq!(at(&data, "Nov"), Some(dec("968")));
+    s.period_basis = PeriodBasis::Calendar;
+    let calendar = query(&snap, &s);
+    assert_eq!(at(&calendar, "Oct"), Some(dec("107")));
 }
 
 #[test]

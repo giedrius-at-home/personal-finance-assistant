@@ -1,9 +1,9 @@
 //! The one plain sentence under a plot, from the plot's own numbers. The
 //! unfinished bucket is never the last, the highest or the lowest.
 
-use finance_types::plot::{Axis, Compare, Insight, InsightKind, PlotSpec, Unit, Value};
+use finance_types::plot::{Axis, Compare, Insight, InsightKind, Measure, PlotSpec, Unit, Value};
 use finance_types::report::Currency;
-use rust_decimal::Decimal;
+use rust_decimal::{Decimal, RoundingStrategy};
 
 use super::Column;
 use super::options::mean;
@@ -36,9 +36,32 @@ pub(super) fn insight(
             text,
         })
     };
+    // Sums and shares only mean something for a measure that adds up.
+    let additive = matches!(
+        spec.measures[0].measure,
+        Measure::Spent | Measure::Income | Measure::Net | Measure::Count
+    );
+    let peak_shape = matches!(
+        spec.by,
+        Axis::Weekday | Axis::DayOfMonth | Axis::MonthOfYear
+    );
+    if !additive && (reference.is_some() || !peak_shape) {
+        return None;
+    }
     if let Some(reference) = reference {
-        let value: Decimal = totals.iter().flatten().sum();
-        let against: Decimal = reference.iter().flatten().sum();
+        // Finished positions with a counterpart, on both sides.
+        let pairs: Vec<(Decimal, Decimal)> = totals
+            .iter()
+            .zip(reference)
+            .zip(finished)
+            .filter(|(_, done)| **done)
+            .filter_map(|((v, r), _)| v.zip(*r))
+            .collect();
+        if pairs.is_empty() {
+            return None;
+        }
+        let value: Decimal = pairs.iter().map(|(v, _)| *v).sum();
+        let against: Decimal = pairs.iter().map(|(_, r)| *r).sum();
         let what = if spec.compare == Compare::AverageOf3 {
             "the usual"
         } else {
@@ -73,6 +96,9 @@ pub(super) fn insight(
         Axis::Weekday | Axis::DayOfMonth | Axis::MonthOfYear => {
             let (peak, high) = positive().reduce(highest)?;
             let (low, least) = positive().reduce(lowest)?;
+            if low == peak || least == high {
+                return None;
+            }
             let title = &columns[peak].title;
             let text = format!(
                 "{title}: {}, {} the lowest, {} ({})",
@@ -91,7 +117,7 @@ pub(super) fn insight(
                 .reduce(highest)
                 .filter(|(_, v)| *v > Decimal::ZERO)?;
             let total: Decimal = positive().map(|(_, v)| v).sum();
-            let share = (value * Decimal::ONE_HUNDRED / total).round();
+            let share = whole(value * Decimal::ONE_HUNDRED / total);
             let title = &columns[top].title;
             let text = format!("{title}: {}, {share}% of {}", money(value), money(total));
             insight(InsightKind::LargestShare, title, value, total, text)
@@ -120,7 +146,7 @@ fn compare(value: Decimal, against: Decimal) -> String {
     if against.is_zero() {
         return "against".into();
     }
-    let percent = ((value - against) * Decimal::ONE_HUNDRED / against.abs()).round();
+    let percent = whole((value - against) * Decimal::ONE_HUNDRED / against.abs());
     if percent.is_zero() {
         "in line with".into()
     } else if percent > Decimal::ZERO {
@@ -128,4 +154,9 @@ fn compare(value: Decimal, against: Decimal) -> String {
     } else {
         format!("{}% below", -percent)
     }
+}
+
+/// A percentage as a whole number, halves away from zero.
+fn whole(percent: Decimal) -> Decimal {
+    percent.round_dp_with_strategy(0, RoundingStrategy::MidpointAwayFromZero)
 }

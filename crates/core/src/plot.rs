@@ -208,6 +208,8 @@ struct Frame<'a> {
     names: Names<'a>,
     rows: Vec<&'a Row<'a>>,
     budget: bool,
+    /// The earliest day of any counted row.
+    first_day: Option<Date>,
 }
 
 pub fn plot_query(ctx: &Ctx<'_>, spec: &PlotSpec) -> Result<PlotData> {
@@ -217,6 +219,11 @@ pub fn plot_query(ctx: &Ctx<'_>, spec: &PlotSpec) -> Result<PlotData> {
     {
         return Err(Error::Rejected(
             "All time has no period before it to compare with.".into(),
+        ));
+    }
+    if spec.average_line && spec.cumulative {
+        return Err(Error::Rejected(
+            "An average line can't go with a running total.".into(),
         ));
     }
     let snap = ctx.snap;
@@ -281,6 +288,7 @@ pub fn plot_query(ctx: &Ctx<'_>, spec: &PlotSpec) -> Result<PlotData> {
         names,
         rows,
         budget,
+        first_day: counted.iter().map(|r| r.day).min(),
     };
 
     let window = frame.window(0)?;
@@ -300,7 +308,11 @@ pub fn plot_query(ctx: &Ctx<'_>, spec: &PlotSpec) -> Result<PlotData> {
     };
     let (columns, starts, axis_left_out) = frame.columns(&window, ranking)?;
     let finished = frame.finished(&starts, columns.len());
+    // Buckets after today's (a period that ends later) have no value yet.
+    let today_key = frame.today_key();
+    let future: Vec<bool> = starts.iter().map(|&s| s > today_key).collect();
     let mut values = frame.values(&window, &rows, &columns, &defs);
+    values.iter_mut().for_each(|v| options::blank(v, &future));
     if spec.by == Axis::MonthOfYear {
         // This year's months that have not started yet have no value, so its line stops at today.
         let current = frame.current();
@@ -318,7 +330,7 @@ pub fn plot_query(ctx: &Ctx<'_>, spec: &PlotSpec) -> Result<PlotData> {
         }
     }
     if spec.value == Value::Change {
-        options::change(&frame, &columns, &defs, &mut values)?;
+        options::change(&frame, &window, &columns, &defs, &mut values)?;
     }
     let reference = options::reference(&frame, columns.len())?;
     let unit = |m: Measure| {
@@ -378,21 +390,34 @@ pub fn plot_query(ctx: &Ctx<'_>, spec: &PlotSpec) -> Result<PlotData> {
             series.push(reference_series(key, label, values));
         }
         if spec.average_line {
+            // The first measure's, or the split series' together.
             let shown: Vec<Vec<Option<Decimal>>> = series
                 .iter()
                 .filter(|s| !s.reference)
+                .take(if spec.split.is_some() { usize::MAX } else { 1 })
                 .map(|s| s.values.clone())
                 .collect();
             let average = options::average(&totals(&shown, spec.split.is_some()), &finished);
+            let label = if spec.measures.len() > 1 {
+                format!(
+                    "Average {}",
+                    measure_name(spec.measures[0].measure).1.to_lowercase()
+                )
+            } else {
+                "Average".to_owned()
+            };
             series.push(reference_series(
                 "average",
-                "Average",
+                &label,
                 vec![average; columns.len()],
             ));
         }
+        for s in &mut series {
+            options::blank(&mut s.values, &future);
+        }
     }
     Ok(PlotData {
-        partial_last: starts.last() == Some(&frame.today_key()) && frame.today() <= window.to,
+        partial_last: starts.last() == Some(&today_key) && frame.today() <= window.to,
         categories: columns.iter().map(|c| c.label.clone()).collect(),
         titles: columns.into_iter().map(|c| c.title).collect(),
         series,

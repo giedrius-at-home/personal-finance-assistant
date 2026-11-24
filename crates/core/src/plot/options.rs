@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use finance_types::plot::Compare;
 use rust_decimal::Decimal;
 
-use super::buckets::Window;
+use super::buckets::{Window, bucket_start};
 use super::{Column, Def, Dim, Frame, Row, measure};
 use crate::Result;
 use crate::model::Tx;
@@ -20,7 +20,8 @@ pub(super) fn change_ranking(frame: &Frame, window: &Window, rows: &[&Row]) -> R
     let dim = Dim::from(frame.spec.by);
     let (now, then) = (by_key(frame, dim, rows), by_key(frame, dim, &before_rows));
     let all = [Column::named(String::new(), Vec::new())];
-    let (days_now, days_then) = (frame.days(window, &all)[0], frame.days(&before, &all)[0]);
+    let day_count = |w: &Window| frame.days(w, &all)[0].values().sum::<i64>();
+    let (days_now, days_then) = (day_count(window), day_count(&before));
     let m = frame.spec.measures[0].measure;
     let value = |map: &BTreeMap<String, Vec<&Tx>>, key: &str, days| {
         measure(m, map.get(key).map(Vec::as_slice).unwrap_or_default(), days)
@@ -42,6 +43,7 @@ pub(super) fn change_ranking(frame: &Frame, window: &Window, rows: &[&Row]) -> R
 /// the period before, on a time axis against the bucket before.
 pub(super) fn change(
     frame: &Frame,
+    window: &Window,
     columns: &[Column],
     defs: &[Def],
     values: &mut [Vec<Option<Decimal>>],
@@ -64,6 +66,18 @@ pub(super) fn change(
                 let value = *v;
                 *v = difference(value, previous);
                 previous = value;
+            }
+        }
+        // A first bucket cut by the period start has no whole bucket before it.
+        let first = match window.months {
+            Some((first, _)) if frame.by_month() => first,
+            _ => window.from,
+        };
+        if bucket_start(frame.spec.by, first) < first {
+            for now in values.iter_mut() {
+                if let Some(v) = now.first_mut() {
+                    *v = None;
+                }
             }
         }
     }
@@ -99,6 +113,11 @@ pub(super) fn reference(frame: &Frame, n: usize) -> Result<Option<Reference>> {
     let mut counterparts = Vec::new();
     for back in 1..=periods {
         let w = frame.window(back)?;
+        // A period from before the ledger starts has no counterpart.
+        if frame.first_day.is_none_or(|first| w.to < first) {
+            counterparts.push(vec![None; n]);
+            continue;
+        }
         let rows = frame.rows_in(&w);
         let (columns, starts, _) = frame.columns(&w, Vec::new())?;
         let finished = frame.finished(&starts, columns.len());
@@ -150,4 +169,11 @@ pub(super) fn average(values: &[Option<Decimal>], finished: &[bool]) -> Option<D
 
 pub(super) fn mean(values: &[Decimal]) -> Decimal {
     cents(values.iter().sum::<Decimal>() / Decimal::from(values.len()))
+}
+
+/// Positions marked in `future` get no value.
+pub(super) fn blank(values: &mut [Option<Decimal>], future: &[bool]) {
+    for (v, _) in values.iter_mut().zip(future).filter(|(_, f)| **f) {
+        *v = None;
+    }
 }
