@@ -9,6 +9,10 @@ pub const MAX_NAME: usize = 40;
 pub struct UiLayout {
     #[serde(default)]
     pub tabs: Vec<TabLayout>,
+    /// `tabs` is the whole bar in the owner's order. False: written by 0.3.0
+    /// folds in click order, so the built-in tabs show in their default order.
+    #[serde(default)]
+    pub tabs_ordered: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -120,6 +124,14 @@ mod tests {
     }
 
     #[test]
+    fn tabs_ordered_defaults_to_false_for_old_json() {
+        let old = r#"{"tabs":[{"id":"spending","name":"Spending","built_in":true}]}"#;
+        let l: UiLayout = serde_json::from_str(old).unwrap();
+        assert_eq!(l.tabs.len(), 1);
+        assert!(!l.tabs_ordered);
+    }
+
+    #[test]
     fn page_mut_creates_tab_and_page_once() {
         let mut l = UiLayout::default();
         l.page_mut("spending", "Spending", "spending.habits")
@@ -146,17 +158,22 @@ mod tests {
             hidden,
             pages: vec![],
         };
-        let one = |t| UiLayout { tabs: vec![t] };
+        let one = |t| UiLayout {
+            tabs: vec![t],
+            ..Default::default()
+        };
         assert!(one(tab("plan", "Plan", true)).validate().is_ok());
         assert!(one(tab("manage", "Manage", true)).validate().is_err());
         assert!(one(tab("plan", "", false)).validate().is_err());
         assert!(one(tab("plan", &"x".repeat(41), false)).validate().is_err());
         let twice = UiLayout {
             tabs: vec![tab("plan", "Plan", false), tab("plan", "Plan 2", false)],
+            ..Default::default()
         };
         assert!(twice.validate().is_err());
         let many = UiLayout {
             tabs: (0..51).map(|i| tab(&format!("t{i}"), "T", false)).collect(),
+            ..Default::default()
         };
         assert!(many.validate().is_err());
     }

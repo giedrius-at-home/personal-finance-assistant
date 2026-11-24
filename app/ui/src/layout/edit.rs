@@ -149,6 +149,7 @@ pub fn tab_added(l: &mut UiLayout, name: &str) -> Result<String, String> {
         .map(|n| format!("own-{n}"))
         .find(|id| !l.tabs.iter().any(|t| &t.id == id))
         .expect("an unused id");
+    materialised(l);
     l.tabs.push(TabLayout {
         id: id.clone(),
         name,
@@ -174,9 +175,11 @@ pub fn tab_deleted(l: &mut UiLayout, id: &str) {
     l.tabs.retain(|t| t.id != id || t.built_in);
 }
 
-/// Writes the full tab list into `l.tabs`, keeping each saved tab's pages.
+/// Writes the full tab list into `l.tabs` in the bar's order, keeping each
+/// saved tab's pages, and marks the order as the owner's.
 pub(super) fn materialised(l: &mut UiLayout) {
     let order = tabs(l);
+    l.tabs_ordered = true;
     let mut saved = std::mem::take(&mut l.tabs);
     l.tabs = order
         .into_iter()
@@ -224,12 +227,22 @@ pub fn all_reset(l: &mut UiLayout) {
     *l = UiLayout::default();
 }
 
-/// The tab bar: saved tabs in saved order, then each built-in tab that is not
-/// saved, inserted after the nearest earlier built-in (default order) present.
+/// The tab bar: saved tabs in saved order (when `tabs_ordered`; else saved
+/// built-ins in default order, then own tabs), then each built-in tab that is
+/// not saved, inserted after the nearest earlier built-in (default order) present.
 pub fn tabs(l: &UiLayout) -> Vec<TabView> {
-    let mut out: Vec<TabView> = l
-        .tabs
-        .iter()
+    let is_built_in = |t: &&TabLayout| BUILT_IN.iter().any(|(b, _)| *b == t.id);
+    let saved: Vec<&TabLayout> = if l.tabs_ordered {
+        l.tabs.iter().collect()
+    } else {
+        BUILT_IN
+            .iter()
+            .filter_map(|(id, _)| l.tabs.iter().find(|t| t.id == *id))
+            .chain(l.tabs.iter().filter(|t| !is_built_in(t)))
+            .collect()
+    };
+    let mut out: Vec<TabView> = saved
+        .into_iter()
         .map(|t| TabView {
             id: t.id.clone(),
             name: t.name.clone(),
@@ -489,7 +502,8 @@ mod tests {
     fn tab_names_are_trimmed_and_checked() {
         let mut l = UiLayout::default();
         let id = tab_added(&mut l, "  Trips ").unwrap();
-        assert_eq!(l.tabs[0].name, "Trips");
+        let name = |l: &UiLayout| l.tabs.iter().find(|t| t.id == id).unwrap().name.clone();
+        assert_eq!(name(&l), "Trips");
         assert!(tab_added(&mut l, "   ").is_err());
         assert!(tab_added(&mut l, &"x".repeat(41)).is_err());
         assert!(tab_added(&mut l, &"x".repeat(40)).is_ok());
@@ -497,7 +511,7 @@ mod tests {
         assert!(tab_renamed(&mut l, &id, "   ").is_err());
         assert!(tab_renamed(&mut l, &id, &"x".repeat(41)).is_err());
         tab_renamed(&mut l, &id, " Holidays ").unwrap();
-        assert_eq!(l.tabs[0].name, "Holidays");
+        assert_eq!(name(&l), "Holidays");
     }
 
     #[test]
@@ -579,6 +593,7 @@ mod tests {
             ]
             .map(tab)
             .into(),
+            tabs_ordered: true,
         };
         assert_eq!(
             tab_ids(&l),
@@ -595,8 +610,61 @@ mod tests {
         // With no earlier built-in saved, the missing one goes first.
         let l = UiLayout {
             tabs: vec![tab("plan")],
+            tabs_ordered: true,
         };
         assert_eq!(tab_ids(&l), defaults());
+    }
+
+    fn built_in(id: &str) -> TabLayout {
+        TabLayout {
+            id: id.into(),
+            name: id.into(),
+            built_in: true,
+            hidden: false,
+            pages: vec![],
+        }
+    }
+
+    fn click_order() -> UiLayout {
+        UiLayout {
+            tabs: vec![built_in("spending"), built_in("overview")],
+            tabs_ordered: false,
+        }
+    }
+
+    #[test]
+    fn a_0_3_0_layout_saved_in_click_order_shows_the_default_bar() {
+        assert_eq!(tab_ids(&click_order()), defaults());
+    }
+
+    #[test]
+    fn the_first_write_stores_the_default_order_and_the_flag() {
+        let r = reg();
+        let d: Vec<&PanelDef> = r.iter().collect();
+        let mut l = click_order();
+        panel_removed(&mut l, &d, &p1(), "a");
+        let saved: Vec<_> = l.tabs.iter().map(|t| t.id.clone()).collect();
+        assert_eq!(saved, defaults());
+        assert!(l.tabs_ordered);
+        assert_eq!(removed(&l, "p1"), ["a"]);
+    }
+
+    #[test]
+    fn an_ordered_layout_keeps_its_saved_order() {
+        let order = [
+            "plan",
+            "overview",
+            "transactions",
+            "spending",
+            "wishes",
+            "events",
+            "manage",
+        ];
+        let l = UiLayout {
+            tabs: order.map(built_in).into(),
+            tabs_ordered: true,
+        };
+        assert_eq!(tab_ids(&l), order);
     }
 
     #[test]
@@ -656,6 +724,7 @@ mod tests {
         let mut l = UiLayout::default();
         let own = tab_added(&mut l, "Trips").unwrap();
         tab_deleted(&mut l, &own);
+        let before = l.clone();
         let gone = at(&own, &own);
         panel_added(&mut l, &d, &gone, "m");
         panel_removed(&mut l, &d, &gone, "m");
@@ -663,7 +732,7 @@ mod tests {
         panel_half_set(&mut l, &d, &gone, "m", true);
         panel_sent(&mut l, &d, &p2(), &gone, "m");
         panel_sent(&mut l, &d, &gone, &p1(), "m");
-        assert_eq!(l, UiLayout::default());
+        assert_eq!(l, before);
     }
 
     #[test]

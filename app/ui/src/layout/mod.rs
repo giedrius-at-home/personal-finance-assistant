@@ -156,15 +156,15 @@ fn defs() -> Vec<&'static PanelDef> {
     registry().collect()
 }
 
-/// The page's entry. A tab not saved yet is written in with the whole bar
-/// first: `page_mut` would append it, moving it to the end of the bar.
+/// The page's entry. The whole bar is written first when its order is not
+/// stored yet or the tab is missing: `page_mut` would append the tab at the end.
 fn page_entry<'a>(
     l: &'a mut UiLayout,
     tab: &str,
     tab_name: &str,
     page: &str,
 ) -> &'a mut PageLayout {
-    if !l.tabs.iter().any(|t| t.id == tab) {
+    if !l.tabs_ordered || !l.tabs.iter().any(|t| t.id == tab) {
         edit::materialised(l);
     }
     l.page_mut(tab, tab_name, page)
