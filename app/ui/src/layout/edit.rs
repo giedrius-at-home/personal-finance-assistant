@@ -95,9 +95,16 @@ pub fn plot_saved(
     if l.plots.len() >= MAX_PLOTS {
         return Err(format!("At most {MAX_PLOTS} plots"));
     }
+    // A stale `plot:<id>` left on a page by another build must not attach to the new plot.
+    let pages: Vec<&PageLayout> = l.tabs.iter().flat_map(|t| &t.pages).collect();
+    let referenced = |panel: &str| {
+        pages.iter().any(|p| {
+            p.items.iter().any(|i| i.panel == panel) || p.removed.iter().any(|r| r == panel)
+        })
+    };
     let id = (1..)
         .map(|n| format!("p{n}"))
-        .find(|id| !has_plot(&l.plots, id))
+        .find(|id| !has_plot(&l.plots, id) && !referenced(&plot_panel_id(id)))
         .expect("an unused id");
     l.plots.push(SavedPlot {
         id: id.clone(),
@@ -917,6 +924,19 @@ mod tests {
         assert_eq!(plot_saved(&mut l, None, "C", &spec(3)).unwrap(), "p1");
         assert_eq!(plot_ids(&l), ["p2", "p1"]);
         assert_eq!(l.plots[1].spec, serde_json::to_value(spec(3)).unwrap());
+    }
+
+    #[test]
+    fn a_new_plot_id_skips_ids_still_on_a_page() {
+        let mut l = UiLayout::default();
+        let page = l.page_mut("overview", "Overview", "overview");
+        page.items.push(PanelItem {
+            panel: plot_panel_id("p1"),
+            folded: false,
+            half: false,
+        });
+        page.removed.push(plot_panel_id("p2"));
+        assert_eq!(plot_saved(&mut l, None, "A", &spec(1)).unwrap(), "p3");
     }
 
     #[test]
