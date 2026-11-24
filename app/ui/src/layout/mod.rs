@@ -8,7 +8,7 @@ use leptos::task::spawn_local;
 use serde::Serialize;
 
 use crate::api::{self, NoArgs};
-use crate::ds::arrange::{drop_index, moves};
+use crate::ds::arrange::{Edited, drop_move, focus_after, focus_label, moves};
 use crate::ds::{
     Button, Confirm, DropTarget, EditBar, Gallery, PanelFrame, PanelList, Size, Variant,
 };
@@ -397,6 +397,19 @@ pub fn PageView(
         at.with_value(|a| state.edit(|l| f(l, &defs(), a)));
     };
     let position = move |id: &str| items.with(|v| v.iter().position(|i| i.panel == id));
+    // Focus goes back to a control after the edit redraws, disables or removes the pressed one.
+    let refocus = move |edited: Edited, title: &str| {
+        let after: Vec<(&str, bool)> = items.with_untracked(|v| {
+            v.iter()
+                .filter_map(|i| {
+                    registry()
+                        .find(|d| d.id == i.panel)
+                        .map(|d| (d.title, i.half))
+                })
+                .collect()
+        });
+        focus_label(focus_after(edited, title, &after));
+    };
     // The panel being dragged, and the one under the pointer (with "after").
     let dragging = RwSignal::new(None::<&'static str>);
     let target = RwSignal::new(None::<(&'static str, bool)>);
@@ -410,14 +423,16 @@ pub fn PageView(
             report.data.with(|d| d.as_ref()?.as_ref().ok().and_then(f))
         });
         let render = def.render;
-        let half = item.half;
+        let half =
+            Signal::derive(move || items.with(|v| v.iter().any(|i| i.panel == id && i.half)));
         let ends = Memo::new(move |_| {
             let len = items.with(Vec::len);
             position(id).map_or((None, None), |p| moves(p, len))
         });
-        let moved = move |to: Option<usize>| {
+        let moved = move |to: Option<usize>, edited: Edited| {
             if let Some(to) = to {
                 edit(&|l, d, a| edit::panel_moved(l, d, a, id, to));
+                refocus(edited, def.title);
             }
         };
         let bar = move || {
@@ -432,13 +447,17 @@ pub fn PageView(
                             dragging.set(on.then_some(id));
                             target.set(None);
                         })
-                        on_up=Callback::new(move |()| moved(ends.get_untracked().0))
-                        on_down=Callback::new(move |()| moved(ends.get_untracked().1))
+                        on_up=Callback::new(move |()| moved(ends.get_untracked().0, Edited::Up))
+                        on_down=Callback::new(move |()| moved(ends.get_untracked().1, Edited::Down))
                         on_half=Callback::new(move |()| {
-                            edit(&|l, d, a| edit::panel_half_set(l, d, a, id, !half));
+                            let to = !half.get_untracked();
+                            edit(&|l, d, a| edit::panel_half_set(l, d, a, id, to));
+                            refocus(Edited::Half, def.title);
                         })
                         on_remove=Callback::new(move |()| {
+                            let Some(at) = position(id) else { return };
                             edit(&|l, d, a| edit::panel_removed(l, d, a, id));
+                            refocus(Edited::Removed(at), def.title);
                         })
                     />
                 }
@@ -465,8 +484,10 @@ pub fn PageView(
                 else {
                     return;
                 };
-                if let (Some(f), Some(o)) = (position(from), position(id)) {
-                    let to = drop_index(f, o, after);
+                // A drop where it already is writes nothing.
+                if let (Some(f), Some(o)) = (position(from), position(id))
+                    && let Some(to) = drop_move(f, o, after)
+                {
                     edit(&|l, d, a| edit::panel_moved(l, d, a, from, to));
                 }
                 dragging.set(None);
@@ -483,6 +504,7 @@ pub fn PageView(
                     folded=folded
                     on_toggle=Callback::new(move |()| at.with_value(|a| state.toggle(&a.tab, &a.tab_name, &a.page, id)))
                     half=half
+                    editing=editing
                     edit=bar
                     drop=drop
                     quiet=quiet.get()
@@ -522,12 +544,17 @@ pub fn PageView(
                     </div>
                 })}
                 <PanelList>
-                    <For each=listed key=|i| (i.panel.clone(), i.half) children=panel />
+                    <For each=listed key=|i| i.panel.clone() children=panel />
                 </PanelList>
                 {move || editing.get().then(|| view! {
                     <Gallery
                         items=addable
-                        on_add=Callback::new(move |id: String| edit(&|l, d, a| edit::panel_added(l, d, a, &id)))
+                        on_add=Callback::new(move |id: String| {
+                            edit(&|l, d, a| edit::panel_added(l, d, a, &id));
+                            if let Some(d) = registry().find(|d| d.id == id) {
+                                refocus(Edited::Added, d.title);
+                            }
+                        })
                     />
                     <div>
                         <Confirm

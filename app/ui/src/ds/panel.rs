@@ -38,7 +38,10 @@ pub fn PanelFrame(
     #[prop(into)] summary: Signal<Option<String>>,
     #[prop(into)] folded: Signal<bool>,
     on_toggle: Callback<()>,
-    #[prop(optional)] half: bool,
+    #[prop(optional, into)] half: Signal<bool>,
+    /// Edit layout is on: an open panel with an empty body stays drawn, so it can be edited.
+    #[prop(optional, into)]
+    editing: Signal<bool>,
     /// Edit layout's controls, drawn above the top rule; empty outside it.
     #[prop(optional, into)]
     edit: ViewFn,
@@ -50,12 +53,14 @@ pub fn PanelFrame(
     quiet: bool,
     children: ChildrenFn,
 ) -> impl IntoView {
-    let base = cn([
-        if half { PANEL_HALF } else { PANEL_FULL },
-        EMPTY_OPEN_HIDDEN,
-    ]);
     let over = move || drop.is_some_and(|d| d.over.get());
-    let class = move || cn([base.as_str(), if over() { DROP_TARGET } else { "" }]);
+    let class = move || {
+        cn([
+            if half.get() { PANEL_HALF } else { PANEL_FULL },
+            if editing.get() { "" } else { EMPTY_OPEN_HIDDEN },
+            if over() { DROP_TARGET } else { "" },
+        ])
+    };
     let accepts = move || drop.is_some_and(|d| d.accepts.get_untracked());
     let on_dragover = move |e: leptos::ev::DragEvent| {
         let Some(d) = drop.filter(|_| accepts()) else {

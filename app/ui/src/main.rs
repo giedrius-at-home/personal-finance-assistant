@@ -399,7 +399,11 @@ fn Tabs(visible: Memo<Vec<TabView>>) -> impl IntoView {
 /// Esc belongs to something else: a popup is open or focus is in a text field.
 fn escape_taken() -> bool {
     let doc = document();
-    let popup = doc.query_selector("[role=dialog]").ok().flatten().is_some();
+    let popup = doc
+        .query_selector("[role=dialog], [role=alertdialog]")
+        .ok()
+        .flatten()
+        .is_some();
     let typing = doc.active_element().is_some_and(|el| {
         matches!(el.tag_name().as_str(), "INPUT" | "TEXTAREA" | "SELECT")
             || el

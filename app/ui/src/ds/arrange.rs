@@ -40,7 +40,7 @@ pub fn EditBar(
     #[prop(into)] title: String,
     #[prop(into)] first: Signal<bool>,
     #[prop(into)] last: Signal<bool>,
-    half: bool,
+    #[prop(into)] half: Signal<bool>,
     on_grab: Callback<bool>,
     on_up: Callback<()>,
     on_down: Callback<()>,
@@ -59,6 +59,7 @@ pub fn EditBar(
                 type="button"
                 class=grip
                 draggable="true"
+                tabindex="-1"
                 aria-label=format!("Drag {title}")
                 on:dragstart=move |e| {
                     if let Some(data) = e.data_transfer() {
@@ -101,10 +102,13 @@ pub fn EditBar(
             <button
                 type="button"
                 class=word
-                aria-label=format!("Make {title} {}", if half { "full width" } else { "half width" })
+                aria-label={
+                    let title = title.clone();
+                    move || half_label(&title, half.get())
+                }
                 on:click=move |_| on_half.run(())
             >
-                {if half { "Full" } else { "Half" }}
+                {move || if half.get() { "Full" } else { "Half" }}
             </button>
             <button
                 type="button"
@@ -164,10 +168,10 @@ pub fn Confirm(
     on_yes: Callback<()>,
 ) -> impl IntoView {
     let asking = RwSignal::new(false);
-    let yes = NodeRef::<html::Button>::new();
-    // Focus follows the question, so a keyboard user answers it next.
+    let cancel = NodeRef::<html::Button>::new();
+    // Focus follows the question, on the safe answer: a held Enter cannot repeat into "Yes".
     Effect::new(move |_| {
-        if let Some(b) = yes.get() {
+        if let Some(b) = cancel.get() {
             let _ = b.focus();
         }
     });
@@ -179,7 +183,6 @@ pub fn Confirm(
                     <span class=MUTED>{text.with_value(|t| t.1.clone())}</span>
                     <button
                         type="button"
-                        node_ref=yes
                         class=button_class(Variant::Danger, Size::Sm)
                         on:click=move |_| {
                             asking.set(false);
@@ -188,12 +191,17 @@ pub fn Confirm(
                     >
                         "Yes"
                     </button>
-                    <Button variant=Variant::Ghost size=Size::Sm on_click=Callback::new(move |_| asking.set(false))>
+                    <button
+                        type="button"
+                        node_ref=cancel
+                        class=button_class(Variant::Ghost, Size::Sm)
+                        on:click=move |_| asking.set(false)
+                    >
                         "Cancel"
-                    </Button>
+                    </button>
                 </span>
             }
-                .into_any()
+            .into_any()
         } else {
             view! {
                 <Button variant=Variant::Secondary size=Size::Sm on_click=Callback::new(move |_| asking.set(true))>
@@ -209,6 +217,80 @@ pub fn Confirm(
 pub fn drop_index(from: usize, over: usize, after: bool) -> usize {
     let at = over + usize::from(after);
     if from < at { at - 1 } else { at }
+}
+
+/// The `to` for `panel_moved` of a drop; None when the panel would stay where it is.
+pub fn drop_move(from: usize, over: usize, after: bool) -> Option<usize> {
+    Some(drop_index(from, over, after)).filter(|&to| to != from)
+}
+
+/// The Half/Full control's label.
+pub fn half_label(title: &str, half: bool) -> String {
+    format!(
+        "Make {title} {}",
+        if half { "full width" } else { "half width" }
+    )
+}
+
+/// What was just done to the panel titled `title`, for `focus_after`.
+#[derive(Clone, Copy, Debug)]
+pub enum Edited {
+    Up,
+    Down,
+    Half,
+    /// It was at this index.
+    Removed(usize),
+    Added,
+}
+
+/// The first enabled edit control of the panel at `at` of `len` (the grip is not tabbable).
+fn first_control(title: &str, at: usize, len: usize, half: bool) -> String {
+    match moves(at, len) {
+        (Some(_), _) => format!("Move {title} up"),
+        (None, Some(_)) => format!("Move {title} down"),
+        (None, None) => half_label(title, half),
+    }
+}
+
+/// The `aria-label` of the control that takes focus after an edit, so it is
+/// not lost when the pressed control is redrawn, disabled or gone. `items`
+/// are the page's (title, half) after the edit.
+pub fn focus_after(edited: Edited, title: &str, items: &[(&str, bool)]) -> String {
+    let len = items.len();
+    let at = items.iter().position(|(t, _)| *t == title);
+    let half = at.is_some_and(|p| items[p].1);
+    match (edited, at) {
+        (Edited::Up, Some(0)) => format!("Move {title} down"),
+        (Edited::Up, _) => format!("Move {title} up"),
+        (Edited::Down, Some(p)) if p + 1 == len => format!("Move {title} up"),
+        (Edited::Down, _) => format!("Move {title} down"),
+        (Edited::Half, _) => half_label(title, half),
+        (Edited::Removed(i), _) => match items.get(i) {
+            Some((next, h)) => first_control(next, i, len, *h),
+            // Nothing after it: its button in "Add a panel".
+            None => format!("Add {title}"),
+        },
+        (Edited::Added, Some(p)) => first_control(title, p, len, half),
+        (Edited::Added, None) => format!("Add {title}"),
+    }
+}
+
+/// Focuses the button labelled `label` once the edit is drawn.
+pub fn focus_label(label: String) {
+    set_timeout(
+        move || {
+            let sel = format!("button[aria-label=\"{}\"]", label.replace('"', "\\\""));
+            if let Some(b) = document()
+                .query_selector(&sel)
+                .ok()
+                .flatten()
+                .and_then(|e| e.dyn_into::<web_sys::HtmlElement>().ok())
+            {
+                let _ = b.focus();
+            }
+        },
+        std::time::Duration::ZERO,
+    );
 }
 
 /// The `to` of "Move up" and "Move down" for the item at `at` of `len`; None
@@ -229,6 +311,41 @@ mod tests {
         assert_eq!(drop_index(3, 1, true), 2);
         assert_eq!(drop_index(1, 1, false), 1);
         assert_eq!(drop_index(1, 1, true), 1);
+    }
+
+    #[test]
+    fn a_move_to_the_same_index_is_not_an_edit() {
+        assert_eq!(drop_move(1, 1, false), None);
+        assert_eq!(drop_move(1, 1, true), None);
+        assert_eq!(drop_move(1, 0, true), None);
+        assert_eq!(drop_move(0, 2, true), Some(2));
+    }
+
+    const AFTER: [(&str, bool); 3] = [("A", false), ("B", true), ("C", false)];
+
+    #[test]
+    fn focus_stays_on_the_pressed_control_or_its_partner() {
+        assert_eq!(focus_after(Edited::Up, "A", &AFTER), "Move A down");
+        assert_eq!(focus_after(Edited::Up, "B", &AFTER), "Move B up");
+        assert_eq!(focus_after(Edited::Down, "C", &AFTER), "Move C up");
+        assert_eq!(focus_after(Edited::Down, "B", &AFTER), "Move B down");
+        assert_eq!(focus_after(Edited::Half, "B", &AFTER), "Make B full width");
+        assert_eq!(focus_after(Edited::Half, "C", &AFTER), "Make C half width");
+    }
+
+    #[test]
+    fn focus_after_remove_and_add() {
+        // "X" was removed from index 0: A is first now.
+        assert_eq!(focus_after(Edited::Removed(0), "X", &AFTER), "Move A down");
+        assert_eq!(focus_after(Edited::Removed(2), "X", &AFTER), "Move C up");
+        // The last one went: its button in "Add a panel".
+        assert_eq!(focus_after(Edited::Removed(3), "X", &AFTER), "Add X");
+        assert_eq!(focus_after(Edited::Removed(0), "X", &[]), "Add X");
+        assert_eq!(focus_after(Edited::Added, "C", &AFTER), "Move C up");
+        assert_eq!(
+            focus_after(Edited::Added, "A", &[("A", true)]),
+            "Make A full width"
+        );
     }
 
     #[test]

@@ -434,6 +434,7 @@ pub fn Disclosure(
     }
 }
 
-/// The tab bar's row: the bar at the left, "Edit layout" at the right; it
-/// sticks under the window's drag strip. Only its children take clicks.
-pub const TAB_ROW: &str = "pointer-events-none sticky top-10 z-30 mb-4 flex items-center justify-between gap-3 sm:mb-6 [&>*]:pointer-events-auto";
+/// The tab bar's row: the bar at the left, "Edit layout" at the right (below
+/// `sm`, on its own row under the full-width bar); it sticks under the
+/// window's drag strip. Only its children take clicks.
+pub const TAB_ROW: &str = "pointer-events-none sticky top-10 z-30 mb-4 flex flex-col items-end gap-2 sm:mb-6 sm:flex-row sm:items-center sm:justify-between sm:gap-3 [&>*]:pointer-events-auto";
