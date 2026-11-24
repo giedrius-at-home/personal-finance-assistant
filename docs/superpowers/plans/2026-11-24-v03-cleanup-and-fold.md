@@ -16,6 +16,7 @@
 - Every new piece of UI is a component or named constant in `app/ui/src/ds`. A page does not list its panels in code; it renders what its layout says.
 - No new dependency.
 - Every backend command is added in both `app/src-tauri/src/main.rs` (and its `generate_handler!` list) and `app/devserver/src/main.rs`.
+- A new command must also be in `COMMANDS` in `app/src-tauri/build.rs` and allowed (`allow-<kebab-name>`) in `app/src-tauri/capabilities/default.json`, or the installed app refuses it; the devserver has no such list, so only a Tauri build or the test that compares the three lists shows the gap.
 - Saving the layout must not drop the cached snapshot, bump `AppState::revision`, or cause a ledger backup.
 - Reading the layout when the `ui_layout` table does not exist gives the default layout, not an error.
 - Tests cover calculations and writes, not wording or layout of screens.
