@@ -70,7 +70,7 @@ pub(super) fn insight(
     let lowest = |a: (usize, Decimal), b: (usize, Decimal)| if b.1 < a.1 { b } else { a };
     let positive = || done.iter().copied().filter(|(_, v)| *v > Decimal::ZERO);
     match spec.by {
-        Axis::Weekday | Axis::DayOfMonth => {
+        Axis::Weekday | Axis::DayOfMonth | Axis::MonthOfYear => {
             let (peak, high) = positive().reduce(highest)?;
             let (low, least) = positive().reduce(lowest)?;
             let title = &columns[peak].title;

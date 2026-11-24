@@ -854,3 +854,60 @@ fn comparing_or_changing_all_time_is_refused() {
     s.value = Value::Change;
     assert!(plot_query(&Ctx::new(&ctx_snap, &now()), &s).is_err());
 }
+
+fn two_years() -> Vec<Tx> {
+    vec![
+        out("j25", "10", None, "2025-01-10"),
+        out("d25", "7", None, "2025-12-10"),
+        out("j26", "20", None, "2026-01-10"),
+        out("m26", "5", None, "2026-03-10"),
+    ]
+}
+
+#[test]
+fn month_of_year_buckets_fold_the_years_together() {
+    let data = query(
+        &snap(two_years()),
+        &spec(Axis::MonthOfYear, Period::AllTime, &[Measure::Spent]),
+    );
+    assert_eq!(data.categories.len(), 12);
+    assert_eq!(data.titles[0], "January");
+    assert_eq!(at(&data, "Jan"), Some(dec("30")));
+    assert_eq!(at(&data, "Mar"), Some(dec("5")));
+    assert_eq!(at(&data, "Dec"), Some(dec("7")));
+    assert!(!data.partial_last);
+}
+
+#[test]
+fn year_on_year_gives_one_series_per_year_over_twelve_months() {
+    let mut s = spec(Axis::MonthOfYear, Period::AllTime, &[Measure::Spent]);
+    s.split = Some(Split::Year);
+    s.chart = Chart::Line;
+    let data = query(&snap(two_years()), &s);
+    let labels: Vec<&str> = data.series.iter().map(|s| s.label.as_str()).collect();
+    assert_eq!(labels, ["2025", "2026"]);
+    let (last_year, this_year) = (&data.series[0].values, &data.series[1].values);
+    assert_eq!(last_year.len(), 12);
+    assert_eq!(last_year[0], Some(dec("10")));
+    assert_eq!(last_year[1], Some(Decimal::ZERO));
+    assert_eq!(last_year[11], Some(dec("7")));
+    assert_eq!(this_year.len(), 12);
+    assert_eq!(this_year[0], Some(dec("20")));
+    assert_eq!(this_year[1], Some(Decimal::ZERO));
+    // November has started; December has not.
+    assert_eq!(this_year[10], Some(Decimal::ZERO));
+    assert_eq!(this_year[11], None);
+}
+
+#[test]
+fn month_of_year_insight_is_peak_against_lowest() {
+    let data = query(
+        &snap(two_years()),
+        &spec(Axis::MonthOfYear, Period::AllTime, &[Measure::Spent]),
+    );
+    let insight = data.insight.unwrap();
+    assert_eq!(insight.kind, InsightKind::PeakAgainstLowest);
+    assert_eq!(insight.label, "January");
+    assert_eq!(insight.value, dec("30"));
+    assert_eq!(insight.against, Some(dec("5")));
+}

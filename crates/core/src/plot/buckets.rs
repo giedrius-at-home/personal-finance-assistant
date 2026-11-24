@@ -47,13 +47,18 @@ impl Frame<'_> {
 
     /// The plot's period (`back` 0), or the one of equal length `back`
     /// periods before it.
-    pub(super) fn window(&self, back: i32) -> Result<Window> {
-        let today = self.today();
-        let current = if self.budget {
+    /// The month (budget or calendar) running today.
+    pub(super) fn current(&self) -> Date {
+        if self.budget {
             self.ctx.current_month()
         } else {
-            today.first_of_month()
-        };
+            self.today().first_of_month()
+        }
+    }
+
+    pub(super) fn window(&self, back: i32) -> Result<Window> {
+        let today = self.today();
+        let current = self.current();
         let months = |first: Date, last: Date| {
             let n = month_number(last) - month_number(first) + 1;
             let (first, last) = (shift_month(first, -n * back), shift_month(last, -n * back));
@@ -128,6 +133,19 @@ impl Frame<'_> {
                         label: w[..3].into(),
                         title: (*w).into(),
                         keys: vec![i.to_string()],
+                        other: false,
+                    })
+                    .collect(),
+                Vec::new(),
+                0,
+            ),
+            Axis::MonthOfYear => (
+                (1..=12)
+                    .filter_map(|m| Date::new(2000, m, 1).ok())
+                    .map(|d| Column {
+                        label: d.strftime("%b").to_string(),
+                        title: d.strftime("%B").to_string(),
+                        keys: vec![d.month().to_string()],
                         other: false,
                     })
                     .collect(),
@@ -292,6 +310,7 @@ pub(super) fn point_key(dim: Dim, day: Date, month: Date) -> String {
         Dim::Time(axis) => bucket_start(axis, day).to_string(),
         Dim::Weekday => day.weekday().to_monday_zero_offset().to_string(),
         Dim::DayOfMonth => day.day().to_string(),
+        Dim::MonthOfYear => month.month().to_string(),
         Dim::Year => month.year().to_string(),
         _ => String::new(),
     }

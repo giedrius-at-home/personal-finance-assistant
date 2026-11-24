@@ -45,6 +45,8 @@ pub enum Axis {
     Year,
     Weekday,
     DayOfMonth,
+    /// January to December, every year folded together.
+    MonthOfYear,
     Category,
     Group,
     Merchant,
@@ -595,6 +597,7 @@ mod tests {
         assert!(with(Axis::Category).validate().is_ok());
         assert!(with(Axis::Weekday).validate().is_err());
         assert!(with(Axis::DayOfMonth).validate().is_err());
+        assert!(with(Axis::MonthOfYear).validate().is_err());
         let compared = PlotSpec {
             compare: Compare::Previous,
             ..with(Axis::Month)
@@ -612,6 +615,7 @@ mod tests {
         assert!(with(Axis::Day).validate().is_ok());
         assert!(with(Axis::Category).validate().is_err());
         assert!(with(Axis::Weekday).validate().is_err());
+        assert!(with(Axis::MonthOfYear).validate().is_err());
     }
 
     #[test]
@@ -623,6 +627,7 @@ mod tests {
         };
         assert!(with(Axis::Week).validate().is_ok());
         assert!(with(Axis::Merchant).validate().is_err());
+        assert!(with(Axis::MonthOfYear).validate().is_err());
         let split = PlotSpec {
             split: Some(Split::Group),
             ..with(Axis::Week)
@@ -784,6 +789,15 @@ mod tests {
             [Bars, StackedBars, Line, Area, Heatmap, Table]
         );
         assert_eq!(samples[3].charts(), [Scatter, Table]);
+        let year_on_year = PlotSpec {
+            by: Axis::MonthOfYear,
+            split: Some(Split::Year),
+            ..spec()
+        };
+        assert_eq!(
+            year_on_year.charts(),
+            [Bars, StackedBars, Line, Area, Heatmap, Table]
+        );
     }
 
     #[test]
@@ -871,7 +885,13 @@ mod tests {
                 chart,
                 ..spec()
             };
-            for by in [Axis::Day, Axis::Quarter, Axis::Weekday, Axis::DayOfMonth] {
+            for by in [
+                Axis::Day,
+                Axis::Quarter,
+                Axis::Weekday,
+                Axis::DayOfMonth,
+                Axis::MonthOfYear,
+            ] {
                 assert!(with(by).validate().is_ok(), "{chart:?} {by:?}");
             }
             for by in [
@@ -955,6 +975,7 @@ mod tests {
             (
                 "Year on year",
                 PlotSpec {
+                    by: Axis::MonthOfYear,
                     split: Some(Split::Year),
                     period: Period::AllTime,
                     chart: Chart::Line,

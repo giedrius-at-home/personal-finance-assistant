@@ -54,6 +54,7 @@ enum Dim {
     Time(Axis),
     Weekday,
     DayOfMonth,
+    MonthOfYear,
     Year,
     Category,
     Group,
@@ -67,6 +68,7 @@ impl From<Axis> for Dim {
         match axis {
             Axis::Weekday => Self::Weekday,
             Axis::DayOfMonth => Self::DayOfMonth,
+            Axis::MonthOfYear => Self::MonthOfYear,
             Axis::Category => Self::Category,
             Axis::Group => Self::Group,
             Axis::Merchant => Self::Merchant,
@@ -104,7 +106,7 @@ struct Names<'a> {
 impl Names<'_> {
     fn key(&self, dim: Dim, r: &Row) -> String {
         match dim {
-            Dim::Time(_) | Dim::Weekday | Dim::DayOfMonth | Dim::Year => {
+            Dim::Time(_) | Dim::Weekday | Dim::DayOfMonth | Dim::MonthOfYear | Dim::Year => {
                 point_key(dim, r.day, r.month)
             }
             Dim::Category => r.t.category.as_deref().unwrap_or("Uncategorised").into(),
@@ -299,6 +301,22 @@ pub fn plot_query(ctx: &Ctx<'_>, spec: &PlotSpec) -> Result<PlotData> {
     let (columns, starts, axis_left_out) = frame.columns(&window, ranking)?;
     let finished = frame.finished(&starts, columns.len());
     let mut values = frame.values(&window, &rows, &columns, &defs);
+    if spec.by == Axis::MonthOfYear {
+        // This year's months that have not started yet have no value, so its line stops at today.
+        let current = frame.current();
+        let this_year = current.year().to_string();
+        for (def, values) in defs.iter().zip(&mut values) {
+            if let Some((Dim::Year, years)) = &def.only
+                && years.len() == 1
+                && years.contains(&this_year)
+            {
+                values
+                    .iter_mut()
+                    .skip(usize::try_from(current.month()).unwrap_or(12))
+                    .for_each(|v| *v = None);
+            }
+        }
+    }
     if spec.value == Value::Change {
         options::change(&frame, &columns, &defs, &mut values)?;
     }
