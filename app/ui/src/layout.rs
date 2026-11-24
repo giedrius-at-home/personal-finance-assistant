@@ -114,6 +114,24 @@ impl SaveQueue {
     }
 }
 
+/// The page ids of every tab.
+#[cfg(test)]
+pub const PAGES: [&str; 13] = [
+    "overview",
+    "transactions",
+    "spending.habits",
+    "spending.organise",
+    "spending.history",
+    "plan",
+    "wishes",
+    "events",
+    "manage.banks",
+    "manage.close",
+    "manage.import",
+    "manage.status",
+    "manage.settings",
+];
+
 /// Every page's panels, in registry order.
 pub fn registry() -> impl Iterator<Item = &'static PanelDef> {
     crate::pages::overview::PANELS
@@ -329,6 +347,23 @@ pub fn PageView(tab: &'static str, tab_name: &'static str, page: &'static str) -
 mod tests {
     use super::*;
     use leptos::prelude::IntoAny;
+
+    #[test]
+    fn registry_is_sound() {
+        let defs: Vec<_> = registry().collect();
+        let ids: std::collections::HashSet<_> = defs.iter().map(|d| d.id).collect();
+        assert_eq!(ids.len(), defs.len()); // ids are unique
+        assert_eq!(defs.len(), 48); // every panel of the spec's tables
+        for d in &defs {
+            assert!(d.id.starts_with(d.page) && PAGES.contains(&d.page), "{}", d.id);
+        }
+        for page in PAGES {
+            assert!(
+                defs.iter().any(|d| d.page == page && d.initial == Initial::Open),
+                "{page} opens empty"
+            );
+        }
+    }
 
     fn def(id: &'static str, initial: Initial, half: bool) -> PanelDef {
         PanelDef {
