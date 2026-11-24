@@ -129,13 +129,17 @@ fn nice_axis(min: f64, max: f64) -> (f64, f64, Vec<f64>) {
 fn pct(v: f64) -> String {
     format!("{:.4}%", v.clamp(-1000.0, 1000.0))
 }
+
 mod bar;
 mod donut;
+mod heatmap;
 mod line;
 mod progress;
 
 pub use bar::BarChart;
 pub use donut::{Donut, Slice};
+#[allow(unused_imports, reason = "plots use these from v0.3 Task 6")]
+pub use heatmap::{Heatmap, heat_level};
 pub use line::LineChart;
 pub use progress::{BarTone, BudgetBar, ProgressBar};
 
@@ -203,6 +207,25 @@ fn Tooltip(
                 })
                 .collect_view()}
         </div>
+    }
+}
+
+/// The chart's values as a visually hidden table, for screen readers.
+#[component]
+fn ValueTable(caption: String, head: Vec<String>, rows: Vec<Vec<String>>) -> impl IntoView {
+    view! {
+        <table class="sr-only">
+            <caption>{caption}</caption>
+            <thead>
+                <tr>{head.into_iter().map(|h| view! { <th scope="col">{h}</th> }).collect_view()}</tr>
+            </thead>
+            <tbody>
+                {rows
+                    .into_iter()
+                    .map(|row| view! { <tr>{row.into_iter().map(|c| view! { <td>{c}</td> }).collect_view()}</tr> })
+                    .collect_view()}
+            </tbody>
+        </table>
     }
 }
 
