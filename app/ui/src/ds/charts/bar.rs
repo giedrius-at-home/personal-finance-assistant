@@ -16,6 +16,9 @@ pub fn BarChart(
     /// Tooltip title per category (defaults to the category label).
     #[prop(optional)]
     titles: Option<Vec<String>>,
+    /// The last category is unfinished (this month so far): drawn lighter.
+    #[prop(optional)]
+    partial_last: bool,
 ) -> impl IntoView {
     let n = categories.len().max(1);
     let totals: Vec<(f64, f64)> = (0..categories.len())
@@ -76,12 +79,19 @@ pub fn BarChart(
                     let (y1, y2) = (y(base.max(top)), y(base.min(top)));
                     let cap = !stacked || k == last_index;
                     let radius = if cap { "4px 4px 0 0" } else { "0" };
+                    let partial = if partial_last && i + 1 == categories.len() {
+                        let edge = if v >= 0.0 { "top" } else { "bottom" };
+                        let dash = if cap { format!(";border-{edge}:2px dashed {}", s.color) } else { String::new() };
+                        format!(";background:color-mix(in oklab,{} 45%,transparent){dash}", s.color)
+                    } else {
+                        String::new()
+                    };
                     Some(
                         view! {
                             <div
                                 class="absolute"
                                 style=format!(
-                                    "left:{};width:{};top:{};height:{};background:{};border-radius:{radius};max-width:32px;margin-left:max(0px,calc(({} - 32px)/2))",
+                                    "left:{};width:{};top:{};height:{};background:{};border-radius:{radius};max-width:32px;margin-left:max(0px,calc(({} - 32px)/2)){partial}",
                                     pct(x),
                                     pct(width),
                                     pct(y1),

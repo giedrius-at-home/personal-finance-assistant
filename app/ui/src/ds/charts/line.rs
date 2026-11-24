@@ -20,7 +20,11 @@ pub fn LineChart(
     /// A labelled vertical line at one category, e.g. today.
     #[prop(default = None)]
     marker: Option<(usize, String)>,
+    /// The last category is unfinished (this month so far): its segment is dashed.
+    #[prop(optional)]
+    partial_last: bool,
 ) -> impl IntoView {
+    let last = categories.len().checked_sub(1).filter(|_| partial_last);
     let n = categories.len().max(1);
     let all: Vec<f64> = series
         .iter()
@@ -63,16 +67,33 @@ pub fn LineChart(
                 d.push(' ');
                 seg.clear();
             };
-            for (i, v) in s.values.iter().enumerate() {
+            for (i, v) in s.values.iter().enumerate().take(last.unwrap_or(usize::MAX)) {
                 match v {
                     Some(v) => segment.push((x(i), y(*v))),
                     None => flush(&mut segment, &mut d, &mut fill),
                 }
             }
             flush(&mut segment, &mut d, &mut fill);
+            let point = |i: usize| s.values.get(i).copied().flatten().map(|v| (x(i), y(v)));
+            let tail = last.and_then(|l| Some(join(&[point(l.checked_sub(1)?)?, point(l)?], line)));
             let color = s.color.clone();
+            let tail = tail.map(|path| {
+                let fill = format!("{path} L{:.3},{:.3} L{:.3},{:.3} Z", x(n - 1), y(0.0), x(n - 2), y(0.0));
+                view! {
+                    {area.then(|| view! { <path d=fill fill=color.clone() fill-opacity="0.07" stroke="none"></path> })}
+                    <path
+                        d=path
+                        fill="none"
+                        stroke=color.clone()
+                        stroke-width=if line == Line::Dashed { "1.5" } else { "2" }
+                        stroke-dasharray="5 4"
+                        vector-effect="non-scaling-stroke"
+                    ></path>
+                }
+            });
             view! {
                 {area.then(|| view! { <path d=fill.clone() fill=color.clone() fill-opacity="0.15" stroke="none"></path> })}
+                {tail}
                 <path
                     d=d
                     fill="none"
