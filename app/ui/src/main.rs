@@ -16,9 +16,7 @@ use leptos::prelude::*;
 use leptos::tachys::reactive_graph::OwnedView;
 
 use crate::api::{Loaded, NoArgs, load};
-use crate::ds::arrange::{
-    DropTarget, TAB_ALERT, TAB_EDITOR, drop_index, drop_move, focus_label, focus_on,
-};
+use crate::ds::arrange::{DropTarget, TAB_ALERT, TAB_EDITOR, drop_index, drop_move, focus_on};
 use crate::ds::patterns::{ERROR_LINE, TAB_ROW, TAB_SCROLL};
 use crate::ds::{
     Button, Eyebrow, Heading, Icon, Lucide, SegmentedControl, Size, TABS_LIST, TABS_TRIGGER,
@@ -423,11 +421,8 @@ fn TabEditor(tabs: Memo<Vec<TabView>>) -> impl IntoView {
     // The tab being dragged, and the tab under the pointer (with "after").
     let dragging = RwSignal::new(None::<String>);
     let over = RwSignal::new(None::<(String, bool)>);
-    let refocus = move |edited: TabEdited, id: &str| match untrack(|| {
-        tab_focus_after(edited, id, &layout.tabs())
-    }) {
-        Some(label) => focus_label(label),
-        None => focus_on("button[aria-current=page]".into()),
+    let refocus = move |edited: TabEdited, id: &str| {
+        focus_on(untrack(|| tab_focus_after(edited, id, &layout.tabs())));
     };
     let chip = move |t: TabView| {
         let id = StoredValue::new(t.id.clone());
@@ -492,6 +487,7 @@ fn TabEditor(tabs: Memo<Vec<TabView>>) -> impl IntoView {
         };
         view! {
             <TabChip
+                id=t.id.clone()
                 name=t.name.clone()
                 active=Signal::derive(move || id.with_value(|id| app.shown_id() == *id))
                 own=!t.built_in
@@ -500,6 +496,7 @@ fn TabEditor(tabs: Memo<Vec<TabView>>) -> impl IntoView {
                 last=Signal::derive(move || ends.get().1.is_none())
                 renaming=Signal::derive(move || renaming.with(|r| id.with_value(|id| r.as_ref() == Some(id))))
                 draft
+                refused=Signal::derive(move || refused.get().filter(|_| renaming.with(|r| id.with_value(|id| r.as_ref() == Some(id)))))
                 drop
                 on_grab=Callback::new(move |on: bool| {
                     dragging.set(on.then(|| id.get_value()));
@@ -518,14 +515,16 @@ fn TabEditor(tabs: Memo<Vec<TabView>>) -> impl IntoView {
                         draft.set(name.clone());
                         refused.set(None);
                         renaming.set(Some(id.get_value()));
-                        focus_label(format!("Name of {name}"));
+                        id.with_value(|id| focus_on(in_tab(id, &format!("Name of {name}"))));
                     }
                 })
                 on_save=Callback::new(move |()| id.with_value(|id| {
-                    let mut named = Ok(());
-                    layout.edit(|l| named = edit::tab_renamed(l, id, &draft.get_untracked()));
-                    match named {
-                        Ok(()) => {
+                    // Checked first: a refused name writes (and saves) nothing.
+                    match edit::tab_name(&draft.get_untracked()) {
+                        Ok(name) => {
+                            layout.edit(|l| {
+                                let _ = edit::tab_renamed(l, id, &name);
+                            });
                             renaming.set(None);
                             refused.set(None);
                             refocus(TabEdited::Named, id);
@@ -546,26 +545,34 @@ fn TabEditor(tabs: Memo<Vec<TabView>>) -> impl IntoView {
         }
     };
     let add = move |_| {
-        let mut added = Err(String::new());
-        layout.edit(|l| added = edit::tab_added(l, "New tab"));
-        match added {
-            Ok(id) => {
-                app.go_own(&id);
-                draft.set("New tab".into());
-                refused.set(None);
-                renaming.set(Some(id.clone()));
-                refocus(TabEdited::Added, &id);
-            }
-            Err(why) => refused.set(Some(why)),
+        // Checked first: a refused add writes (and saves) nothing.
+        if let Err(why) = untrack(|| edit::tab_room(&layout.tabs())) {
+            refused.set(Some(why));
+            return;
         }
+        // The name is fixed and there is room, so this is Ok.
+        let mut id = String::new();
+        layout.edit(|l| id = edit::tab_added(l, "New tab").unwrap_or_default());
+        app.go_own(&id);
+        draft.set("New tab".into());
+        refused.set(None);
+        renaming.set(Some(id.clone()));
+        refocus(TabEdited::Added, &id);
     };
     view! {
         <div role="group" aria-label="Edit tabs" class=TAB_EDITOR>
-            {move || listed.get().into_iter().map(chip).collect_view()}
+            // Keyed, so a chip (and an open Delete question) outlives edits of other tabs;
+            // what the chip is built from is in the key.
+            <For
+                each=move || listed.get()
+                key=|t| (t.id.clone(), t.name.clone(), t.hidden)
+                children=chip
+            />
             <Button variant=Variant::Ghost size=Size::IconSm label="Add a tab" on_click=Callback::new(add)>
                 <Lucide icon=Icon::Plus size=14 />
             </Button>
-            {move || refused.get().map(|why| view! {
+            // A refused add; a refused name shows in its chip.
+            {move || refused.get().filter(|_| renaming.with(Option::is_none)).map(|why| view! {
                 <p role="alert" class=cn([ERROR_LINE, TAB_ALERT])>{why}</p>
             })}
         </div>
@@ -682,10 +689,28 @@ pub fn tab_moves(tabs: &[TabView], id: &str) -> (Option<usize>, Option<usize>) {
 }
 
 /// The `to` for `tab_moved` of tab `from` dropped on tab `over` (`after`: on
-/// its right half); None when it would stay where it is.
+/// its right half). Decided over the tabs shown in the bar, so hidden tabs keep
+/// their places; None when it would stay where it is.
 pub fn tab_drop(tabs: &[TabView], from: &str, over: &str, after: bool) -> Option<usize> {
-    let at = |id: &str| tabs.iter().position(|t| t.id == id);
-    drop_move(at(from)?, at(over)?, after)
+    let shown: Vec<&str> = tabs
+        .iter()
+        .filter(|t| !t.hidden)
+        .map(|t| t.id.as_str())
+        .collect();
+    let at = |id: &str| shown.iter().position(|s| *s == id);
+    let to = drop_move(at(from)?, at(over)?, after)?;
+    // In the list without `from`: right after the shown tab before it, or before the first.
+    let rest: Vec<&str> = tabs
+        .iter()
+        .map(|t| t.id.as_str())
+        .filter(|t| *t != from)
+        .collect();
+    let shown_rest: Vec<&str> = shown.into_iter().filter(|s| *s != from).collect();
+    let full = |id: &str| rest.iter().position(|t| *t == id);
+    match to.checked_sub(1) {
+        None => full(shown_rest.first()?),
+        Some(p) => full(shown_rest.get(p)?).map(|i| i + 1),
+    }
 }
 
 /// The page tab `id` shows: for Spending and Manage the selected sub-section.
@@ -721,12 +746,23 @@ pub enum TabEdited {
     Deleted,
 }
 
-/// The `aria-label` of the control that takes focus after an edit of tab
-/// `id`, from the tabs as the edit left them; None: the tab now shown.
-pub fn tab_focus_after(edited: TabEdited, id: &str, tabs: &[TabView]) -> Option<String> {
-    let name = &tabs.iter().find(|t| t.id == id)?.name;
+/// The selector of the control labelled `label` in the chip of tab `id`:
+/// names repeat ("New tab"), ids do not.
+pub fn in_tab(id: &str, label: &str) -> String {
+    let (id, label) = (id.replace('"', "\\\""), label.replace('"', "\\\""));
+    format!(
+        "[data-tab=\"{id}\"] button[aria-label=\"{label}\"], [data-tab=\"{id}\"] input[aria-label=\"{label}\"]"
+    )
+}
+
+/// The selector of what takes focus after an edit of tab `id`, from the tabs
+/// as the edit left them: a control in its chip, or (once it is gone) the tab now shown.
+pub fn tab_focus_after(edited: TabEdited, id: &str, tabs: &[TabView]) -> String {
+    let Some(name) = tabs.iter().find(|t| t.id == id).map(|t| &t.name) else {
+        return "button[aria-current=page]".into();
+    };
     let (left, right) = tab_moves(tabs, id);
-    Some(match edited {
+    let label = match edited {
         TabEdited::Left if left.is_none() => format!("Move {name} right"),
         TabEdited::Left => format!("Move {name} left"),
         TabEdited::Right if right.is_none() => format!("Move {name} left"),
@@ -735,8 +771,9 @@ pub fn tab_focus_after(edited: TabEdited, id: &str, tabs: &[TabView]) -> Option<
         TabEdited::Shown => format!("Hide {name}"),
         TabEdited::Named => format!("Rename {name}"),
         TabEdited::Added => format!("Name of {name}"),
-        TabEdited::Deleted => return None,
-    })
+        TabEdited::Deleted => return "button[aria-current=page]".into(),
+    };
+    in_tab(id, &label)
 }
 
 /// Renders `f` under its own owner: the contexts a page provides (Overview's
@@ -876,6 +913,19 @@ mod tests {
     }
 
     #[test]
+    fn a_drop_next_to_a_hidden_tab_is_decided_by_the_tabs_shown() {
+        // a, b(hidden), c: the bar shows a c.
+        let tabs = [tab("a", false), tab("b", true), tab("c", false)];
+        assert_eq!(tab_drop(&tabs, "c", "a", true), None);
+        assert_eq!(tab_drop(&tabs, "a", "c", false), None);
+        assert_eq!(tab_drop(&tabs, "c", "a", false), Some(0));
+        // a after c: the end, so b keeps its place before c.
+        assert_eq!(tab_drop(&tabs, "a", "c", true), Some(2));
+        // A hidden tab is neither dragged nor dropped on.
+        assert_eq!(tab_drop(&tabs, "b", "a", false), None);
+    }
+
+    #[test]
     fn a_panel_dropped_on_a_tab_goes_to_the_page_it_shows() {
         let (s, m) = (SpendingSection::History, ManageSection::CloseMonth);
         assert_eq!(tab_page("spending", s, m), "spending.history");
@@ -892,16 +942,46 @@ mod tests {
             tab("wishes", true),
         ];
         let f = |e, id| tab_focus_after(e, id, &tabs);
-        assert_eq!(f(TabEdited::Left, "own-1").unwrap(), "Move Trips right");
-        assert_eq!(f(TabEdited::Right, "own-1").unwrap(), "Move Trips right");
+        assert_eq!(
+            f(TabEdited::Left, "own-1"),
+            in_tab("own-1", "Move Trips right")
+        );
+        assert_eq!(
+            f(TabEdited::Right, "own-1"),
+            in_tab("own-1", "Move Trips right")
+        );
         // plan is the last tab shown: hidden wishes does not count.
-        assert_eq!(f(TabEdited::Right, "plan").unwrap(), "Move plan left");
-        assert_eq!(f(TabEdited::Left, "plan").unwrap(), "Move plan left");
-        assert_eq!(f(TabEdited::Hidden, "wishes").unwrap(), "Show wishes");
-        assert_eq!(f(TabEdited::Shown, "plan").unwrap(), "Hide plan");
-        assert_eq!(f(TabEdited::Named, "own-1").unwrap(), "Rename Trips");
-        assert_eq!(f(TabEdited::Added, "own-1").unwrap(), "Name of Trips");
-        assert_eq!(f(TabEdited::Deleted, "own-2"), None);
+        assert_eq!(
+            f(TabEdited::Right, "plan"),
+            in_tab("plan", "Move plan left")
+        );
+        assert_eq!(f(TabEdited::Left, "plan"), in_tab("plan", "Move plan left"));
+        assert_eq!(
+            f(TabEdited::Hidden, "wishes"),
+            in_tab("wishes", "Show wishes")
+        );
+        assert_eq!(f(TabEdited::Shown, "plan"), in_tab("plan", "Hide plan"));
+        assert_eq!(
+            f(TabEdited::Named, "own-1"),
+            in_tab("own-1", "Rename Trips")
+        );
+        assert_eq!(
+            f(TabEdited::Added, "own-1"),
+            in_tab("own-1", "Name of Trips")
+        );
+        assert_eq!(f(TabEdited::Deleted, "own-2"), "button[aria-current=page]");
+    }
+
+    #[test]
+    fn focus_finds_the_edited_tab_when_names_repeat() {
+        let tabs = [
+            own("own-1", "New tab"),
+            own("own-2", "New tab"),
+            tab("manage", false),
+        ];
+        let got = tab_focus_after(TabEdited::Right, "own-2", &tabs);
+        assert_ne!(got, tab_focus_after(TabEdited::Right, "own-1", &tabs));
+        assert!(got.starts_with("[data-tab=\"own-2\"] button[aria-label=\"Move New tab right\"]"));
     }
 
     #[test]

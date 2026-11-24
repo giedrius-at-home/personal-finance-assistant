@@ -6,7 +6,7 @@ use leptos::html;
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 
-use super::patterns::{ACTIONS, CHIPS, MUTED};
+use super::patterns::{ACTIONS, CHIPS, ERROR_LINE, MUTED};
 use super::{Button, CardTitle, Heading, Icon, Input, Lucide, Size, Variant, button_class, cn};
 
 /// The edit controls: in the gap above the section's top rule, left of the fold button.
@@ -30,7 +30,7 @@ const TAB_HIDDEN: &str = "opacity-60";
 const TAB_NAME: &str = "data-[state=active]:bg-soft data-[state=active]:text-fg";
 /// The rename field of a tab.
 const TAB_NAME_FIELD: &str = "h-8 w-40";
-/// A refused tab name, on its own line under the tabs.
+/// A refused tab name, on its own line under the field (or under the tabs).
 pub const TAB_ALERT: &str = "basis-full px-2";
 
 /// A frame's part as a drop target while a panel is dragged.
@@ -255,6 +255,9 @@ pub fn Confirm(
 /// or Hide for a built-in one. A hidden tab is muted and shows only "Show".
 #[component]
 pub fn TabChip(
+    /// The tab's id, on the chip as `data-tab`: focus is found within it.
+    #[prop(into)]
+    id: String,
     #[prop(into)] name: String,
     #[prop(into)] active: Signal<bool>,
     /// An own tab: rename and delete.
@@ -267,6 +270,9 @@ pub fn TabChip(
     #[prop(into)]
     renaming: Signal<bool>,
     draft: RwSignal<String>,
+    /// Why the name in the field was refused; shown under it.
+    #[prop(into)]
+    refused: Signal<Option<String>>,
     drop: DropTarget,
     on_grab: Callback<bool>,
     on_pick: Callback<()>,
@@ -330,6 +336,9 @@ pub fn TabChip(
                 }>
                     <Input value=draft class=TAB_NAME_FIELD label=label("Name of") />
                 </span>
+                {move || refused.get().map(|why| view! {
+                    <p role="alert" class=cn([ERROR_LINE, TAB_ALERT])>{why}</p>
+                })}
             }
             .into_any()
         } else {
@@ -402,7 +411,7 @@ pub fn TabChip(
         .into_any()
     };
     view! {
-        <span class=class on:dragover=on_dragover on:dragleave=on_dragleave on:drop=on_drop>
+        <span class=class data-tab=id on:dragover=on_dragover on:dragleave=on_dragleave on:drop=on_drop>
             {tab}
             {tools}
         </span>

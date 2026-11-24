@@ -122,6 +122,8 @@ pub fn sendable(
         && from.tab != to.tab
         && exists(l, from)
         && exists(l, to)
+        // A hidden tab's chip is muted: no drops on it.
+        && !tabs(l).iter().any(|t| t.id == to.tab && t.hidden)
         && !resolve(defs, &to.page, l.page(&to.page))
             .iter()
             .any(|i| i.panel == panel)
@@ -149,7 +151,8 @@ pub fn addable<'a>(l: &UiLayout, defs: &[&'a PanelDef], at: &PageRef) -> Vec<&'a
     home.filter(off).chain(guests.filter(off)).collect()
 }
 
-fn checked(name: &str) -> Result<String, String> {
+/// A tab name as saved (trimmed), or why it is refused.
+pub fn tab_name(name: &str) -> Result<String, String> {
     let name = name.trim();
     if name.is_empty() || name.chars().count() > MAX_NAME {
         return Err(format!("A tab name is 1 to {MAX_NAME} characters"));
@@ -159,11 +162,8 @@ fn checked(name: &str) -> Result<String, String> {
 
 /// A new own tab with one empty page; returns its id.
 pub fn tab_added(l: &mut UiLayout, name: &str) -> Result<String, String> {
-    let name = checked(name)?;
-    // Counted with the built-ins `tab_moved` may write out, so `validate` holds.
-    if tabs(l).len() >= MAX_TABS {
-        return Err(format!("At most {MAX_TABS} tabs"));
-    }
+    let name = tab_name(name)?;
+    tab_room(&tabs(l))?;
     let id = (1..)
         .map(|n| format!("own-{n}"))
         .find(|id| !l.tabs.iter().any(|t| &t.id == id))
@@ -183,8 +183,17 @@ pub fn tab_added(l: &mut UiLayout, name: &str) -> Result<String, String> {
     Ok(id)
 }
 
+/// Room for one more tab in the bar `tabs`. Counted with the built-ins
+/// `tab_moved` may write out, so `validate` holds.
+pub fn tab_room(tabs: &[TabView]) -> Result<(), String> {
+    if tabs.len() >= MAX_TABS {
+        return Err(format!("At most {MAX_TABS} tabs"));
+    }
+    Ok(())
+}
+
 pub fn tab_renamed(l: &mut UiLayout, id: &str, name: &str) -> Result<(), String> {
-    let name = checked(name)?;
+    let name = tab_name(name)?;
     let tab = l.tabs.iter_mut().find(|t| t.id == id && !t.built_in);
     tab.ok_or("Only your own tabs can be renamed")?.name = name;
     Ok(())
@@ -462,6 +471,18 @@ mod tests {
         assert!(!sendable(&l, &d, &p1(), &at("own-9", "own-9"), "a"));
         panel_sent(&mut l, &d, &p2(), &p1(), "a");
         assert_eq!(l, UiLayout::default());
+    }
+
+    #[test]
+    fn a_panel_is_not_sent_to_a_hidden_tab() {
+        let r = reg();
+        let d: Vec<&PanelDef> = r.iter().collect();
+        let mut l = UiLayout::default();
+        tab_hidden_set(&mut l, "plan", true);
+        let before = l.clone();
+        assert!(!sendable(&l, &d, &p1(), &p2(), "a"));
+        panel_sent(&mut l, &d, &p1(), &p2(), "a");
+        assert_eq!(l, before);
     }
 
     #[test]
