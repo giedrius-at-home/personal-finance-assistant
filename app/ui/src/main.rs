@@ -9,6 +9,7 @@ mod ds;
 mod format;
 mod layout;
 mod pages;
+mod plots;
 
 use finance_types::report::Dashboard;
 use leptos::ev;

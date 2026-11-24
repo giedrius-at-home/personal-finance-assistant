@@ -6,11 +6,13 @@ use leptos::html;
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 
-use super::patterns::{ACTIONS, CHIPS, ERROR_LINE, MUTED};
+use super::patterns::{
+    ACTIONS, CHIPS, CONTROL_GROUP, CONTROL_ROW, ERROR_LINE, FIELD_LABEL, GALLERY_GROUP, MUTED,
+};
 use super::{Button, CardTitle, Heading, Icon, Input, Lucide, Size, Variant, button_class, cn};
 
-/// The edit controls: in the gap above the section's top rule, left of the fold button.
-const EDIT_BAR: &str = "absolute bottom-full right-7 flex items-center gap-0.5";
+/// The edit controls, in the frame's tools above its top rule.
+const EDIT_BAR: &str = "flex items-center gap-0.5";
 /// An icon control of the edit bar, as small as the fold button.
 const EDIT_ICON: &str = "size-6";
 /// A word control of the edit bar ("Half" / "Full").
@@ -135,9 +137,55 @@ pub fn EditBar(
     }
 }
 
-/// The dashed "Add a panel" box: one button per panel that may be added.
+/// One "Add …" chip; its panel id (if any) as `data-panel`, so focus can find
+/// it. `aria` is its label: "Add <title>" unless given.
+fn add_chip(
+    panel: Option<String>,
+    title: String,
+    aria: Option<String>,
+    on: Callback<()>,
+) -> impl IntoView {
+    let aria = aria.unwrap_or_else(|| format!("Add {title}"));
+    view! {
+        <span class="contents" data-panel=panel>
+            <Button
+                variant=Variant::Secondary
+                size=Size::Sm
+                label=aria
+                on_click=Callback::new(move |_| on.run(()))
+            >
+                <Lucide icon=Icon::Plus size=14 />
+                {title}
+            </Button>
+        </span>
+    }
+}
+
+/// The dashed "Add a panel" box: the panels that may be added, the owner's
+/// plots (added from here when not on this page; each with Delete), the
+/// ready-made plots and "New plot".
 #[component]
-pub fn Gallery(items: Signal<Vec<(String, String)>>, on_add: Callback<String>) -> impl IntoView {
+pub fn Gallery(
+    /// Registry panels: (panel id, title).
+    items: Signal<Vec<(String, String)>>,
+    on_add: Callback<String>,
+    /// Every saved plot: (panel id, title, already on this page).
+    plots: Signal<Vec<(String, String, bool)>>,
+    /// Deletes the plot of a panel id.
+    on_delete: Callback<String>,
+    /// Ready-made plot names; empty hides the group.
+    ready: Signal<Vec<String>>,
+    /// Adds a copy of the ready-made plot at this index.
+    on_ready: Callback<usize>,
+    /// Why the last pick was refused.
+    #[prop(into)]
+    error: Signal<Option<String>>,
+    /// The "New plot" button's label, also its `aria-label`.
+    #[prop(into)]
+    new_label: String,
+    on_new: Callback<()>,
+) -> impl IntoView {
+    let new_label = StoredValue::new(new_label);
     view! {
         <section aria-label="Add a panel" class=GALLERY>
             <CardTitle level=Heading::H3>"Add a panel"</CardTitle>
@@ -151,17 +199,8 @@ pub fn Gallery(items: Signal<Vec<(String, String)>>, on_add: Callback<String>) -
                             {items
                                 .into_iter()
                                 .map(|(id, title)| {
-                                    view! {
-                                        <Button
-                                            variant=Variant::Secondary
-                                            size=Size::Sm
-                                            label=format!("Add {title}")
-                                            on_click=Callback::new(move |_| on_add.run(id.clone()))
-                                        >
-                                            <Lucide icon=Icon::Plus size=14 />
-                                            {title}
-                                        </Button>
-                                    }
+                                    let panel = id.clone();
+                                    add_chip(Some(panel), title, None, Callback::new(move |()| on_add.run(id.clone())))
                                 })
                                 .collect_view()}
                         </div>
@@ -169,6 +208,69 @@ pub fn Gallery(items: Signal<Vec<(String, String)>>, on_add: Callback<String>) -
                         .into_any()
                 }
             }}
+            {move || {
+                let plots = plots.get();
+                (!plots.is_empty()).then(|| view! {
+                    <div class=GALLERY_GROUP>
+                        <h4 class=FIELD_LABEL>"Your plots"</h4>
+                        <div class=CONTROL_ROW>
+                            {plots
+                                .into_iter()
+                                .map(|(id, title, here)| {
+                                    let (add, delete) = (id.clone(), id.clone());
+                                    let name = if here {
+                                        view! { <span class=MUTED>{title.clone()}</span> }.into_any()
+                                    } else {
+                                        add_chip(None, title.clone(), None, Callback::new(move |()| on_add.run(add.clone()))).into_any()
+                                    };
+                                    view! {
+                                        <span class=CONTROL_GROUP data-panel=id>
+                                            {name}
+                                            <Confirm
+                                                label="Delete"
+                                                aria=format!("Delete {title}")
+                                                question="Delete this plot? It leaves every tab."
+                                                on_yes=Callback::new(move |()| on_delete.run(delete.clone()))
+                                            />
+                                        </span>
+                                    }
+                                })
+                                .collect_view()}
+                        </div>
+                    </div>
+                })
+            }}
+            {move || {
+                let ready = ready.get();
+                (!ready.is_empty()).then(|| view! {
+                    <div class=GALLERY_GROUP>
+                        <h4 class=FIELD_LABEL>"Ready-made plots"</h4>
+                        <div class=CONTROL_ROW>
+                            {ready
+                                .into_iter()
+                                .enumerate()
+                                .map(|(i, name)| {
+                                    // Not "Add <name>": a saved plot may have that name too.
+                                    let aria = format!("Add a copy of {name}");
+                                    add_chip(None, name, Some(aria), Callback::new(move |()| on_ready.run(i)))
+                                })
+                                .collect_view()}
+                        </div>
+                    </div>
+                })
+            }}
+            {move || error.get().map(|why| view! { <p role="alert" class=ERROR_LINE>{why}</p> })}
+            <div>
+                <Button
+                    variant=Variant::Secondary
+                    size=Size::Sm
+                    label=new_label.get_value()
+                    on_click=Callback::new(move |_| on_new.run(()))
+                >
+                    <Lucide icon=Icon::Plus size=14 />
+                    {new_label.get_value()}
+                </Button>
+            </div>
         </section>
     }
 }
@@ -488,36 +590,35 @@ fn first_control(title: &str, at: usize, len: usize, half: bool) -> String {
     }
 }
 
-/// The `aria-label` of the control that takes focus after an edit, so it is
-/// not lost when the pressed control is redrawn, disabled or gone. `items`
-/// are the page's (title, half) after the edit.
-pub fn focus_after(edited: Edited, title: &str, items: &[(&str, bool)]) -> String {
+/// The selector of the control that takes focus after an edit of panel `id`
+/// titled `title`, so it is not lost when the pressed control is redrawn,
+/// disabled or gone. `items` are the page's (id, title, half) after the edit.
+pub fn focus_after(edited: Edited, id: &str, title: &str, items: &[(&str, &str, bool)]) -> String {
     let len = items.len();
-    let at = items.iter().position(|(t, _)| *t == title);
-    let half = at.is_some_and(|p| items[p].1);
-    match (edited, at) {
+    let at = items.iter().position(|(i, _, _)| *i == id);
+    let half = at.is_some_and(|p| items[p].2);
+    let label = match (edited, at) {
         (Edited::Up, Some(0)) => format!("Move {title} down"),
         (Edited::Up, _) => format!("Move {title} up"),
         (Edited::Down, Some(p)) if p + 1 == len => format!("Move {title} up"),
         (Edited::Down, _) => format!("Move {title} down"),
         (Edited::Half, _) => half_label(title, half),
         (Edited::Removed(i), _) => match items.get(i) {
-            Some((next, h)) => first_control(next, i, len, *h),
+            Some((next, t, h)) => return in_panel(next, &first_control(t, i, len, *h)),
             // Nothing after it: its button in "Add a panel".
             None => format!("Add {title}"),
         },
         (Edited::Added, Some(p)) => first_control(title, p, len, half),
         (Edited::Added, None) => format!("Add {title}"),
-    }
+    };
+    in_panel(id, &label)
 }
 
-/// Focuses the button or field labelled `label` once the edit is drawn; a
-/// field's text is selected.
-pub fn focus_label(label: String) {
-    let label = css_escaped(&label);
-    focus_on(format!(
-        "button[aria-label=\"{label}\"], input[aria-label=\"{label}\"]"
-    ));
+/// The selector of the button labelled `label` in panel `id`'s frame or its
+/// "Add a panel" chip: titles repeat (two plots), ids do not.
+pub fn in_panel(id: &str, label: &str) -> String {
+    let (id, label) = (css_escaped(id), css_escaped(label));
+    format!("[data-panel=\"{id}\"] button[aria-label=\"{label}\"]")
 }
 
 /// `s` made safe inside a double-quoted CSS attribute selector value.
@@ -571,31 +672,71 @@ mod tests {
         assert_eq!(drop_move(0, 2, true), Some(2));
     }
 
-    const AFTER: [(&str, bool); 3] = [("A", false), ("B", true), ("C", false)];
+    const AFTER: [(&str, &str, bool); 3] = [("a", "A", false), ("b", "B", true), ("c", "C", false)];
+
+    /// `focus_after` for the panel whose id is its title in lower case.
+    fn after(e: Edited, title: &str, items: &[(&str, &str, bool)]) -> String {
+        focus_after(e, &title.to_lowercase(), title, items)
+    }
 
     #[test]
     fn focus_stays_on_the_pressed_control_or_its_partner() {
-        assert_eq!(focus_after(Edited::Up, "A", &AFTER), "Move A down");
-        assert_eq!(focus_after(Edited::Up, "B", &AFTER), "Move B up");
-        assert_eq!(focus_after(Edited::Down, "C", &AFTER), "Move C up");
-        assert_eq!(focus_after(Edited::Down, "B", &AFTER), "Move B down");
-        assert_eq!(focus_after(Edited::Half, "B", &AFTER), "Make B full width");
-        assert_eq!(focus_after(Edited::Half, "C", &AFTER), "Make C half width");
+        assert_eq!(after(Edited::Up, "A", &AFTER), in_panel("a", "Move A down"));
+        assert_eq!(after(Edited::Up, "B", &AFTER), in_panel("b", "Move B up"));
+        assert_eq!(after(Edited::Down, "C", &AFTER), in_panel("c", "Move C up"));
+        assert_eq!(
+            after(Edited::Down, "B", &AFTER),
+            in_panel("b", "Move B down")
+        );
+        assert_eq!(
+            after(Edited::Half, "B", &AFTER),
+            in_panel("b", "Make B full width")
+        );
+        assert_eq!(
+            after(Edited::Half, "C", &AFTER),
+            in_panel("c", "Make C half width")
+        );
     }
 
     #[test]
     fn focus_after_remove_and_add() {
         // "X" was removed from index 0: A is first now.
-        assert_eq!(focus_after(Edited::Removed(0), "X", &AFTER), "Move A down");
-        assert_eq!(focus_after(Edited::Removed(2), "X", &AFTER), "Move C up");
-        // The last one went: its button in "Add a panel".
-        assert_eq!(focus_after(Edited::Removed(3), "X", &AFTER), "Add X");
-        assert_eq!(focus_after(Edited::Removed(0), "X", &[]), "Add X");
-        assert_eq!(focus_after(Edited::Added, "C", &AFTER), "Move C up");
         assert_eq!(
-            focus_after(Edited::Added, "A", &[("A", true)]),
-            "Make A full width"
+            after(Edited::Removed(0), "X", &AFTER),
+            in_panel("a", "Move A down")
         );
+        assert_eq!(
+            after(Edited::Removed(2), "X", &AFTER),
+            in_panel("c", "Move C up")
+        );
+        // The last one went: its button in "Add a panel".
+        assert_eq!(
+            after(Edited::Removed(3), "X", &AFTER),
+            in_panel("x", "Add X")
+        );
+        assert_eq!(after(Edited::Removed(0), "X", &[]), in_panel("x", "Add X"));
+        assert_eq!(
+            after(Edited::Added, "C", &AFTER),
+            in_panel("c", "Move C up")
+        );
+        assert_eq!(
+            after(Edited::Added, "A", &[("a", "A", true)]),
+            in_panel("a", "Make A full width")
+        );
+    }
+
+    #[test]
+    fn focus_finds_the_edited_panel_when_titles_repeat() {
+        let two = [("plot:p1", "Food", false), ("plot:p2", "Food", false)];
+        assert_eq!(
+            focus_after(Edited::Up, "plot:p2", "Food", &two),
+            in_panel("plot:p2", "Move Food up")
+        );
+        assert_eq!(
+            focus_after(Edited::Down, "plot:p1", "Food", &two),
+            in_panel("plot:p1", "Move Food down")
+        );
+        assert!(in_panel("plot:p2", "Move Food up").starts_with("[data-panel=\"plot:p2\"] "));
     }
 
     #[test]

@@ -438,3 +438,60 @@ pub fn Disclosure(
 /// `sm`, on its own row under the full-width bar); it sticks under the
 /// window's drag strip. Only its children take clicks.
 pub const TAB_ROW: &str = "pointer-events-none sticky top-10 z-30 mb-4 flex flex-col items-end gap-2 sm:mb-6 sm:flex-row sm:items-center sm:justify-between sm:gap-3 [&>*]:pointer-events-auto";
+
+/// A sortable table heading's button: the heading's look, an arrow when sorted.
+pub const SORT_BUTTON: &str = "inline-flex items-center gap-1 uppercase tracking-eyebrow hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
+
+/// The name cell at the start of a data table's row.
+pub const TABLE_ROW_HEAD: &str =
+    "px-2 py-2.5 text-left align-top font-medium group-data-[density=sm]/table:py-1.5";
+
+/// A data table's totals row.
+pub const TABLE_TOTAL_ROW: &str = "font-semibold";
+
+/// Under a plot: its period, the insight sentence and "Show numbers".
+pub const PLOT_FOOT: &str = "mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2";
+
+/// The insight sentence under a plot.
+pub const PLOT_INSIGHT: &str = "text-sm text-fg";
+
+/// A saved plot that can't be drawn: a quiet card in its place.
+pub const PLOT_UNREADABLE: &str = "rounded-lg bg-card-muted px-4 py-3 text-sm text-fg-muted";
+
+/// Under a plot: its period over the insight sentence.
+pub const PLOT_CAPTION: &str = "grid gap-1";
+
+/// A popup wide enough for a builder or an editor with a preview.
+pub const WIDE_POPUP: &str = "w-[min(94vw,60rem)]";
+
+/// The plot builder's body: its rows, preview and name, one under another.
+pub const BUILDER: &str = "grid min-w-0 gap-5";
+
+/// One labelled control in a row of the plot builder; rows wrap.
+pub const BUILDER_FIELD: &str = "min-w-0 flex-1 basis-40";
+
+/// A group of "Add a panel": its name over its chips.
+pub const GALLERY_GROUP: &str = "grid gap-2";
+
+/// A row of controls or objects of unequal height, side by side: all on one
+/// middle line; wraps.
+pub const CONTROL_ROW: &str = "flex flex-wrap items-center gap-3";
+
+/// Controls that stay together on one line, on one middle line, inside a
+/// `CONTROL_ROW`.
+pub const CONTROL_GROUP: &str = "inline-flex items-center gap-3";
+
+/// A select inside a `CONTROL_GROUP`.
+pub const GROUP_SELECT: &str = "w-48";
+
+/// A row of labelled fields: labels above, the controls (all one height)
+/// on one line; wraps.
+pub const FIELD_ROW: &str = "flex flex-wrap items-end gap-3";
+
+/// A switch with its label after it, on one middle line.
+pub const SWITCH_FIELD: &str = "inline-flex items-center gap-2 text-sm text-fg";
+
+/// A chip of a multiple choice: on (`CHIP_ON`) or off (`CHIP_OFF`).
+pub const CHIP: &str = "inline-flex items-center gap-1 rounded-pill border px-3 py-1 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
+pub const CHIP_ON: &str = "border-contrast bg-contrast text-fg-on-contrast";
+pub const CHIP_OFF: &str = "border-border text-fg-muted hover:text-fg";

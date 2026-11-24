@@ -212,6 +212,7 @@ pub fn run(
         "save_ui_layout" => {
             parse::<UiLayoutArgs>(args).and_then(|a| ok(service.save_ui_layout(a.layout)))
         }
+        "plot_query" => arg(args, "spec").and_then(|spec| ok(service.plot_query(spec))),
         "save_account_role" => {
             parse::<RoleArgs>(args).and_then(|a| ok(service.save_account_role(a.role)))
         }
