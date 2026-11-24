@@ -1,6 +1,7 @@
 //! The personal site's design system (`components/ui`), ported to Leptos with
 //! the same Tailwind classes so screens look the same as the web finance UI.
 
+pub mod arrange;
 pub mod charts;
 mod cn;
 pub mod icons;
@@ -8,6 +9,7 @@ pub mod money_plan;
 pub mod panel;
 pub mod patterns;
 
+pub use arrange::{Confirm, DropTarget, EditBar, Gallery, TabChip};
 pub use cn::cn;
 pub use icons::{Icon, Lucide};
 pub use panel::{PanelFrame, PanelList};

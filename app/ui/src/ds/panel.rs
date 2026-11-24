@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use leptos::prelude::*;
 
+use super::arrange::{DROP_TARGET, DropTarget, drag_after, drag_left};
 use super::{CardTitle, Heading, Icon, Lucide, Size, Variant, button_class, cn};
 
 /// Two columns from `md`, one below; the gap is `.page-stack`'s 1.5rem.
@@ -19,6 +20,8 @@ const PANEL_HALF: &str = "relative min-w-0";
 const FOLD_BUTTON: &str = "absolute bottom-full right-0 size-6";
 /// Folded: the whole row on the rule is the button.
 const FOLDED_ROW: &str = "flat-section flex w-full min-w-0 items-center gap-3 text-left text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
+/// Edit layout, a panel with nothing to show now: one muted row on the rule.
+const QUIET_ROW: &str = "flat-section flex w-full min-w-0 items-center gap-3 text-fg-muted";
 
 #[component]
 pub fn PanelList(children: Children) -> impl IntoView {
@@ -33,9 +36,65 @@ pub fn PanelFrame(
     #[prop(into)] summary: Signal<Option<String>>,
     #[prop(into)] folded: Signal<bool>,
     on_toggle: Callback<()>,
-    #[prop(optional)] half: bool,
+    #[prop(optional, into)] half: Signal<bool>,
+    /// Edit layout is on: an open panel with an empty body stays drawn, so it can be edited.
+    #[prop(optional, into)]
+    editing: Signal<bool>,
+    /// Edit layout's controls, drawn above the top rule; empty outside it.
+    #[prop(optional, into)]
+    edit: ViewFn,
+    /// A dragged panel may be let go here.
+    #[prop(optional)]
+    drop: Option<DropTarget>,
+    /// Edit layout, nothing to show now: a muted row with `title`, no body.
+    #[prop(optional)]
+    quiet: bool,
     children: ChildrenFn,
 ) -> impl IntoView {
+    let over = move || drop.is_some_and(|d| d.over.get());
+    let class = move || {
+        cn([
+            if half.get() { PANEL_HALF } else { PANEL_FULL },
+            if editing.get() { "" } else { EMPTY_OPEN_HIDDEN },
+            if over() { DROP_TARGET } else { "" },
+        ])
+    };
+    let accepts = move || drop.is_some_and(|d| d.accepts.get_untracked());
+    let on_dragover = move |e: leptos::ev::DragEvent| {
+        let Some(d) = drop.filter(|_| accepts()) else {
+            return;
+        };
+        e.prevent_default();
+        if let Some(after) = drag_after(&e, false) {
+            d.on_over.run(after);
+        }
+    };
+    let on_dragleave = move |e: leptos::ev::DragEvent| {
+        if let Some(d) = drop.filter(|_| accepts())
+            && drag_left(&e)
+        {
+            d.on_leave.run(());
+        }
+    };
+    let on_drop = move |e: leptos::ev::DragEvent| {
+        if let Some(d) = drop.filter(|_| accepts()) {
+            e.prevent_default();
+            d.on_drop.run(());
+        }
+    };
+    let edit = move || edit.run();
+    if quiet {
+        return view! {
+            <section class=class on:dragover=on_dragover on:dragleave=on_dragleave on:drop=on_drop>
+                {edit.clone()}
+                <div class=QUIET_ROW>
+                    <CardTitle level=Heading::Span class="min-w-0 truncate">{title}</CardTitle>
+                    <span class="ml-auto truncate text-sm">"Nothing to show now"</span>
+                </div>
+            </section>
+        }
+        .into_any();
+    }
     static NEXT: AtomicU32 = AtomicU32::new(0);
     let body_id = format!("panel-{}", NEXT.fetch_add(1, Ordering::Relaxed));
     let mounted =
@@ -46,7 +105,8 @@ pub fn PanelFrame(
     ]);
     let label = format!("Fold {title}");
     view! {
-        <section class=cn([if half { PANEL_HALF } else { PANEL_FULL }, EMPTY_OPEN_HIDDEN])>
+        <section class=class on:dragover=on_dragover on:dragleave=on_dragleave on:drop=on_drop>
+            {edit.clone()}
             // One button for both states, so focus stays on it across a toggle.
             <button
                 type="button"
@@ -77,4 +137,5 @@ pub fn PanelFrame(
             </div>
         </section>
     }
+    .into_any()
 }

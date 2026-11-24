@@ -78,6 +78,7 @@ mod tests {
     fn layout() -> UiLayout {
         UiLayout {
             tabs: vec![tab("overview", false), tab("manage", false)],
+            ..Default::default()
         }
     }
 
@@ -127,6 +128,7 @@ mod tests {
         let mut db = crate::writes::fixture::db();
         let bad = UiLayout {
             tabs: vec![tab("manage", true)],
+            ..Default::default()
         };
         db.store
             .connection()
@@ -153,6 +155,7 @@ mod tests {
         db.write(|w, _| save(w, &layout())).unwrap();
         let bad = UiLayout {
             tabs: vec![tab("manage", true)],
+            ..Default::default()
         };
         assert!(db.write(|w, _| save(w, &bad)).is_err());
         assert_eq!(load(db.store.connection()).unwrap(), layout());
