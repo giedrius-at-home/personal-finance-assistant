@@ -262,6 +262,16 @@ impl Frame<'_> {
         bucket_start(self.spec.by, month)
     }
 
+    /// The start of the bucket that holds `day`.
+    fn key_of(&self, day: Date) -> Date {
+        let day = if self.budget && self.by_month() {
+            self.month_of_day(day)
+        } else {
+            day
+        };
+        bucket_start(self.spec.by, day)
+    }
+
     /// Per column, whether its bucket is over; every column off a time axis is.
     pub(super) fn finished(&self, starts: &[Date], columns: usize) -> Vec<bool> {
         if starts.is_empty() {
@@ -269,6 +279,20 @@ impl Frame<'_> {
         }
         let today = self.today_key();
         starts.iter().map(|&s| s < today).collect()
+    }
+
+    /// Per column, whether it goes into an average (the insight's, the
+    /// average line, the usual): it is finished and does not end before the
+    /// ledger's first counted transaction. A bucket that holds that
+    /// transaction counts; buckets entirely before it are still drawn (as
+    /// zero) but are not averaged.
+    pub(super) fn averaged(&self, starts: &[Date], columns: usize) -> Vec<bool> {
+        let first = self.first_day.map(|d| self.key_of(d));
+        let mut averaged = self.finished(starts, columns);
+        for (a, &s) in averaged.iter_mut().zip(starts) {
+            *a &= first.is_some_and(|f| s >= f);
+        }
+        averaged
     }
 
     /// The split that divides the days themselves: each year or weekday
@@ -298,7 +322,8 @@ impl Frame<'_> {
         let dim = Dim::from(self.spec.by);
         let named = self.spec.named_axis();
         let partition = self.partition();
-        let mut day = w.from;
+        // Days before the ledger's first counted transaction have no data.
+        let mut day = w.from.max(self.first_day.unwrap_or(w.from));
         while day <= w.to.min(self.today()) {
             let month = self.month_of_day(day);
             if w.months

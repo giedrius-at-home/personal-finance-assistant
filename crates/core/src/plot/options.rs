@@ -139,7 +139,13 @@ pub(super) fn reference(frame: &Frame, n: usize) -> Result<Option<Reference>> {
         }
         let rows = frame.rows_in(&w);
         let (columns, starts, _) = frame.columns(&w, Vec::new())?;
-        let finished = frame.finished(&starts, columns.len());
+        // The period before is shown as it is; the usual averages only
+        // buckets the ledger reaches.
+        let finished = if periods == 1 {
+            frame.finished(&starts, columns.len())
+        } else {
+            frame.averaged(&starts, columns.len())
+        };
         let values = frame.values(&w, &rows, &columns, &def).remove(0);
         counterparts.push(
             (0..n)

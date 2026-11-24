@@ -1226,3 +1226,55 @@ fn budget_months_over_all_time_keep_at_most_240_buckets() {
     assert_eq!(data.categories.len(), 240);
     assert_eq!(data.titles[0], "December 2006");
 }
+
+/// A ledger that starts on 10 August 2026.
+fn young() -> Snapshot {
+    snap(vec![
+        out("a", "30", None, "2026-08-10"),
+        out("s", "60", None, "2026-09-10"),
+        out("o", "90", None, "2026-10-05"),
+    ])
+}
+
+#[test]
+fn months_before_the_ledger_starts_are_drawn_as_zero_but_not_averaged() {
+    let mut s = spec(Axis::Month, Period::Last12Months, &[Measure::Spent]);
+    let data = query(&young(), &s);
+    // December 2025 is before the ledger: drawn as zero.
+    assert_eq!(data.series[0].values[0], Some(Decimal::ZERO));
+    let insight = data.insight.unwrap();
+    assert_eq!(insight.label, "October 2026");
+    // August and September only.
+    assert_eq!(insight.against, Some(dec("45.00")));
+    s.average_line = true;
+    // August to October.
+    assert_eq!(
+        reference(&query(&young(), &s)).values[0],
+        Some(dec("60.00"))
+    );
+}
+
+#[test]
+fn usual_leaves_out_months_before_the_ledger_starts() {
+    let mut s = spec(Axis::Month, Period::Last3Months, &[Measure::Spent]);
+    s.compare = Compare::AverageOf3;
+    // Against June, July and August: only August is in the ledger.
+    assert_eq!(
+        reference(&query(&young(), &s)).values,
+        [None, None, Some(dec("30.00"))]
+    );
+}
+
+#[test]
+fn average_per_day_counts_days_from_the_first_transaction() {
+    let data = query(
+        &young(),
+        &spec(
+            Axis::Category,
+            Period::Last12Months,
+            &[Measure::AveragePerDay],
+        ),
+    );
+    // 180 over 10 August to 24 November: 107 days.
+    assert_eq!(data.series[0].values, [Some(dec("1.68"))]);
+}

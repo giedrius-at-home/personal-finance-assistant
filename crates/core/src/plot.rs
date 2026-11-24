@@ -298,7 +298,7 @@ pub fn plot_query(ctx: &Ctx<'_>, spec: &PlotSpec) -> Result<PlotData> {
         )
     };
     let (columns, starts, axis_left_out) = frame.columns(&window, ranking)?;
-    let finished = frame.finished(&starts, columns.len());
+    let averaged = frame.averaged(&starts, columns.len());
     // Buckets after today's (a period that ends later) have no value yet.
     let today_key = frame.today_key();
     let future: Vec<bool> = starts.iter().map(|&s| s > today_key).collect();
@@ -339,7 +339,7 @@ pub fn plot_query(ctx: &Ctx<'_>, spec: &PlotSpec) -> Result<PlotData> {
             spec,
             &columns,
             &totals(&values, spec.split.is_some()),
-            &finished,
+            &averaged,
             reference.as_ref().map(|r| r.2.as_slice()),
             first_unit,
             &currency,
@@ -388,7 +388,7 @@ pub fn plot_query(ctx: &Ctx<'_>, spec: &PlotSpec) -> Result<PlotData> {
                 .take(if spec.split.is_some() { usize::MAX } else { 1 })
                 .map(|s| s.values.clone())
                 .collect();
-            let average = options::average(&totals(&shown, spec.split.is_some()), &finished);
+            let average = options::average(&totals(&shown, spec.split.is_some()), &averaged);
             let label = if spec.measures.len() > 1 {
                 format!(
                     "Average {}",
