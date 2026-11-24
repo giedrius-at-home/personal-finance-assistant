@@ -194,6 +194,7 @@ pub fn Organise() -> impl IntoView {
     crate::pages::organise::Organise()
 }
 
+/// The History panel's page: past months at a glance.
 #[component]
 pub fn History() -> impl IntoView {
     view! { <PageView tab="spending" tab_name="Spending" page=HISTORY /> }

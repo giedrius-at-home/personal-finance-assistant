@@ -355,11 +355,16 @@ mod tests {
         assert_eq!(ids.len(), defs.len()); // ids are unique
         assert_eq!(defs.len(), 48); // every panel of the spec's tables
         for d in &defs {
-            assert!(d.id.starts_with(d.page) && PAGES.contains(&d.page), "{}", d.id);
+            assert!(
+                d.id.starts_with(d.page) && PAGES.contains(&d.page),
+                "{}",
+                d.id
+            );
         }
         for page in PAGES {
             assert!(
-                defs.iter().any(|d| d.page == page && d.initial == Initial::Open),
+                defs.iter()
+                    .any(|d| d.page == page && d.initial == Initial::Open),
                 "{page} opens empty"
             );
         }
