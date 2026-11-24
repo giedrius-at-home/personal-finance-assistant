@@ -1539,6 +1539,8 @@ name = "finance-server"
 version = "0.3.0"
 dependencies = [
  "anyhow",
+ "aws-lc-rs",
+ "base64 0.23.1",
  "finance-ai",
  "finance-bank",
  "finance-core",
@@ -1548,6 +1550,7 @@ dependencies = [
  "finance-timesfm",
  "finance-types",
  "jiff",
+ "reqwest",
  "rust_decimal",
  "serde",
  "serde_json",

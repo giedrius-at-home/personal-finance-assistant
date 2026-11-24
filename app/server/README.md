@@ -99,3 +99,20 @@ command is `/usr/local/sbin/finance-deploy`, which installs the build in
 `~/finance` and restarts the service; `app/server/deploy/deploy-here.sh`
 builds and then calls it. Deployed code still runs with the ledger, so the
 separation guards against accidents, not against what gets merged.
+
+## The phone: Cloudflare Access instead of the token
+
+Behind the tunnel (`cloudflared`, public hostname → `http://<tailnet ip>:8443`,
+an Access application allowing only the owner's email) the server trusts
+the Access login and shows no token page. `/etc/finance-access.env`:
+
+```
+FINANCE_ACCESS_TEAM=<name>.cloudflareaccess.com
+FINANCE_ACCESS_AUD=<the application's AUD tag>
+FINANCE_ACCESS_EMAIL=<the owner's email>
+```
+
+Each request's `Cf-Access-Jwt-Assertion` must verify against the team's
+keys, be for that AUD, in date, and name that email; otherwise 403. Without
+the file, tunnel requests are refused. The token stays for the Mac app and
+for browsers on the tailnet. Refusals are logged with their reason.

@@ -8,6 +8,8 @@
 //! - `FINANCE_UI_DIST`: the built UI (`app/ui/dist`).
 //! - `FINANCE_SECRETS_DIR`: the secret store folder; must be set. Holds
 //!   `server-token` and, once moved, the bank and mail secrets.
+//! - `FINANCE_ACCESS_TEAM`, `FINANCE_ACCESS_AUD`, `FINANCE_ACCESS_EMAIL`
+//!   (optional, all three): trust that Cloudflare Access login (`access.rs`).
 //! - `FINANCE_DB` (optional): the ledger; default `<data dir>/Finance/finance.sqlite3`.
 //! - `FINANCE_MODEL_DIR` (optional): the TimesFM weights; default
 //!   `<data dir>/Finance/models/timesfm-3.0`.
@@ -25,6 +27,7 @@ use finance_core::service::Service;
 use finance_core::spending_email::{Message, Sender, Smtp};
 use finance_notify::{Mailer, Ollama};
 use finance_secrets::{Item, Secret};
+use finance_server::access::{self, Access};
 use finance_server::auth;
 use finance_server::commands::{self, arg, ok};
 use finance_server::http::{self, Request, respond, respond_with};
@@ -49,6 +52,8 @@ struct App {
     syncer: Syncer,
     assistant: Assistant,
     token: Secret,
+    /// The owner's Cloudflare Access login, when configured (the phone).
+    access: Option<Access>,
     dist: PathBuf,
     model_dir: PathBuf,
 }
@@ -85,6 +90,7 @@ fn main() -> Result<()> {
         syncer: Syncer::default(),
         assistant: Assistant::default(),
         token,
+        access: Access::from_env().map_err(anyhow::Error::msg)?,
         dist,
         model_dir,
     }));
@@ -120,10 +126,31 @@ fn handle(stream: &mut TcpStream, app: &App) -> Result<()> {
         return respond(stream, "413 Content Too Large", "text/plain", b"too large");
     };
     let route = request.route();
-    if route == "/login" {
-        return login(stream, app, &request);
+    // Through the Cloudflare tunnel the Access login decides, alone: a
+    // request that carries its header gets in on that or not at all, and is
+    // never offered the token page.
+    let via_access = request.header(access::HEADER);
+    let by_access = match (&app.access, via_access) {
+        (Some(access), Some(token)) => access.allows(token),
+        _ => false,
+    };
+    if via_access.is_some() && !by_access {
+        return respond(stream, "403 Forbidden", "text/plain", b"forbidden");
     }
-    if !auth::authorized(&request, app.token.expose()) {
+    if route == "/login" {
+        return if by_access {
+            respond_with(
+                stream,
+                "303 See Other",
+                "text/plain",
+                &[("Location", "/")],
+                b"",
+            )
+        } else {
+            login(stream, app, &request)
+        };
+    }
+    if !by_access && !auth::authorized(&request, app.token.expose()) {
         return if route.starts_with("/invoke/") {
             respond(
                 stream,
