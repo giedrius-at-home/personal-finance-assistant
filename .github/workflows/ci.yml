@@ -11,13 +11,18 @@ permissions:
 jobs:
   check:
     # Everything except the Tauri shell builds on Linux; the shell is built on
-    # macOS by the release workflow.
-    runs-on: ubuntu-latest
+    # macOS by the release workflow. Runs on the owner's own runner (the
+    # Oracle server, user `dev`): no Actions minutes, and the build folder
+    # stays between runs, so there is no cache step.
+    runs-on: [self-hosted, linux, ARM64]
+    env:
+      CARGO_TARGET_DIR: /home/dev/ci-target
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Toolchain from rust-toolchain.toml
-        run: rustup show
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        run: |
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          "$HOME/.cargo/bin/rustup" show
       - name: Format
         run: cargo fmt --all --check
       - name: Lint
@@ -30,9 +35,12 @@ jobs:
         run: cargo test --locked -p finance-ui --bins
 
   supply-chain:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, ARM64]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
-        with:
-          command: check advisories bans licenses sources
+      # cargo-deny is installed on the runner (app/server/README.md); the
+      # Docker action it replaces cannot run there.
+      - name: cargo deny
+        run: |
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          "$HOME/.cargo/bin/cargo" deny check advisories bans licenses sources

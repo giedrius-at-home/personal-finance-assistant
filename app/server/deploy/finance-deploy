@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Installed root-owned at /usr/local/sbin/finance-deploy by setup.sh; the
+# only thing the `dev` user may run as root (sudoers). Takes no arguments,
+# so it cannot be pointed anywhere else: it installs the build in dev's
+# checkout and restarts the service.
+set -euo pipefail
+
+src=/home/dev/finance
+[ -x "$src/target/release/finance-server" ] && [ -f "$src/app/ui/dist/index.html" ] || {
+  echo "no build in $src: run app/server/deploy/deploy-here.sh" >&2; exit 1; }
+
+install -o root -g root -m 0755 "$src/target/release/finance-server" /opt/finance/finance-server
+rm -rf /opt/finance/ui.new
+cp -r "$src/app/ui/dist" /opt/finance/ui.new
+chown -R root:root /opt/finance/ui.new
+rm -rf /opt/finance/ui && mv /opt/finance/ui.new /opt/finance/ui
+systemctl restart finance-server
+sleep 2
+systemctl is-active finance-server

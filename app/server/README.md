@@ -88,3 +88,14 @@ fetches a consistent copy into `~/Library/Application Support/Finance/server-bac
 (integrity-checked, last 14 kept). To go back to the Mac: quit the app, put a
 copy at `Finance/finance.sqlite3`, move `secrets/on-server/*` back into
 `secrets/`, delete `server-url`, and stop the server so only one side syncs.
+
+## Development and CI on the server
+
+The `dev` user (no sudo) holds the checkout (`~/finance`), the Rust
+toolchain, Trunk and `cargo-deny`, and runs the repository's GitHub Actions
+runner (`~/actions-runner`, labels `self-hosted, Linux, ARM64`), so CI uses
+no Actions minutes. `dev` cannot read `/var/lib/finance`. Its one root
+command is `/usr/local/sbin/finance-deploy`, which installs the build in
+`~/finance` and restarts the service; `app/server/deploy/deploy-here.sh`
+builds and then calls it. Deployed code still runs with the ledger, so the
+separation guards against accidents, not against what gets merged.
