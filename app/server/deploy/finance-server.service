@@ -7,6 +7,8 @@ After=network-online.target tailscaled.service
 User=finance
 Group=finance
 EnvironmentFile=/etc/finance-server.env
+# Optional: the Cloudflare Access login the server trusts (README).
+EnvironmentFile=-/etc/finance-access.env
 Environment=XDG_DATA_HOME=/var/lib/finance
 Environment=FINANCE_SECRETS_DIR=/var/lib/finance/secrets
 Environment=FINANCE_UI_DIST=/opt/finance/ui

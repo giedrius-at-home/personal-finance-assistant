@@ -17,7 +17,10 @@ finance-storage.workspace = true
 finance-timesfm.workspace = true
 finance-types.workspace = true
 anyhow.workspace = true
+aws-lc-rs = "1.18.2"
+base64 = "0.23.1"
 jiff = "0.2.38"
+reqwest = { version = "0.13.5", default-features = false, features = ["blocking", "json", "rustls"] }
 rust_decimal.workspace = true
 serde.workspace = true
 serde_json.workspace = true
