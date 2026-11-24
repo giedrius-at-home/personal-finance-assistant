@@ -62,3 +62,21 @@ cargo run -p finance-server
 `FINANCE_SECRETS_DIR` needs a `server-token` (`openssl rand -hex 32`). Never
 point a local run at the real secrets folder: it would sync the real banks
 against the copy.
+
+## The Mac app as a window onto the server
+
+Put the server's address in `~/Library/Application Support/Finance/server-url`
+(one line, e.g. `http://100.83.10.51:8443`) and the server token in
+`…/Finance/secrets/server-token` (0600), then restart the app. Every command
+except updates now goes to the server, and the app stops its own bank sync,
+email, suggestions and forecasts. Plain `http://` is accepted only for a
+Tailscale address; anything else must be `https://`. Delete `server-url`
+and restart to return to the local ledger (the two do not merge).
+
+Not yet in server mode: screens do not reload by themselves after a sync
+on the server (use the refresh button), and alerts are not shown.
+
+## The phone
+
+Open the server's `https://` address in Chrome, sign in with the token once,
+then menu → "Install app" (the UI ships a web app manifest and icons).

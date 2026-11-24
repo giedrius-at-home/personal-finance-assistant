@@ -4,6 +4,12 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Finance</title>
+    <!-- Lets a phone's browser install the server's UI as an app. -->
+    <meta name="theme-color" content="#f4f3ef" />
+    <link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials" />
+    <link rel="apple-touch-icon" href="icons/icon-192.png" />
+    <link data-trunk rel="copy-file" href="manifest.webmanifest" />
+    <link data-trunk rel="copy-dir" href="icons" />
     <link data-trunk rel="tailwind-css" href="styles/main.css" />
     <link data-trunk rel="copy-dir" href="fonts" />
     <link data-trunk rel="rust" data-wasm-opt="z" data-wasm-opt-params="--enable-bulk-memory --enable-nontrapping-float-to-int --enable-sign-ext --enable-reference-types --enable-multivalue" />
