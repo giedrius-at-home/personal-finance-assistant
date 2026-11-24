@@ -10,6 +10,8 @@ use serde::Serialize;
 use crate::api::{self, NoArgs};
 use crate::ds::{Button, PanelFrame, PanelList, Size, Variant};
 
+pub mod edit;
+
 /// State of a panel on its home page on first run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Initial {
@@ -24,7 +26,6 @@ pub struct PanelDef {
     /// Home page id.
     pub page: &'static str,
     /// May be added to other tabs.
-    #[allow(dead_code)] // read once panels can move between tabs (later task)
     pub movable: bool,
     pub initial: Initial,
     pub half: bool,
@@ -56,9 +57,11 @@ fn item_from_def(d: &PanelDef, folded: bool) -> PanelItem {
     }
 }
 
-/// The panels a page shows, in order. `defs` are the registry entries whose
-/// home is this page, in registry order.
-pub fn resolve(defs: &[&PanelDef], saved: Option<&PageLayout>) -> Vec<PanelItem> {
+/// The panels page `page` shows, in order. `all` is the registry: its entries
+/// whose home is `page` are the page's own; a saved guest (a panel from another
+/// page) is kept while the registry knows it and it is movable.
+pub fn resolve(all: &[&PanelDef], page: &str, saved: Option<&PageLayout>) -> Vec<PanelItem> {
+    let defs: Vec<&PanelDef> = all.iter().copied().filter(|d| d.page == page).collect();
     let Some(saved) = saved else {
         return defs
             .iter()
@@ -69,7 +72,10 @@ pub fn resolve(defs: &[&PanelDef], saved: Option<&PageLayout>) -> Vec<PanelItem>
     let mut items: Vec<PanelItem> = saved
         .items
         .iter()
-        .filter(|i| defs.iter().any(|d| d.id == i.panel))
+        .filter(|i| {
+            all.iter()
+                .any(|d| d.id == i.panel && (d.page == page || d.movable))
+        })
         .cloned()
         .collect();
     for (n, d) in defs.iter().enumerate() {
@@ -145,8 +151,9 @@ pub fn registry() -> impl Iterator<Item = &'static PanelDef> {
         .chain(crate::pages::manage::panels())
 }
 
-fn home_defs(page: &str) -> Vec<&'static PanelDef> {
-    registry().filter(|d| d.page == page).collect()
+/// The registry, as the slice `resolve` and the edits take.
+fn defs() -> Vec<&'static PanelDef> {
+    registry().collect()
 }
 
 /// Write the page's full resolved list, changed by `f`, into `layout`.
@@ -156,7 +163,7 @@ fn write_page(
     (tab, tab_name, page): (&str, &str, &str),
     f: impl FnMut(&mut PanelItem),
 ) {
-    let mut items = resolve(defs, layout.page(page));
+    let mut items = resolve(defs, page, layout.page(page));
     items.iter_mut().for_each(f);
     layout.page_mut(tab, tab_name, page).items = items;
 }
@@ -245,14 +252,14 @@ impl LayoutState {
         page: &'static str,
         panel: &str,
     ) {
-        self.change(|l| toggled(l, &home_defs(page), (tab, tab_name, page), panel));
+        self.change(|l| toggled(l, &defs(), (tab, tab_name, page), panel));
     }
 
     /// Unfolds `panel`, for a link that points at it; nothing when it is open.
     pub fn open(&self, tab: &'static str, tab_name: &'static str, page: &'static str, panel: &str) {
-        let defs = home_defs(page);
+        let defs = defs();
         let folded = self.layout.with_untracked(|l| {
-            resolve(&defs, l.page(page))
+            resolve(&defs, page, l.page(page))
                 .iter()
                 .any(|i| i.panel == panel && i.folded)
         });
@@ -268,7 +275,7 @@ impl LayoutState {
         page: &'static str,
         folded: bool,
     ) {
-        self.change(|l| all_set(l, &home_defs(page), (tab, tab_name, page), folded));
+        self.change(|l| all_set(l, &defs(), (tab, tab_name, page), folded));
     }
 
     fn change(&self, f: impl FnOnce(&mut UiLayout)) {
@@ -310,11 +317,7 @@ impl LayoutState {
 pub fn PageView(tab: &'static str, tab_name: &'static str, page: &'static str) -> impl IntoView {
     let state = expect_context::<LayoutState>();
     let report = crate::state().report;
-    let items = Memo::new(move |_| {
-        state
-            .layout
-            .with(|l| resolve(&home_defs(page), l.page(page)))
-    });
+    let items = Memo::new(move |_| state.layout.with(|l| resolve(&defs(), page, l.page(page))));
     // Read inside reactive closures, so `shown` may track signals.
     let visible = move || items.with(|v| drawn(v, is_shown));
     let all_folded = move || visible().iter().all(|i| i.folded);
@@ -438,7 +441,7 @@ mod tests {
     fn first_run_uses_the_defaults() {
         let d = abc();
         let refs: Vec<&PanelDef> = d.iter().collect();
-        let got = resolve(&refs, None);
+        let got = resolve(&refs, "p", None);
         assert_eq!(
             got,
             vec![
@@ -457,7 +460,7 @@ mod tests {
         let d = abc();
         let refs: Vec<&PanelDef> = d.iter().collect();
         let saved = page(vec![it("b", false), it("a", true)], &[]);
-        assert_eq!(resolve(&refs, Some(&saved)), saved.items);
+        assert_eq!(resolve(&refs, "p", Some(&saved)), saved.items);
     }
 
     #[test]
@@ -466,7 +469,7 @@ mod tests {
         let refs: Vec<&PanelDef> = d.iter().collect();
         let saved = page(vec![it("a", false), it("gone.panel", false)], &[]);
         assert_eq!(
-            ids(&resolve(&refs, Some(&saved))),
+            ids(&resolve(&refs, "p", Some(&saved))),
             [("a", false), ("b", true)]
         );
     }
@@ -476,7 +479,7 @@ mod tests {
         let d = abc();
         let refs: Vec<&PanelDef> = d.iter().collect();
         let saved = page(vec![it("a", false)], &["b"]);
-        assert_eq!(resolve(&refs, Some(&saved)), saved.items);
+        assert_eq!(resolve(&refs, "p", Some(&saved)), saved.items);
     }
 
     #[test]
@@ -487,7 +490,7 @@ mod tests {
         ];
         let refs: Vec<&PanelDef> = d.iter().collect();
         let saved = page(vec![it("a", false)], &[]);
-        assert_eq!(resolve(&refs, Some(&saved)), saved.items);
+        assert_eq!(resolve(&refs, "p", Some(&saved)), saved.items);
     }
 
     #[test]
@@ -499,7 +502,7 @@ mod tests {
         ];
         let refs: Vec<&PanelDef> = d.iter().collect();
         let saved = page(vec![it("b", false), it("a", false)], &[]);
-        let got = resolve(&refs, Some(&saved));
+        let got = resolve(&refs, "p", Some(&saved));
         assert_eq!(ids(&got), [("b", false), ("a", false), ("n", true)]);
         assert!(got[2].half);
     }
@@ -513,7 +516,7 @@ mod tests {
         let refs: Vec<&PanelDef> = d.iter().collect();
         let saved = page(vec![it("a", false)], &[]);
         assert_eq!(
-            ids(&resolve(&refs, Some(&saved))),
+            ids(&resolve(&refs, "p", Some(&saved))),
             [("n", true), ("a", false)]
         );
     }
@@ -526,7 +529,7 @@ mod tests {
         ];
         let refs: Vec<&PanelDef> = d.iter().collect();
         let saved = page(vec![it("c", false), it("a", false)], &[]);
-        assert_eq!(resolve(&refs, Some(&saved)), saved.items);
+        assert_eq!(resolve(&refs, "p", Some(&saved)), saved.items);
     }
 
     const AT: (&str, &str, &str) = ("t", "T", "p");
@@ -539,7 +542,7 @@ mod tests {
         toggled(&mut l, &refs, AT, "a");
         assert_eq!(ids(&l.page("p").unwrap().items), [("a", true), ("b", true)]);
         toggled(&mut l, &refs, AT, "a");
-        assert_eq!(l.page("p").unwrap().items, resolve(&refs, None));
+        assert_eq!(l.page("p").unwrap().items, resolve(&refs, "p", None));
     }
 
     #[test]
@@ -548,7 +551,7 @@ mod tests {
         let refs: Vec<&PanelDef> = d.iter().collect();
         let mut l = UiLayout::default();
         opened(&mut l, &refs, AT, "a");
-        assert_eq!(l.page("p").unwrap().items, resolve(&refs, None));
+        assert_eq!(l.page("p").unwrap().items, resolve(&refs, "p", None));
         opened(&mut l, &refs, AT, "b");
         assert_eq!(
             ids(&l.page("p").unwrap().items),
