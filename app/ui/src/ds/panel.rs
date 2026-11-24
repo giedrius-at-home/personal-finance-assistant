@@ -9,9 +9,11 @@ use super::{CardTitle, Heading, Icon, Lucide, Size, Variant, button_class, cn};
 
 /// Two columns from `md`, one below; the gap is `.page-stack`'s 1.5rem.
 pub const PANEL_LIST: &str = "grid min-w-0 gap-6 md:grid-cols-2";
-/// A full-width panel spans both columns; a half one takes one.
-const PANEL_FULL: &str = "relative min-w-0 md:col-span-2";
-const PANEL_HALF: &str = "relative min-w-0";
+/// A full-width panel spans both columns; a half one takes one. An open panel
+/// whose body rendered nothing takes no room (no stray button, no extra gap).
+const PANEL_FULL: &str =
+    "relative min-w-0 md:col-span-2 has-[>[aria-expanded=true]+div:empty]:hidden";
+const PANEL_HALF: &str = "relative min-w-0 has-[>[aria-expanded=true]+div:empty]:hidden";
 /// Open: a small button at the right end of the section's top rule, in the gap above it.
 const FOLD_BUTTON: &str = "absolute bottom-full right-0 size-6";
 /// Folded: the whole row on the rule is the button.

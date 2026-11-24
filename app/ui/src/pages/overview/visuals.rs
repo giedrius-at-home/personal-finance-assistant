@@ -9,8 +9,8 @@ use rust_decimal::Decimal;
 use crate::ds::charts::{Donut, Line, LineChart, Series, Slice, fmt, series_color};
 use crate::ds::patterns::{AMOUNT, CHART_EMPTY, FIELD, FIGURE, NAME_ROW, TOTALS, TRUNCATE};
 use crate::ds::{
-    CardHeader, CardTitle, Eyebrow, Facts, Heading, METRIC_STRIP, Metric, Money, Select, Stat,
-    Tone, cn, money,
+    Card, CardHeader, CardTitle, Eyebrow, Facts, Heading, METRIC_STRIP, Metric, Money, Select,
+    Stat, Tone, cn, money,
 };
 use crate::format;
 use crate::pages::f;
@@ -542,7 +542,7 @@ pub fn BudgetVisuals(
     };
 
     view! {
-        <div class="grid gap-x-10 gap-y-8 border-y border-line py-6 lg:grid-cols-[minmax(280px,.55fr)_minmax(0,1.45fr)]">
+        <Card class="grid gap-x-10 gap-y-8 lg:grid-cols-[minmax(280px,.55fr)_minmax(0,1.45fr)]">
             <div class=cn([PLAIN_CARD, "min-w-0 lg:border-r lg:border-line lg:pr-10"])>
                 <CardHeader class="mb-4 block">
                     <Eyebrow level=Heading::P>{if current { "THIS MONTH" } else { "MONEY SPLIT" }}</Eyebrow>
@@ -551,7 +551,7 @@ pub fn BudgetVisuals(
                 {split}
             </div>
             <div class=cn([PLAIN_CARD, "min-w-0"])>{trajectory}</div>
-        </div>
+        </Card>
     }
 }
 

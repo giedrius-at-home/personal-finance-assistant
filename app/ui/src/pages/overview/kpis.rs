@@ -146,7 +146,7 @@ fn strip(report: &Dashboard) -> Option<AnyView> {
         .iter()
         .find(|d| d.currency.code == unit.code)
         .map(|d| {
-            let value = m(d.next_week_habit + d.next_week_planned);
+            let value = m(super::forecast::next_week(d));
             let facts = vec![
                 ("Habits".to_owned(), m(d.next_week_habit)),
                 ("Planned".to_owned(), m(d.next_week_planned)),

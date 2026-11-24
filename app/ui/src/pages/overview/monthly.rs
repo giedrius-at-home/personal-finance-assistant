@@ -1,9 +1,9 @@
 //! This and next month's plan per currency (`owner-monthly-overview.tsx`).
 
-use finance_types::report::Currency;
 use finance_types::report::allocation::{CurrencyAllocation, spare_split, wish_shares};
 use finance_types::report::closure::MoneyPlan;
 use finance_types::report::trends::SpendingForecast;
+use finance_types::report::{Currency, Dashboard};
 use leptos::ev;
 use leptos::prelude::*;
 use rust_decimal::Decimal;
@@ -19,9 +19,11 @@ use crate::{SpendingSection, Tab, state};
 use super::{month_name, remaining_days};
 use crate::ds::patterns::{
     ADDENDUM, CARD_HEADER, EMPTY_COMPACT, FIGURE, HEADLINE_FIGURE, ITEM_TITLE, LEGEND_ITEM,
-    NUM_HINT, SIDE_FACTS, SMALL, SPLIT_ROW, SWATCH, TITLE,
+    NUM_HINT, REPEAT_STACK, SIDE_FACTS, SMALL, SPLIT_ROW, SWATCH, TITLE,
 };
 
+/// The `overview.spendable` panel: this month's spendable money and next
+/// month's salary plan, per currency.
 #[component]
 pub fn OwnerMonthlyOverview() -> impl IntoView {
     with_report(|report| {
@@ -41,9 +43,53 @@ pub fn OwnerMonthlyOverview() -> impl IntoView {
             }
             .into_any();
         };
-        let show_forecast = report.monthly_budgets.is_empty();
-        let through = allocation.through_date.clone();
-        allocation
+        let blocks = allocation
+            .currencies
+            .iter()
+            .map(|a| {
+                let plan = report
+                    .money_plan
+                    .clone()
+                    .filter(|p| p.currency.code == a.currency.code);
+                view! {
+                    <CurrencyOverview
+                        allocation=a.clone()
+                        plan=plan
+                    />
+                }
+            })
+            .collect_view();
+        view! { <div class=REPEAT_STACK>{blocks}</div> }.into_any()
+    })
+}
+
+/// "Spendable €X" for each currency, as the panel's headlines show it.
+pub fn spendable_summary(report: &Dashboard) -> Option<String> {
+    let parts: Vec<String> = report
+        .monthly_allocation
+        .as_ref()?
+        .currencies
+        .iter()
+        .map(spendable)
+        .collect();
+    (!parts.is_empty()).then(|| format!("Spendable {}", parts.join(" · ")))
+}
+
+/// The spendable headline: never negative; the breakdown still shows the gap.
+fn spendable(a: &CurrencyAllocation) -> String {
+    money(a.current_wiggle_room.max(Decimal::ZERO), &a.currency)
+}
+
+/// The `overview.heading` panel: the variable spending forecast per
+/// currency, only while there is no monthly budget to show it.
+#[component]
+pub fn MonthHeading() -> impl IntoView {
+    with_report(|report| {
+        let allocation = report
+            .monthly_allocation
+            .as_ref()
+            .filter(|a| !a.currencies.is_empty() && report.monthly_budgets.is_empty())?;
+        let cards = allocation
             .currencies
             .iter()
             .map(|a| {
@@ -53,22 +99,16 @@ pub fn OwnerMonthlyOverview() -> impl IntoView {
                     .filter(|f| f.currency.code == a.currency.code)
                     .cloned()
                     .collect();
-                let plan = report
-                    .money_plan
-                    .clone()
-                    .filter(|p| p.currency.code == a.currency.code);
                 view! {
-                    <CurrencyOverview
+                    <CurrencyHeading
                         allocation=a.clone()
                         forecasts=forecasts
-                        through_date=through.clone()
-                        show_forecast=show_forecast
-                        plan=plan
+                        through_date=allocation.through_date.clone()
                     />
                 }
             })
-            .collect_view()
-            .into_any()
+            .collect_view();
+        Some(view! { <div class=REPEAT_STACK>{cards}</div> })
     })
 }
 
@@ -78,8 +118,7 @@ fn BankBalanceBreakdown(allocation: CurrencyAllocation) -> impl IntoView {
     let open = RwSignal::new(false);
     let unit = allocation.currency.clone();
     let m = move |v: Decimal| money(v, &unit);
-    // Never a negative headline; the breakdown still shows the gap.
-    let headline = m(allocation.current_wiggle_room.max(Decimal::ZERO));
+    let headline = spendable(&allocation);
     let lines: Vec<(&str, Decimal, bool)> = vec![
         ("Included bank balances", allocation.bank_balance, false),
         ("Protected savings", allocation.protected_savings, true),
@@ -414,9 +453,6 @@ fn forecast_row(
 #[component]
 fn CurrencyOverview(
     allocation: CurrencyAllocation,
-    forecasts: Vec<SpendingForecast>,
-    through_date: String,
-    show_forecast: bool,
     /// Where the money should go now, in this currency.
     plan: Option<MoneyPlan>,
 ) -> impl IntoView {
@@ -428,7 +464,6 @@ fn CurrencyOverview(
     let next_total = a.next_planned_funds.max(zero);
     let next_funded = next_total > zero;
     let next_negative = next_funded && a.next_shortfall > zero;
-    let remaining = remaining_days(&through_date);
 
     // The month's money is the spending accounts plus the savings account;
     // what the wishes already saved is spoken for, like a bill.
@@ -544,27 +579,6 @@ fn CurrencyOverview(
     )
     .map(|rows| view! { <div class=ADDENDUM>{rows}</div> });
 
-    let limit_of = |group: &str| {
-        a.groups
-            .iter()
-            .find(|g| g.group == group)
-            .map_or(zero, |g| g.limit)
-    };
-    let mut ordered = forecasts;
-    ordered.sort_by(|l, r| {
-        let (ll, rl) = (limit_of(&l.group), limit_of(&r.group));
-        if (ll > zero) != (rl > zero) {
-            return if rl > zero {
-                std::cmp::Ordering::Greater
-            } else {
-                std::cmp::Ordering::Less
-            };
-        }
-        let lr = l.expected / ll.max(Decimal::ONE);
-        let rr = r.expected / rl.max(Decimal::ONE);
-        rr.cmp(&lr)
-    });
-
     let expected_note = (a.current_expected_income > zero).then(|| {
         view! {
             <Facts
@@ -592,70 +606,6 @@ fn CurrencyOverview(
     } else {
         a.next_wiggle_room
     };
-
-    let forecast_card = show_forecast.then(|| {
-        let table = if ordered.is_empty() {
-            view! {
-                <EmptyState class=EMPTY_COMPACT icon=Icon::TrendingDown title="Add group limits to see month-end forecasts." />
-            }
-            .into_any()
-        } else {
-            let rows = ordered
-                .into_iter()
-                .map(|fc| forecast_row(fc, &allocation, remaining))
-                .collect_view();
-            view! {
-                <div aria-label="Variable spending forecast" tabindex="0" class=cn([TABLE_CONTAINER, "mt-3 max-h-96 overflow-y-auto"])>
-                    <table class=cn([TABLE, "table-fixed"])>
-                        <thead>
-                            <tr>
-                                <th class=cn([TH, "text-left w-[45%] sm:w-[34%] md:w-[18%]"])>"Group"</th>
-                                <th class=cn([TH, "text-left hidden w-[42%] md:table-cell"])>"Spent · forecast · limit"</th>
-                                <th class=cn([TH, "text-left w-[55%] sm:w-[33%] md:w-[20%]"])>"Month end"</th>
-                                <th class=cn([TH, "text-left hidden w-[33%] sm:table-cell md:w-[20%]"])>"Action"</th>
-                            </tr>
-                        </thead>
-                        <tbody>{rows}</tbody>
-                    </table>
-                </div>
-            }
-            .into_any()
-        };
-        view! {
-            <Card class="min-w-0">
-                <header class="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
-                    <div class="min-w-0">
-                        <Eyebrow level=Heading::P>"VARIABLE SPENDING FORECAST"</Eyebrow>
-                        <CardTitle level=Heading::H2 class="mt-1">"Where this month is heading"</CardTitle>
-                    </div>
-                    <button
-                        type="button"
-                        class=cn([button_class(Variant::Ghost, Size::Sm).as_str(), "shrink-0 text-accent"])
-                        on:click=move |_| app.go_spending(SpendingSection::PlanPatterns)
-                    >
-                        "Adjust limits "
-                        <Lucide icon=Icon::ArrowRight size=14 />
-                    </button>
-                </header>
-                {table}
-                <footer class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-fg-muted">
-                    <span class=LEGEND_ITEM tabindex="0" aria-label="Spent">
-                        <i aria-hidden="true" class="h-1.5 w-2.5 rounded-pill bg-chart-1"></i>
-                        <b class="font-normal">"spent"</b>
-                    </span>
-                    <span class=LEGEND_ITEM tabindex="0" aria-label="Forecast">
-                        <i aria-hidden="true" class="h-1.5 w-2.5 rounded-pill bg-chart-1/30"></i>
-                        <b class="font-normal">"forecast"</b>
-                    </span>
-                    <span class=LEGEND_ITEM tabindex="0" aria-label="Limit">
-                        <i aria-hidden="true" class="h-2.5 w-0.5 rounded-pill bg-chart-limit"></i>
-                        <b class="font-normal">"limit"</b>
-                    </span>
-                    <small class="ml-auto text-xs">{format!("{remaining} days left")}</small>
-                </footer>
-            </Card>
-        }
-    });
 
     let section_label = format!("{} monthly plan", unit.code);
     let this_month = format!("SPENDABLE · {}", month_name(&a.current_month));
@@ -740,8 +690,102 @@ fn CurrencyOverview(
                     {next_result}
                 </Card>
             </div>
-            {forecast_card}
         </section>
+    }
+}
+
+/// Where each spending group is heading by month end, in one currency.
+#[component]
+fn CurrencyHeading(
+    allocation: CurrencyAllocation,
+    forecasts: Vec<SpendingForecast>,
+    through_date: String,
+) -> impl IntoView {
+    let app = state();
+    let a = &allocation;
+    let zero = Decimal::ZERO;
+    let remaining = remaining_days(&through_date);
+    let limit_of = |group: &str| {
+        a.groups
+            .iter()
+            .find(|g| g.group == group)
+            .map_or(zero, |g| g.limit)
+    };
+    let mut ordered = forecasts;
+    ordered.sort_by(|l, r| {
+        let (ll, rl) = (limit_of(&l.group), limit_of(&r.group));
+        if (ll > zero) != (rl > zero) {
+            return if rl > zero {
+                std::cmp::Ordering::Greater
+            } else {
+                std::cmp::Ordering::Less
+            };
+        }
+        let lr = l.expected / ll.max(Decimal::ONE);
+        let rr = r.expected / rl.max(Decimal::ONE);
+        rr.cmp(&lr)
+    });
+
+    let table = if ordered.is_empty() {
+        view! {
+                <EmptyState class=EMPTY_COMPACT icon=Icon::TrendingDown title="Add group limits to see month-end forecasts." />
+            }
+            .into_any()
+    } else {
+        let rows = ordered
+            .into_iter()
+            .map(|fc| forecast_row(fc, &allocation, remaining))
+            .collect_view();
+        view! {
+                <div aria-label="Variable spending forecast" tabindex="0" class=cn([TABLE_CONTAINER, "mt-3 max-h-96 overflow-y-auto"])>
+                    <table class=cn([TABLE, "table-fixed"])>
+                        <thead>
+                            <tr>
+                                <th class=cn([TH, "text-left w-[45%] sm:w-[34%] md:w-[18%]"])>"Group"</th>
+                                <th class=cn([TH, "text-left hidden w-[42%] md:table-cell"])>"Spent · forecast · limit"</th>
+                                <th class=cn([TH, "text-left w-[55%] sm:w-[33%] md:w-[20%]"])>"Month end"</th>
+                                <th class=cn([TH, "text-left hidden w-[33%] sm:table-cell md:w-[20%]"])>"Action"</th>
+                            </tr>
+                        </thead>
+                        <tbody>{rows}</tbody>
+                    </table>
+                </div>
+            }
+            .into_any()
+    };
+    view! {
+        <Card class="min-w-0">
+            <header class="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
+                <div class="min-w-0">
+                    <Eyebrow level=Heading::P>"VARIABLE SPENDING FORECAST"</Eyebrow>
+                    <CardTitle level=Heading::H2 class="mt-1">"Where this month is heading"</CardTitle>
+                </div>
+                <button
+                    type="button"
+                    class=cn([button_class(Variant::Ghost, Size::Sm).as_str(), "shrink-0 text-accent"])
+                    on:click=move |_| app.go_spending(SpendingSection::PlanPatterns)
+                >
+                    "Adjust limits "
+                    <Lucide icon=Icon::ArrowRight size=14 />
+                </button>
+            </header>
+            {table}
+            <footer class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-fg-muted">
+                <span class=LEGEND_ITEM tabindex="0" aria-label="Spent">
+                    <i aria-hidden="true" class="h-1.5 w-2.5 rounded-pill bg-chart-1"></i>
+                    <b class="font-normal">"spent"</b>
+                </span>
+                <span class=LEGEND_ITEM tabindex="0" aria-label="Forecast">
+                    <i aria-hidden="true" class="h-1.5 w-2.5 rounded-pill bg-chart-1/30"></i>
+                    <b class="font-normal">"forecast"</b>
+                </span>
+                <span class=LEGEND_ITEM tabindex="0" aria-label="Limit">
+                    <i aria-hidden="true" class="h-2.5 w-0.5 rounded-pill bg-chart-limit"></i>
+                    <b class="font-normal">"limit"</b>
+                </span>
+                <small class="ml-auto text-xs">{format!("{remaining} days left")}</small>
+            </footer>
+        </Card>
     }
 }
 

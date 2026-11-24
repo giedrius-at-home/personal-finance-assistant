@@ -491,6 +491,16 @@ pub fn move_nudge(plan: &MoneyPlan) -> Option<Nudge> {
     })
 }
 
+/// "3 things" while there is something to do.
+pub fn summary(report: &Dashboard) -> Option<String> {
+    report.monthly_allocation.as_ref()?;
+    match nudges(report).len() {
+        0 => None,
+        1 => Some("1 thing".to_owned()),
+        n => Some(format!("{n} things")),
+    }
+}
+
 #[component]
 pub fn OverviewNudges() -> impl IntoView {
     with_report(|report| {

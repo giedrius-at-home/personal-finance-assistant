@@ -13,7 +13,6 @@ use crate::ds::{Button, PanelFrame, PanelList, Size, Variant};
 /// State of a panel on its home page on first run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Initial {
-    #[allow(dead_code)] // the first page's PANELS use it in Task 6
     Open,
     Folded,
     Absent,
@@ -101,8 +100,7 @@ impl SaveQueue {
 
 /// Every page's panels, in registry order.
 pub fn registry() -> impl Iterator<Item = &'static PanelDef> {
-    const NONE: &[PanelDef] = &[];
-    NONE.iter()
+    crate::pages::overview::PANELS.iter()
 }
 
 fn home_defs(page: &str) -> Vec<&'static PanelDef> {
@@ -243,68 +241,56 @@ impl LayoutState {
     }
 }
 
-// No page renders `PageView` until Task 6, which moves it out of this module.
-// The allow sits on a module because the props struct `#[component]` generates
-// takes no attributes from the function.
-#[allow(dead_code)]
-pub mod page_view {
-    use super::*;
-
-    /// A page's panels, as its saved layout says, with "Fold all / Open all".
-    #[component]
-    pub fn PageView(
-        tab: &'static str,
-        tab_name: &'static str,
-        page: &'static str,
-    ) -> impl IntoView {
-        let state = expect_context::<LayoutState>();
-        let report = crate::state().report;
-        let items = Memo::new(move |_| {
-            state
-                .layout
-                .with(|l| resolve(&home_defs(page), l.page(page)))
+/// A page's panels, as its saved layout says, with "Fold all / Open all".
+#[component]
+pub fn PageView(tab: &'static str, tab_name: &'static str, page: &'static str) -> impl IntoView {
+    let state = expect_context::<LayoutState>();
+    let report = crate::state().report;
+    let items = Memo::new(move |_| {
+        state
+            .layout
+            .with(|l| resolve(&home_defs(page), l.page(page)))
+    });
+    let all_folded = move || items.with(|v| v.iter().all(|i| i.folded));
+    let panel = move |item: PanelItem| {
+        let def = registry().find(|d| d.id == item.panel)?;
+        let id = def.id;
+        let folded =
+            Signal::derive(move || items.with(|v| v.iter().any(|i| i.panel == id && i.folded)));
+        let summary = Signal::derive(move || {
+            let f = def.summary?;
+            report.data.with(|d| d.as_ref()?.as_ref().ok().and_then(f))
         });
-        let all_folded = move || items.with(|v| v.iter().all(|i| i.folded));
-        let panel = move |item: PanelItem| {
-            let def = registry().find(|d| d.id == item.panel)?;
-            let id = def.id;
-            let folded =
-                Signal::derive(move || items.with(|v| v.iter().any(|i| i.panel == id && i.folded)));
-            let summary = Signal::derive(move || {
-                let f = def.summary?;
-                report.data.with(|d| d.as_ref()?.as_ref().ok().and_then(f))
-            });
-            let render = def.render;
-            Some(view! {
-                <PanelFrame
-                    title=def.title
-                    summary=summary
-                    folded=folded
-                    on_toggle=Callback::new(move |()| state.toggle(tab, tab_name, page, id))
-                    half=item.half
-                >
-                    {render()}
-                </PanelFrame>
-            })
-        };
-        // Panels wait for the saved layout, so one saved folded never mounts.
-        let ready = move || state.load.get() != Load::Loading;
-        move || {
-            ready().then(|| view! {
-            <div class="flex justify-end">
-                <Button
-                    variant=Variant::Ghost
-                    size=Size::Sm
-                    on_click=Callback::new(move |_| state.set_all(tab, tab_name, page, !all_folded()))
-                >
-                    {move || if all_folded() { "Open all" } else { "Fold all" }}
-                </Button>
-            </div>
-            <PanelList>
-                <For each=move || items.get() key=|i| (i.panel.clone(), i.half) children=panel />
-            </PanelList>
+        let render = def.render;
+        Some(view! {
+            <PanelFrame
+                title=def.title
+                summary=summary
+                folded=folded
+                on_toggle=Callback::new(move |()| state.toggle(tab, tab_name, page, id))
+                half=item.half
+            >
+                {render()}
+            </PanelFrame>
         })
-        }
+    };
+    // Panels wait for the saved layout, so one saved folded never mounts.
+    let ready = move || state.load.get() != Load::Loading;
+    move || {
+        ready().then(|| view! {
+        <div class="flex justify-end">
+            <Button
+                variant=Variant::Ghost
+                size=Size::Sm
+                on_click=Callback::new(move |_| state.set_all(tab, tab_name, page, !all_folded()))
+            >
+                {move || if all_folded() { "Open all" } else { "Fold all" }}
+            </Button>
+        </div>
+        <PanelList>
+            <For each=move || items.get() key=|i| (i.panel.clone(), i.half) children=panel />
+        </PanelList>
+    })
     }
 }
 

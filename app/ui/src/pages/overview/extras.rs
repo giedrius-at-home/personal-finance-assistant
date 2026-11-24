@@ -11,7 +11,8 @@ use rust_decimal::Decimal;
 use crate::ds::charts::{BarTone, ProgressBar};
 use crate::ds::patterns::ROW_LIST;
 use crate::ds::{
-    Eyebrow, Facts, Heading, Icon, Lucide, Metric, Money, Size, Variant, button_class, cn, money,
+    CardTone, Eyebrow, Facts, Heading, Icon, Lucide, Metric, Money, Size, Variant, button_class,
+    card_class, cn, money,
 };
 use crate::pages::f;
 use crate::{Tab, state};
@@ -103,7 +104,7 @@ pub fn BudgetExtras(
 
     let app = state();
     view! {
-        <section class="border-b border-border py-6" aria-label="Extra income and payments">
+        <section class=card_class(CardTone::Default) aria-label="Extra income and payments">
             <header class="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
                 <div>
                     <Eyebrow level=Heading::P>"THIS MONTH ONLY"</Eyebrow>
