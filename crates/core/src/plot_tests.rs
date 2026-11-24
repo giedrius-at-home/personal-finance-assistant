@@ -1165,3 +1165,64 @@ fn month_of_year_insight_is_peak_against_lowest() {
     assert_eq!(insight.value, dec("30"));
     assert_eq!(insight.against, Some(dec("5")));
 }
+
+/// The ledger, November closed early on the 21st, and a purchase on the
+/// 22nd that the budget counts in December, the running budget month.
+fn closed_november() -> Snapshot {
+    let mut rows = ledger();
+    rows.push(named(
+        out("late", "70", Some("Jumbo"), "2026-11-22"),
+        "Jumbo",
+    ));
+    let mut snap = snap(rows);
+    snap.month_periods = vec![MonthPeriod {
+        cutoff_at: Some("2026-11-21T10:00:00Z".into()),
+        ..crate::closure::tests::period("2026-11-01", ClosureStatus::Closed)
+    }];
+    snap
+}
+
+#[test]
+fn budget_months_over_all_time_or_between_run_to_the_running_budget_month() {
+    let snap = closed_november();
+    let between = Period::Between {
+        from: "2026-11-01".into(),
+        to: "2026-11-24".into(),
+    };
+    for (period, expected) in [(Period::AllTime, "1120"), (between, "968")] {
+        let budget = |by| {
+            let mut s = spec(by, period.clone(), &[Measure::Spent]);
+            s.period_basis = PeriodBasis::Budget;
+            query(&snap, &s)
+        };
+        let months = budget(Axis::Month);
+        assert_eq!(total(&months), dec(expected), "{period:?}");
+        assert_eq!(total(&budget(Axis::Weekday)), dec(expected));
+        assert_eq!(total(&budget(Axis::Category)), dec(expected));
+        assert_eq!(months.titles.last().unwrap(), "December 2026");
+        assert!(months.partial_last, "{period:?}");
+        assert_eq!(total(&budget(Axis::Quarter)), dec(expected));
+    }
+    let mut s = spec(Axis::Month, Period::AllTime, &[Measure::Spent]);
+    s.period_basis = PeriodBasis::Budget;
+    let insight = query(&snap, &s).insight.unwrap();
+    assert_eq!(insight.label, "November 2026");
+}
+
+#[test]
+fn budget_months_over_all_time_keep_at_most_240_buckets() {
+    let mut rows = ledger();
+    rows.push(out("ancient", "5", None, "2000-01-01"));
+    let mut snap = snap(rows);
+    // November 2006 closed early: the oldest month shown, December 2006,
+    // starts on 20 November.
+    snap.month_periods = vec![MonthPeriod {
+        cutoff_at: Some("2006-11-20T10:00:00Z".into()),
+        ..crate::closure::tests::period("2006-11-01", ClosureStatus::Closed)
+    }];
+    let mut s = spec(Axis::Month, Period::AllTime, &[Measure::Spent]);
+    s.period_basis = PeriodBasis::Budget;
+    let data = query(&snap, &s);
+    assert_eq!(data.categories.len(), 240);
+    assert_eq!(data.titles[0], "December 2006");
+}

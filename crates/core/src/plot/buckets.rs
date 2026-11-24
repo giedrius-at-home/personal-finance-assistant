@@ -207,6 +207,22 @@ impl Frame<'_> {
             _ if spec.time_axis() => {
                 let (from, to) = match w.months {
                     Some(months) if self.by_month() => months,
+                    // Budget months over days (All time, Between): from the
+                    // budget month of the first day to that of the last (the
+                    // running one when the window reaches today), so every
+                    // row, keyed by its budget month, has a column.
+                    None if self.budget && self.by_month() => {
+                        let mut first = self.month_of_day(w.from);
+                        if spec.by == Axis::Month && self.all_time_cap().is_some() {
+                            first =
+                                first.max(shift_month(self.current(), -(LIMIT_MONTHS as i32 - 1)));
+                        }
+                        let mut last = self.month_of_day(w.to);
+                        if w.to >= self.today() {
+                            last = last.max(self.current());
+                        }
+                        (first, last)
+                    }
                     _ => (w.from, w.to),
                 };
                 let starts = buckets(spec.by, from, to)?;
