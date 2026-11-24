@@ -932,15 +932,27 @@ fn change_leaves_a_cut_first_bucket_empty() {
     let mut quarters = spec(Axis::Quarter, Period::Last6Months, &[Measure::Spent]);
     quarters.value = Value::Change;
     let data = query(&snap, &quarters);
-    // June alone is cut out of Q2.
+    // June alone is cut out of Q2; Q3 (30 + 35) against the whole Q2 (0).
     assert_eq!(data.series[0].values[0], None);
-    assert!(data.series[0].values[1].is_some());
+    assert_eq!(data.series[0].values[1], Some(dec("65")));
     let mut weeks = spec(Axis::Week, Period::ThisMonth, &[Measure::Spent]);
     weeks.value = Value::Change;
     let data = query(&snap, &weeks);
-    // 1 November is a Sunday.
+    // 1 November is a Sunday. The week of 2 November (40 − 10) against the
+    // whole week of 26 October (the 800 rent on the 1st).
     assert_eq!(data.series[0].values[0], None);
-    assert!(data.series[0].values[1].is_some());
+    assert_eq!(data.series[0].values[1], Some(dec("-770")));
+    // A ledger that starts in November has no whole week of 26 October.
+    let fresh = query(
+        &self::snap(vec![
+            out("a", "10", None, "2026-11-01"),
+            out("b", "20", None, "2026-11-03"),
+        ]),
+        &weeks,
+    );
+    assert_eq!(fresh.series[0].values[0], None);
+    assert_eq!(fresh.series[0].values[1], None);
+    assert!(fresh.series[0].values[2].is_some());
 }
 
 #[test]

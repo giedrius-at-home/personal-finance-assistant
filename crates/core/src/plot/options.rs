@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use finance_types::plot::Compare;
+use finance_types::plot::{Compare, Measure};
 use rust_decimal::Decimal;
 
 use super::buckets::{Window, bucket_start};
@@ -60,23 +60,42 @@ pub(super) fn change(
     } else {
         let (before_columns, _, _) = frame.columns(&before, Vec::new())?;
         let then = frame.values(&before, &before_rows, &before_columns, defs);
-        for (now, then) in values.iter_mut().zip(then) {
-            let mut previous = then.last().copied().flatten();
-            for v in now.iter_mut() {
-                let value = *v;
-                *v = difference(value, previous);
-                previous = value;
-            }
-        }
-        // A first bucket cut by the period start has no whole bucket before it.
-        let first = match window.months {
+        let first_of = |w: &Window| match w.months {
             Some((first, _)) if frame.by_month() => first,
-            _ => window.from,
+            _ => w.from,
         };
-        if bucket_start(frame.spec.by, first) < first {
-            for now in values.iter_mut() {
-                if let Some(v) = now.first_mut() {
-                    *v = None;
+        let first = first_of(window);
+        let start = bucket_start(frame.spec.by, first);
+        // A first bucket cut by the period start: its whole is the cut part
+        // plus the period before's last bucket (the same calendar bucket),
+        // when that period holds all of it, the ledger reaches back to it and
+        // the measure adds up.
+        let cut = start < first;
+        let whole = first_of(&before) <= start
+            && frame.first_day.is_some_and(|d| d <= start)
+            && matches!(
+                frame.spec.measures[0].measure,
+                Measure::Spent | Measure::Income | Measure::Net | Measure::Count
+            );
+        for (now, then) in values.iter_mut().zip(then) {
+            let last_before = then.last().copied().flatten();
+            let mut previous = if cut {
+                whole
+                    .then(|| now.first().copied().flatten().zip(last_before))
+                    .flatten()
+                    .map(|(a, b)| a + b)
+            } else {
+                last_before
+            };
+            for (i, v) in now.iter_mut().enumerate() {
+                let value = *v;
+                *v = if cut && i == 0 {
+                    None
+                } else {
+                    difference(value, previous)
+                };
+                if !(cut && i == 0) {
+                    previous = value;
                 }
             }
         }
