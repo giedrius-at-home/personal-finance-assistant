@@ -441,6 +441,134 @@ pub struct PlotData {
     pub left_out: usize,
 }
 
+/// The ready-made plots offered in "Add a panel", in menu order: the ten
+/// insight plots, then a table of merchants.
+pub fn ready_made() -> Vec<(&'static str, PlotSpec)> {
+    let m = |measure| MeasureSpec {
+        measure,
+        draw: Draw::Bars,
+    };
+    let one = |measure| vec![m(measure)];
+    let spec = PlotSpec::default;
+    vec![
+        (
+            "Spending calendar",
+            PlotSpec {
+                by: Axis::Week,
+                split: Some(Split::Weekday),
+                period: Period::Last3Months,
+                chart: Chart::Heatmap,
+                ..spec()
+            },
+        ),
+        (
+            "Weekday pattern",
+            PlotSpec {
+                measures: one(Measure::AveragePerDay),
+                by: Axis::Weekday,
+                ..spec()
+            },
+        ),
+        (
+            "This month against usual",
+            PlotSpec {
+                by: Axis::Day,
+                period: Period::ThisMonth,
+                chart: Chart::Line,
+                cumulative: true,
+                compare: Compare::AverageOf3,
+                ..spec()
+            },
+        ),
+        (
+            "Top merchants",
+            PlotSpec {
+                by: Axis::Merchant,
+                period: Period::Last3Months,
+                chart: Chart::Ranked,
+                ..spec()
+            },
+        ),
+        (
+            "Where it went",
+            PlotSpec {
+                split: Some(Split::Group),
+                period: Period::Last12Months,
+                chart: Chart::StackedBars,
+                ..spec()
+            },
+        ),
+        (
+            "Income and spending",
+            PlotSpec {
+                measures: vec![
+                    m(Measure::Income),
+                    m(Measure::Spent),
+                    MeasureSpec {
+                        measure: Measure::Net,
+                        draw: Draw::Line,
+                    },
+                ],
+                period: Period::Last12Months,
+                ..spec()
+            },
+        ),
+        (
+            "Year on year",
+            PlotSpec {
+                by: Axis::MonthOfYear,
+                split: Some(Split::Year),
+                period: Period::AllTime,
+                chart: Chart::Line,
+                ..spec()
+            },
+        ),
+        (
+            "Small payments",
+            PlotSpec {
+                measures: one(Measure::Count),
+                by: Axis::Merchant,
+                filters: Filters {
+                    max: Some(Decimal::from(10)),
+                    ..Filters::default()
+                },
+                chart: Chart::Ranked,
+                ..spec()
+            },
+        ),
+        (
+            "Fixed against variable",
+            PlotSpec {
+                split: Some(Split::FixedOrVariable),
+                period: Period::Last12Months,
+                chart: Chart::StackedBars,
+                ..spec()
+            },
+        ),
+        (
+            "Biggest changes",
+            PlotSpec {
+                by: Axis::Category,
+                period: Period::Last3Months,
+                value: Value::Change,
+                chart: Chart::Ranked,
+                ..spec()
+            },
+        ),
+        (
+            "Merchants table",
+            PlotSpec {
+                measures: vec![m(Measure::Spent), m(Measure::Count), m(Measure::Average)],
+                by: Axis::Merchant,
+                top: 20,
+                period: Period::Last3Months,
+                chart: Chart::Table,
+                ..spec()
+            },
+        ),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -906,124 +1034,26 @@ mod tests {
         }
     }
 
-    /// The ten ready-made plots (plan Task 8).
-    fn ready_made() -> Vec<(&'static str, PlotSpec)> {
-        let one = |measure| vec![m(measure)];
-        vec![
-            (
-                "Spending calendar",
-                PlotSpec {
-                    by: Axis::Week,
-                    split: Some(Split::Weekday),
-                    period: Period::Last3Months,
-                    chart: Chart::Heatmap,
-                    ..spec()
-                },
-            ),
-            (
-                "Weekday pattern",
-                PlotSpec {
-                    measures: one(Measure::AveragePerDay),
-                    by: Axis::Weekday,
-                    ..spec()
-                },
-            ),
-            (
-                "This month against usual",
-                PlotSpec {
-                    by: Axis::Day,
-                    period: Period::ThisMonth,
-                    chart: Chart::Line,
-                    cumulative: true,
-                    compare: Compare::AverageOf3,
-                    ..spec()
-                },
-            ),
-            (
-                "Top merchants",
-                PlotSpec {
-                    by: Axis::Merchant,
-                    period: Period::Last3Months,
-                    chart: Chart::Ranked,
-                    ..spec()
-                },
-            ),
-            (
-                "Where it went",
-                PlotSpec {
-                    split: Some(Split::Group),
-                    period: Period::Last12Months,
-                    chart: Chart::StackedBars,
-                    ..spec()
-                },
-            ),
-            (
-                "Income and spending",
-                PlotSpec {
-                    measures: vec![
-                        m(Measure::Income),
-                        m(Measure::Spent),
-                        MeasureSpec {
-                            measure: Measure::Net,
-                            draw: Draw::Line,
-                        },
-                    ],
-                    period: Period::Last12Months,
-                    ..spec()
-                },
-            ),
-            (
-                "Year on year",
-                PlotSpec {
-                    by: Axis::MonthOfYear,
-                    split: Some(Split::Year),
-                    period: Period::AllTime,
-                    chart: Chart::Line,
-                    ..spec()
-                },
-            ),
-            (
-                "Small payments",
-                PlotSpec {
-                    measures: one(Measure::Count),
-                    by: Axis::Merchant,
-                    filters: Filters {
-                        max: Some(Decimal::from(10)),
-                        ..Filters::default()
-                    },
-                    chart: Chart::Ranked,
-                    ..spec()
-                },
-            ),
-            (
-                "Fixed against variable",
-                PlotSpec {
-                    split: Some(Split::FixedOrVariable),
-                    period: Period::Last12Months,
-                    chart: Chart::StackedBars,
-                    ..spec()
-                },
-            ),
-            (
-                "Biggest changes",
-                PlotSpec {
-                    by: Axis::Category,
-                    period: Period::Last3Months,
-                    value: Value::Change,
-                    chart: Chart::Ranked,
-                    ..spec()
-                },
-            ),
-        ]
-    }
-
     #[test]
-    fn every_ready_made_plot_validates_with_its_chart() {
+    fn every_ready_made_plot_validates_and_offers_its_chart() {
         let all = ready_made();
-        assert_eq!(all.len(), 10);
+        assert_eq!(all.len(), 11, "ten insight plots and the merchants table");
         for (title, s) in all {
             assert_eq!(s.validate(), Ok(()), "{title}");
             assert!(s.charts().contains(&s.chart), "{title}");
+        }
+    }
+
+    #[test]
+    fn ready_made_titles_are_unique_and_within_the_name_limit() {
+        let titles: Vec<&str> = ready_made().into_iter().map(|(t, _)| t).collect();
+        let unique: std::collections::HashSet<&str> = titles.iter().copied().collect();
+        assert_eq!(unique.len(), titles.len());
+        for t in titles {
+            assert!(
+                (1..=crate::ui::MAX_NAME).contains(&t.chars().count()),
+                "{t}"
+            );
         }
     }
 

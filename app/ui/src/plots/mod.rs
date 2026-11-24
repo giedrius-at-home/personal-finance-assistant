@@ -149,6 +149,7 @@ pub fn subtitle_for(spec: &PlotSpec, data: &PlotData) -> String {
         },
     };
     let mut parts = vec![data.subtitle.clone()];
+    parts.retain(|p| !p.is_empty());
     if items.in_other > 0 {
         parts.push(format!("{} more in Other", items.in_other));
     }
@@ -487,11 +488,14 @@ pub fn PlotView(
                 let subtitle = subtitle_for(&spec, d);
                 let insight = d.insight.as_ref().map(|i| view! { <p class=PLOT_INSIGHT>{i.text.clone()}</p> });
                 let data = d.clone();
+                let fallback = subtitle.clone();
                 let body = move || {
+                    // Without a title the period and filters name the chart.
+                    let label = Some(title.get()).filter(|t| !t.is_empty()).unwrap_or_else(|| fallback.clone());
                     if table_only || numbers.get() {
-                        data_table(&spec, &data, title.get())
+                        data_table(&spec, &data, label)
                     } else {
-                        drawing(&spec, &data, title.get())
+                        drawing(&spec, &data, label)
                     }
                 };
                 let id = switch_id.clone();
@@ -680,7 +684,7 @@ mod tests {
         };
         assert_eq!(
             subtitle_for(&ranked, &data),
-            " · 2 items at zero or below not shown · 1 item with no value not shown"
+            "2 items at zero or below not shown · 1 item with no value not shown"
         );
     }
 
@@ -707,9 +711,14 @@ mod tests {
             chart: Chart::Donut,
             ..spec(&[Measure::Spent], None)
         };
-        assert_eq!(subtitle_for(&donut, &data), " · 17 more in Other");
+        assert_eq!(subtitle_for(&donut, &data), "17 more in Other");
         let bars = spec(&[Measure::Spent], None);
-        assert_eq!(subtitle_for(&bars, &data), " · 12 more in Other");
+        assert_eq!(subtitle_for(&bars, &data), "12 more in Other");
+        data.subtitle = "Last 6 months".into();
+        assert_eq!(
+            subtitle_for(&bars, &data),
+            "Last 6 months · 12 more in Other"
+        );
     }
 
     #[test]
