@@ -191,6 +191,13 @@ fn spent_by_weekday_equals_net_of_the_same_rows() {
         assert_eq!(*value, Some(groups::net(&same)));
     }
     assert_eq!(data.categories.len(), 7);
+    let trends = time_trends(&rows, &snap.group_mappings, &now(), &HashSet::new());
+    let expected: Vec<_> = trends.currencies[0]
+        .weekdays
+        .iter()
+        .map(|w| Some(w.spending.unwrap_or_default()))
+        .collect();
+    assert_eq!(data.series[0].values, expected);
 }
 
 #[test]
@@ -498,4 +505,98 @@ fn a_day_axis_over_all_time_is_refused_past_the_limit() {
     );
     assert_eq!(months.categories.first().unwrap(), "Mar");
     assert_eq!(total(&months), dec("1050"));
+}
+
+#[test]
+fn other_with_negative_members_still_sums_to_the_total() {
+    let mut rows = thirty_merchants();
+    rows.push(named(
+        tx("back", "50", Kind::Refund, Some("Shop"), &on("2026-11-11")),
+        "Refundo",
+    ));
+    let mut s = spec(Axis::Merchant, Period::ThisMonth, &[Measure::Spent]);
+    s.top = 5;
+    let data = query(&snap(rows), &s);
+    assert_eq!(at(&data, "Other"), Some(dec("275")));
+    assert_eq!(total(&data), dec("415"));
+}
+
+#[test]
+fn a_split_series_key_never_collides_with_other() {
+    let mut rows = thirty_merchants();
+    rows.push(named(out("o", "100", Some("Shop"), "2026-11-10"), "Other"));
+    let mut s = spec(Axis::Month, Period::ThisMonth, &[Measure::Spent]);
+    s.split = Some(Split::Merchant);
+    let data = query(&snap(rows), &s);
+    let keys: HashSet<&str> = data.series.iter().map(|s| s.key.as_str()).collect();
+    assert_eq!(keys.len(), data.series.len());
+    assert_eq!(data.series[0].label, "Other");
+    assert_eq!(data.series.last().unwrap().label, "Other");
+}
+
+#[test]
+fn weekday_split_keeps_seven_weekdays_in_order() {
+    let mut s = spec(Axis::Week, Period::Last3Months, &[Measure::Spent]);
+    s.split = Some(Split::Weekday);
+    s.chart = Chart::Heatmap;
+    let data = query(&snap(ledger()), &s);
+    let labels: Vec<&str> = data.series.iter().map(|s| s.label.as_str()).collect();
+    assert_eq!(
+        labels,
+        [
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday",
+            "Sunday"
+        ]
+    );
+    assert_eq!(data.left_out, 0);
+}
+
+#[test]
+fn year_split_runs_in_calendar_order_keeping_the_recent_years() {
+    let rows: Vec<Tx> = (2019..=2026)
+        .map(|y| {
+            out(
+                &format!("y{y}"),
+                &(3000 - y).to_string(),
+                None,
+                &format!("{y}-03-01"),
+            )
+        })
+        .collect();
+    let mut s = spec(Axis::Month, Period::AllTime, &[Measure::Spent]);
+    s.split = Some(Split::Year);
+    s.split_top = 6;
+    let data = query(&snap(rows), &s);
+    let labels: Vec<&str> = data.series.iter().map(|s| s.label.as_str()).collect();
+    assert_eq!(labels, ["2022", "2023", "2024", "2025", "2026", "Other"]);
+}
+
+#[test]
+fn quarter_and_year_labels() {
+    let snap = snap(ledger());
+    let quarters = query(
+        &snap,
+        &spec(Axis::Quarter, Period::ThisYear, &[Measure::Spent]),
+    );
+    assert_eq!(
+        quarters.categories,
+        ["Q1 2026", "Q2 2026", "Q3 2026", "Q4 2026"]
+    );
+    let years = query(&snap, &spec(Axis::Year, Period::AllTime, &[Measure::Spent]));
+    assert_eq!(years.categories, ["2026"]);
+}
+
+#[test]
+fn a_week_spanning_two_years_carries_its_year() {
+    let data = query(
+        &snap(ledger()),
+        &spec(Axis::Week, Period::ThisYear, &[Measure::Spent]),
+    );
+    assert_eq!(data.categories[0], "29 Dec 2025");
+    assert_eq!(data.categories[1], "5 Jan");
 }

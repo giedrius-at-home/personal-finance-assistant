@@ -21,6 +21,10 @@ use crate::writes::review::normalize_merchant;
 use crate::{Ctx, Error, Result, budget, groups, plans};
 
 const OTHER: &str = "Other";
+/// The "Other" series key; a real split value's key is `SPLIT_KEY` + the value,
+/// so the two never collide.
+const OTHER_KEY: &str = "other";
+const SPLIT_KEY: &str = "split:";
 const WEEKDAYS: [&str; 7] = [
     "Monday",
     "Tuesday",
@@ -136,12 +140,12 @@ impl Names<'_> {
     }
 
     /// Every given filter matches; one naming nothing that exists matches nothing.
-    fn passes(&self, f: &Filters, r: &Row) -> bool {
-        let merchant = casefold(f.merchant.trim());
+    /// `merchant` is the filter's merchant text, normalised once by the caller.
+    fn passes(&self, f: &Filters, merchant: &str, r: &Row) -> bool {
         (f.categories.is_empty() || f.categories.contains(&self.key(Dim::Category, r)))
             && (f.groups.is_empty() || f.groups.contains(&self.key(Dim::Group, r)))
             && (f.accounts.is_empty() || f.accounts.contains(&r.t.account_id))
-            && (merchant.is_empty() || casefold(&r.merchant).contains(&merchant))
+            && (merchant.is_empty() || casefold(&r.merchant).contains(merchant))
             && f.min.is_none_or(|min| r.t.amount >= min)
             && f.max.is_none_or(|max| r.t.amount <= max)
             && !(f.variable_only && self.fixed.contains(&r.t.transaction_id))
@@ -209,9 +213,10 @@ pub fn plot_query(ctx: &Ctx<'_>, spec: &PlotSpec) -> Result<PlotData> {
         merchants: spellings(&counted),
         fixed: groups::non_variable_ids(&snap.transactions, &fixed_categories),
     };
+    let merchant = casefold(&normalize_merchant(&spec.filters.merchant));
     let filtered: Vec<&Row> = counted
         .iter()
-        .filter(|r| names.passes(&spec.filters, r))
+        .filter(|r| names.passes(&spec.filters, &merchant, r))
         .collect();
     let today = ctx.today();
     let (from, to) = period_days(&spec.period, today, &filtered)?;
@@ -243,10 +248,9 @@ pub fn plot_query(ctx: &Ctx<'_>, spec: &PlotSpec) -> Result<PlotData> {
             .collect(),
         _ if spec.time_axis() => {
             starts = buckets(spec.by, from, to)?;
-            let years = from.year() != to.year();
             starts
                 .iter()
-                .map(|&d| bucket_column(spec.by, d, years))
+                .map(|&d| bucket_column(spec.by, d, d.year() != to.year()))
                 .collect()
         }
         _ => {
@@ -310,14 +314,7 @@ pub fn plot_query(ctx: &Ctx<'_>, spec: &PlotSpec) -> Result<PlotData> {
         Vec::new()
     } else if let Some(split) = spec.split {
         let dim = Dim::from(split);
-        let mut kept = ranked(&names, dim, &rows, first);
-        // At most six series, "Other" included.
-        let keep = usize::from(spec.split_top);
-        let rest = kept.split_off(if kept.len() > keep {
-            keep.min(5)
-        } else {
-            keep.min(kept.len())
-        });
+        let (kept, rest) = split_keys(split, ranked(&names, dim, &rows, first), spec.split_top);
         left_out += rest.len();
         let mut series: Vec<PlotSeries> = kept
             .into_iter()
@@ -325,7 +322,7 @@ pub fn plot_query(ctx: &Ctx<'_>, spec: &PlotSpec) -> Result<PlotData> {
                 let label = names.label(dim, &k);
                 series_of(
                     &spec.measures[0],
-                    k.clone(),
+                    format!("{SPLIT_KEY}{k}"),
                     label,
                     Some((dim, HashSet::from([k]))),
                 )
@@ -334,7 +331,7 @@ pub fn plot_query(ctx: &Ctx<'_>, spec: &PlotSpec) -> Result<PlotData> {
         if !rest.is_empty() {
             series.push(series_of(
                 &spec.measures[0],
-                "other".into(),
+                OTHER_KEY.into(),
                 OTHER.into(),
                 Some((dim, rest.into_iter().collect())),
             ));
@@ -412,6 +409,34 @@ fn measure_name(m: Measure) -> (&'static str, &'static str) {
         Measure::Largest => ("largest", "Largest purchase"),
         Measure::AveragePerDay => ("average_per_day", "Average per day"),
     }
+}
+
+/// The split values shown as their own series, and those folded into "Other".
+/// Weekdays are all seven, Monday first; years run in calendar order and keep
+/// the most recent; other splits keep the largest. At most six series,
+/// "Other" included.
+fn split_keys(split: Split, ranked: Vec<String>, split_top: u8) -> (Vec<String>, Vec<String>) {
+    let mut kept = match split {
+        Split::Weekday => return ((0..7).map(|i: u8| i.to_string()).collect(), Vec::new()),
+        Split::Year => {
+            let mut years = ranked;
+            years.sort();
+            years
+        }
+        _ => ranked,
+    };
+    let keep = usize::from(split_top);
+    let cut = if kept.len() > keep {
+        keep.min(5)
+    } else {
+        kept.len()
+    };
+    let rest = if split == Split::Year {
+        kept.drain(..kept.len() - cut).collect()
+    } else {
+        kept.split_off(cut)
+    };
+    (kept, rest)
 }
 
 /// The keys of `dim` among `rows`, by `m` over each key's rows, largest first.
