@@ -117,16 +117,17 @@ cargo deny check
 
 ## Releases and updates
 
-Every merge to `main` ships (changes to Markdown, `docs/` and `design/` only
-do not). The Release workflow builds and signs `Finance.app.tar.gz`, tags the
-merge commit and publishes it with `latest.json`.
+A release ships only when asked: **Actions → Release → Run workflow** (or
+`gh workflow run release.yml`). The workflow builds and signs
+`Finance.app.tar.gz`, tags the commit and publishes it with `latest.json`.
+(Releasing on every merge used up the free plan's Actions minutes: macOS
+counts ten times.)
 
 - The version is the latest release's patch plus one, stamped into the build
   only; `main` keeps the last hand-set version.
 - For a minor or major release, raise `version` in
   `app/src-tauri/tauri.conf.json` and `[workspace.package]` in the PR; the
   workflow uses it when it is newer than the latest release.
-- Re-run a release from **Actions → Release → Run workflow**.
 
 The installed app checks at launch and every 6 hours. Because the repository
 is private it needs a fine-grained GitHub token with read-only **Contents**
