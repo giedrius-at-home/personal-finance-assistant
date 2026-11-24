@@ -208,11 +208,7 @@ fn App() -> impl IntoView {
     Effect::new(move |prev: Option<(String, bool)>| {
         let shown = app.shown_id();
         let hidden = tabs.with(|t| t.iter().find(|v| v.id == shown).map(|v| v.hidden));
-        let gone = match hidden {
-            None => true,
-            Some(h) => h && prev.is_some_and(|(p, was)| p == shown && !was),
-        };
-        if gone {
+        if must_leave(&shown, hidden, prev.as_ref()) {
             app.go_id(&tabs.with_untracked(|t| fallback_tab(t, &shown)));
         }
         (shown, hidden.unwrap_or(true))
@@ -279,10 +275,7 @@ fn App() -> impl IntoView {
                 <Tabs visible />
                 <div role="tabpanel" class="page-stack mt-0 min-w-0">
                     {move || {
-                        // A page's own owner: the contexts it provides (Overview's
-                        // `PanelState`, …) end with it instead of reaching the next page.
-                        let owner = Owner::new();
-                        let page = owner.with(|| match app.own_tab.get() {
+                        owned(|| match app.own_tab.get() {
                             Some(id) => {
                                 let name = tabs.with_untracked(|t| {
                                     t.iter().find(|v| v.id == id).map(|v| v.name.clone())
@@ -299,8 +292,7 @@ fn App() -> impl IntoView {
                                 Tab::Events => pages::events::Events().into_any(),
                                 Tab::Manage => view! { <ManageTabs /> }.into_any(),
                             },
-                        });
-                        OwnedView::new_with_owner(page, owner)
+                        })
                     }}
                 </div>
             </div>
@@ -398,11 +390,11 @@ fn SpendingTabs() -> impl IntoView {
                 items=SpendingSection::ALL.iter().map(|s| (s.label().to_owned(), s.label().to_owned())).collect()
             />
         </div>
-        {move || match app.spending.get() {
+        {move || owned(|| match app.spending.get() {
             SpendingSection::PlanPatterns => pages::spending::PlanPatterns().into_any(),
             SpendingSection::Organise => pages::spending::Organise().into_any(),
             SpendingSection::History => pages::spending::History().into_any(),
-        }}
+        })}
     }
 }
 
@@ -423,13 +415,13 @@ fn ManageTabs() -> impl IntoView {
                 items=ManageSection::ALL.iter().map(|s| (s.label().to_owned(), s.label().to_owned())).collect()
             />
         </div>
-        {move || match app.manage.get() {
+        {move || owned(|| match app.manage.get() {
             ManageSection::Banks => pages::manage::Banks().into_any(),
             ManageSection::CloseMonth => pages::manage::CloseMonth().into_any(),
             ManageSection::Import => pages::manage::Import().into_any(),
             ManageSection::Status => pages::manage::Status().into_any(),
             ManageSection::Settings => pages::manage::Settings().into_any(),
-        }}
+        })}
     }
 }
 
@@ -439,6 +431,23 @@ pub fn visible_tabs(tabs: &[TabView], shown: &str) -> Vec<TabView> {
         .filter(|t| !t.hidden || t.id == shown)
         .cloned()
         .collect()
+}
+
+/// The shown tab must be left: it is gone (`hidden` None), or it became hidden
+/// while it was already shown. `prev` is the last (shown id, hidden) seen.
+pub fn must_leave(shown: &str, hidden: Option<bool>, prev: Option<&(String, bool)>) -> bool {
+    match hidden {
+        None => true,
+        Some(h) => h && prev.is_some_and(|(p, was)| p == shown && !was),
+    }
+}
+
+/// Renders `f` under its own owner: the contexts a page provides (Overview's
+/// `PanelState`, …) end with it instead of reaching the next page.
+fn owned<V>(f: impl FnOnce() -> V) -> OwnedView<V> {
+    let owner = Owner::new();
+    let view = owner.with(f);
+    OwnedView::new_with_owner(view, owner)
 }
 
 /// The tab to show after `gone` disappears (deleted or hidden while on screen): the first visible one.
@@ -512,6 +521,19 @@ mod tests {
             tab("manage", false),
         ];
         assert_eq!(fallback_tab(&tabs, "plan"), "manage");
+    }
+
+    #[test]
+    fn following_a_link_to_a_hidden_tab_stays_there() {
+        let prev = ("overview".to_string(), false);
+        assert!(!must_leave("plan", Some(true), Some(&prev)));
+    }
+
+    #[test]
+    fn hiding_the_shown_tab_moves_away() {
+        let prev = ("plan".to_string(), false);
+        assert!(must_leave("plan", Some(true), Some(&prev)));
+        assert!(must_leave("own-1", None, Some(&prev)));
     }
 
     #[test]

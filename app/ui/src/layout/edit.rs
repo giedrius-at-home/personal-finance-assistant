@@ -37,7 +37,11 @@ pub const BUILT_IN: [(&str, &str); 7] = [
 
 /// False for a deleted own tab: `page_mut` would recreate it as a built-in one.
 fn exists(l: &UiLayout, at: &PageRef) -> bool {
-    BUILT_IN.iter().any(|(b, _)| *b == at.tab) || l.tabs.iter().any(|t| t.id == at.tab)
+    tab_exists(l, &at.tab)
+}
+
+pub(super) fn tab_exists(l: &UiLayout, tab: &str) -> bool {
+    BUILT_IN.iter().any(|(b, _)| *b == tab) || l.tabs.iter().any(|t| t.id == tab)
 }
 
 fn def<'a>(defs: &[&'a PanelDef], panel: &str) -> Option<&'a PanelDef> {
@@ -626,8 +630,18 @@ mod tests {
     }
 
     fn click_order() -> UiLayout {
+        let mut spending = built_in("spending");
+        spending.pages = vec![PageLayout {
+            id: "spending.habits".into(),
+            items: vec![PanelItem {
+                panel: "s".into(),
+                folded: true,
+                half: false,
+            }],
+            removed: vec![],
+        }];
         UiLayout {
-            tabs: vec![built_in("spending"), built_in("overview")],
+            tabs: vec![spending, built_in("overview")],
             tabs_ordered: false,
         }
     }
@@ -642,11 +656,14 @@ mod tests {
         let r = reg();
         let d: Vec<&PanelDef> = r.iter().collect();
         let mut l = click_order();
+        let spending = click_order().tabs[0].pages.clone();
         panel_removed(&mut l, &d, &p1(), "a");
         let saved: Vec<_> = l.tabs.iter().map(|t| t.id.clone()).collect();
         assert_eq!(saved, defaults());
         assert!(l.tabs_ordered);
         assert_eq!(removed(&l, "p1"), ["a"]);
+        let after = l.tabs.iter().find(|t| t.id == "spending").unwrap();
+        assert_eq!(after.pages, spending);
     }
 
     #[test]

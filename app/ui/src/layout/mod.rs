@@ -170,13 +170,17 @@ fn page_entry<'a>(
     l.page_mut(tab, tab_name, page)
 }
 
-/// Write the page's full resolved list, changed by `f`, into `layout`.
+/// Write the page's full resolved list, changed by `f`, into `layout`; nothing
+/// when the tab is gone (a fold on a deleted own tab must not recreate it).
 fn write_page(
     layout: &mut UiLayout,
     defs: &[&PanelDef],
     (tab, tab_name, page): (&str, &str, &str),
     f: impl FnMut(&mut PanelItem),
 ) {
+    if !edit::tab_exists(layout, tab) {
+        return;
+    }
     let mut items = resolve(defs, page, layout.page(page));
     items.iter_mut().for_each(f);
     page_entry(layout, tab, tab_name, page).items = items;
@@ -551,7 +555,7 @@ mod tests {
         assert_eq!(resolve(&refs, "p", Some(&saved)), saved.items);
     }
 
-    const AT: (&str, &str, &str) = ("t", "T", "p");
+    const AT: (&str, &str, &str) = ("overview", "Overview", "p");
 
     #[test]
     fn a_toggle_writes_the_full_resolved_page_and_twice_restores_it() {
@@ -604,6 +608,18 @@ mod tests {
     }
 
     #[test]
+    fn a_fold_on_a_deleted_own_tab_changes_nothing() {
+        let d = abc();
+        let refs: Vec<&PanelDef> = d.iter().collect();
+        let mut l = UiLayout::default();
+        let at = ("own-1", "Trips", "own-1");
+        toggled(&mut l, &refs, at, "a");
+        opened(&mut l, &refs, at, "b");
+        all_set(&mut l, &refs, at, true);
+        assert_eq!(l, UiLayout::default());
+    }
+
+    #[test]
     fn saving_a_page_keeps_the_tab_order() {
         let d = abc();
         let refs: Vec<&PanelDef> = d.iter().collect();
@@ -637,7 +653,7 @@ mod tests {
                 .is_none_or(|f| f())
         };
         let mut l = UiLayout::default();
-        l.page_mut("t", "T", "p").items = vec![it("a", false), it("b", false)];
+        l.page_mut("overview", "Overview", "p").items = vec![it("a", false), it("b", false)];
         assert_eq!(
             ids(&drawn(&l.page("p").unwrap().items, shown)),
             [("a", false)]
