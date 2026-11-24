@@ -324,15 +324,13 @@ fn current_month(report: &Dashboard) -> String {
     format!("{}-01", &through[..7.min(through.len())])
 }
 
-/// The budget the month picker shows: the picked one, else this month's,
-/// else the first.
+/// The budget the month picker shows: the picked one, else the first (the
+/// page's default month). Every budget panel uses this, so they agree.
 fn selected<'a>(report: &'a Dashboard, selection: &str) -> Option<&'a MonthlyBudget> {
     let budgets = &report.monthly_budgets;
-    let month = current_month(report);
     budgets
         .iter()
         .find(|b| key(b) == selection)
-        .or_else(|| budgets.iter().find(|b| b.plan.month == month))
         .or_else(|| budgets.first())
 }
 
@@ -350,7 +348,7 @@ pub fn budget_shown() -> bool {
     super::report_is(|r| selected(r, &picked_selection()).is_some())
 }
 
-/// The picked budget month, for a panel summary; this month's without the panels' state.
+/// The picked budget month; the default month off Overview (no panels' state there).
 fn picked_selection() -> String {
     use_context::<PanelState>().map_or_else(String::new, |s| s.selection.get())
 }
@@ -393,14 +391,13 @@ pub fn summary(report: &Dashboard) -> Option<String> {
 
 /// A panel that follows the month picked in the budget panel.
 fn for_selected(
-    f: impl Fn(&Dashboard, &MonthlyBudget, PanelState) -> Option<AnyView> + Copy + Send + Sync + 'static,
+    f: impl Fn(&Dashboard, &MonthlyBudget) -> Option<AnyView> + Copy + Send + Sync + 'static,
 ) -> AnyView {
-    let s = expect_context::<PanelState>();
     with_report(move |report| {
         let report = StoredValue::new(report.clone());
         move || {
-            let selection = s.selection.get();
-            report.with_value(|r| selected(r, &selection).and_then(|b| f(r, b, s)))
+            let selection = picked_selection();
+            report.with_value(|r| selected(r, &selection).and_then(|b| f(r, b)))
         }
     })
     .into_any()
@@ -408,7 +405,7 @@ fn for_selected(
 
 /// The `overview.week` panel: the daily forecast while the picked month is this one.
 pub fn week() -> AnyView {
-    for_selected(|report, budget, _| {
+    for_selected(|report, budget| {
         is_current(report, budget).then(|| {
             let code = budget.plan.currency.code.clone();
             view! { <DailyForecastPanel report=report.clone() currency_code=code /> }.into_any()
@@ -432,9 +429,10 @@ pub fn week_summary(report: &Dashboard) -> Option<String> {
     ))
 }
 
-/// The `overview.trajectory` panel.
+/// The `overview.trajectory` panel (not movable: Overview always provides the state).
 pub fn trajectory() -> AnyView {
-    for_selected(|report, budget, s| {
+    let s = expect_context::<PanelState>();
+    for_selected(move |report, budget| {
         Some(
             view! {
                 <BudgetVisuals
@@ -451,7 +449,7 @@ pub fn trajectory() -> AnyView {
 
 /// The `overview.extras` panel.
 pub fn extras() -> AnyView {
-    for_selected(|report, budget, _| {
+    for_selected(|report, budget| {
         let available = available(
             allocation_for(report, budget).as_ref(),
             is_current(report, budget),

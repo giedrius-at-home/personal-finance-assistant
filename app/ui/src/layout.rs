@@ -501,17 +501,31 @@ mod tests {
 
     #[test]
     fn a_hidden_panel_is_not_drawn_and_keeps_its_saved_item() {
-        let d = abc();
+        let mut d = abc();
+        d[1].shown = Some(|| false);
         let refs: Vec<&PanelDef> = d.iter().collect();
+        let shown = |id: &str| {
+            refs.iter()
+                .find(|d| d.id == id)
+                .and_then(|d| d.shown)
+                .is_none_or(|f| f())
+        };
         let mut l = UiLayout::default();
         l.page_mut("t", "T", "p").items = vec![it("a", false), it("b", false)];
-        let hidden = |id: &str| id != "b";
-        let shown = drawn(&l.page("p").unwrap().items, hidden);
-        assert_eq!(ids(&shown), [("a", false)]);
+        assert_eq!(
+            ids(&drawn(&l.page("p").unwrap().items, shown)),
+            [("a", false)]
+        );
         toggled(&mut l, &refs, AT, "a");
         assert_eq!(
             ids(&l.page("p").unwrap().items),
             [("a", true), ("b", false)]
+        );
+        all_set(&mut l, &refs, AT, true);
+        assert_eq!(ids(&l.page("p").unwrap().items), [("a", true), ("b", true)]);
+        assert_eq!(
+            ids(&drawn(&l.page("p").unwrap().items, shown)),
+            [("a", true)]
         );
     }
 
