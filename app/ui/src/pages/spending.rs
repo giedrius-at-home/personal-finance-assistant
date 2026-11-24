@@ -12,7 +12,7 @@ use crate::ds::{
     Badge, Card, Eyebrow, Facts, Heading, Help, Icon, Lucide, Money, Size, Switch, Tone, Variant,
     button_class, money,
 };
-use crate::layout::{Initial, PageView, PanelDef};
+use crate::layout::{Initial, LayoutState, PageView, PanelDef};
 use crate::pages::category_trends::CategoryTrends;
 use crate::pages::overview::outlook;
 use crate::pages::{f, report_is, with_report};
@@ -95,11 +95,17 @@ const HISTORY: &str = "spending.history";
 #[component]
 pub fn PlanPatterns() -> impl IntoView {
     let app = state();
+    let layout = use_context::<LayoutState>();
     view! {
         <button
             type="button"
             class=format!("{} -ml-4", button_class(Variant::Ghost, Size::Md))
-            on:click=move |_| app.go(Tab::Transactions)
+            on:click=move |_| {
+                if let Some(layout) = layout {
+                    layout.open("transactions", "Transactions", "transactions", "transactions.personal");
+                }
+                app.go(Tab::Transactions)
+            }
         >
             "Review shared spending & money back →"
         </button>

@@ -170,6 +170,15 @@ fn toggled(layout: &mut UiLayout, defs: &[&PanelDef], at: (&str, &str, &str), pa
     });
 }
 
+/// `layout` with one panel unfolded.
+fn opened(layout: &mut UiLayout, defs: &[&PanelDef], at: (&str, &str, &str), panel: &str) {
+    write_page(layout, defs, at, |i| {
+        if i.panel == panel {
+            i.folded = false;
+        }
+    });
+}
+
 /// `layout` with every panel on the page folded (or opened).
 fn all_set(layout: &mut UiLayout, defs: &[&PanelDef], at: (&str, &str, &str), folded: bool) {
     write_page(layout, defs, at, |i| i.folded = folded);
@@ -237,6 +246,19 @@ impl LayoutState {
         panel: &str,
     ) {
         self.change(|l| toggled(l, &home_defs(page), (tab, tab_name, page), panel));
+    }
+
+    /// Unfolds `panel`, for a link that points at it; nothing when it is open.
+    pub fn open(&self, tab: &'static str, tab_name: &'static str, page: &'static str, panel: &str) {
+        let defs = home_defs(page);
+        let folded = self.layout.with_untracked(|l| {
+            resolve(&defs, l.page(page))
+                .iter()
+                .any(|i| i.panel == panel && i.folded)
+        });
+        if folded {
+            self.change(|l| opened(l, &defs, (tab, tab_name, page), panel));
+        }
     }
 
     pub fn set_all(
@@ -518,6 +540,20 @@ mod tests {
         assert_eq!(ids(&l.page("p").unwrap().items), [("a", true), ("b", true)]);
         toggled(&mut l, &refs, AT, "a");
         assert_eq!(l.page("p").unwrap().items, resolve(&refs, None));
+    }
+
+    #[test]
+    fn open_unfolds_a_folded_panel_and_leaves_an_open_one_open() {
+        let d = abc();
+        let refs: Vec<&PanelDef> = d.iter().collect();
+        let mut l = UiLayout::default();
+        opened(&mut l, &refs, AT, "a");
+        assert_eq!(l.page("p").unwrap().items, resolve(&refs, None));
+        opened(&mut l, &refs, AT, "b");
+        assert_eq!(
+            ids(&l.page("p").unwrap().items),
+            [("a", false), ("b", false)]
+        );
     }
 
     #[test]

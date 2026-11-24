@@ -297,8 +297,8 @@ pub const PANELS: &[PanelDef] = &[
 
 const PAGE: &str = "plan";
 
-/// The page state and the shown month, by context; the plan box and the
-/// payment picker open over the page, outside the panels.
+/// The page state and the shown month, by context; the removal notice, the
+/// plan box and the payment picker sit outside the panels.
 #[component]
 pub fn Plan() -> impl IntoView {
     let ui = Ui::new();
@@ -311,6 +311,8 @@ pub fn Plan() -> impl IntoView {
     provide_context(ui);
     provide_context(month);
     view! {
+        // Outside the panels: "Add" starts folded, and a removal happens on the board.
+        {feedback(ui, "plan-removed".into())}
         <PageView tab="plan" tab_name="Plan" page=PAGE />
         {move || {
             let id = ui.open_plan.get()?;
@@ -620,7 +622,6 @@ fn add(ui: Ui, s: &Shared, _: &Dashboard) -> AnyView {
             <Eyebrow>"NEW"</Eyebrow>
             <h2 class=PANEL_TITLE>"Add a payment or income"</h2>
             {form}
-            {feedback(ui, "plan-removed".into())}
         </Card>
     }
     .into_any()

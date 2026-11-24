@@ -21,7 +21,7 @@ use crate::ds::{
     Badge, Button, CONTROL, Card, CardHeader, CardTitle, CardTone, Eyebrow, Field, Heading, Icon,
     Input, Lucide, Money, Select, Size, Tone, Variant, cn, money,
 };
-use crate::layout::{Initial, PageView, PanelDef};
+use crate::layout::{Initial, LayoutState, PageView, PanelDef};
 use crate::pages::{plural, report_is, with_report};
 use crate::{Tab, state};
 
@@ -106,6 +106,7 @@ fn metric(label: String, value: AnyView, note: Option<String>) -> impl IntoView 
 #[component]
 fn SpendingOrganization(report: Dashboard) -> impl IntoView {
     let app = state();
+    let layout = use_context::<LayoutState>();
     let rows = report
         .monthly_spending
         .currencies
@@ -150,10 +151,19 @@ fn SpendingOrganization(report: Dashboard) -> impl IntoView {
                     <Button
                         variant=Variant::Secondary
                         size=Size::Sm
-                        on_click=Callback::new(|_| {
-                            if let Some(el) = document().get_element_by_id("spending-category-groups") {
-                                el.scroll_into_view();
+                        on_click=Callback::new(move |_| {
+                            if let Some(layout) = layout {
+                                layout.open("spending", "Spending", PAGE, "spending.organise.groups");
                             }
+                            // On the next tick, once the opened panel is drawn.
+                            set_timeout(
+                                || {
+                                    if let Some(el) = document().get_element_by_id("spending-category-groups") {
+                                        el.scroll_into_view();
+                                    }
+                                },
+                                std::time::Duration::ZERO,
+                            );
                         })
                     >
                         "Organise"
