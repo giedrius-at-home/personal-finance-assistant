@@ -336,6 +336,20 @@ fn selected<'a>(report: &'a Dashboard, selection: &str) -> Option<&'a MonthlyBud
         .or_else(|| budgets.first())
 }
 
+fn is_current(report: &Dashboard, budget: &MonthlyBudget) -> bool {
+    budget.plan.month == current_month(report)
+}
+
+/// `overview.week` draws only for this month's budget.
+pub fn week_shown() -> bool {
+    super::report_is(|r| selected(r, &picked_selection()).is_some_and(|b| is_current(r, b)))
+}
+
+/// `overview.trajectory` and `overview.extras` draw only with a budget.
+pub fn budget_shown() -> bool {
+    super::report_is(|r| selected(r, &picked_selection()).is_some())
+}
+
 /// The picked budget month, for a panel summary; this month's without the panels' state.
 fn picked_selection() -> String {
     use_context::<PanelState>().map_or_else(String::new, |s| s.selection.get())
@@ -395,7 +409,7 @@ fn for_selected(
 /// The `overview.week` panel: the daily forecast while the picked month is this one.
 pub fn week() -> AnyView {
     for_selected(|report, budget, _| {
-        (budget.plan.month == current_month(report)).then(|| {
+        is_current(report, budget).then(|| {
             let code = budget.plan.currency.code.clone();
             view! { <DailyForecastPanel report=report.clone() currency_code=code /> }.into_any()
         })
@@ -405,7 +419,7 @@ pub fn week() -> AnyView {
 /// "≈ €X expected" over the next seven days, as the week panel shows it.
 pub fn week_summary(report: &Dashboard) -> Option<String> {
     let budget = selected(report, &picked_selection())?;
-    if budget.plan.month != current_month(report) {
+    if !is_current(report, budget) {
         return None;
     }
     let forecast = report
@@ -438,8 +452,10 @@ pub fn trajectory() -> AnyView {
 /// The `overview.extras` panel.
 pub fn extras() -> AnyView {
     for_selected(|report, budget, _| {
-        let is_current = budget.plan.month == current_month(report);
-        let available = available(allocation_for(report, budget).as_ref(), is_current);
+        let available = available(
+            allocation_for(report, budget).as_ref(),
+            is_current(report, budget),
+        );
         Some(
             view! { <BudgetExtras report=report.clone() budget=budget.clone() available=available /> }
                 .into_any(),
@@ -463,7 +479,7 @@ fn panel(report: &Dashboard, selection: &str, s: PanelState) -> AnyView {
         let unit = unit.clone();
         move |v: Decimal| money(v, &unit)
     };
-    let is_current = plan.month == current_month(report);
+    let is_current = is_current(report, budget);
     let allocation = allocation_for(report, budget);
     let savings = available(allocation.as_ref(), is_current);
 

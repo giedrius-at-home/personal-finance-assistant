@@ -30,6 +30,22 @@ pub struct PanelDef {
     pub half: bool,
     pub render: fn() -> AnyView,
     pub summary: Option<fn(&Dashboard) -> Option<String>>,
+    /// False: the panel draws nothing (no row, no button) and keeps its saved
+    /// place. Runs reactively; may read signals and `use_context`. None: always.
+    pub shown: Option<fn() -> bool>,
+}
+
+/// The items to draw: a hidden panel draws nothing but stays in the layout.
+fn drawn(items: &[PanelItem], shown: impl Fn(&str) -> bool) -> Vec<PanelItem> {
+    items.iter().filter(|i| shown(&i.panel)).cloned().collect()
+}
+
+/// A panel's `shown` answer; an unknown panel is not drawn anyway.
+fn is_shown(id: &str) -> bool {
+    registry()
+        .find(|d| d.id == id)
+        .and_then(|d| d.shown)
+        .is_none_or(|f| f())
 }
 
 fn item_from_def(d: &PanelDef, folded: bool) -> PanelItem {
@@ -251,7 +267,9 @@ pub fn PageView(tab: &'static str, tab_name: &'static str, page: &'static str) -
             .layout
             .with(|l| resolve(&home_defs(page), l.page(page)))
     });
-    let all_folded = move || items.with(|v| v.iter().all(|i| i.folded));
+    // Read inside reactive closures, so `shown` may track signals.
+    let visible = move || items.with(|v| drawn(v, is_shown));
+    let all_folded = move || visible().iter().all(|i| i.folded);
     let panel = move |item: PanelItem| {
         let def = registry().find(|d| d.id == item.panel)?;
         let id = def.id;
@@ -288,7 +306,7 @@ pub fn PageView(tab: &'static str, tab_name: &'static str, page: &'static str) -
             </Button>
         </div>
         <PanelList>
-            <For each=move || items.get() key=|i| (i.panel.clone(), i.half) children=panel />
+            <For each=visible key=|i| (i.panel.clone(), i.half) children=panel />
         </PanelList>
     })
     }
@@ -309,6 +327,7 @@ mod tests {
             half,
             render: || ().into_any(),
             summary: None,
+            shown: None,
         }
     }
 
@@ -478,6 +497,22 @@ mod tests {
         let got =
             [Load::Loading, Load::Loaded, Load::Failed].map(|l| (l.may_change(), l.may_save()));
         assert_eq!(got, [(false, false), (true, true), (true, false)]);
+    }
+
+    #[test]
+    fn a_hidden_panel_is_not_drawn_and_keeps_its_saved_item() {
+        let d = abc();
+        let refs: Vec<&PanelDef> = d.iter().collect();
+        let mut l = UiLayout::default();
+        l.page_mut("t", "T", "p").items = vec![it("a", false), it("b", false)];
+        let hidden = |id: &str| id != "b";
+        let shown = drawn(&l.page("p").unwrap().items, hidden);
+        assert_eq!(ids(&shown), [("a", false)]);
+        toggled(&mut l, &refs, AT, "a");
+        assert_eq!(
+            ids(&l.page("p").unwrap().items),
+            [("a", true), ("b", false)]
+        );
     }
 
     #[test]

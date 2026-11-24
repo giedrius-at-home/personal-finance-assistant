@@ -12,6 +12,7 @@ mod nudges;
 pub mod outlook;
 pub mod visuals;
 
+use finance_types::report::Dashboard;
 use leptos::prelude::*;
 
 use crate::format;
@@ -34,6 +35,7 @@ pub const PANELS: &[PanelDef] = &[
         half: false,
         render: || kpis::OverviewKpis().into_any(),
         summary: None,
+        shown: Some(|| report_is(|r| kpis::first_allocation(r).is_some())),
     },
     PanelDef {
         id: "overview.nudges",
@@ -44,6 +46,7 @@ pub const PANELS: &[PanelDef] = &[
         half: false,
         render: || nudges::OverviewNudges().into_any(),
         summary: Some(nudges::summary),
+        shown: Some(|| report_is(|r| r.monthly_allocation.is_some())),
     },
     PanelDef {
         id: "overview.spendable",
@@ -54,6 +57,7 @@ pub const PANELS: &[PanelDef] = &[
         half: false,
         render: || monthly::OwnerMonthlyOverview().into_any(),
         summary: Some(monthly::spendable_summary),
+        shown: None,
     },
     PanelDef {
         id: "overview.heading",
@@ -64,6 +68,7 @@ pub const PANELS: &[PanelDef] = &[
         half: false,
         render: || monthly::MonthHeading().into_any(),
         summary: None,
+        shown: Some(|| report_is(|r| monthly::heading_allocation(r).is_some())),
     },
     PanelDef {
         id: "overview.budget",
@@ -74,6 +79,7 @@ pub const PANELS: &[PanelDef] = &[
         half: false,
         render: || budget::MonthlyBudgetPanel().into_any(),
         summary: Some(budget::summary),
+        shown: None,
     },
     PanelDef {
         id: "overview.week",
@@ -84,6 +90,7 @@ pub const PANELS: &[PanelDef] = &[
         half: false,
         render: budget::week,
         summary: Some(budget::week_summary),
+        shown: Some(budget::week_shown),
     },
     PanelDef {
         id: "overview.trajectory",
@@ -94,6 +101,7 @@ pub const PANELS: &[PanelDef] = &[
         half: false,
         render: budget::trajectory,
         summary: None,
+        shown: Some(budget::budget_shown),
     },
     PanelDef {
         id: "overview.extras",
@@ -104,10 +112,19 @@ pub const PANELS: &[PanelDef] = &[
         half: false,
         render: budget::extras,
         summary: None,
+        shown: Some(budget::budget_shown),
     },
 ];
 
 const PAGE: &str = "overview";
+
+/// Whether the loaded report passes `f`; nothing that asks draws before it loads.
+fn report_is(f: impl FnOnce(&Dashboard) -> bool) -> bool {
+    crate::state()
+        .report
+        .data
+        .with(|d| matches!(d, Some(Ok(r)) if f(r)))
+}
 
 #[component]
 pub fn Overview() -> impl IntoView {

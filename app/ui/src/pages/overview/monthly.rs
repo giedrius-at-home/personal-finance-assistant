@@ -1,6 +1,8 @@
 //! This and next month's plan per currency (`owner-monthly-overview.tsx`).
 
-use finance_types::report::allocation::{CurrencyAllocation, spare_split, wish_shares};
+use finance_types::report::allocation::{
+    CurrencyAllocation, MonthlyAllocation, spare_split, wish_shares,
+};
 use finance_types::report::closure::MoneyPlan;
 use finance_types::report::trends::SpendingForecast;
 use finance_types::report::{Currency, Dashboard};
@@ -80,15 +82,20 @@ fn spendable(a: &CurrencyAllocation) -> String {
     money(a.current_wiggle_room.max(Decimal::ZERO), &a.currency)
 }
 
+/// The allocation the heading panel shows: only while there is no monthly budget.
+pub fn heading_allocation(report: &Dashboard) -> Option<&MonthlyAllocation> {
+    report
+        .monthly_allocation
+        .as_ref()
+        .filter(|a| !a.currencies.is_empty() && report.monthly_budgets.is_empty())
+}
+
 /// The `overview.heading` panel: the variable spending forecast per
 /// currency, only while there is no monthly budget to show it.
 #[component]
 pub fn MonthHeading() -> impl IntoView {
     with_report(|report| {
-        let allocation = report
-            .monthly_allocation
-            .as_ref()
-            .filter(|a| !a.currencies.is_empty() && report.monthly_budgets.is_empty())?;
+        let allocation = heading_allocation(report)?;
         let cards = allocation
             .currencies
             .iter()
