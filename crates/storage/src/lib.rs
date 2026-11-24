@@ -45,6 +45,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Sql(include_str!("ai.sql")),
     Migration::Sql(include_str!("wishes.sql")),
     Migration::Run(repair_pocket_transfers),
+    Migration::Sql(include_str!("ui_layout.sql")),
 ];
 
 fn has_table(conn: &Connection, name: &str) -> Result<bool> {
@@ -318,7 +319,7 @@ mod tests {
         );
         assert_eq!(stale, 0);
         let version: i64 = one(&store, "SELECT max(version) FROM app_migrations");
-        assert_eq!(version, 6);
+        assert_eq!(version, 7);
     }
 
     #[test]

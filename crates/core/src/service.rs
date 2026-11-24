@@ -63,6 +63,13 @@ fn backup(path: &std::path::Path) -> Result<(), String> {
     Ok(())
 }
 
+/// The read-write store and whether this session's backup has been taken.
+#[derive(Debug)]
+struct Rw {
+    store: Store,
+    backed_up: bool,
+}
+
 /// No delivery channel is registered (development server, tests).
 struct Unavailable;
 
@@ -96,7 +103,7 @@ pub struct Service {
     path: PathBuf,
     state: Mutex<Option<Open>>,
     /// The read-write store, opened on the first write.
-    writer: Mutex<Option<Store>>,
+    writer: Mutex<Option<Rw>>,
     alerts: AlertSink,
     /// The daily forecast's model (TimesFM), when the app has one.
     model: Mutex<Option<Arc<ModelRunner>>>,
@@ -237,6 +244,13 @@ impl Service {
         f(open.store.connection()).map_err(|e| e.to_string())
     }
 
+    #[cfg(test)]
+    pub(crate) fn snapshot_cached(&self) -> bool {
+        self.state
+            .lock()
+            .is_ok_and(|g| g.as_ref().is_some_and(|o| o.snapshot.is_some()))
+    }
+
     /// Forget the cached snapshot so the next read sees the latest data.
     pub fn refresh(&self) {
         if let Ok(mut guard) = self.state.lock()
@@ -265,24 +279,69 @@ impl Service {
         self.write_then(f, false)
     }
 
+    /// The read-write store, opened on first use. With `backup`, the database is
+    /// copied first if this session has not done so yet; a layout save passes
+    /// `false` and leaves the backup to the first ledger write.
+    fn writer_store<'a>(
+        &self,
+        guard: &'a mut Option<Rw>,
+        backup_now: bool,
+    ) -> Result<&'a mut Store, String> {
+        if guard.is_none() {
+            if backup_now {
+                backup(&self.path).map_err(|e| format!("backup failed: {e}"))?;
+            }
+            *guard = Some(Rw {
+                store: Store::open(&self.path).map_err(|e| e.to_string())?,
+                backed_up: backup_now,
+            });
+        }
+        let rw = guard.as_mut().ok_or_else(|| NO_DATA.to_owned())?;
+        if backup_now && !rw.backed_up {
+            backup(&self.path).map_err(|e| format!("backup failed: {e}"))?;
+            rw.backed_up = true;
+        }
+        Ok(&mut rw.store)
+    }
+
+    /// Store the saved UI layout: no snapshot, the cached one stays, and no
+    /// backup (the layout is not ledger data).
+    pub fn save_ui_layout(
+        &self,
+        layout: finance_types::ui::UiLayout,
+    ) -> Result<finance_types::ui::UiLayout, String> {
+        self.write_with(false, |w| {
+            crate::ui_layout::save(w, &layout)?;
+            Ok(layout)
+        })
+    }
+
+    pub fn ui_layout(&self) -> Result<finance_types::ui::UiLayout, String> {
+        self.read_store(crate::ui_layout::load)
+    }
+
     /// A write that needs no snapshot and leaves the cached one in place;
     /// the caller refreshes when its work is done.
     pub(crate) fn write_raw<T>(
         &self,
         f: impl FnOnce(&Writer<'_>) -> crate::Result<T>,
     ) -> Result<T, String> {
+        self.write_with(true, f)
+    }
+
+    fn write_with<T>(
+        &self,
+        backup_now: bool,
+        f: impl FnOnce(&Writer<'_>) -> crate::Result<T>,
+    ) -> Result<T, String> {
+        if !self.path.exists() {
+            return Err(NO_DATA.to_owned());
+        }
         let mut guard = self
             .writer
             .lock()
             .map_err(|_| "store-poisoned".to_owned())?;
-        if guard.is_none() {
-            if !self.path.exists() {
-                return Err(NO_DATA.to_owned());
-            }
-            backup(&self.path).map_err(|e| format!("backup failed: {e}"))?;
-            *guard = Some(Store::open(&self.path).map_err(|e| e.to_string())?);
-        }
-        let store = guard.as_mut().ok_or_else(|| NO_DATA.to_owned())?;
+        let store = self.writer_store(&mut guard, backup_now)?;
         (|| {
             let writer = Writer {
                 // IMMEDIATE: take the write lock up front, so a read-then-write never
@@ -311,10 +370,7 @@ impl Service {
             .writer
             .lock()
             .map_err(|_| "store-poisoned".to_owned())?;
-        if guard.is_none() {
-            backup(&self.path).map_err(|e| format!("backup failed: {e}"))?;
-            *guard = Some(Store::open(&self.path).map_err(|e| e.to_string())?);
-        }
+        let store = self.writer_store(&mut guard, true)?;
         // Taken under the writer lock, so it includes every write this
         // process committed before (a bank import this write waited for).
         let snapshot = {
@@ -325,7 +381,6 @@ impl Service {
             })?;
             snap.ok_or_else(|| NO_DATA.to_owned())?
         };
-        let store = guard.as_mut().ok_or_else(|| NO_DATA.to_owned())?;
         let before = store.connection().total_changes();
         let result = (|| {
             let writer = Writer {
@@ -369,11 +424,7 @@ impl Service {
             .writer
             .lock()
             .map_err(|_| "store-poisoned".to_owned())?;
-        if guard.is_none() {
-            backup(&self.path).map_err(|e| format!("backup failed: {e}"))?;
-            *guard = Some(Store::open(&self.path).map_err(|e| e.to_string())?);
-        }
-        let store = guard.as_mut().ok_or_else(|| NO_DATA.to_owned())?;
+        let store = self.writer_store(&mut guard, true)?;
         f(store.connection_mut()).map_err(|e| e.to_string())
     }
 
