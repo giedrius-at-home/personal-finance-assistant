@@ -342,6 +342,9 @@ pub const ERROR: &str =
 /// A fieldset without its browser frame.
 pub const FIELDSET: &str = "m-0 min-w-0 border-0 p-0";
 
+/// A label and its value on the far side.
+pub const SPLIT_ROW: &str = "flex justify-between gap-4";
+
 /// Three columns of settings.
 pub const SETTINGS_GRID: &str = "my-5 grid gap-5 md:grid-cols-3";
 

@@ -14,6 +14,7 @@ use leptos::ev;
 use leptos::prelude::*;
 
 use crate::api::{Loaded, NoArgs, load};
+use crate::ds::patterns::TAB_SCROLL;
 use crate::ds::{
     Eyebrow, Heading, Icon, Lucide, SegmentedControl, Size, TABS_LIST, TABS_TRIGGER, Variant,
     button_class, cn,
@@ -314,7 +315,7 @@ fn Tabs() -> impl IntoView {
 fn SpendingTabs() -> impl IntoView {
     let app = state();
     view! {
-        <div class="mb-4 max-w-full overflow-x-auto sm:mb-5">
+        <div class=TAB_SCROLL>
             <SegmentedControl
                 label="Spending workspace"
                 class="w-max"
@@ -339,7 +340,7 @@ fn SpendingTabs() -> impl IntoView {
 fn ManageTabs() -> impl IntoView {
     let app = state();
     view! {
-        <div class="mb-4 max-w-full overflow-x-auto sm:mb-5">
+        <div class=TAB_SCROLL>
             <SegmentedControl
                 label="Manage finance"
                 class="w-max"

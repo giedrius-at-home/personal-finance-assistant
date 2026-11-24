@@ -14,8 +14,8 @@ use serde::Serialize;
 use super::{Choice, TextInput, clean_error, options, report_categories};
 use crate::api::invoke;
 use crate::ds::patterns::{
-    Disclosure, FILTER_ROW, GROW_40, GROW_56, MUTED, SECTION_HEADING, SUBLINE, TRAILING, WARN,
-    WRAP_TEXT,
+    Disclosure, FILTER_ROW, GROW_40, GROW_56, MUTED, SECTION_HEADING, SPLIT_ROW, SUBLINE, TRAILING,
+    WARN, WRAP_TEXT,
 };
 use crate::ds::{
     CardTone, Eyebrow, FactsRow, Field, Heading, Help, Money, Size, Variant, button_class,
@@ -467,7 +467,7 @@ fn PersonalPayment(
     view! {
         <Disclosure
             class="border-t border-line py-3"
-            summary_class="flex justify-between gap-4"
+            summary_class=SPLIT_ROW
             summary=view! {
                 <span class=WRAP_TEXT>
                     <strong class="font-semibold">{r.description.clone()}</strong>

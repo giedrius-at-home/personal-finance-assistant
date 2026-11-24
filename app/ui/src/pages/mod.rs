@@ -19,6 +19,7 @@ use leptos::prelude::*;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 
+use crate::ds::patterns::{MUTED, SKELETON_CARD, STACK, STACK_XS, TITLE, TWO_COLUMNS};
 use crate::ds::{Card, CardTone, Skeleton};
 use crate::state;
 
@@ -31,11 +32,11 @@ pub fn with_report<V: IntoView + 'static>(
     move || {
         app.report.data.with(|data| match data {
             None => view! {
-                <div class="grid gap-4">
+                <div class=STACK>
                     <Skeleton class="h-11 w-full max-w-md rounded-pill" />
-                    <div class="grid gap-4 md:grid-cols-2">
-                        <Skeleton class="h-56 rounded-xl" />
-                        <Skeleton class="h-56 rounded-xl" />
+                    <div class=TWO_COLUMNS>
+                        <Skeleton class=SKELETON_CARD />
+                        <Skeleton class=SKELETON_CARD />
                     </div>
                 </div>
             }
@@ -58,9 +59,9 @@ pub fn Problem(#[prop(into)] error: String) -> impl IntoView {
         ("Could not load this view", error)
     };
     view! {
-        <Card tone=CardTone::Muted class="grid gap-1">
-            <h2 class="text-base font-semibold">{title}</h2>
-            <p role="alert" class="text-sm text-fg-muted">{detail}</p>
+        <Card tone=CardTone::Muted class=STACK_XS>
+            <h2 class=TITLE>{title}</h2>
+            <p role="alert" class=MUTED>{detail}</p>
         </Card>
     }
 }

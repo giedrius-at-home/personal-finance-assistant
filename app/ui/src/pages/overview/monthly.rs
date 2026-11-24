@@ -19,7 +19,7 @@ use crate::{SpendingSection, Tab, state};
 use super::{month_name, remaining_days};
 use crate::ds::patterns::{
     CARD_HEADER, DOT, EMPTY_COMPACT, FIGURE, FIGURE_LG, ITEM_TITLE, LEGEND_ITEM, NUM_HINT, RULED,
-    SIDE_FACTS, SMALL, TITLE,
+    SIDE_FACTS, SMALL, SPLIT_ROW, TITLE,
 };
 
 #[component]
@@ -228,7 +228,7 @@ fn BankBalanceBreakdown(allocation: CurrencyAllocation) -> impl IntoView {
                                     .into_iter()
                                     .map(|(label, value)| {
                                         view! {
-                                            <div class="flex justify-between gap-4">
+                                            <div class=SPLIT_ROW>
                                                 <dt>{label}</dt>
                                                 <dd class=FIGURE>{value}</dd>
                                             </div>
