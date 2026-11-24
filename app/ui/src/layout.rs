@@ -1,16 +1,19 @@
 //! Panel registry types and the pure logic that turns a saved layout into the
 //! panels a page shows.
 
-// Nothing renders from here yet; Task 5 removes this allow.
-#![allow(dead_code)]
-
 use finance_types::report::Dashboard;
-use finance_types::ui::{PageLayout, PanelItem};
-use leptos::prelude::AnyView;
+use finance_types::ui::{PageLayout, PanelItem, UiLayout};
+use leptos::prelude::*;
+use leptos::task::spawn_local;
+use serde::Serialize;
+
+use crate::api::{self, NoArgs};
+use crate::ds::{Button, PanelFrame, PanelList, Size, Variant};
 
 /// State of a panel on its home page on first run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Initial {
+    #[allow(dead_code)] // the first page's PANELS use it in Task 6
     Open,
     Folded,
     Absent,
@@ -22,6 +25,7 @@ pub struct PanelDef {
     /// Home page id.
     pub page: &'static str,
     /// May be added to other tabs.
+    #[allow(dead_code)] // read once panels can move between tabs (later task)
     pub movable: bool,
     pub initial: Initial,
     pub half: bool,
@@ -92,6 +96,186 @@ impl SaveQueue {
     pub fn finished(&mut self) -> bool {
         self.in_flight = std::mem::take(&mut self.dirty);
         self.in_flight
+    }
+}
+
+/// Every page's panels, in registry order.
+pub fn registry() -> impl Iterator<Item = &'static PanelDef> {
+    const NONE: &[PanelDef] = &[];
+    NONE.iter()
+}
+
+fn home_defs(page: &str) -> Vec<&'static PanelDef> {
+    registry().filter(|d| d.page == page).collect()
+}
+
+/// Write the page's full resolved list, changed by `f`, into `layout`.
+fn write_page(
+    layout: &mut UiLayout,
+    defs: &[&PanelDef],
+    (tab, tab_name, page): (&str, &str, &str),
+    f: impl FnMut(&mut PanelItem),
+) {
+    let mut items = resolve(defs, layout.page(page));
+    items.iter_mut().for_each(f);
+    layout.page_mut(tab, tab_name, page).items = items;
+}
+
+/// `layout` with one panel's fold state flipped.
+fn toggled(layout: &mut UiLayout, defs: &[&PanelDef], at: (&str, &str, &str), panel: &str) {
+    write_page(layout, defs, at, |i| {
+        if i.panel == panel {
+            i.folded = !i.folded;
+        }
+    });
+}
+
+/// `layout` with every panel on the page folded (or opened).
+fn all_set(layout: &mut UiLayout, defs: &[&PanelDef], at: (&str, &str, &str), folded: bool) {
+    write_page(layout, defs, at, |i| i.folded = folded);
+}
+
+#[derive(Serialize)]
+struct SaveArgs {
+    layout: UiLayout,
+}
+
+/// The saved layout, shared by every page; changes are saved in the background.
+#[derive(Clone, Copy)]
+pub struct LayoutState {
+    layout: RwSignal<UiLayout>,
+    queue: StoredValue<SaveQueue>,
+    /// Changes wait for the saved layout, so an early click cannot save over it.
+    ready: StoredValue<bool>,
+}
+
+impl LayoutState {
+    /// Reads `ui_layout` once; the default until it arrives or when it fails.
+    pub fn load() -> Self {
+        let state = Self {
+            layout: RwSignal::new(UiLayout::default()),
+            queue: StoredValue::new(SaveQueue::default()),
+            ready: StoredValue::new(false),
+        };
+        spawn_local(async move {
+            if let Ok(layout) = api::invoke::<UiLayout>("ui_layout", &NoArgs {}).await {
+                state.layout.set(layout);
+            }
+            state.ready.set_value(true);
+        });
+        state
+    }
+
+    pub fn toggle(
+        &self,
+        tab: &'static str,
+        tab_name: &'static str,
+        page: &'static str,
+        panel: &str,
+    ) {
+        self.change(|l| toggled(l, &home_defs(page), (tab, tab_name, page), panel));
+    }
+
+    pub fn set_all(
+        &self,
+        tab: &'static str,
+        tab_name: &'static str,
+        page: &'static str,
+        folded: bool,
+    ) {
+        self.change(|l| all_set(l, &home_defs(page), (tab, tab_name, page), folded));
+    }
+
+    fn change(&self, f: impl FnOnce(&mut UiLayout)) {
+        if !self.ready.get_value() {
+            return;
+        }
+        self.layout.update(f);
+        if self
+            .queue
+            .try_update_value(SaveQueue::changed)
+            .unwrap_or(false)
+        {
+            self.save();
+        }
+    }
+
+    /// A failed save is ignored on screen; the state stays as clicked.
+    fn save(self) {
+        spawn_local(async move {
+            loop {
+                let layout = self.layout.get_untracked();
+                let _ = api::invoke::<UiLayout>("save_ui_layout", &SaveArgs { layout }).await;
+                if !self
+                    .queue
+                    .try_update_value(SaveQueue::finished)
+                    .unwrap_or(false)
+                {
+                    break;
+                }
+            }
+        });
+    }
+}
+
+// No page renders `PageView` until Task 6, which moves it out of this module.
+// The allow sits on a module because the props struct `#[component]` generates
+// takes no attributes from the function.
+#[allow(dead_code)]
+pub mod page_view {
+    use super::*;
+
+    /// A page's panels, as its saved layout says, with "Fold all / Open all".
+    #[component]
+    pub fn PageView(
+        tab: &'static str,
+        tab_name: &'static str,
+        page: &'static str,
+    ) -> impl IntoView {
+        let state = expect_context::<LayoutState>();
+        let report = crate::state().report;
+        let items = Memo::new(move |_| {
+            state
+                .layout
+                .with(|l| resolve(&home_defs(page), l.page(page)))
+        });
+        let all_folded = move || items.with(|v| v.iter().all(|i| i.folded));
+        let panel = move |item: PanelItem| {
+            let def = registry().find(|d| d.id == item.panel)?;
+            let id = def.id;
+            let folded =
+                Signal::derive(move || items.with(|v| v.iter().any(|i| i.panel == id && i.folded)));
+            let summary = Signal::derive(move || {
+                let f = def.summary?;
+                report.data.with(|d| d.as_ref()?.as_ref().ok().and_then(f))
+            });
+            let render = def.render;
+            Some(view! {
+                <PanelFrame
+                    title=def.title
+                    summary=summary
+                    folded=folded
+                    on_toggle=Callback::new(move |()| state.toggle(tab, tab_name, page, id))
+                    half=item.half
+                >
+                    {render()}
+                </PanelFrame>
+            })
+        };
+        view! {
+            <div class="flex justify-end">
+                <Button
+                    variant=Variant::Ghost
+                    size=Size::Sm
+                    on_click=Callback::new(move |_| state.set_all(tab, tab_name, page, !all_folded()))
+                >
+                    {move || if all_folded() { "Open all" } else { "Fold all" }}
+                </Button>
+            </div>
+            <PanelList>
+                <For each=move || items.get() key=|i| (i.panel.clone(), i.half) children=panel />
+            </PanelList>
+        }
     }
 }
 
@@ -201,15 +385,14 @@ mod tests {
     fn a_new_panel_lands_folded_after_its_registry_neighbour() {
         let d = [
             def("a", Initial::Open, false),
-            def("n", Initial::Open, false),
+            def("n", Initial::Open, true),
             def("b", Initial::Open, false),
         ];
         let refs: Vec<&PanelDef> = d.iter().collect();
         let saved = page(vec![it("b", false), it("a", false)], &[]);
-        assert_eq!(
-            ids(&resolve(&refs, Some(&saved))),
-            [("b", false), ("a", false), ("n", true)]
-        );
+        let got = resolve(&refs, Some(&saved));
+        assert_eq!(ids(&got), [("b", false), ("a", false), ("n", true)]);
+        assert!(got[2].half);
     }
 
     #[test]
@@ -224,6 +407,55 @@ mod tests {
             ids(&resolve(&refs, Some(&saved))),
             [("n", true), ("a", false)]
         );
+    }
+
+    #[test]
+    fn a_saved_absent_panel_is_kept() {
+        let d = [
+            def("a", Initial::Open, false),
+            def("c", Initial::Absent, false),
+        ];
+        let refs: Vec<&PanelDef> = d.iter().collect();
+        let saved = page(vec![it("c", false), it("a", false)], &[]);
+        assert_eq!(resolve(&refs, Some(&saved)), saved.items);
+    }
+
+    const AT: (&str, &str, &str) = ("t", "T", "p");
+
+    #[test]
+    fn a_toggle_writes_the_full_resolved_page_and_twice_restores_it() {
+        let d = abc();
+        let refs: Vec<&PanelDef> = d.iter().collect();
+        let mut l = UiLayout::default();
+        toggled(&mut l, &refs, AT, "a");
+        assert_eq!(ids(&l.page("p").unwrap().items), [("a", true), ("b", true)]);
+        toggled(&mut l, &refs, AT, "a");
+        assert_eq!(l.page("p").unwrap().items, resolve(&refs, None));
+    }
+
+    #[test]
+    fn set_all_folds_and_opens_every_item() {
+        let d = abc();
+        let refs: Vec<&PanelDef> = d.iter().collect();
+        let mut l = UiLayout::default();
+        all_set(&mut l, &refs, AT, true);
+        assert_eq!(ids(&l.page("p").unwrap().items), [("a", true), ("b", true)]);
+        all_set(&mut l, &refs, AT, false);
+        assert_eq!(
+            ids(&l.page("p").unwrap().items),
+            [("a", false), ("b", false)]
+        );
+    }
+
+    #[test]
+    fn a_toggle_leaves_other_pages_alone() {
+        let d = abc();
+        let refs: Vec<&PanelDef> = d.iter().collect();
+        let mut l = UiLayout::default();
+        l.page_mut("t", "T", "q").items = vec![it("x", true)];
+        let other = l.page("q").cloned();
+        toggled(&mut l, &refs, AT, "a");
+        assert_eq!(l.page("q").cloned(), other);
     }
 
     #[test]
