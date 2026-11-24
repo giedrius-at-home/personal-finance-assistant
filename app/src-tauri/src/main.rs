@@ -21,6 +21,7 @@ use finance_types::report::events::EventsView;
 use finance_types::report::review::{TransactionSearchQuery, TransactionSearchResult};
 use finance_types::report::wishes::WishesView;
 use finance_types::report::{Dashboard, ReviewReport};
+use finance_types::ui::UiLayout;
 use finance_types::{DataStatus, UpdateStatus};
 use rust_decimal::Decimal;
 use tauri::{AppHandle, Manager, State};
@@ -249,6 +250,16 @@ fn save_wish_settings(
     settings: WishSettings,
 ) -> Result<WishSettings, String> {
     traced("save_wish_settings", service.save_wish_settings(settings))
+}
+
+#[tauri::command(async)]
+fn ui_layout(service: State<'_, Service>) -> Result<UiLayout, String> {
+    traced("ui_layout", service.ui_layout())
+}
+
+#[tauri::command(async)]
+fn save_ui_layout(service: State<'_, Service>, layout: UiLayout) -> Result<UiLayout, String> {
+    traced("save_ui_layout", service.save_ui_layout(layout))
 }
 
 #[tauri::command(async)]
@@ -567,6 +578,8 @@ fn main() {
             mark_wish_bought,
             start_wish,
             save_wish_settings,
+            ui_layout,
+            save_ui_layout,
             save_account_role,
             unclassified_accounts,
             manage_workspace,
