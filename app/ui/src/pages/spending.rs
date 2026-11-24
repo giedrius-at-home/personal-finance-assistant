@@ -73,7 +73,8 @@ pub const PANELS: &[PanelDef] = &[
         half: false,
         render: monthly,
         summary: None,
-        shown: Some(|| report_is(|r| !r.monthly_spending.currencies.is_empty())),
+        // Shown while loading or failed, so `with_report` draws the skeleton or the problem.
+        shown: Some(|| !report_is(|r| r.monthly_spending.currencies.is_empty())),
     },
     PanelDef {
         id: "spending.history.compare",
