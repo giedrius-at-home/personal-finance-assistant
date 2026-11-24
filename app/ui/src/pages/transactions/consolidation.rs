@@ -9,7 +9,7 @@ use serde::Serialize;
 
 use super::{Choice, clean_error, options};
 use crate::api::invoke;
-use crate::ds::patterns::{Disclosure, DisclosureKind, GROW_48, HINT, INLINE_FORM, MUTED};
+use crate::ds::patterns::{Disclosure, DisclosureKind, FORM_FIELD, HINT, INLINE_FORM, MUTED};
 use crate::ds::{Field, Help, Size, Variant, button_class, cn};
 use crate::state;
 
@@ -137,7 +137,7 @@ pub fn CategoryConsolidation(catalog: CategoryCatalog) -> impl IntoView {
                         .map(|(label, value, id)| {
                             let choices = choices.clone();
                             view! {
-                                <Field label=label id=id class=GROW_48>
+                                <Field label=label id=id class=FORM_FIELD>
                                     <Choice
                                         id=id
                                         value=value

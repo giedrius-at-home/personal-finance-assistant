@@ -12,8 +12,10 @@ use rust_decimal::Decimal;
 
 use super::Wizard;
 use super::transfer::{Hop, LegStatus, legs_of};
-use super::ui::{ACTIONS, CALLOUT, Choice, FOOTNOTE, LIST, SMALL, TextLink, WARN, money, options};
-use crate::ds::patterns::{GROW_48, STACK_MD, STEP_TITLE, TWO_COLUMNS};
+use super::ui::{
+    ACTIONS, CALLOUT, Choice, ERROR_LINE, FOOTNOTE, LIST, SMALL, TextLink, money, options,
+};
+use crate::ds::patterns::{CARD_GRID, SECTION_BODY, STEP_TEXT, STEP_TITLE};
 use crate::ds::{
     Button, Checkbox, Size, TABLE, TABLE_CONTAINER, TCELL, TH, TROW, Variant, card_class, cn,
 };
@@ -104,7 +106,7 @@ pub fn UnclassifiedAccounts(data: Unclassified, goals: Vec<(String, String)>) ->
             </div>
         }
     });
-    view! { <div class=STACK_MD>{accounts}{suspected}</div> }.into_any()
+    view! { <div class=SECTION_BODY>{accounts}{suspected}</div> }.into_any()
 }
 
 /// Display names for budget groups and planned payments the review only
@@ -256,7 +258,7 @@ pub fn ReviewStep(
                 <article class=cn([card_class(Default::default()), "grid min-w-0 gap-3 p-3 sm:p-5"])>
                     <h3 class=cn([STEP_TITLE, "text-base"])>{title}</h3>
                     {(skipped > 0).then(|| view! {
-                        <p class=WARN role="note">
+                        <p class=ERROR_LINE role="note">
                             {format!(
                                 "{skipped} transaction{} in another currency {} left out.",
                                 if skipped == 1 { "" } else { "s" },
@@ -295,7 +297,7 @@ pub fn ReviewStep(
         })
         .collect_view();
     view! {
-        <div class=TWO_COLUMNS>
+        <div class=CARD_GRID>
             {unassigned}
             {cards}
             {empty.then(|| view! { <p class=cn([FOOTNOTE, "md:col-span-2"])>"No spending accounts to review."</p> })}
@@ -481,7 +483,7 @@ pub fn AllocationList(
                                     disabled=true
                                     label=if leg_done { "Hop done" } else { "Hop not found yet" }
                                 />
-                                <span class=cn([GROW_48, if leg_done { "text-fg-muted" } else { "" }])>{text}</span>
+                                <span class=cn([STEP_TEXT, if leg_done { "text-fg-muted" } else { "" }])>{text}</span>
                                 <LegStatus line=line.get_value() leg=leg hop=Hop::Index(index as u32) names=names actions=actions />
                             </li>
                         }
@@ -499,7 +501,7 @@ pub fn AllocationList(
                             label=if done { "Transfer found" } else { "Transfer not found yet" }
                         />
                     })}
-                    <span class=cn([GROW_48, if done { "text-fg-muted" } else { "" }])>{text}</span>
+                    <span class=cn([STEP_TEXT, if done { "text-fg-muted" } else { "" }])>{text}</span>
                     {direct}
                     {routed}
                 </li>

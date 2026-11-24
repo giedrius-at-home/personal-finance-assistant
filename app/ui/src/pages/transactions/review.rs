@@ -22,8 +22,8 @@ use super::research::{MerchantResearch, RequestSuggestions};
 use super::{Choice, clean_error, focus_id, options, region_name};
 use crate::api::{NoArgs, invoke, load};
 use crate::ds::patterns::{
-    BOARD_TITLE, CHIPS, Disclosure, HINT, INSET, ITEM_HEADING, MUTED, PAIR, QUEUE_TITLE, STACK,
-    STACK_SM, STRONG_SM, WARNING_TEXT,
+    BATCH_TITLE, BUTTON_GROUP, CHIPS, Disclosure, HINT, INSET, ITEM_HEADING, ITEM_SUMMARY, MUTED,
+    QUEUE_TITLE, STACK, SUGGESTION_BADGE, WARNING_LINE,
 };
 use crate::ds::{
     Badge, CONTROL, CardTone, EmptyState, Eyebrow, FactsRow, Field, Heading, Money, Size, Skeleton,
@@ -855,7 +855,7 @@ pub fn OwnerReview() -> impl IntoView {
         view! {
             <div class=FOCUS_NAV>
                 <span>{format!("{} of {len} · {label}", index + 1)}</span>
-                <div class=PAIR>
+                <div class=BUTTON_GROUP>
                     <button
                         type="button"
                         class=button_class(Variant::Secondary, Size::Sm)
@@ -966,7 +966,7 @@ pub fn OwnerReview() -> impl IntoView {
                     .into_any()
                 }
                 ("done", proposal) => view! {
-                    <div class=STACK_SM>
+                    <div class=ITEM_SUMMARY>
                         <h3 class=ITEM_HEADING>{description}</h3>
                         <FactsRow rows=vec![("Completed".to_owned(), entry.entry.resolution.clone().unwrap_or_default())] />
                         {proposal.map(|p| view! { <TransactionDetails item=p /> })}
@@ -978,7 +978,7 @@ pub fn OwnerReview() -> impl IntoView {
                 }
                 .into_any(),
                 (_, None) => view! {
-                    <div class=STACK_SM>
+                    <div class=ITEM_SUMMARY>
                         <h3 class=ITEM_HEADING>{description}</h3>
                         <p class=MUTED>"Category is being prepared."</p>
                     </div>
@@ -1226,7 +1226,7 @@ fn BatchReview(items: Vec<ReviewItem>, categories: Memo<Vec<String>>) -> impl In
             <div class="flex flex-col items-stretch justify-between gap-3 sm:flex-row sm:items-center">
                 <div>
                     <Eyebrow level=Heading::P>"CURRENT BATCH"</Eyebrow>
-                    <h3 class=BOARD_TITLE>{format!("{count} ready")}</h3>
+                    <h3 class=BATCH_TITLE>{format!("{count} ready")}</h3>
                 </div>
                 <button
                     type="button"
@@ -1525,7 +1525,7 @@ fn ReviewRow(
             <div class="flex flex-wrap items-center gap-2.5 border-b border-line pb-3 text-sm">
                 <Badge tone=Tone::Outline>{original}</Badge>
                 <span aria-hidden="true" class="text-fg-muted">"→"</span>
-                <Badge tone=Tone::Accent class=STRONG_SM><strong>{suggestion}</strong></Badge>
+                <Badge tone=Tone::Accent class=SUGGESTION_BADGE><strong>{suggestion}</strong></Badge>
             </div>
             <FactsRow rows=method_line />
             {(!ranked.is_empty()).then(|| view! {
@@ -1549,7 +1549,7 @@ fn ReviewRow(
                 <div class="mt-3"><MerchantResearch id=i.proposal_id.clone() /></div>
             </Disclosure>
             <Show when=move || details_editing.get()>
-                <p role="status" class=WARNING_TEXT>"Save or discard your detail edits before deciding on the category."</p>
+                <p role="status" class=WARNING_LINE>"Save or discard your detail edits before deciding on the category."</p>
             </Show>
             <div>
                 <div

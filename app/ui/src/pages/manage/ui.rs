@@ -21,7 +21,7 @@ pub const CONTROLS: &str =
     "flex flex-col items-stretch gap-4 sm:flex-row sm:flex-wrap sm:items-end";
 pub const FILE_INPUT: &str = "py-2 file:mr-3 file:border-0 file:bg-transparent file:p-0 file:text-sm file:font-medium file:text-fg";
 pub const DETAILS: &str = "border-t border-line py-4";
-pub const SUMMARY: &str = "cursor-pointer text-sm font-medium";
+pub const SUMMARY: &str = "text-sm font-medium";
 
 /// The site's `date()`: `toLocaleString("en-GB")`, or "Not recorded".
 pub fn local_date(value: Option<&str>) -> String {

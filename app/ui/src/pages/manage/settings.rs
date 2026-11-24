@@ -12,8 +12,9 @@ use serde::Serialize;
 use super::ui::{DETAILS, FIELDSET, Ops, PREVIEW, SUMMARY, frame, load_workspace, local_date};
 use crate::api::{NoArgs, load};
 use crate::ds::patterns::{
-    ACTIONS, CHECK_SLOT, DD, DD_NUM, DL_THREE_SPACED, Disclosure, HINT, MUTED, OPTION_SPACED,
-    SECRET_FORM, SECTION_STACK, SETTINGS_GRID, STACK_XS, STATUS_NOTE, SUBSECTION, SUBSTACK, TITLE,
+    ACTIONS, CHECK_SLOT, DD, DD_NUM, Disclosure, HINT, MUTED, OPTION_SPACED, SECRET_FORM,
+    SECTION_STACK, SETTINGS_GRID, STATUS_LIST, STATUS_NOTE, SUBSECTION, SUBSTACK, TITLE,
+    TITLE_BLOCK,
 };
 use crate::ds::{
     Button, CONTROL, Card, CardTitle, Checkbox, Eyebrow, Field, Heading, Help, Input, Select, Size,
@@ -619,7 +620,7 @@ fn ForecastModel() -> impl IntoView {
         let failed = s.error.is_some();
         let offer = !s.available && s.downloading.is_none();
         view! {
-            <dl class=DL_THREE_SPACED>
+            <dl class=STATUS_LIST>
                 <div>
                     <dt class=HINT>"Model"</dt>
                     <dd class=DD>"TimesFM 3.0"</dd>
@@ -720,7 +721,7 @@ fn Updates() -> impl IntoView {
         let failed = u.error.is_some();
         let (installing, checking) = (u.installing, u.checking);
         view! {
-            <dl class=DL_THREE_SPACED>
+            <dl class=STATUS_LIST>
                 <div>
                     <dt class=HINT>"Installed version"</dt>
                     <dd class=DD_NUM>{u.current_version.clone()}</dd>
@@ -736,7 +737,7 @@ fn Updates() -> impl IntoView {
                 .map(|a| {
                     view! {
                         <div class=cn([PREVIEW, "mt-5 sm:grid-cols-[1fr_auto] sm:items-center"])>
-                            <div class=STACK_XS>
+                            <div class=TITLE_BLOCK>
                                 <strong class="font-semibold">
                                     {format!("Version {} is available", a.version)}
                                     {a.date.map(|d| view! { <span class="font-normal text-fg-muted">{format!(" · {}", format::date(&d))}</span> })}

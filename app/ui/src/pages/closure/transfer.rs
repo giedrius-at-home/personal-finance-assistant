@@ -8,8 +8,8 @@ use leptos::prelude::*;
 use rust_decimal::Decimal;
 
 use super::Wizard;
-use super::ui::{ACTIONS, CALLOUT, FOOTNOTE, SMALL, WARN, money};
-use crate::ds::patterns::STACK_SM;
+use super::ui::{ACTIONS, CALLOUT, ERROR_LINE, FOOTNOTE, SMALL, money};
+use crate::ds::patterns::ROW_LIST;
 use crate::ds::{Button, Checkbox, Size, Variant, cn};
 
 /// A routed line's hop index, or the direct transfer of an unrouted line.
@@ -188,7 +188,7 @@ pub fn LegStatus(
                 <p class=FOOTNOTE>
                     {format!("Bank transfers from {from_name} to {to_name} since the split. Pick the ones that made this move.")}
                 </p>
-                <ul class=STACK_SM>{items}</ul>
+                <ul class=ROW_LIST>{items}</ul>
             }
             .into_any()
         };
@@ -219,7 +219,7 @@ pub fn LegStatus(
     view! {
         <small class=SMALL>{status}</small>
         {short.map(|(moved, required)| view! {
-            <small class=cn([WARN, "basis-full text-xs"])>
+            <small class=cn([ERROR_LINE, "basis-full text-xs"])>
                 {format!(
                     "moved {} of {} — edit the split if this is the real amount",
                     money(moved, &line.currency),

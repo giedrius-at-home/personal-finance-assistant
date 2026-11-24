@@ -7,7 +7,7 @@ use leptos::prelude::*;
 use rust_decimal::Decimal;
 
 use crate::ds::charts::{Donut, Line, LineChart, Series, Slice, fmt, series_color};
-use crate::ds::patterns::{AMOUNT, CHART_EMPTY, FIELD, FIGURE, NAME_ROW, RULED_LOOSE, TRUNCATE};
+use crate::ds::patterns::{AMOUNT, CHART_EMPTY, FIELD, FIGURE, NAME_ROW, TOTALS, TRUNCATE};
 use crate::ds::{
     CardHeader, CardTitle, Eyebrow, Facts, Heading, METRIC_STRIP, Metric, Money, Select, Stat,
     Tone, cn, money,
@@ -248,7 +248,7 @@ fn on_track(budget: &MonthlyBudget, days: usize) -> AnyView {
             {month_end}
         </div>
         <ul class="mt-6 grid list-none gap-3.5 p-0">{bars}</ul>
-        <Facts rows=sums class=RULED_LOOSE />
+        <Facts rows=sums class=TOTALS />
     }
     .into_any()
 }

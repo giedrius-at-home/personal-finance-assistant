@@ -14,10 +14,10 @@ use rust_decimal::Decimal;
 use super::Wizard;
 use super::suggestion::{SuggestionLine, SuggestionPanel, figures};
 use super::ui::{
-    ACTIONS, Choice, FieldBox, GROW, INLINE_FORM, SMALL, TextBox, WARN, decimal_places, field_id,
-    fixed, minor_amount, money, new_id, next_month, options, parse_amount,
+    ACTIONS, Choice, ERROR_LINE, FieldBox, GROW, INLINE_FORM, SMALL, TextBox, decimal_places,
+    field_id, fixed, minor_amount, money, new_id, next_month, options, parse_amount,
 };
-use crate::ds::patterns::{NUM, STACK};
+use crate::ds::patterns::{SPLIT_TOTAL, STACK};
 use crate::ds::{Button, Size, Variant, cn};
 
 /// One line as typed.
@@ -638,7 +638,7 @@ pub fn SplitEditor(
                                     "Enter positive amounts".to_owned()
                                 };
                                 view! {
-                                    <strong class=cn([NUM, if ok { "" } else { "text-negative-fg" }])>{text}</strong>
+                                    <strong class=cn([SPLIT_TOTAL, if ok { "" } else { "text-negative-fg" }])>{text}</strong>
                                 }
                             })}
                         </div>
@@ -880,7 +880,7 @@ fn SplitLine(
                 })>"Remove"</Button>
             </div>
             <Show when=move || is_plan.get()>{plan_form}</Show>
-            {move || error().map(|e| view! { <small class=cn([WARN, "text-xs sm:col-span-3"])>{e}</small> })}
+            {move || error().map(|e| view! { <small class=cn([ERROR_LINE, "text-xs sm:col-span-3"])>{e}</small> })}
         </div>
     }
 }

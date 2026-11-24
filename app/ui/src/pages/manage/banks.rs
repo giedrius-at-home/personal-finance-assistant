@@ -23,7 +23,7 @@ use wasm_bindgen::prelude::*;
 use super::ui::{ERROR, FEEDBACK, FILE_INPUT, Messages, Ops, local_date};
 use crate::api::{NoArgs, invoke, load};
 use crate::ds::patterns::{
-    DD, DL_THREE, Disclosure, FACT_ROW, FILE_FORM, HINT, LIST_STACK, MUTED, ROW_TITLE,
+    DD, DETAILS_LIST, Disclosure, FACT_ROW, FILE_FORM, HINT, LIST_STACK, MUTED, ROW_TITLE,
     SECTION_STACK, SUBLINE, TOOLBAR,
 };
 use crate::ds::{
@@ -416,7 +416,7 @@ fn BankBox(
                 <span class=cn(["text-sm", if attention { "text-warning-fg" } else { "text-accent" }])>{headline}</span>
             </div>
             {note.map(|d| view! { <p class=MUTED>{d}</p> })}
-            <dl class=DL_THREE>
+            <dl class=DETAILS_LIST>
                 {facts
                     .into_iter()
                     .map(|(term, value)| {

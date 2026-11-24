@@ -14,8 +14,8 @@ use serde::Serialize;
 use super::{Choice, TextInput, clean_error, options, report_categories};
 use crate::api::invoke;
 use crate::ds::patterns::{
-    Disclosure, FILTER_ROW, GROW_40, GROW_56, MUTED, SECTION_HEADING, SPLIT_ROW, SUBLINE, TRAILING,
-    WARN, WRAP_TEXT,
+    Disclosure, ERROR_LINE, FILTER_ROW, FORM_FIELD_NARROW, FORM_FIELD_WIDE, MUTED, SECTION_HEADING,
+    SPLIT_ROW, SUBLINE, TRAILING, WRAP_TEXT,
 };
 use crate::ds::{
     CardTone, Eyebrow, FactsRow, Field, Heading, Help, Money, Size, Variant, button_class,
@@ -257,7 +257,7 @@ pub fn PersonalSpending() -> impl IntoView {
                     search.set(query.get_untracked().trim().to_owned());
                 }
             >
-                <Field label="Find a person" id="personal-query" class=GROW_56>
+                <Field label="Find a person" id="personal-query" class=FORM_FIELD_WIDE>
                     <TextInput id="personal-query" kind="search" value=query maxlength=128 placeholder="e.g. Yuri or Nicolas" />
                 </Field>
                 <button type="submit" class=button_class(Variant::Primary, Size::Md)>"Search"</button>
@@ -274,7 +274,7 @@ pub fn PersonalSpending() -> impl IntoView {
             </form>
             {move || {
                 let e = error.get();
-                (!e.is_empty()).then(|| view! { <p role="alert" class=WARN>{e}</p> })
+                (!e.is_empty()).then(|| view! { <p role="alert" class=ERROR_LINE>{e}</p> })
             }}
             {move || {
                 if loading.get() {
@@ -483,7 +483,7 @@ fn PersonalPayment(
             }
         >
             <fieldset disabled=move || busy.get() class="flex min-w-0 flex-wrap items-end gap-3 border-0 px-0 pb-2 pt-4">
-                <Field label="This was" id=format!("{}-role", id.get_value()) class=GROW_56>
+                <Field label="This was" id=format!("{}-role", id.get_value()) class=FORM_FIELD_WIDE>
                     <Choice
                         id=format!("{}-role", id.get_value())
                         value=role
@@ -496,7 +496,7 @@ fn PersonalPayment(
                         on_change=Callback::new(move |v| role.set(v))
                     />
                 </Field>
-                <Field label="For" id=format!("{}-for", id.get_value()) class=GROW_40>
+                <Field label="For" id=format!("{}-for", id.get_value()) class=FORM_FIELD_NARROW>
                     <Choice
                         id=format!("{}-for", id.get_value())
                         disabled=Signal::derive(move || role.get() == "ignore")
@@ -509,7 +509,7 @@ fn PersonalPayment(
                     />
                 </Field>
                 <Show when=move || other.get()>
-                    <Field label="Category" id=category_id.get_value() class=GROW_40>
+                    <Field label="Category" id=category_id.get_value() class=FORM_FIELD_NARROW>
                         <Choice
                             id=category_id.get_value()
                             value=category
@@ -542,7 +542,7 @@ fn PersonalPayment(
             <Help text="Applies to this transaction across spending, budgets and forecasts. Your bank amount stays unchanged." />
             {move || {
                 let e = error.get();
-                (!e.is_empty()).then(|| view! { <p role="alert" class=WARN>{e}</p> })
+                (!e.is_empty()).then(|| view! { <p role="alert" class=ERROR_LINE>{e}</p> })
             }}
         </Disclosure>
     }

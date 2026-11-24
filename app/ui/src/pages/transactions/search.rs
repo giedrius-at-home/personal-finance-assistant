@@ -20,7 +20,8 @@ use super::{
 };
 use crate::api::invoke;
 use crate::ds::patterns::{
-    FILTER_ROW, HEADER_ROW, MUTED, SECTION_HEADING, SMALL, STACK_SM, STACK_XS, TRAILING, WRAP_TEXT,
+    COMPACT_FIELD, FILTER_ROW, HEADER_ROW, MUTED, ROW_LIST, SECTION_HEADING, SMALL, TRAILING,
+    WRAP_TEXT,
 };
 use crate::ds::{
     CardTone, EmptyState, Eyebrow, Field, Heading, Icon, Lucide, METRIC_STRIP, Metric, Money, Size,
@@ -495,7 +496,7 @@ pub fn TransactionSearch() -> impl IntoView {
                 let busy = loading.get();
                 match result.get() {
                     None if busy => view! {
-                        <div class=STACK_SM role="status" aria-label="Loading transactions">
+                        <div class=ROW_LIST role="status" aria-label="Loading transactions">
                             {(0..4).map(|_| view! { <Skeleton class="h-10" /> }).collect_view()}
                         </div>
                     }
@@ -706,7 +707,7 @@ fn CategoryCell(row: SearchRow, categories: Memo<Vec<String>>) -> impl IntoView 
     });
     let label = format!("Category for {}", title(&row));
     view! {
-        <span class=STACK_XS>
+        <span class=COMPACT_FIELD>
             <Choice
                 label=label
                 value=shown

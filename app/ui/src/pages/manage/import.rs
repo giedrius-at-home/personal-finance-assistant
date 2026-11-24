@@ -11,7 +11,7 @@ use wasm_bindgen::prelude::*;
 
 use super::ui::{CONTROLS, FIELDSET, FILE_INPUT, Ops, frame, load_workspace};
 use crate::ds::patterns::{
-    ACTIONS, CHECK_SLOT, MUTED, OPTION, ROW_TITLE, SUBLINE, TITLE, WARNING_TEXT,
+    ACTIONS, CHECK_SLOT, MUTED, OPTION, ROW_TITLE, SUBLINE, TITLE, WARNING_LINE,
 };
 use crate::ds::{
     Button, CONTROL, Card, CardTitle, CardTone, Checkbox, Eyebrow, Field, Heading, Help, Money,
@@ -289,7 +289,7 @@ fn PreviewView(
                 .into_iter()
                 .map(|r| {
                     view! {
-                        <p class=WARNING_TEXT>
+                        <p class=WARNING_LINE>
                             {format!("Line {}: {}", r.line_number, r.reason.replace('_', " "))}
                         </p>
                     }

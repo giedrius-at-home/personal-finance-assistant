@@ -31,9 +31,9 @@ use super::forecast::DailyForecastPanel;
 use super::month_label;
 use super::visuals::{BudgetVisuals, row_color};
 use crate::ds::patterns::{
-    AMOUNT, AMOUNT_STRONG, CARD_TITLE, CHOICE_GRID, Disclosure, FIELD, FIELD_LABEL, FIELDSET,
-    HEADER_ROW, HINT, LEDGER_ROW, PAGE_TITLE, PLAIN_LIST, SELECT_CHEVRON, SELECT_WRAP, STACK_SM,
-    SUBLINE, SUBSECTION, TITLE, WARN,
+    AMOUNT, AMOUNT_STRONG, CARD_TITLE, CHOICE_GRID, Disclosure, ERROR_LINE, FIELD, FIELD_LABEL,
+    FIELDSET, HEADER_ROW, HINT, LEDGER_ROW, PAGE_TITLE, PENDING_CARD, PLAIN_LIST, SELECT_CHEVRON,
+    SELECT_WRAP, SUBLINE, SUBSECTION, TITLE,
 };
 
 #[wasm_bindgen(inline_js = "
@@ -320,7 +320,7 @@ fn panel(report: &Dashboard, selection: &str, s: PanelState) -> AnyView {
         .or_else(|| budgets.first())
     else {
         return view! {
-            <Card class=STACK_SM>
+            <Card class=PENDING_CARD>
                 <h2 class=CARD_TITLE>"Monthly budget"</h2>
                 <span title="Refresh after the finance service is updated."><Badge tone=Tone::Outline>"Unavailable"</Badge></span>
             </Card>
@@ -1106,7 +1106,7 @@ fn editor_form(
                                     </div>
                                 </div>
                                 <Show when=name_taken>
-                                    <p role="alert" class=WARN>"That name is already used this month."</p>
+                                    <p role="alert" class=ERROR_LINE>"That name is already used this month."</p>
                                 </Show>
                                 <span class="text-sm">"Include spending from"</span>
                                 <Help text="Bills stay under Fixed expenses." />

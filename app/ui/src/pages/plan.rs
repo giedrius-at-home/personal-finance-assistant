@@ -24,10 +24,10 @@ use serde::de::IgnoredAny;
 use crate::api::invoke;
 use crate::ds::money_plan::MoneyPlanFields;
 use crate::ds::patterns::{
-    ADD_FORM, BADGE_TIGHT, BOARD_TITLE, CARD_NAME, DATE, Disclosure, DisclosureKind, FEEDBACK_LINE,
-    FIGURE, HINT, INLINE_TOOLS, LIST_STACK, META_LINE, MUTED, NAME_ROW, PAIR, PANEL_TITLE,
-    PAYMENT_ROW, RULED_LOOSE, SELECT_CHEVRON, SELECT_WRAP, STACK, STACK_MD, STACK_SM, TRUNCATE,
-    WARNING_TEXT,
+    ADD_FORM, BADGE_TIGHT, BOARD_SECTION, BOARD_TITLE, BUTTON_GROUP, CARD_NAME, DATE, Disclosure,
+    DisclosureKind, FEEDBACK_LINE, FIGURE, HINT, INLINE_TOOLS, LIST_STACK, META_LINE, MORE_DETAILS,
+    MUTED, NAME_ROW, PANEL_TITLE, PAYMENT_ROW, ROW_LIST, SELECT_CHEVRON, SELECT_WRAP, STACK,
+    TRUNCATE, WARNING_LINE,
 };
 use crate::ds::sync_value;
 use crate::ds::{
@@ -537,7 +537,7 @@ fn page(ui: Ui, report: &Dashboard) -> impl IntoView + use<> {
                     let label = format!("{} earlier", older.len());
                     cards.push(
                         view! {
-                            <Disclosure class=STACK_SM summary_class="px-1 text-xs text-fg-muted" summary=label>
+                            <Disclosure class=ROW_LIST summary_class="px-1 text-xs text-fg-muted" summary=label>
                                 <div class="mt-2 grid gap-2">{older}</div>
                             </Disclosure>
                         }
@@ -597,7 +597,7 @@ fn page(ui: Ui, report: &Dashboard) -> impl IntoView + use<> {
                     max=next_month.clone()
                 />
             </div>
-            <section aria-label="Payments board" class=STACK_MD>
+            <section aria-label="Payments board" class=BOARD_SECTION>
                 <div>
                     <Eyebrow>"PAYMENTS"</Eyebrow>
                     <h2 class=BOARD_TITLE>{active_label.clone()}</h2>
@@ -625,13 +625,13 @@ fn page(ui: Ui, report: &Dashboard) -> impl IntoView + use<> {
                 {create_form(ui, &available, &owners, &accounts, &currencies, &active_month, &active_end, reimbursable)}
                 {feedback(ui, "plan-removed".into())}
             </Card>
-            <section aria-label="Bills" class=STACK_MD>
+            <section aria-label="Bills" class=BOARD_SECTION>
                 <div>
                     <Eyebrow>"EVERY MONTH"</Eyebrow>
                     <h2 class=BOARD_TITLE>"Bills"</h2>
                 </div>
                 {stale.then(|| view! {
-                    <p role="status" class=WARNING_TEXT>"Out of date. Refresh first."</p>
+                    <p role="status" class=WARNING_LINE>"Out of date. Refresh first."</p>
                 })}
                 {feedback(ui, "bill-removed".into())}
                 {no_bills.then(|| view! { <p class=MUTED>"No bills this month."</p> })}
@@ -1319,7 +1319,7 @@ fn plan_popup(ui: Ui, plan: PlannedPaymentView) -> impl IntoView {
                 if removing {
                     let (id, name, target) = (confirm_id.clone(), name.clone(), target.clone());
                     view! {
-                        <span class=PAIR>
+                        <span class=BUTTON_GROUP>
                             <Button
                                 size=Size::Sm
                                 variant=Variant::Danger
@@ -1844,7 +1844,7 @@ fn matching(
         .collect_view();
     let busy_label = busy.clone();
     view! {
-        <Disclosure class=RULED_LOOSE summary_class="text-sm font-semibold" summary=summary>
+        <Disclosure class=MORE_DETAILS summary_class="text-sm font-semibold" summary=summary>
             <form class="grid gap-3 pt-3" on:submit=submit>
                 <Help text="Choose the transaction categories that belong to this subscription. A matching amount in the billing window can then be marked paid automatically. One category can belong to only one subscription." />
                 <div class="grid grid-cols-[repeat(auto-fit,minmax(145px,1fr))] gap-2">{boxes}</div>

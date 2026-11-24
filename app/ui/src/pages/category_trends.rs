@@ -8,7 +8,7 @@ use leptos::prelude::*;
 use rust_decimal::Decimal;
 
 use crate::ds::charts::{LineChart, Series, fmt};
-use crate::ds::patterns::{CHIPS, DOT, META_ROW, META_VALUE, MUTED, STACK, STRONG, TOOLBAR};
+use crate::ds::patterns::{CHIPS, EMPHASIS, META_ROW, META_VALUE, MUTED, STACK, SWATCH, TOOLBAR};
 use crate::ds::{
     Badge, Card, CardHeader, CardTitle, CardTone, EmptyState, Eyebrow, Heading, Money,
     SegmentedControl, Size, Tone, Variant, button_class, cn, money,
@@ -270,7 +270,7 @@ pub fn CategoryTrends(
                             disabled={!active && selected >= COLORS.len()}
                             on:click=move |_| toggle(k2.clone())
                         >
-                            {slot.map(|s| view! { <i aria-hidden="true" class=DOT style:background=COLORS[s]></i> })}
+                            {slot.map(|s| view! { <i aria-hidden="true" class=SWATCH style:background=COLORS[s]></i> })}
                             {name(row)}
                         </button>
                     }
@@ -339,7 +339,7 @@ pub fn CategoryTrends(
                             items=Metric::ALL.iter().map(|x| (x.id().to_owned(), x.label().to_owned())).collect()
                         />
                         <p class=MUTED>
-                            <strong class=STRONG>{m.label()}</strong>
+                            <strong class=EMPHASIS>{m.label()}</strong>
                             {format!(" · {}", m.note(&code))}
                         </p>
                     </div>

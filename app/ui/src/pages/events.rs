@@ -15,9 +15,9 @@ use serde::Serialize;
 
 use crate::api::{NoArgs, load};
 use crate::ds::patterns::{
-    BADGE_TIGHT, BOARD_TITLE, CARD_NAME, CHECK_LABEL_START, DATE, EVENT_FORM_SPACED, FIGURE,
-    LEGEND_ITEM, METER, METER_SCALE, MUTED, NAME_ROW, PAYMENT_ROW, SKELETON_CARD, SKELETON_SHORT,
-    STACK, STACK_MD, STACK_XS, TRUNCATE,
+    BADGE_TIGHT, BOARD_SECTION, BOARD_TITLE, CARD_NAME, CHECK_LABEL_START, DATE, EVENT_FORM_ROW,
+    FIGURE, LEGEND_ITEM, LINE_LIST, METER, METER_BLOCK, METER_SCALE, MUTED, NAME_ROW, PAYMENT_ROW,
+    SKELETON_CARD, SKELETON_HEADER, STACK, TRUNCATE,
 };
 use crate::ds::{
     BOARD_CARD, Badge, BoardColumn, Button, CONTROL, Card, Checkbox, Eyebrow, Facts, FactsRow,
@@ -235,7 +235,7 @@ pub fn Events() -> impl IntoView {
         view_data.data.with(|data| match data {
             None => view! {
                 <div class=STACK>
-                    <Skeleton class=SKELETON_SHORT />
+                    <Skeleton class=SKELETON_HEADER />
                     <Skeleton class=SKELETON_CARD />
                 </div>
             }
@@ -293,7 +293,7 @@ fn page(ui: Ui, own: Own, view: &EventsView, ctx: Context) -> impl IntoView + us
     });
     view! {
         <div class=STACK>
-            <section aria-label="Events board" class=STACK_MD>
+            <section aria-label="Events board" class=BOARD_SECTION>
                 <div>
                     <Eyebrow>"EVENTS"</Eyebrow>
                     <h2 class=BOARD_TITLE>"Planned days and trips"</h2>
@@ -393,7 +393,7 @@ fn event_box(ui: Ui, event: &EventRow, code: &str) -> impl IntoView + use<> {
                 }
             })
             .collect_view();
-        view! { <ul class=STACK_XS>{boxes}</ul> }
+        view! { <ul class=LINE_LIST>{boxes}</ul> }
     });
     let total = m(planned_total(event));
     view! {
@@ -416,7 +416,7 @@ fn event_box(ui: Ui, event: &EventRow, code: &str) -> impl IntoView + use<> {
                 </span>
                 <span class="whitespace-nowrap">{days}</span>
             </span>
-            <span class=STACK_XS>
+            <span class=METER_BLOCK>
                 <span role="img" aria-label=format!("{used} used") class=METER>
                     <i
                         class=cn(["block h-full rounded-pill", if over > Decimal::ZERO { "bg-negative" } else { "bg-accent" }])
@@ -748,7 +748,7 @@ fn event_block(
             </div>
             <Show when=move || is("part")>
                 <form
-                    class=EVENT_FORM_SPACED
+                    class=EVENT_FORM_ROW
                     on:submit=move |ev: SubmitEvent| add_part.with_value(|f| f(ev))
                 >
                     <Field label="Part" id=field_id("part-name")>{text_input(field_id("part-name"), own.part_name, "text")}</Field>
@@ -765,7 +765,7 @@ fn event_block(
             />
             <Show when=move || is("dates")>
                 <form
-                    class=EVENT_FORM_SPACED
+                    class=EVENT_FORM_ROW
                     on:submit=move |ev: SubmitEvent| save_dates.with_value(|f| f(ev))
                 >
                     <Field label="First day" id=field_id("new-starts")>{text_input(field_id("new-starts"), own.new_starts, "date")}</Field>

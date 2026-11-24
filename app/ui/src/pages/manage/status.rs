@@ -9,7 +9,7 @@ use leptos::prelude::*;
 
 use super::ui::{FEEDBACK, Ops, PREVIEW, frame, load_workspace, local_date};
 use crate::api::{NoArgs, load};
-use crate::ds::patterns::{CARD_TITLE, TITLE, TWO_COLUMNS, TWO_COLUMNS_TIGHT};
+use crate::ds::patterns::{CARD_GRID, CARD_TITLE, REVIEW_GRID, TITLE};
 use crate::ds::{
     Badge, Button, Card, CardHeader, CardTitle, Eyebrow, FactsRow, Heading, Help, Icon, Lucide,
     Size, Tone, Variant, cn,
@@ -29,7 +29,7 @@ pub fn Status() -> impl IntoView {
     });
     view! {
         {frame(ops, workspace, retry, move |ws| view! { <Connections ws=ws ops=ops /> }.into_any())}
-        <div class=TWO_COLUMNS_TIGHT>
+        <div class=REVIEW_GRID>
             <CategoryReview review=review />
             {with_report(|report| {
                 let accounts = report.cash_overview.accounts.clone();
@@ -178,7 +178,7 @@ fn Connections(ws: ManageWorkspace, ops: Ops) -> impl IntoView {
                 </button>
                 "."
             </p>
-            <div class=TWO_COLUMNS>
+            <div class=CARD_GRID>
                 {cards
                     .into_iter()
                     .map(|(name, ok, facts)| {

@@ -14,7 +14,8 @@ use serde::Serialize;
 
 use crate::api::invoke;
 use crate::ds::patterns::{
-    ACTIONS, GROW_56, HINT, INLINE_FORM, MUTED, NUM_HINT, SELECT_CHEVRON, SELECT_WRAP, STACK, TITLE,
+    ACTIONS, FORM_FIELD_WIDE, HINT, INLINE_FORM, METRIC_VALUE, MUTED, NUM_HINT, SELECT_CHEVRON,
+    SELECT_WRAP, STACK,
 };
 use crate::ds::{
     Badge, Button, CONTROL, Card, CardHeader, CardTitle, CardTone, Eyebrow, Field, Heading, Icon,
@@ -61,7 +62,7 @@ fn metric(label: String, value: AnyView, note: Option<String>) -> impl IntoView 
     view! {
         <div class="grid gap-1 border-line py-3 sm:border-r sm:px-3 sm:first:pl-0 sm:last:border-r-0 sm:last:pr-0">
             <small class=HINT>{label}</small>
-            <strong class=TITLE>{value}</strong>
+            <strong class=METRIC_VALUE>{value}</strong>
             {note.map(|n| view! { <span class=HINT>{n}</span> })}
         </div>
     }
@@ -309,7 +310,7 @@ fn OwnerCategoryGroups() -> impl IntoView {
                     create();
                 }
             >
-                <Field label="New spending group" id="new-spending-group" class=GROW_56>
+                <Field label="New spending group" id="new-spending-group" class=FORM_FIELD_WIDE>
                     <input
                         id="new-spending-group"
                         class=CONTROL

@@ -18,8 +18,8 @@ use crate::{SpendingSection, Tab, state};
 
 use super::{month_name, remaining_days};
 use crate::ds::patterns::{
-    CARD_HEADER, DOT, EMPTY_COMPACT, FIGURE, FIGURE_LG, ITEM_TITLE, LEGEND_ITEM, NUM_HINT, RULED,
-    SIDE_FACTS, SMALL, SPLIT_ROW, TITLE,
+    ADDENDUM, CARD_HEADER, EMPTY_COMPACT, FIGURE, HEADLINE_FIGURE, ITEM_TITLE, LEGEND_ITEM,
+    NUM_HINT, SIDE_FACTS, SMALL, SPLIT_ROW, SWATCH, TITLE,
 };
 
 #[component]
@@ -315,7 +315,7 @@ fn allocation_legend(parts: &[(String, Decimal, Part)], unit: &Currency) -> AnyV
                     aria-label=format!("{label}: {}", money(value, unit))
                     class="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-sm text-xs text-fg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                 >
-                    <i aria-hidden="true" class=cn([DOT, tone.fill()])></i>
+                    <i aria-hidden="true" class=cn([SWATCH, tone.fill()])></i>
                     <b class="truncate font-normal">{label.clone()}</b>
                     <Money value=value unit=unit.clone() neutral=true class="truncate font-medium text-fg" />
                 </span>
@@ -330,7 +330,7 @@ fn allocation_result(label: &str, value: Decimal, unit: &Currency, negative: boo
         <div class="mt-3 flex items-baseline justify-between gap-4 border-t border-line pt-3 text-sm text-fg-muted">
             <span>{label.to_owned()}</span>
             <strong class=cn([
-                FIGURE_LG,
+                HEADLINE_FIGURE,
                 if negative { "text-over-fg" } else { "text-positive-fg" },
             ])>{money(value, unit)}</strong>
         </div>
@@ -542,7 +542,7 @@ fn CurrencyOverview(
         format!("To wishes in {}", month_name(&a.funded_month)),
         wish_shares(to_wishes, wishes_now, &needs),
     )
-    .map(|rows| view! { <div class=RULED>{rows}</div> });
+    .map(|rows| view! { <div class=ADDENDUM>{rows}</div> });
 
     let limit_of = |group: &str| {
         a.groups
@@ -568,7 +568,7 @@ fn CurrencyOverview(
     let expected_note = (a.current_expected_income > zero).then(|| {
         view! {
             <Facts
-                class=RULED
+                class=ADDENDUM
                 rows=vec![
                     ("Expected extra income".to_owned(), money(a.current_expected_income, &unit)),
                     ("Wiggle room with it".to_owned(), money(a.current_planned_wiggle_room, &unit)),

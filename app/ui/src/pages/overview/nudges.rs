@@ -23,7 +23,7 @@ use crate::pages::with_report;
 use crate::{SpendingSection, state};
 
 use super::{month_name, remaining_days};
-use crate::ds::patterns::{CARD_HEADER, Disclosure, EMPTY_COMPACT, FIGURE_LG};
+use crate::ds::patterns::{CARD_HEADER, Disclosure, EMPTY_COMPACT, HEADLINE_FIGURE};
 
 /// The most a list shows: the heaviest ones.
 const MOST: usize = 6;
@@ -544,7 +544,7 @@ fn tile(n: Nudge) -> impl IntoView {
             <span class="truncate text-eyebrow font-bold uppercase tracking-eyebrow text-fg-muted">{n.label}</span>
             <strong class="text-lg font-semibold leading-tight tracking-tight">{n.action}</strong>
             <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-                <span class=cn([FIGURE_LG, if n.bad { "text-over-fg" } else { "" }])>{n.value}</span>
+                <span class=cn([HEADLINE_FIGURE, if n.bad { "text-over-fg" } else { "" }])>{n.value}</span>
                 {n.chip.map(|(tone, text)| view! { <Badge tone=tone>{text}</Badge> })}
             </div>
             <Facts rows=n.key />

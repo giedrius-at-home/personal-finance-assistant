@@ -11,7 +11,7 @@ use rust_decimal::Decimal;
 use serde::Serialize;
 
 use crate::api::invoke;
-use crate::ds::patterns::{BADGE_TIGHT, DATE, PAYMENT_ROW, TRUNCATE, WARN};
+use crate::ds::patterns::{BADGE_TIGHT, DATE, ERROR_LINE, PAYMENT_ROW, TRUNCATE};
 use crate::ds::{Badge, Button, CONTROL, Popup, Size, Tone, Variant, money};
 use crate::format;
 
@@ -158,7 +158,7 @@ pub fn PaymentPicker(
                 />
                 {move || {
                     let text = error.get();
-                    (!text.is_empty()).then(|| view! { <p role="alert" class=WARN>{text}</p> })
+                    (!text.is_empty()).then(|| view! { <p role="alert" class=ERROR_LINE>{text}</p> })
                 }}
                 <ul class="max-h-[55vh] overflow-y-auto">
                     {move || {

@@ -17,7 +17,7 @@ use crate::ds::patterns::{FIELD, FIELD_LABEL, SELECT_CHEVRON, SELECT_WRAP, STEP_
 use crate::ds::{CONTROL, Icon, Lucide, card_class, cn};
 use crate::format;
 
-pub use crate::ds::patterns::{ACTIONS, ERROR, INLINE_FORM, SMALL, WARN};
+pub use crate::ds::patterns::{ACTIONS, ERROR, ERROR_LINE, INLINE_FORM, SMALL};
 
 pub const FOOTNOTE: &str = "text-sm leading-relaxed text-fg-muted";
 pub const CALLOUT: &str =

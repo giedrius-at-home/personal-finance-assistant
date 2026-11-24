@@ -7,7 +7,8 @@ use rust_decimal::{Decimal, RoundingStrategy};
 
 use crate::ds::charts::{LineChart, Series, fmt, series_color};
 use crate::ds::patterns::{
-    COLUMN, Disclosure, EXPLAINER, MUTED, STACK_LG, STACK_MD, STACK_SM, STRONG_SM, TOOLBAR,
+    ACTION_NAME, CARD_LABEL, COLUMN, Disclosure, EXPLAINER, INSIGHT_CARD, PENDING_CARD,
+    SECTION_BODY, TOOLBAR,
 };
 use crate::ds::{
     Badge, Card, CardDescription, CardHeader, CardTitle, Eyebrow, Facts, Heading, METRIC_STRIP,
@@ -46,7 +47,7 @@ pub fn chart_frame(
         <div class="min-w-0 text-fg">
             <CardHeader>
                 <div class="min-w-0">
-                    <CardTitle class=MUTED>{title}</CardTitle>
+                    <CardTitle class=CARD_LABEL>{title}</CardTitle>
                     {(!description.is_empty()).then(|| view! { <CardDescription>{description}</CardDescription> })}
                 </div>
             </CardHeader>
@@ -69,7 +70,7 @@ pub fn SavingsOutlookPanel(report: Dashboard, currency_code: String) -> impl Int
         .cloned()
     else {
         return view! {
-            <Card class=STACK_SM>
+            <Card class=PENDING_CARD>
                 <CardTitle>"Three-month outlook"</CardTitle>
                 <span title="Prepared in the background. Refresh shortly."><Badge tone=Tone::Outline>"Preparing"</Badge></span>
             </Card>
@@ -270,14 +271,14 @@ pub fn SavingsOutlookPanel(report: Dashboard, currency_code: String) -> impl Int
                             {r.why}
                             <Badge tone=Tone::Warning>{format!("\u{2212}{} points", r.points)}</Badge>
                         </span>
-                        <strong class=STRONG_SM>{r.action}</strong>
+                        <strong class=ACTION_NAME>{r.action}</strong>
                         <Facts rows=fix />
                     </li>
                 }
             })
             .collect_view();
         view! {
-            <section aria-label="How to raise the habit score" class=STACK_MD>
+            <section aria-label="How to raise the habit score" class=SECTION_BODY>
                 <Eyebrow level=Heading::P>"RAISE YOUR SCORE"</Eyebrow>
                 <ul class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{rows}</ul>
             </section>
@@ -349,7 +350,7 @@ pub fn SavingsOutlookPanel(report: Dashboard, currency_code: String) -> impl Int
         </div>
     }
     .into_any();
-    view! { <Card class=STACK_LG>{content}</Card> }.into_any()
+    view! { <Card class=INSIGHT_CARD>{content}</Card> }.into_any()
 }
 
 /// One thing that costs habit-score points, with the way to win them back.

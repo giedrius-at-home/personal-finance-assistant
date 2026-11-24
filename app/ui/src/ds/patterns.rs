@@ -14,15 +14,6 @@ pub const HINT: &str = "text-xs text-fg-muted";
 /// Vertical stack of sections or cards.
 pub const STACK: &str = "grid gap-4";
 
-/// Tight vertical stack: a title over its subline.
-pub const STACK_XS: &str = "grid gap-1";
-
-/// Vertical stack of related blocks.
-pub const STACK_MD: &str = "grid gap-3";
-
-/// Vertical stack of rows or lines.
-pub const STACK_SM: &str = "grid gap-2";
-
 /// A label over its control.
 pub const FIELD: &str = "grid gap-1.5";
 
@@ -35,7 +26,7 @@ pub const ACTIONS: &str = "flex flex-wrap items-center gap-2";
 /// Secondary line under a row's title.
 pub const SUBLINE: &str = "mt-1 block text-xs text-fg-muted";
 
-/// Title of a card or block.
+/// Heading (h2/h3) of a card section or block inside a card.
 pub const TITLE: &str = "text-base font-semibold";
 
 /// A badge inside a dense row.
@@ -44,8 +35,8 @@ pub const BADGE_TIGHT: &str = "px-2 py-0";
 /// Small secondary text on its own line.
 pub const SMALL: &str = "block text-xs text-fg-muted";
 
-/// Two or three controls side by side.
-pub const PAIR: &str = "flex gap-2";
+/// Buttons kept together on one line.
+pub const BUTTON_GROUP: &str = "flex gap-2";
 
 /// A wrapping row of chips or steps.
 pub const CHIPS: &str = "flex flex-wrap gap-2";
@@ -69,7 +60,7 @@ pub const STATUS_NOTE: &str = "mt-5 text-sm text-fg-muted";
 /// A right-aligned secondary figure in a table row.
 pub const NUM_MUTED: &str = "text-right text-fg-muted";
 
-/// Heading of a board or panel, under its eyebrow.
+/// Heading of a board (events, payments, bills, wishes), under its eyebrow.
 pub const BOARD_TITLE: &str = "mt-1 text-lg font-semibold";
 
 /// A name with its amount on the far side.
@@ -81,8 +72,8 @@ pub const LEGEND_ITEM: &str = "flex items-center gap-1.5";
 /// The box of a checkbox beside a multi-line label.
 pub const CHECK_SLOT: &str = "mt-1 flex";
 
-/// An error line.
-pub const WARN: &str = "text-sm text-negative-fg";
+/// An error line (negative colour).
+pub const ERROR_LINE: &str = "text-sm text-negative-fg";
 
 /// Loading placeholder for a card.
 pub const SKELETON_CARD: &str = "h-56 rounded-xl";
@@ -96,20 +87,17 @@ pub const LIST_STACK: &str = "mt-4 grid gap-3";
 /// A figure under its term in a definition list.
 pub const DD_NUM: &str = "mt-1.5 text-sm tabular-nums";
 
-/// A warning line.
-pub const WARNING_TEXT: &str = "text-sm text-warning-fg";
+/// A warning line (warning colour).
+pub const WARNING_LINE: &str = "text-sm text-warning-fg";
 
-/// Title of a list item on its own line.
+/// Bold name of a forecast or balance item, on its own line.
 pub const ITEM_TITLE: &str = "block text-sm font-semibold";
 
 /// Fields and buttons aligned on their baseline, wrapping.
 pub const FILTER_ROW: &str = "flex flex-wrap items-end gap-2";
 
-/// A four-column form row.
-pub const EVENT_FORM: &str = "grid items-end gap-2 sm:grid-cols-4";
-
-/// A small figure.
-pub const NUM: &str = "text-sm tabular-nums";
+/// A one-row form inside a wish (join, plan, buy).
+pub const INLINE_FORM_ROW: &str = "grid items-end gap-2 sm:grid-cols-4";
 
 /// A padded row of a nested list.
 pub const SUB_ROW: &str = "grid gap-2 py-3";
@@ -123,11 +111,8 @@ pub const META_ROW: &str = "flex justify-between gap-3 text-xs text-fg-muted";
 /// The value in a small-print pair.
 pub const META_VALUE: &str = "font-medium text-fg";
 
-/// Two columns from medium width.
-pub const TWO_COLUMNS: &str = "grid gap-4 md:grid-cols-2";
-
-/// A field that grows from 12rem in a wrapping row.
-pub const GROW_48: &str = "min-w-0 flex-1 basis-48";
+/// Cards side by side from medium width.
+pub const CARD_GRID: &str = "grid gap-4 md:grid-cols-2";
 
 /// A bank payment line: date, text, amount, action.
 pub const PAYMENT_ROW: &str = "grid grid-cols-[6.5rem_1fr_auto_auto] items-center gap-x-3 border-t border-line py-1.5 text-sm first:border-t-0";
@@ -141,14 +126,14 @@ pub const SECTION_STACK: &str = "mb-6 grid gap-4";
 /// A value under its term in a definition list.
 pub const DD: &str = "mt-1.5 text-sm";
 
-/// Title of a row on its own line.
+/// Bold name of an account or import row, on its own line.
 pub const ROW_TITLE: &str = "block font-semibold";
 
 /// A block that follows its section at small text size.
 pub const SUBSECTION: &str = "mt-4 text-sm";
 
-/// A field that grows from 14rem in a wrapping row.
-pub const GROW_56: &str = "min-w-0 flex-1 basis-56";
+/// A form field that grows from 14rem in a wrapping row.
+pub const FORM_FIELD_WIDE: &str = "min-w-0 flex-1 basis-56";
 
 /// A list without bullets or padding.
 pub const PLAIN_LIST: &str = "mb-3 mt-2 list-none p-0";
@@ -160,13 +145,10 @@ pub const LEDGER_ROW: &str =
 /// A card's heading with its side content.
 pub const CARD_HEADER: &str = "flex items-start justify-between gap-4";
 
-/// Emphasised small text.
-pub const STRONG_SM: &str = "text-sm font-semibold";
-
 /// A wrapping row of small controls and text.
 pub const INLINE_TOOLS: &str = "flex flex-wrap items-center gap-2 text-sm";
 
-/// Heading of a panel, under its eyebrow.
+/// Heading of a side panel or add form, under its eyebrow.
 pub const PANEL_TITLE: &str = "mt-2 text-lg font-semibold";
 
 /// A muted inset box.
@@ -178,29 +160,29 @@ pub const NESTED: &str = "border-t border-line pl-4 sm:pl-6";
 /// A row divided from the one above.
 pub const DIVIDED: &str = "border-t border-line first:border-t-0";
 
-/// A horizontally scrolling region.
-pub const SCROLL_X: &str = "mt-2 overflow-x-auto";
+/// A wide table that scrolls sideways.
+pub const TABLE_SCROLL: &str = "mt-2 overflow-x-auto";
 
 /// A table that keeps its width and scrolls.
 pub const WIDE_TABLE: &str = "min-w-[44rem] text-sm tabular-nums";
 
-/// A section that fills its column.
-pub const FILL_MIN: &str = "w-full min-w-0";
+/// A screen section that fills its column.
+pub const PAGE_SECTION: &str = "w-full min-w-0";
 
-/// A colour dot.
-pub const DOT: &str = "size-2 rounded-pill";
+/// The colour marker of a series or group.
+pub const SWATCH: &str = "size-2 rounded-pill";
 
-/// Emphasised text in the main colour.
-pub const STRONG: &str = "font-semibold text-fg";
+/// Emphasis inside secondary text.
+pub const EMPHASIS: &str = "font-semibold text-fg";
 
-/// Title of a screen.
+/// Main heading of a screen, under its eyebrow.
 pub const PAGE_TITLE: &str = "mt-1 text-2xl font-semibold tracking-tight";
 
-/// Title of a step.
+/// Heading of a month-closure step.
 pub const STEP_TITLE: &str = "text-lg font-semibold leading-tight";
 
-/// Short loading placeholder.
-pub const SKELETON_SHORT: &str = "h-32 rounded-xl";
+/// Loading placeholder for a screen's header card.
+pub const SKELETON_HEADER: &str = "h-32 rounded-xl";
 
 /// Track of a thin meter.
 pub const METER: &str = "block h-1.5 overflow-hidden rounded-pill bg-soft";
@@ -211,14 +193,14 @@ pub const METER_SCALE: &str = "flex justify-between text-xs text-fg-muted";
 /// A checkbox label in a form's first column.
 pub const CHECK_LABEL_START: &str = "flex items-center gap-2.5 text-sm sm:col-start-1";
 
-/// A four-column form row below other content.
-pub const EVENT_FORM_SPACED: &str = "mt-3 grid items-end gap-2 sm:grid-cols-4";
+/// A one-row form inside an event, below its content.
+pub const EVENT_FORM_ROW: &str = "mt-3 grid items-end gap-2 sm:grid-cols-4";
 
 /// A checkbox with a multi-line label, spaced from what follows.
 pub const OPTION_SPACED: &str = "mb-5 flex items-start gap-2.5 text-sm leading-relaxed";
 
-/// A definition list in three columns.
-pub const DL_THREE: &str = "grid gap-4 sm:grid-cols-3";
+/// Details of a bank or email connection, three to a row.
+pub const DETAILS_LIST: &str = "grid gap-4 sm:grid-cols-3";
 
 /// A wrapping row of facts.
 pub const FACT_ROW: &str = "flex flex-wrap items-end gap-x-6 gap-y-2";
@@ -235,19 +217,19 @@ pub const SUBPANEL: &str = "mt-5 grid gap-3 border-t border-line pt-5";
 /// A secret field with its save button.
 pub const SECRET_FORM: &str = "flex flex-col gap-3 sm:flex-row sm:items-end";
 
-/// A spaced row of buttons that wraps.
-pub const ACTIONS_LOOSE: &str = "flex flex-wrap items-center gap-3";
+/// The action buttons under a block, spaced and wrapping.
+pub const ACTION_BAR: &str = "flex flex-wrap items-center gap-3";
 
-/// A definition list in three columns below a heading.
-pub const DL_THREE_SPACED: &str = "mt-5 grid gap-4 sm:grid-cols-3";
+/// Status facts of a settings card, under its heading.
+pub const STATUS_LIST: &str = "mt-5 grid gap-4 sm:grid-cols-3";
 
 /// A stack below a heading.
 pub const SUBSTACK: &str = "mt-5 grid gap-3";
 
-/// Two close columns from medium width.
-pub const TWO_COLUMNS_TIGHT: &str = "grid gap-3 md:grid-cols-2";
+/// Review and summary cards side by side from medium width.
+pub const REVIEW_GRID: &str = "grid gap-3 md:grid-cols-2";
 
-/// Title of a card.
+/// Heading of a card that has no eyebrow.
 pub const CARD_TITLE: &str = "text-lg font-semibold";
 
 /// A form laid out as one wrapping row.
@@ -275,11 +257,11 @@ pub const COLUMN: &str = "grid content-start gap-6";
 /// A disclosure of explanatory text.
 pub const EXPLAINER: &str = "grid gap-3 text-sm leading-relaxed [&>*]:mt-3";
 
-/// Spaced vertical stack.
-pub const STACK_LG: &str = "grid gap-5";
+/// Body of a forecast or outlook card: its parts spaced apart.
+pub const INSIGHT_CARD: &str = "grid gap-5";
 
-/// A block divided from what is above.
-pub const RULED: &str = "mt-3 border-t border-line pt-3";
+/// Extra lines under a block, divided from it.
+pub const ADDENDUM: &str = "mt-3 border-t border-line pt-3";
 
 /// A compact empty state.
 pub const EMPTY_COMPACT: &str = "mt-3 p-5";
@@ -287,11 +269,8 @@ pub const EMPTY_COMPACT: &str = "mt-3 p-5";
 /// Facts beside a header, from small width.
 pub const SIDE_FACTS: &str = "hidden w-56 sm:grid";
 
-/// A headline figure.
-pub const FIGURE_LG: &str = "text-base font-semibold tabular-nums";
-
-/// A block divided from what is above, spaced.
-pub const RULED_LOOSE: &str = "mt-4 border-t border-line pt-3";
+/// The headline figure of a tile.
+pub const HEADLINE_FIGURE: &str = "text-base font-semibold tabular-nums";
 
 /// A chart that has nothing to draw.
 pub const CHART_EMPTY: &str = "py-10 text-center text-sm text-fg-muted";
@@ -305,7 +284,7 @@ pub const META_LINE: &str = "flex items-center justify-between gap-3 text-xs tex
 /// The receipt or error under a control.
 pub const FEEDBACK_LINE: &str = "mt-2 break-words text-sm";
 
-/// Heading of a large section.
+/// Heading of a full-width list section (transactions, shared spending).
 pub const SECTION_HEADING: &str = "mt-1 text-xl font-semibold";
 
 /// Text that wraps inside a flex row.
@@ -314,22 +293,22 @@ pub const WRAP_TEXT: &str = "min-w-0 break-words";
 /// Content held at a row's far end.
 pub const TRAILING: &str = "shrink-0 text-right";
 
-/// A field that grows from 10rem in a wrapping row.
-pub const GROW_40: &str = "min-w-0 flex-1 basis-40";
+/// A form field that grows from 10rem in a wrapping row.
+pub const FORM_FIELD_NARROW: &str = "min-w-0 flex-1 basis-40";
 
-/// Title of a queue item, cut to one line.
+/// Name of a review-queue entry, cut to one line.
 pub const QUEUE_TITLE: &str = "block min-w-0 truncate text-sm font-semibold";
 
-/// Heading of the item in focus.
+/// Heading of the review item in focus.
 pub const ITEM_HEADING: &str = "break-words text-xl font-semibold";
 
-/// Heading of a panel with a help button.
+/// Heading of a side panel with a help button beside it.
 pub const PANEL_TITLE_HELP: &str = "mt-2 text-lg font-semibold flex items-center gap-2";
 
 /// Head of a tree row: name and amount, wrapping.
 pub const TREE_HEAD: &str = "flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1";
 
-/// Name of a tree row with its icon.
+/// Name of a wish-tree row with its icon.
 pub const TREE_NAME: &str = "flex items-center gap-2 font-semibold";
 
 /// A strip of tabs that scrolls sideways.
@@ -347,6 +326,72 @@ pub const SPLIT_ROW: &str = "flex justify-between gap-4";
 
 /// Three columns of settings.
 pub const SETTINGS_GRID: &str = "my-5 grid gap-5 md:grid-cols-3";
+
+/// A form field that grows from 12rem in a wrapping row.
+pub const FORM_FIELD: &str = "min-w-0 flex-1 basis-48";
+
+/// The text of a checklist step, beside its controls.
+pub const STEP_TEXT: &str = "min-w-0 flex-1 basis-48";
+
+/// A heading with the lines under it.
+pub const TITLE_BLOCK: &str = "grid gap-1";
+
+/// A list of short lines.
+pub const LINE_LIST: &str = "grid gap-1";
+
+/// A thin meter with its scale.
+pub const METER_BLOCK: &str = "grid gap-1";
+
+/// A small label or control stacked in a compact form.
+pub const COMPACT_FIELD: &str = "grid gap-1";
+
+/// A card waiting for its data: its title over a status badge.
+pub const PENDING_CARD: &str = "grid gap-2";
+
+/// A finished review item: heading over its facts.
+pub const ITEM_SUMMARY: &str = "grid gap-2";
+
+/// A list of rows or cards.
+pub const ROW_LIST: &str = "grid gap-2";
+
+/// A board section: header over its columns.
+pub const BOARD_SECTION: &str = "grid gap-3";
+
+/// The blocks of a section or step.
+pub const SECTION_BODY: &str = "grid gap-3";
+
+/// The change figure in a table row.
+pub const DELTA: &str = "text-sm tabular-nums";
+
+/// The disclosure of what drives a figure.
+pub const DRIVER_DETAILS: &str = "text-sm tabular-nums";
+
+/// The running total of a split.
+pub const SPLIT_TOTAL: &str = "text-sm tabular-nums";
+
+/// Title of a before/after impact card.
+pub const IMPACT_TITLE: &str = "text-sm font-semibold";
+
+/// A badge carrying a suggested name.
+pub const SUGGESTION_BADGE: &str = "text-sm font-semibold";
+
+/// The name of a suggested action.
+pub const ACTION_NAME: &str = "text-sm font-semibold";
+
+/// A disclosure of extra details at the end of a card.
+pub const MORE_DETAILS: &str = "mt-4 border-t border-line pt-3";
+
+/// Totals under a chart, divided from it.
+pub const TOTALS: &str = "mt-4 border-t border-line pt-3";
+
+/// A card title that labels the figure under it.
+pub const CARD_LABEL: &str = "text-sm text-fg-muted";
+
+/// Heading of a batch of review items, under its eyebrow.
+pub const BATCH_TITLE: &str = "mt-1 text-lg font-semibold";
+
+/// The value of a metric tile.
+pub const METRIC_VALUE: &str = "text-base font-semibold";
 
 /// The three looks of a disclosure.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

@@ -5,7 +5,7 @@ use finance_types::report::trends::CurrencyTrends;
 use leptos::prelude::*;
 
 use crate::ds::charts::ProgressBar;
-use crate::ds::patterns::{Disclosure, HINT, LEGEND_ITEM, STACK_XS, STRONG, TWO_COLUMNS_TIGHT};
+use crate::ds::patterns::{Disclosure, EMPHASIS, HINT, LEGEND_ITEM, REVIEW_GRID, TITLE_BLOCK};
 use crate::ds::{
     Badge, Card, Eyebrow, Facts, Heading, Help, Icon, Lucide, Money, Size, Switch, Tone, Variant,
     button_class, money,
@@ -80,7 +80,7 @@ fn SpendingAnalysis(trend: CurrencyTrends, variable_only: bool) -> impl IntoView
                 <Disclosure
                     summary_class="flex items-center justify-between gap-4 px-4 py-3.5 [&::-webkit-details-marker]:hidden"
                     summary=view! {
-                        <div class=STACK_XS>
+                        <div class=TITLE_BLOCK>
                             <Eyebrow>"SECONDARY PATTERN"</Eyebrow>
                             <strong class="font-semibold">"Spending by weekday"</strong>
                         </div>
@@ -176,7 +176,7 @@ pub fn History() -> impl IntoView {
                                                     view! {
                                                         <p class="mt-3 flex justify-between gap-3 text-xs text-fg-muted">
                                                             <span>{text}</span>
-                                                            <Money value=store.spending unit=unit.clone() neutral=true class=STRONG />
+                                                            <Money value=store.spending unit=unit.clone() neutral=true class=EMPHASIS />
                                                         </p>
                                                     }
                                                 })
@@ -200,7 +200,7 @@ pub fn History() -> impl IntoView {
             })
             .collect_view();
         view! {
-            <div class=TWO_COLUMNS_TIGHT>{cards}</div>
+            <div class=REVIEW_GRID>{cards}</div>
             {compare}
         }
     })

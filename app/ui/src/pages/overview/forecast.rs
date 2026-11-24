@@ -15,7 +15,7 @@ use crate::pages::f;
 
 use super::outlook::{CAPTION, ROW_HEADER, chart_frame, percent};
 use super::weekday;
-use crate::ds::patterns::{COLUMN, Disclosure, EXPLAINER, STACK_LG, STACK_SM};
+use crate::ds::patterns::{COLUMN, Disclosure, EXPLAINER, INSIGHT_CARD, PENDING_CARD};
 
 #[component]
 pub fn DailyForecastPanel(report: Dashboard, currency_code: String) -> impl IntoView {
@@ -26,7 +26,7 @@ pub fn DailyForecastPanel(report: Dashboard, currency_code: String) -> impl Into
         .cloned()
     else {
         return view! {
-            <Card class=STACK_SM>
+            <Card class=PENDING_CARD>
                 <CardTitle>"Daily forecast"</CardTitle>
                 <span title="Prepared in the background. It needs at least four weeks of spending history."><Badge tone=Tone::Outline>"Preparing"</Badge></span>
             </Card>
@@ -225,5 +225,5 @@ pub fn DailyForecastPanel(report: Dashboard, currency_code: String) -> impl Into
         </div>
     }
     .into_any();
-    view! { <Card class=STACK_LG>{content}</Card> }.into_any()
+    view! { <Card class=INSIGHT_CARD>{content}</Card> }.into_any()
 }

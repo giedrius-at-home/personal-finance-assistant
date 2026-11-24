@@ -19,7 +19,7 @@ use leptos::prelude::*;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 
-use crate::ds::patterns::{MUTED, SKELETON_CARD, STACK, STACK_XS, TITLE, TWO_COLUMNS};
+use crate::ds::patterns::{CARD_GRID, MUTED, SKELETON_CARD, STACK, TITLE, TITLE_BLOCK};
 use crate::ds::{Card, CardTone, Skeleton};
 use crate::state;
 
@@ -34,7 +34,7 @@ pub fn with_report<V: IntoView + 'static>(
             None => view! {
                 <div class=STACK>
                     <Skeleton class="h-11 w-full max-w-md rounded-pill" />
-                    <div class=TWO_COLUMNS>
+                    <div class=CARD_GRID>
                         <Skeleton class=SKELETON_CARD />
                         <Skeleton class=SKELETON_CARD />
                     </div>
@@ -59,7 +59,7 @@ pub fn Problem(#[prop(into)] error: String) -> impl IntoView {
         ("Could not load this view", error)
     };
     view! {
-        <Card tone=CardTone::Muted class=STACK_XS>
+        <Card tone=CardTone::Muted class=TITLE_BLOCK>
             <h2 class=TITLE>{title}</h2>
             <p role="alert" class=MUTED>{detail}</p>
         </Card>

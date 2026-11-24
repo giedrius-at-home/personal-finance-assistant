@@ -11,7 +11,7 @@ use wasm_bindgen::JsValue;
 
 use super::{Choice, clean_error, options};
 use crate::api::invoke;
-use crate::ds::patterns::{ACTIONS, Disclosure, DisclosureKind, FIELD, STACK_MD, WARNING_TEXT};
+use crate::ds::patterns::{ACTIONS, Disclosure, DisclosureKind, FIELD, SECTION_BODY, WARNING_LINE};
 use crate::ds::{Badge, CONTROL, Field, Help, Size, Tone, Variant, button_class, cn};
 use crate::state;
 
@@ -385,7 +385,7 @@ pub fn TransactionDetails(
                         }
                     })
                     .collect_view()}
-                <div class=STACK_MD>
+                <div class=SECTION_BODY>
                     <Field label="Bulk payment handling" id=format!("{}-bulk", id.get_value())>
                         <Choice
                             id=format!("{}-bulk", id.get_value())
@@ -423,7 +423,7 @@ pub fn TransactionDetails(
                         </Field>
                     })}
                     {move || (!bulk_complete()).then(|| view! {
-                        <p role="status" class=WARNING_TEXT>"Give this bulk payment a name before saving."</p>
+                        <p role="status" class=WARNING_LINE>"Give this bulk payment a name before saving."</p>
                     })}
                     <Help text="Use the same name for its purchases and final payment." />
                 </div>

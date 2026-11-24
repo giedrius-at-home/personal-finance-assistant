@@ -10,7 +10,7 @@ use serde::Serialize;
 use super::ui::{FIELDSET, Messages, Ops, local_date};
 use crate::api::{NoArgs, load};
 use crate::ds::patterns::{
-    ACTIONS_LOOSE, CHECK_SLOT, DD_NUM, DL_THREE, HINT, LIST_STACK, MUTED, OPTION, SECRET_FORM,
+    ACTION_BAR, CHECK_SLOT, DD_NUM, DETAILS_LIST, HINT, LIST_STACK, MUTED, OPTION, SECRET_FORM,
     SETTINGS_GRID, SMALL, STATUS_NOTE, SUBPANEL,
 };
 use crate::ds::{
@@ -297,7 +297,7 @@ pub fn EmailCard() -> impl IntoView {
                 </form>
             </div>
             <div class=SUBPANEL>
-                <dl class=DL_THREE>
+                <dl class=DETAILS_LIST>
                     {facts
                         .into_iter()
                         .map(|(term, value)| {
@@ -310,7 +310,7 @@ pub fn EmailCard() -> impl IntoView {
                         })
                         .collect_view()}
                 </dl>
-                <div class=ACTIONS_LOOSE>
+                <div class=ACTION_BAR>
                     <Button
                         size=Size::Sm
                         disabled=Signal::derive(move || busy.get() || !ready)

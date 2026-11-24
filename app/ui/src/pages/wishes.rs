@@ -22,11 +22,11 @@ use serde::de::IgnoredAny;
 
 use crate::api::{NoArgs, invoke, load};
 use crate::ds::patterns::{
-    BADGE_TIGHT, BOARD_TITLE, CARD_NAME, CHECK_LABEL_START, CHIPS, DIVIDED, Disclosure, EVENT_FORM,
-    FACT_ROW, FEEDBACK_LINE, FIGURE, FILTER_ROW, HINT, INLINE_TOOLS, LIST_STACK, METER,
-    METER_SCALE, MUTED, NAME_ROW, NESTED, PAIR, PANEL_TITLE, PANEL_TITLE_HELP, SELECT_CHEVRON,
-    SELECT_WRAP, SKELETON_CARD, SKELETON_SHORT, STACK, STACK_MD, STACK_XS, STRONG_SM, SUB_ROW,
-    TREE_HEAD, TREE_NAME,
+    BADGE_TIGHT, BOARD_SECTION, BOARD_TITLE, BUTTON_GROUP, CARD_NAME, CHECK_LABEL_START, CHIPS,
+    COMPACT_FIELD, DIVIDED, Disclosure, FACT_ROW, FEEDBACK_LINE, FIGURE, FILTER_ROW, HINT,
+    IMPACT_TITLE, INLINE_FORM_ROW, INLINE_TOOLS, LIST_STACK, METER, METER_BLOCK, METER_SCALE,
+    MUTED, NAME_ROW, NESTED, PANEL_TITLE, PANEL_TITLE_HELP, SELECT_CHEVRON, SELECT_WRAP,
+    SKELETON_CARD, SKELETON_HEADER, STACK, SUB_ROW, TREE_HEAD, TREE_NAME,
 };
 use crate::ds::{
     BOARD, BOARD_CARD, Badge, BoardColumn, Button, CONTROL, Card, CardTone, Checkbox, Eyebrow,
@@ -943,7 +943,7 @@ pub fn Wishes() -> impl IntoView {
         view_data.data.with(|data| match data {
             None => view! {
                 <div class=STACK>
-                    <Skeleton class=SKELETON_SHORT />
+                    <Skeleton class=SKELETON_HEADER />
                     <Skeleton class=SKELETON_CARD />
                 </div>
             }
@@ -1113,7 +1113,7 @@ fn page(ui: Ui, view: &WishesView, ctx: &Context) -> impl IntoView + use<> {
     );
     view! {
         <div class=STACK>
-            <section aria-label="Wishes board" class=STACK_MD>
+            <section aria-label="Wishes board" class=BOARD_SECTION>
                 <div>
                     <Eyebrow>"WISHES"</Eyebrow>
                     <h2 class=BOARD_TITLE>"From someday to bought"</h2>
@@ -1256,7 +1256,7 @@ fn wish_box(ui: Ui, row: &WishRow, ctx: &Context) -> impl IntoView + use<> {
     let progress = (planned && wish.kind == WishKind::OneOff).then(|| {
         let label = format!("{} saved", amount(saved, &code));
         view! {
-            <span class=STACK_XS>
+            <span class=METER_BLOCK>
                 <span role="img" aria-label=label.clone() class=METER>
                     <i class="block h-full rounded-pill bg-positive" style:width=format!("{percent}%")></i>
                 </span>
@@ -2300,7 +2300,7 @@ fn wish_body(
             <div class=FILTER_ROW>
                 {one_off.then(move || view! {
                 <form class="flex items-end gap-2" on:submit=save_saved>
-                    <div class=STACK_XS>
+                    <div class=COMPACT_FIELD>
                         <label for=saved_id.clone() class=HINT>
                             "Saved so far"
                             {suggestion_hint.clone().map(|h| view! { <span class="text-accent">{format!(" ({h})")}</span> })}
@@ -2371,18 +2371,18 @@ fn wish_body(
                 {(sub && in_event).then(|| leave_button(ui, &id.get_value()))}
             </div>
             <Show when=joining>
-                <form class=EVENT_FORM on:submit=move |ev: SubmitEvent| join.with_value(|f| f(ev))>
+                <form class=INLINE_FORM_ROW on:submit=move |ev: SubmitEvent| join.with_value(|f| f(ev))>
                     <Field label="Event" id=join_id.get_value()>
                         {select(join_id.get_value(), ui.join_event, event_options.get_value())}
                     </Field>
-                    <div class=PAIR>
+                    <div class=BUTTON_GROUP>
                         <Button submit=true size=Size::Sm disabled=Signal::derive(move || ui.busy.get())>"Add to event"</Button>
                         <Button size=Size::Sm variant=Variant::Ghost on_click=Callback::new(move |_| ui.joining.set(None))>"Cancel"</Button>
                     </div>
                 </form>
             </Show>
             <Show when=eventing>
-                <form class=EVENT_FORM on:submit=move |ev: SubmitEvent| plan_event.with_value(|f| f(ev))>
+                <form class=INLINE_FORM_ROW on:submit=move |ev: SubmitEvent| plan_event.with_value(|f| f(ev))>
                     <Field label="First day" id=event_starts_id.get_value()>
                         <input
                             id=event_starts_id.get_value()
@@ -2403,14 +2403,14 @@ fn wish_body(
                             on:input=move |e| ui.event_ends.set(event_target_value(&e))
                         />
                     </Field>
-                    <div class=PAIR>
+                    <div class=BUTTON_GROUP>
                         <Button submit=true size=Size::Sm disabled=Signal::derive(move || ui.busy.get())>"Move to Events"</Button>
                         <Button size=Size::Sm variant=Variant::Ghost on_click=Callback::new(move |_| ui.eventing.set(None))>"Cancel"</Button>
                     </div>
                 </form>
             </Show>
             <Show when=buying>
-                <form class=EVENT_FORM on:submit=buy_submit.clone()>
+                <form class=INLINE_FORM_ROW on:submit=buy_submit.clone()>
                     <Field label="Cost" id=buy_amount_id.get_value()>
                         <input
                             id=buy_amount_id.get_value()
@@ -2441,7 +2441,7 @@ fn wish_body(
                         {select(buy_source_id.get_value(), ui.buy_source, buy_sources.get_value())}
                     </Field>
                     {move || (split && ui.buy_source.get() == "card").then(|| card_fields(ui, cards, &buy_amount_id.get_value()))}
-                    <div class=PAIR>
+                    <div class=BUTTON_GROUP>
                         <Button submit=true size=Size::Sm disabled=Signal::derive(move || ui.busy.get())>"Mark bought"</Button>
                         <Button size=Size::Sm variant=Variant::Ghost on_click=Callback::new(move |_| ui.buying.set(None))>"Cancel"</Button>
                     </div>
@@ -2462,7 +2462,7 @@ fn wish_body(
                     >
                         {select(start_category_id.get_value(), ui.start_category, categories.get_value())}
                     </Field>
-                    <div class=cn([PAIR, LABEL_OFFSET])>
+                    <div class=cn([BUTTON_GROUP, LABEL_OFFSET])>
                         <Button submit=true size=Size::Sm disabled=Signal::derive(move || ui.busy.get())>"Start"</Button>
                         <Button size=Size::Sm variant=Variant::Ghost on_click=Callback::new(move |_| ui.starting.set(None))>"Cancel"</Button>
                     </div>
@@ -2740,11 +2740,11 @@ fn done_entry(ui: Ui, row: &WishRow, ctx: StoredValue<Context>) -> impl IntoView
             <Button size=Size::Sm variant=Variant::Ghost on_click=Callback::new(open)>"Add to event"</Button>
         </div>
         <Show when=joining>
-            <form class=EVENT_FORM on:submit=move |ev: SubmitEvent| join.with_value(|f| f(ev))>
+            <form class=INLINE_FORM_ROW on:submit=move |ev: SubmitEvent| join.with_value(|f| f(ev))>
                 <Field label="Event" id=select_id.get_value()>
                     {select(select_id.get_value(), ui.join_event, options.get_value())}
                 </Field>
-                <div class=PAIR>
+                <div class=BUTTON_GROUP>
                     <Button submit=true size=Size::Sm disabled=Signal::derive(move || ui.busy.get())>"Add to event"</Button>
                     <Button size=Size::Sm variant=Variant::Ghost on_click=Callback::new(move |_| ui.joining.set(None))>"Cancel"</Button>
                 </div>
@@ -2804,7 +2804,7 @@ fn month_card(month: &WishMonth, code: &str) -> impl IntoView + use<> {
     });
     view! {
         <Card tone=CardTone::Muted class="grid gap-3 p-4 sm:p-5">
-            <h3 class=STRONG_SM>{title}</h3>
+            <h3 class=IMPACT_TITLE>{title}</h3>
             <div class="grid grid-cols-2 gap-3">
                 <Stat label="Free before">{before}</Stat>
                 <Stat label="Free after">{after}</Stat>
