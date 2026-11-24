@@ -287,9 +287,10 @@ impl Frame<'_> {
             }
             Axis::Weekday | Axis::DayOfMonth => {
                 let mut done = vec![false; columns];
-                // The last 31 days before today hold every weekday and day of month.
-                let mut day = self.today().yesterday().ok();
-                for _ in 0..31 {
+                // Scan back from the period's last day before today; 62 days
+                // hold every weekday and day of month (29–31 included).
+                let mut day = self.today().yesterday().ok().map(|y| y.min(w.to));
+                for _ in 0..62 {
                     let Some(d) = day.filter(|&d| d >= w.from) else {
                         break;
                     };

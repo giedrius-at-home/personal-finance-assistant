@@ -1334,6 +1334,30 @@ fn a_day_or_weekday_occurring_only_today_is_not_named() {
 }
 
 #[test]
+fn a_past_period_names_its_days_whenever_it_ended() {
+    // Last month ended 24 days ago: day 15 (25) is still its peak.
+    let data = query(
+        &snap(ledger()),
+        &spec(Axis::DayOfMonth, Period::LastMonth, &[Measure::Spent]),
+    );
+    assert_eq!(data.insight.unwrap().label, "Day 15");
+    // A period that ended months ago keeps its insight too.
+    let old = query(
+        &snap(ledger()),
+        &spec(
+            Axis::Weekday,
+            Period::Between {
+                from: "2026-08-01".into(),
+                to: "2026-09-30".into(),
+            },
+            &[Measure::Spent],
+        ),
+    );
+    // 12 Sep 2026 (35) is a Saturday; 7 Aug (30) a Friday.
+    assert_eq!(old.insight.unwrap().label, "Saturday");
+}
+
+#[test]
 fn the_insight_of_several_measures_names_its_measure() {
     let data = query(
         &snap(ledger()),
