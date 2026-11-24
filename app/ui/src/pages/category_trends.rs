@@ -8,6 +8,7 @@ use leptos::prelude::*;
 use rust_decimal::Decimal;
 
 use crate::ds::charts::{LineChart, Series, fmt};
+use crate::ds::patterns::{CHIPS, EMPHASIS, META_ROW, META_VALUE, MUTED, STACK, SWATCH, TOOLBAR};
 use crate::ds::{
     Badge, Card, CardHeader, CardTitle, CardTone, EmptyState, Eyebrow, Heading, Money,
     SegmentedControl, Size, Tone, Variant, button_class, cn, money,
@@ -269,7 +270,7 @@ pub fn CategoryTrends(
                             disabled={!active && selected >= COLORS.len()}
                             on:click=move |_| toggle(k2.clone())
                         >
-                            {slot.map(|s| view! { <i aria-hidden="true" class="size-2 rounded-pill" style:background=COLORS[s]></i> })}
+                            {slot.map(|s| view! { <i aria-hidden="true" class=SWATCH style:background=COLORS[s]></i> })}
                             {name(row)}
                         </button>
                     }
@@ -279,7 +280,7 @@ pub fn CategoryTrends(
     };
     let partial = trend.with_value(|t| t.months.last().is_some_and(|m| m.partial_month));
     view! {
-        <Card class="grid gap-4">
+        <Card class=STACK>
             <CardHeader class="mb-0">
                 <div>
                     <Eyebrow level=Heading::P>{format!("CATEGORY TRENDS · {code}")}</Eyebrow>
@@ -297,7 +298,7 @@ pub fn CategoryTrends(
                     on:input=move |e| query.set(event_target_value(&e))
                 />
             })}
-            <div class="flex flex-wrap gap-2" role="group" aria-label="Categories to plot">{chips}</div>
+            <div class=CHIPS role="group" aria-label="Categories to plot">{chips}</div>
             {move || {
                 let rows = plotted();
                 if rows.is_empty() {
@@ -325,7 +326,7 @@ pub fn CategoryTrends(
                     format!("{sign}{}{suffix}", money(Decimal::from_f64_retain(v).unwrap_or_default(), &u))
                 });
                 view! {
-                    <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div class=TOOLBAR>
                         <SegmentedControl
                             label="Spending measure"
                             small=true
@@ -337,8 +338,8 @@ pub fn CategoryTrends(
                             })
                             items=Metric::ALL.iter().map(|x| (x.id().to_owned(), x.label().to_owned())).collect()
                         />
-                        <p class="text-sm text-fg-muted">
-                            <strong class="font-semibold text-fg">{m.label()}</strong>
+                        <p class=MUTED>
+                            <strong class=EMPHASIS>{m.label()}</strong>
                             {format!(" · {}", m.note(&code))}
                         </p>
                     </div>
@@ -364,17 +365,17 @@ pub fn CategoryTrends(
                                         style:border-top-color=COLORS[slot]
                                     >
                                         <strong class="truncate">{name(&row)}</strong>
-                                        <div class="flex justify-between gap-3 text-xs text-fg-muted">
+                                        <div class=META_ROW>
                                             <span>{if partial { "Monthly spend · projected" } else { "Monthly spend" }}</span>
-                                            <b class="font-medium text-fg"><Money value=mo.projected unit=u.clone() neutral=true /></b>
+                                            <b class=META_VALUE><Money value=mo.projected unit=u.clone() neutral=true /></b>
                                         </div>
-                                        <div class="flex justify-between gap-3 text-xs text-fg-muted">
+                                        <div class=META_ROW>
                                             <span>"Daily pace"</span>
-                                            <b class="font-medium text-fg"><Money value=mo.daily_pace unit=u.clone() neutral=true />"/day"</b>
+                                            <b class=META_VALUE><Money value=mo.daily_pace unit=u.clone() neutral=true />"/day"</b>
                                         </div>
-                                        <div class="flex justify-between gap-3 text-xs text-fg-muted">
+                                        <div class=META_ROW>
                                             <span>"Pace change"</span>
-                                            <b class="font-medium text-fg">
+                                            <b class=META_VALUE>
                                                 {match mo.pace_change {
                                                     None => "—".to_owned().into_any(),
                                                     Some(p) => view! {

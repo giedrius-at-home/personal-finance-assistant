@@ -11,6 +11,7 @@ use wasm_bindgen::JsValue;
 
 use super::{Choice, clean_error, options};
 use crate::api::invoke;
+use crate::ds::patterns::{ACTIONS, Disclosure, DisclosureKind, FIELD, SECTION_BODY, WARNING_LINE};
 use crate::ds::{Badge, CONTROL, Field, Help, Size, Tone, Variant, button_class, cn};
 use crate::state;
 
@@ -266,8 +267,9 @@ pub fn TransactionDetails(
     let bulk_name_id = StoredValue::new(format!("{}-bulk-name", id.get_value()));
 
     view! {
-        <details
-            class="rounded-lg border border-border bg-card-muted px-4 py-3"
+        <Disclosure
+            kind=DisclosureKind::Panel
+            summary=format!("Details & tags{summary}")
             on:toggle=move |e| {
                 let open = e
                     .target()
@@ -282,7 +284,6 @@ pub fn TransactionDetails(
                 draft.set(Some(SavedDetails { revision: saved.with_value(|s| s.revision), values }));
             }
         >
-            <summary class="cursor-pointer text-sm font-semibold">{format!("Details & tags{summary}")}</summary>
             {(prefill_count > 0).then(|| view! { <Badge tone=Tone::Accent class="mt-2">"Check and save"</Badge> })}
             <fieldset disabled=move || busy.get() class="mt-4 grid min-w-0 gap-4 border-0 p-0">
                 {FIELDS
@@ -292,7 +293,7 @@ pub fn TransactionDetails(
                         let suggested = item.with_value(|i| suggestion(i, key));
                         let field_id = format!("{}-{key}", id.get_value());
                         view! {
-                            <div class="grid gap-1.5">
+                            <div class=FIELD>
                                 <Field label=label id=field_id.clone()>
                                     <input
                                         id=field_id
@@ -357,7 +358,7 @@ pub fn TransactionDetails(
                         let text = StoredValue::new(tag_text(&owner));
                         let owner = StoredValue::new(owner);
                         view! {
-                            <div class="flex flex-wrap items-center gap-2">
+                            <div class=ACTIONS>
                                 <Badge tone=Tone::Neutral>{text.get_value()}</Badge>
                                 <button
                                     type="button"
@@ -384,7 +385,7 @@ pub fn TransactionDetails(
                         }
                     })
                     .collect_view()}
-                <div class="grid gap-3">
+                <div class=SECTION_BODY>
                     <Field label="Bulk payment handling" id=format!("{}-bulk", id.get_value())>
                         <Choice
                             id=format!("{}-bulk", id.get_value())
@@ -422,7 +423,7 @@ pub fn TransactionDetails(
                         </Field>
                     })}
                     {move || (!bulk_complete()).then(|| view! {
-                        <p role="status" class="text-sm text-warning-fg">"Give this bulk payment a name before saving."</p>
+                        <p role="status" class=WARNING_LINE>"Give this bulk payment a name before saving."</p>
                     })}
                     <Help text="Use the same name for its purchases and final payment." />
                 </div>
@@ -436,7 +437,7 @@ pub fn TransactionDetails(
                         on:input=move |e| edit("notes", event_target_value(&e))
                     ></textarea>
                 </Field>
-                <div class="flex flex-wrap items-center gap-2">
+                <div class=ACTIONS>
                     <button
                         type="button"
                         class=button_class(Variant::Primary, Size::Md)
@@ -463,6 +464,6 @@ pub fn TransactionDetails(
                 let m = message.get();
                 (!m.is_empty()).then(|| view! { <p role="status" class="mt-3 text-sm text-fg-muted">{m}</p> })
             }}
-        </details>
+        </Disclosure>
     }
 }

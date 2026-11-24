@@ -9,19 +9,19 @@ use serde::de::DeserializeOwned;
 use wasm_bindgen::JsValue;
 
 use crate::api::{Loaded, NoArgs, invoke, load};
+use crate::ds::patterns::SECTION_STACK;
 use crate::ds::{Button, Card};
 use crate::state;
 
+pub use crate::ds::patterns::{ERROR, FIELDSET};
+
 pub const FEEDBACK: &str = "rounded-lg bg-positive/10 px-4 py-3 text-sm text-fg";
-pub const ERROR: &str =
-    "rounded-lg border border-negative/30 bg-negative/10 px-4 py-3 text-sm text-negative-fg";
 pub const PREVIEW: &str = "grid gap-4 rounded-lg border border-border bg-card-muted p-4 sm:p-5";
 pub const CONTROLS: &str =
     "flex flex-col items-stretch gap-4 sm:flex-row sm:flex-wrap sm:items-end";
 pub const FILE_INPUT: &str = "py-2 file:mr-3 file:border-0 file:bg-transparent file:p-0 file:text-sm file:font-medium file:text-fg";
 pub const DETAILS: &str = "border-t border-line py-4";
-pub const SUMMARY: &str = "cursor-pointer text-sm font-medium";
-pub const FIELDSET: &str = "m-0 min-w-0 border-0 p-0";
+pub const SUMMARY: &str = "text-sm font-medium";
 
 /// The site's `date()`: `toLocaleString("en-GB")`, or "Not recorded".
 pub fn local_date(value: Option<&str>) -> String {
@@ -137,7 +137,7 @@ pub fn frame(
         }
     });
     view! {
-        <div class="mb-6 grid gap-4">
+        <div class=SECTION_STACK>
             <Messages ops=ops />
             {move || match workspace.data.get() {
                 Some(Ok(ws)) => body(ws),

@@ -9,12 +9,14 @@ use serde::Serialize;
 
 use super::ui::{FIELDSET, Messages, Ops, local_date};
 use crate::api::{NoArgs, load};
+use crate::ds::patterns::{
+    ACTION_BAR, CHECK_SLOT, DD_NUM, DETAILS_LIST, HINT, LIST_STACK, MUTED, OPTION, SECRET_FORM,
+    SETTINGS_GRID, SMALL, STATUS_NOTE, SUBPANEL,
+};
 use crate::ds::{
     Button, CONTROL, Card, CardTitle, Checkbox, Eyebrow, Field, Heading, Input, Select, Size,
     Variant, cn,
 };
-
-const GRID: &str = "my-5 grid gap-5 md:grid-cols-3";
 
 /// The form as typed.
 #[derive(Clone, Copy, Debug)]
@@ -121,8 +123,8 @@ fn check(
     busy: RwSignal<bool>,
 ) -> impl IntoView {
     view! {
-        <label class="flex items-start gap-2.5 text-sm leading-relaxed">
-            <span class="mt-1 flex">
+        <label class=OPTION>
+            <span class=CHECK_SLOT>
                 <Checkbox
                     checked=Signal::derive(move || value.get())
                     disabled=Signal::derive(move || busy.get())
@@ -131,7 +133,7 @@ fn check(
             </span>
             <span>
                 {label}
-                <span class="block text-xs text-fg-muted">{hint}</span>
+                <span class=SMALL>{hint}</span>
             </span>
         </label>
     }
@@ -218,7 +220,7 @@ pub fn EmailCard() -> impl IntoView {
                             busy,
                         )}
                     </div>
-                    <div class=GRID>
+                    <div class=SETTINGS_GRID>
                         <Field label="Send to" id="mail-to">
                             <Input id="mail-to" value=draft.recipient kind="email" placeholder="you@example.com" />
                         </Field>
@@ -260,15 +262,15 @@ pub fn EmailCard() -> impl IntoView {
                     </Button>
                 </fieldset>
             </form>
-            <div class="mt-5 grid gap-3 border-t border-line pt-5">
-                <p class="text-sm text-fg-muted">
+            <div class=SUBPANEL>
+                <p class=MUTED>
                     {if password_set {
                         "An SMTP password is saved privately on this Mac. For Gmail, use an app password."
                     } else {
                         "No SMTP password saved. For Gmail, create an app password; it is kept privately on this Mac."
                     }}
                 </p>
-                <form class="flex flex-col gap-3 sm:flex-row sm:items-end" on:submit=save_password>
+                <form class=SECRET_FORM on:submit=save_password>
                     <input
                         node_ref=password
                         class=cn([CONTROL, "sm:max-w-sm"])
@@ -294,21 +296,21 @@ pub fn EmailCard() -> impl IntoView {
                         })}
                 </form>
             </div>
-            <div class="mt-5 grid gap-3 border-t border-line pt-5">
-                <dl class="grid gap-4 sm:grid-cols-3">
+            <div class=SUBPANEL>
+                <dl class=DETAILS_LIST>
                     {facts
                         .into_iter()
                         .map(|(term, value)| {
                             view! {
                                 <div>
-                                    <dt class="text-xs text-fg-muted">{term}</dt>
-                                    <dd class="mt-1.5 text-sm tabular-nums">{value}</dd>
+                                    <dt class=HINT>{term}</dt>
+                                    <dd class=DD_NUM>{value}</dd>
                                 </div>
                             }
                         })
                         .collect_view()}
                 </dl>
-                <div class="flex flex-wrap items-center gap-3">
+                <div class=ACTION_BAR>
                     <Button
                         size=Size::Sm
                         disabled=Signal::derive(move || busy.get() || !ready)
@@ -316,7 +318,7 @@ pub fn EmailCard() -> impl IntoView {
                     >
                         {move || if busy.get() { "Working…" } else { "Send test" }}
                     </Button>
-                    <span class="text-xs text-fg-muted">
+                    <span class=HINT>
                         {if ready {
                             "Sends today's email now, marked as a test, with the saved settings."
                         } else {
@@ -331,13 +333,13 @@ pub fn EmailCard() -> impl IntoView {
         <Card>
             <Eyebrow level=Heading::P>"EMAIL"</Eyebrow>
             <CardTitle level=Heading::H2 class="mt-1">"Daily spending email"</CardTitle>
-            <div class="mt-4 grid gap-3">
+            <div class=LIST_STACK>
                 <Messages ops=ops />
             </div>
             {move || match status.data.get() {
-                None => view! { <p class="mt-5 text-sm text-fg-muted">"Loading email settings…"</p> }.into_any(),
+                None => view! { <p class=STATUS_NOTE>"Loading email settings…"</p> }.into_any(),
                 Some(Err(e)) => {
-                    view! { <p class="mt-5 text-sm text-fg-muted">{format!("Email settings are not available ({e}).")}</p> }
+                    view! { <p class=STATUS_NOTE>{format!("Email settings are not available ({e}).")}</p> }
                         .into_any()
                 }
                 Some(Ok(s)) => body(s).into_any(),

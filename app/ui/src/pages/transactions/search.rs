@@ -19,6 +19,10 @@ use super::{
     Choice, TextInput, clean_error, debounce, options, report_categories, storage_get, storage_set,
 };
 use crate::api::invoke;
+use crate::ds::patterns::{
+    COMPACT_FIELD, FILTER_ROW, HEADER_ROW, MUTED, ROW_LIST, SECTION_HEADING, SMALL, TRAILING,
+    WRAP_TEXT,
+};
 use crate::ds::{
     CardTone, EmptyState, Eyebrow, Field, Heading, Icon, Lucide, METRIC_STRIP, Metric, Money, Size,
     Skeleton, TABLE, TABLE_CONTAINER, TCELL, TCELL_NUM, TH, TH_NUM, TROW, Variant, button_class,
@@ -373,9 +377,9 @@ pub fn TransactionSearch() -> impl IntoView {
         <section class=cn([card_class(CardTone::Default), "my-5 grid min-w-0 gap-4"]) aria-label="All transactions">
             <div>
                 <Eyebrow level=Heading::P>"SEARCH"</Eyebrow>
-                <h2 class="mt-1 text-xl font-semibold">"All transactions"</h2>
+                <h2 class=SECTION_HEADING>"All transactions"</h2>
             </div>
-            <div class="flex flex-wrap items-end gap-2">
+            <div class=FILTER_ROW>
                 <Field label="Search" id="tx-search-q" class="min-w-0 flex-1 basis-64">
                     <TextInput
                         id="tx-search-q"
@@ -492,7 +496,7 @@ pub fn TransactionSearch() -> impl IntoView {
                 let busy = loading.get();
                 match result.get() {
                     None if busy => view! {
-                        <div class="grid gap-2" role="status" aria-label="Loading transactions">
+                        <div class=ROW_LIST role="status" aria-label="Loading transactions">
                             {(0..4).map(|_| view! { <Skeleton class="h-10" /> }).collect_view()}
                         </div>
                     }
@@ -542,7 +546,7 @@ pub fn TransactionSearch() -> impl IntoView {
                                                         <td class=cn([TCELL, "whitespace-nowrap"])>{format::date(&row.occurred_on)}</td>
                                                         <td class=TCELL>
                                                             <span class="font-medium">{title(&row)}</span>
-                                                            {detail.map(|d| view! { <small class="block text-xs text-fg-muted">{d}</small> })}
+                                                            {detail.map(|d| view! { <small class=SMALL>{d}</small> })}
                                                         </td>
                                                         <td class=cn([TCELL, "text-fg-muted"])>{row.account_name.clone().unwrap_or_else(|| "—".into())}</td>
                                                         <td class=TCELL><CategoryCell row=row.clone() categories=categories /></td>
@@ -577,16 +581,16 @@ pub fn TransactionSearch() -> impl IntoView {
                                         view! {
                                             <li class="grid gap-2 border-t border-line py-3">
                                                 <div class="flex justify-between gap-3">
-                                                    <span class="min-w-0 break-words">
+                                                    <span class=WRAP_TEXT>
                                                         <strong class="font-semibold">{title(&row)}</strong>
-                                                        <small class="block text-xs text-fg-muted">{meta}</small>
+                                                        <small class=SMALL>{meta}</small>
                                                     </span>
-                                                    <span class=cn(["shrink-0 text-right", if row.direction == SearchDirection::In { "text-positive-fg" } else { "" }])>
+                                                    <span class=cn([TRAILING, if row.direction == SearchDirection::In { "text-positive-fg" } else { "" }])>
                                                         {sign(row.direction)}
                                                         <Money value=row.amount.amount unit=row.amount.currency.clone() neutral=true />
                                                     </span>
                                                 </div>
-                                                <div class="flex items-center justify-between gap-3">
+                                                <div class=HEADER_ROW>
                                                     <CategoryCell row=row.clone() categories=categories />
                                                 </div>
                                             </li>
@@ -596,7 +600,7 @@ pub fn TransactionSearch() -> impl IntoView {
                             </ul>
                             {(shown < total).then(|| view! {
                                 <div class="flex items-center justify-between gap-2">
-                                    <span class="text-sm text-fg-muted" role="status">
+                                    <span class=MUTED role="status">
                                         {if busy { "Loading more…".to_owned() } else { format!("Showing {shown} of {total}") }}
                                     </span>
                                     <button
@@ -703,7 +707,7 @@ fn CategoryCell(row: SearchRow, categories: Memo<Vec<String>>) -> impl IntoView 
     });
     let label = format!("Category for {}", title(&row));
     view! {
-        <span class="grid gap-1">
+        <span class=COMPACT_FIELD>
             <Choice
                 label=label
                 value=shown

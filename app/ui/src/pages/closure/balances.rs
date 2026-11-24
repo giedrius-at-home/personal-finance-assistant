@@ -8,6 +8,7 @@ use rust_decimal::Decimal;
 
 use super::Wizard;
 use super::ui::{ACTIONS, money};
+use crate::ds::patterns::SECTION_BODY;
 use crate::ds::{
     Button, Input, Size, TABLE, TABLE_CONTAINER, TCELL, TCELL_NUM, TH, TH_NUM, TROW, Variant, cn,
 };
@@ -174,7 +175,7 @@ pub fn BalancesPanel(balances: Vec<BalanceStatus>, disabled: Signal<bool>) -> im
         })
         .collect_view();
     Some(view! {
-        <div class="grid gap-3">
+        <div class=SECTION_BODY>
             <div class=ACTIONS>
                 <Button
                     variant=Variant::Secondary

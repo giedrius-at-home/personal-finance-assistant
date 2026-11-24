@@ -15,6 +15,7 @@ use crate::pages::f;
 
 use super::outlook::{CAPTION, ROW_HEADER, chart_frame, percent};
 use super::weekday;
+use crate::ds::patterns::{COLUMN, Disclosure, EXPLAINER, INSIGHT_CARD, PENDING_CARD};
 
 #[component]
 pub fn DailyForecastPanel(report: Dashboard, currency_code: String) -> impl IntoView {
@@ -25,7 +26,7 @@ pub fn DailyForecastPanel(report: Dashboard, currency_code: String) -> impl Into
         .cloned()
     else {
         return view! {
-            <Card class="grid gap-2">
+            <Card class=PENDING_CARD>
                 <CardTitle>"Daily forecast"</CardTitle>
                 <span title="Prepared in the background. It needs at least four weeks of spending history."><Badge tone=Tone::Outline>"Preparing"</Badge></span>
             </Card>
@@ -197,7 +198,7 @@ pub fn DailyForecastPanel(report: Dashboard, currency_code: String) -> impl Into
                 <CardTitle>"Daily spending forecast"</CardTitle>
             </header>
             <div class="grid gap-x-10 gap-y-6 lg:grid-cols-[minmax(240px,.4fr)_minmax(0,1.1fr)_minmax(260px,.5fr)]">
-                <div class="grid content-start gap-6">
+                <div class=COLUMN>
                     <Metric label="Next 7 days" facts=next_week_facts>{next_week}</Metric>
                     <Metric label="Everyday spending by month end" facts=month_end_facts>{month_end}</Metric>
                 </div>
@@ -205,8 +206,7 @@ pub fn DailyForecastPanel(report: Dashboard, currency_code: String) -> impl Into
                 {upcoming}
             </div>
             <ol class="sr-only" aria-label="Forecast per day, as a list">{list}</ol>
-            <details class="grid gap-3 text-sm leading-relaxed [&>*]:mt-3">
-                <summary class="cursor-pointer font-medium">"Your usual week"</summary>
+            <Disclosure class=EXPLAINER summary_class="font-medium" summary="Your usual week">
                 <div tabindex="0" role="region" aria-label="Last twelve weeks" class=TABLE_CONTAINER>
                     <table class=TABLE data-density="md">
                         <caption class=CAPTION>"Last twelve weeks"</caption>
@@ -221,9 +221,9 @@ pub fn DailyForecastPanel(report: Dashboard, currency_code: String) -> impl Into
                     </table>
                 </div>
                 <Facts rows=evidence class="max-w-md" />
-            </details>
+            </Disclosure>
         </div>
     }
     .into_any();
-    view! { <Card class="grid gap-5">{content}</Card> }.into_any()
+    view! { <Card class=INSIGHT_CARD>{content}</Card> }.into_any()
 }

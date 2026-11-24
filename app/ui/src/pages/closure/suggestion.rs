@@ -9,6 +9,7 @@ use rust_decimal::Decimal;
 
 use super::ui::CALLOUT;
 use crate::ds::cn;
+use crate::ds::patterns::Disclosure;
 
 const BREAKDOWN: &str = "grid gap-1 text-xs";
 const BREAKDOWN_ROW: &str = "flex justify-between gap-3 [&>:last-child]:shrink-0 [&>:last-child]:text-right [&>:last-child]:tabular-nums";
@@ -185,7 +186,7 @@ pub fn SuggestionPanel(
     view! {
         <section class=CALLOUT aria-label="Savings suggestion">
             <p><strong>{headline}</strong></p>
-            <details prop:open=move || open.get() on:toggle=move |e| {
+            <Disclosure summary_class="text-xs font-medium" summary="Why this number?" prop:open=move || open.get() on:toggle=move |e| {
                 if let Some(target) = e.target() {
                     let now = js_sys::Reflect::get(&target, &"open".into())
                         .ok()
@@ -196,7 +197,6 @@ pub fn SuggestionPanel(
                     }
                 }
             }>
-                <summary class="cursor-pointer text-xs font-medium">"Why this number?"</summary>
                 <ul class=cn([BREAKDOWN, "mt-2"])>
                     {row(format!("As of {}, for {}", day_name(&inputs.as_of), month_name(&inputs.month, 0)), String::new())}
                     {row("Bank balance on spending accounts".into(), eur(inputs.bank_balance))}
@@ -217,7 +217,7 @@ pub fn SuggestionPanel(
                     {row("− Already assigned in this split".into(), eur(figures.assigned))}
                     <li class=TOTAL_ROW><span>"= Suggested"</span><strong>{eur(suggested)}</strong></li>
                 </ul>
-            </details>
+            </Disclosure>
         </section>
     }
 }

@@ -12,6 +12,7 @@ use serde::Serialize;
 use super::ui::{ACTIONS, LIST, SMALL, TextLink};
 use crate::api::invoke;
 use crate::ds::charts::ProgressBar;
+use crate::ds::patterns::SECTION_BODY;
 use crate::ds::{Button, Size, Variant, cn};
 use crate::{ManageSection, state};
 
@@ -193,7 +194,7 @@ pub fn BankSyncPanel(
         })
     };
     view! {
-        <div class="grid gap-3">
+        <div class=SECTION_BODY>
             <div>
                 <Button disabled=Signal::derive(move || disabled.get() || running.get()) on_click=Callback::new(run)>
                     {move || if running.get() {

@@ -13,22 +13,17 @@ use serde::Serialize;
 use wasm_bindgen::JsValue;
 
 use crate::api::{NoArgs, invoke};
+use crate::ds::patterns::{FIELD, FIELD_LABEL, SELECT_CHEVRON, SELECT_WRAP, STEP_TITLE};
 use crate::ds::{CONTROL, Icon, Lucide, card_class, cn};
 use crate::format;
 
+pub use crate::ds::patterns::{ACTIONS, ERROR, ERROR_LINE, INLINE_FORM, SMALL};
+
 pub const FOOTNOTE: &str = "text-sm leading-relaxed text-fg-muted";
-pub const SMALL: &str = "block text-xs text-fg-muted";
-pub const WARN: &str = "text-sm text-negative-fg";
-pub const ACTIONS: &str = "flex flex-wrap items-center gap-2";
 pub const CALLOUT: &str =
     "grid gap-2 rounded-lg border border-border bg-card-muted px-4 py-3 text-sm";
 pub const LIST: &str = "grid divide-y divide-line";
 pub const SUBHEADING: &str = "mt-2 text-sm font-semibold";
-pub const ERROR: &str =
-    "rounded-lg border border-negative/30 bg-negative/10 px-4 py-3 text-sm text-negative-fg";
-/// Inline forms (account type, planned purchase): fields wrap,
-/// buttons sit on the field baseline.
-pub const INLINE_FORM: &str = "flex flex-wrap items-end gap-3";
 /// A field inside an inline form: grows from 11rem and wraps below that.
 pub const GROW: &str = "min-w-0 flex-1 basis-44";
 pub const LINK: &str = "font-medium underline underline-offset-2 hover:text-fg";
@@ -47,7 +42,7 @@ pub fn StepCard(
     view! {
         <div class=cn([card_class(Default::default()), "grid min-w-0 gap-4"])>
             <div>
-                <h3 class="text-lg font-semibold leading-tight">{title}</h3>
+                <h3 class=STEP_TITLE>{title}</h3>
                 {description.map(|d| view! { <p class="mt-1 text-sm leading-relaxed text-fg-muted">{d}</p> })}
             </div>
             {children()}
@@ -76,8 +71,8 @@ pub fn FieldBox(
     children: Children,
 ) -> impl IntoView {
     view! {
-        <div class=cn(["grid gap-1.5", class.as_str()])>
-            <label for=id class="text-sm font-medium text-fg">{label}</label>
+        <div class=cn([FIELD, class.as_str()])>
+            <label for=id class=FIELD_LABEL>{label}</label>
             {children()}
         </div>
     }
@@ -96,7 +91,7 @@ pub fn Choice(
     #[prop(optional, into)] disabled: Signal<bool>,
 ) -> impl IntoView {
     view! {
-        <div class="relative w-full">
+        <div class=SELECT_WRAP>
             <select
                 id=id
                 aria-label=label
@@ -120,7 +115,7 @@ pub fn Choice(
                         .collect_view()
                 }}
             </select>
-            <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-fg-muted">
+            <span class=SELECT_CHEVRON>
                 <Lucide icon=Icon::ChevronDown size=16 />
             </span>
         </div>

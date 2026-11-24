@@ -5,6 +5,7 @@ pub mod charts;
 mod cn;
 pub mod icons;
 pub mod money_plan;
+pub mod patterns;
 
 pub use cn::cn;
 pub use icons::{Icon, Lucide};

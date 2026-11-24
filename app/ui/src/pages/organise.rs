@@ -13,6 +13,10 @@ use rust_decimal::Decimal;
 use serde::Serialize;
 
 use crate::api::invoke;
+use crate::ds::patterns::{
+    ACTIONS, FORM_FIELD_WIDE, HINT, INLINE_FORM, METRIC_VALUE, MUTED, NUM_HINT, SELECT_CHEVRON,
+    SELECT_WRAP, STACK,
+};
 use crate::ds::{
     Badge, Button, CONTROL, Card, CardHeader, CardTitle, CardTone, Eyebrow, Field, Heading, Icon,
     Input, Lucide, Money, Select, Size, Tone, Variant, cn, money,
@@ -57,9 +61,9 @@ pub fn Organise() -> impl IntoView {
 fn metric(label: String, value: AnyView, note: Option<String>) -> impl IntoView {
     view! {
         <div class="grid gap-1 border-line py-3 sm:border-r sm:px-3 sm:first:pl-0 sm:last:border-r-0 sm:last:pr-0">
-            <small class="text-xs text-fg-muted">{label}</small>
-            <strong class="text-base font-semibold">{value}</strong>
-            {note.map(|n| view! { <span class="text-xs text-fg-muted">{n}</span> })}
+            <small class=HINT>{label}</small>
+            <strong class=METRIC_VALUE>{value}</strong>
+            {note.map(|n| view! { <span class=HINT>{n}</span> })}
         </div>
     }
 }
@@ -108,7 +112,7 @@ fn SpendingOrganization(report: Dashboard) -> impl IntoView {
                     <Eyebrow level=Heading::P>"THIS MONTH"</Eyebrow>
                     <CardTitle level=Heading::H2>"Category coverage"</CardTitle>
                 </div>
-                <div class="flex flex-wrap items-center gap-2">
+                <div class=ACTIONS>
                     <Button
                         variant=Variant::Secondary
                         size=Size::Sm
@@ -136,7 +140,7 @@ fn BulkPayments(payments: Vec<BulkPaymentSummary>) -> impl IntoView {
     let app = state();
     let body = if payments.is_empty() {
         view! {
-            <p class="text-sm text-fg-muted">
+            <p class=MUTED>
                 "No bulk-payment links yet. Open Transactions, expand Details & tags, and choose the bulk-payment role."
             </p>
         }
@@ -167,8 +171,8 @@ fn BulkPayments(payments: Vec<BulkPaymentSummary>) -> impl IntoView {
                 view! {
                     <Card tone=CardTone::Muted class="grid gap-1.5 p-4 sm:p-4">
                         <strong class="font-semibold">{payment.name}</strong>
-                        <span class="text-sm text-fg-muted">{components}</span>
-                        <span class="text-sm text-fg-muted">{settlements}</span>
+                        <span class=MUTED>{components}</span>
+                        <span class=MUTED>{settlements}</span>
                         <span class="text-sm font-medium text-accent">{state}</span>
                     </Card>
                 }
@@ -291,7 +295,7 @@ fn OwnerCategoryGroups() -> impl IntoView {
         ("all".to_owned(), "All categories".to_owned()),
     ];
     view! {
-        <Card class="grid gap-4">
+        <Card class=STACK>
             <CardHeader class="mb-0">
                 <div>
                     <Eyebrow level=Heading::P>"YOUR CATEGORY GROUPS"</Eyebrow>
@@ -300,13 +304,13 @@ fn OwnerCategoryGroups() -> impl IntoView {
                 <Badge tone=Tone::Outline>{badge}</Badge>
             </CardHeader>
             <form
-                class="flex flex-wrap items-end gap-3"
+                class=INLINE_FORM
                 on:submit=move |e| {
                     e.prevent_default();
                     create();
                 }
             >
-                <Field label="New spending group" id="new-spending-group" class="min-w-0 flex-1 basis-56">
+                <Field label="New spending group" id="new-spending-group" class=FORM_FIELD_WIDE>
                     <input
                         id="new-spending-group"
                         class=CONTROL
@@ -323,13 +327,13 @@ fn OwnerCategoryGroups() -> impl IntoView {
             </form>
             {move || {
                 let m = group_message.get();
-                (!m.is_empty()).then(|| view! { <p role="status" class="text-sm text-fg-muted">{m}</p> })
+                (!m.is_empty()).then(|| view! { <p role="status" class=MUTED>{m}</p> })
             }}
             <div class="grid gap-3 sm:grid-cols-2">
                 <Input value=query kind="search" label="Search categories" placeholder="Find a category or group" />
                 <Select value=filter options=Signal::derive(move || filter_options.clone()) label="Filter category groups" />
             </div>
-            <p class="text-xs tabular-nums text-fg-muted">
+            <p class=NUM_HINT>
                 {move || {
                     let total = filtered.with(Vec::len);
                     format!("{} / {total}", limit.get().min(total))
@@ -343,7 +347,7 @@ fn OwnerCategoryGroups() -> impl IntoView {
                 />
             </div>
             {move || filtered.with(Vec::is_empty).then(|| view! {
-                <p class="text-sm text-fg-muted">"No categories match this view."</p>
+                <p class=MUTED>"No categories match this view."</p>
             })}
             {move || (filtered.with(Vec::len) > limit.get()).then(|| view! {
                 <Button
@@ -442,7 +446,7 @@ fn GroupRow(mapping: GroupMapping, options: Memo<Vec<String>>) -> impl IntoView 
     view! {
         <div class="grid items-center gap-x-3 gap-y-2 border-t border-line py-3 [grid-template-columns:1fr_1fr] sm:[grid-template-columns:minmax(150px,1fr)_minmax(160px,1fr)_auto_auto]">
             <strong class="col-span-2 truncate sm:col-span-1">{category}</strong>
-            <div class="relative w-full">
+            <div class=SELECT_WRAP>
                 <select
                     aria-label=label
                     class=cn([CONTROL, "appearance-none pr-9", "col-span-2 sm:col-span-1"])
@@ -463,7 +467,7 @@ fn GroupRow(mapping: GroupMapping, options: Memo<Vec<String>>) -> impl IntoView 
                             .collect_view()
                     }}
                 </select>
-                <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-fg-muted">
+                <span class=SELECT_CHEVRON>
                     <Lucide icon=Icon::ChevronDown size=16 />
                 </span>
             </div>
@@ -472,14 +476,14 @@ fn GroupRow(mapping: GroupMapping, options: Memo<Vec<String>>) -> impl IntoView 
             </Button>
             {move || {
                 let m = message.get();
-                (!m.is_empty()).then(|| view! { <span role="status" class="text-xs text-fg-muted">{m}</span> })
+                (!m.is_empty()).then(|| view! { <span role="status" class=HINT>{m}</span> })
             }}
             {move || {
                 let note = suggestion_note.get();
                 (!note.is_empty() || !suggestions.with(Vec::is_empty)).then(|| view! {
                     <div class="col-span-full grid gap-2">
-                        <p role="status" class="text-sm text-fg-muted">{note}</p>
-                        <div class="flex flex-wrap items-center gap-2">
+                        <p role="status" class=MUTED>{note}</p>
+                        <div class=ACTIONS>
                             {suggestions
                                 .get()
                                 .into_iter()

@@ -15,6 +15,7 @@ use std::time::Duration;
 use leptos::prelude::*;
 use wasm_bindgen::prelude::*;
 
+use crate::ds::patterns::{SELECT_CHEVRON, SELECT_WRAP};
 use crate::ds::{CONTROL, Icon, Lucide, cn};
 use crate::state;
 
@@ -131,7 +132,7 @@ fn Choice(
     #[prop(optional, into)] class: String,
 ) -> impl IntoView {
     view! {
-        <div class="relative w-full">
+        <div class=SELECT_WRAP>
             <select
                 id=id
                 aria-label=label
@@ -152,7 +153,7 @@ fn Choice(
                         .collect_view()
                 }}
             </select>
-            <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-fg-muted">
+            <span class=SELECT_CHEVRON>
                 <Lucide icon=Icon::ChevronDown size=16 />
             </span>
         </div>

@@ -7,6 +7,7 @@ use leptos::prelude::*;
 use rust_decimal::Decimal;
 
 use crate::ds::charts::{Donut, Line, LineChart, Series, Slice, fmt, series_color};
+use crate::ds::patterns::{AMOUNT, CHART_EMPTY, FIELD, FIGURE, NAME_ROW, TOTALS, TRUNCATE};
 use crate::ds::{
     CardHeader, CardTitle, Eyebrow, Facts, Heading, METRIC_STRIP, Metric, Money, Select, Stat,
     Tone, cn, money,
@@ -219,11 +220,11 @@ fn on_track(budget: &MonthlyBudget, days: usize) -> AnyView {
                 m(row.planned)
             );
             view! {
-                <li class="grid gap-1.5">
+                <li class=FIELD>
                     <div class="flex items-baseline justify-between gap-3 text-sm">
-                        <span class="min-w-0 truncate">{row.name.clone()}</span>
+                        <span class=TRUNCATE>{row.name.clone()}</span>
                         <span class=cn([
-                            "whitespace-nowrap tabular-nums",
+                            FIGURE,
                             if over > Decimal::ZERO { "font-medium text-over-fg" } else { "text-fg-muted" },
                         ])>{status}</span>
                     </div>
@@ -247,7 +248,7 @@ fn on_track(budget: &MonthlyBudget, days: usize) -> AnyView {
             {month_end}
         </div>
         <ul class="mt-6 grid list-none gap-3.5 p-0">{bars}</ul>
-        <Facts rows=sums class="mt-4 border-t border-line pt-3" />
+        <Facts rows=sums class=TOTALS />
     }
     .into_any()
 }
@@ -309,7 +310,7 @@ pub fn BudgetVisuals(
             fmt(move |n| money(Decimal::try_from(n).unwrap_or_default(), &unit))
         };
         if pieces.is_empty() {
-            view! { <p role="img" aria-label="No money allocated" class="py-10 text-center text-sm text-fg-muted">"No money allocated"</p> }
+            view! { <p role="img" aria-label="No money allocated" class=CHART_EMPTY>"No money allocated"</p> }
                 .into_any()
         } else {
             let label = pieces
@@ -331,9 +332,9 @@ pub fn BudgetVisuals(
                 .iter()
                 .map(|(l, v, _)| {
                     view! {
-                        <li class="flex items-baseline justify-between gap-3">
+                        <li class=NAME_ROW>
                             <span class="min-w-0 text-fg-muted">{l.clone()}</span>
-                            <strong class="font-medium tabular-nums">{fmt_money(*v)}</strong>
+                            <strong class=AMOUNT>{fmt_money(*v)}</strong>
                         </li>
                     }
                 })
@@ -478,7 +479,7 @@ pub fn BudgetVisuals(
             );
             let code = unit.code.clone();
             let chart = if elapsed == 0 {
-                view! { <p class="py-10 text-center text-sm text-fg-muted">"Your trajectory starts with this month's spending"</p> }
+                view! { <p class=CHART_EMPTY>"Your trajectory starts with this month's spending"</p> }
                     .into_any()
             } else {
                 view! {

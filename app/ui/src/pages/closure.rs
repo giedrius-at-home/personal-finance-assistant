@@ -32,10 +32,11 @@ use self::split::{DraftStore, LegacyNames, SplitEditor, SplitTarget, move_target
 use self::steps::{AllocationList, ReviewNames, ReviewStep, UnclassifiedAccounts as NewAccounts};
 use self::transfer::Hop;
 use self::ui::{
-    ACTIONS, CALLOUT, CONFLICT, Choice, ERROR, FOOTNOTE, FieldBox, LIST, SUBHEADING, StepCard,
-    WARN, date_time, field_id, load_closure, load_unclassified, money, month_label, month_to_close,
-    next_month, post_closure, post_role, previous_month, recent_months,
+    ACTIONS, CALLOUT, CONFLICT, Choice, ERROR, ERROR_LINE, FOOTNOTE, FieldBox, LIST, SUBHEADING,
+    StepCard, date_time, field_id, load_closure, load_unclassified, money, month_label,
+    month_to_close, next_month, post_closure, post_role, previous_month, recent_months,
 };
+use crate::ds::patterns::{CHIPS, MUTED, PAGE_TITLE, STACK};
 use crate::ds::{
     Button, Card, CardTone, EmptyState, Eyebrow, Icon, Lucide, Size, StepState, Variant, step_class,
 };
@@ -562,7 +563,7 @@ fn ClosedSummary(view: ClosureView) -> impl IntoView {
     view! {
         <StepCard title="4. Transfers · closed" description=Some(description)>
             {(pending > 0).then(|| view! {
-                <p class=WARN>
+                <p class=ERROR_LINE>
                     {format!(
                         "{pending} transfer{} still pending. {} can still match on a later sync.",
                         if pending == 1 { " is" } else { "s are" },
@@ -841,11 +842,11 @@ pub fn MonthClosure() -> impl IntoView {
 
     view! {
         <section class="grid min-w-0 gap-4" aria-label="Close month">
-            <Card class="grid gap-4">
+            <Card class=STACK>
                 <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                     <div>
                         <Eyebrow>"Month closure"</Eyebrow>
-                        <h2 class="mt-1 text-2xl font-semibold tracking-tight">
+                        <h2 class=PAGE_TITLE>
                             {move || format!("Close {}", month_label(&month.get(), true))}
                         </h2>
                     </div>
@@ -859,7 +860,7 @@ pub fn MonthClosure() -> impl IntoView {
                         />
                     </FieldBox>
                 </div>
-                <ol class="flex flex-wrap gap-2">{stepper}</ol>
+                <ol class=CHIPS>{stepper}</ol>
                 {move || {
                     let n = notice.get();
                     (!n.is_empty()).then(|| view! { <p class="text-sm text-fg" role="status">{n}</p> })
@@ -869,7 +870,7 @@ pub fn MonthClosure() -> impl IntoView {
                     (!e.is_empty()).then(|| view! { <p class=ERROR role="alert">{e}</p> })
                 }}
                 {move || (view.with(Option::is_none) && error.with(String::is_empty)).then(|| view! {
-                    <p class="text-sm text-fg-muted" role="status">
+                    <p class=MUTED role="status">
                         {format!("Loading {}…", month_label(&month.get(), true))}
                     </p>
                 })}
