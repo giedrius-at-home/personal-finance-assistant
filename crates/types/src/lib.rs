@@ -10,6 +10,7 @@ pub mod gateway;
 pub mod manage;
 pub mod notify;
 pub mod report;
+pub mod ui;
 
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
