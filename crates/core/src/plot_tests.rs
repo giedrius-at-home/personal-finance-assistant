@@ -1278,3 +1278,57 @@ fn average_per_day_counts_days_from_the_first_transaction() {
     // 180 over 10 August to 24 November: 107 days.
     assert_eq!(data.series[0].values, [Some(dec("1.68"))]);
 }
+
+/// The ledger with 5 spent earlier today and 10 on Saturday 21 November.
+fn spent_today() -> Snapshot {
+    let mut rows = ledger();
+    rows.push(tx(
+        "today",
+        "5",
+        Kind::Outflow,
+        None,
+        "2026-11-24T08:00:00+00:00[UTC]",
+    ));
+    rows.push(out("sat", "10", None, "2026-11-21"));
+    snap(rows)
+}
+
+#[test]
+fn the_running_month_of_year_is_never_the_peak_or_the_lowest() {
+    let data = query(
+        &spent_today(),
+        &spec(Axis::MonthOfYear, Period::ThisYear, &[Measure::Spent]),
+    );
+    let insight = data.insight.unwrap();
+    // November (913) is still running.
+    assert_eq!(insight.label, "March");
+    assert_eq!(insight.against, Some(dec("30")));
+}
+
+#[test]
+fn a_day_or_weekday_occurring_only_today_is_not_named() {
+    let snap = spent_today();
+    let days = query(
+        &snap,
+        &spec(Axis::DayOfMonth, Period::ThisMonth, &[Measure::Spent]),
+    );
+    // Day 24 (5) is only today; the lowest is day 15 (8).
+    let insight = days.insight.unwrap();
+    assert_eq!(insight.label, "Day 1");
+    assert_eq!(insight.against, Some(dec("8")));
+    let weekdays = query(
+        &snap,
+        &spec(
+            Axis::Weekday,
+            Period::Between {
+                from: "2026-11-20".into(),
+                to: "2026-11-24".into(),
+            },
+            &[Measure::Spent],
+        ),
+    );
+    // Tuesday occurs only today: Friday 60 against Saturday 10.
+    let insight = weekdays.insight.unwrap();
+    assert_eq!(insight.label, "Friday");
+    assert_eq!(insight.against, Some(dec("10")));
+}

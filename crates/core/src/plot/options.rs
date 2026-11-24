@@ -142,9 +142,9 @@ pub(super) fn reference(frame: &Frame, n: usize) -> Result<Option<Reference>> {
         // The period before is shown as it is; the usual averages only
         // buckets the ledger reaches.
         let finished = if periods == 1 {
-            frame.finished(&starts, columns.len())
+            frame.finished(&w, &starts, columns.len())
         } else {
-            frame.averaged(&starts, columns.len())
+            frame.averaged(&w, &starts, columns.len())
         };
         let values = frame.values(&w, &rows, &columns, &def).remove(0);
         counterparts.push(

@@ -298,7 +298,7 @@ pub fn plot_query(ctx: &Ctx<'_>, spec: &PlotSpec) -> Result<PlotData> {
         )
     };
     let (columns, starts, axis_left_out) = frame.columns(&window, ranking)?;
-    let averaged = frame.averaged(&starts, columns.len());
+    let averaged = frame.averaged(&window, &starts, columns.len());
     // Buckets after today's (a period that ends later) have no value yet.
     let today_key = frame.today_key();
     let future: Vec<bool> = starts.iter().map(|&s| s > today_key).collect();

@@ -272,13 +272,54 @@ impl Frame<'_> {
         bucket_start(self.spec.by, day)
     }
 
-    /// Per column, whether its bucket is over; every column off a time axis is.
-    pub(super) fn finished(&self, starts: &[Date], columns: usize) -> Vec<bool> {
-        if starts.is_empty() {
-            return vec![true; columns];
+    /// Per column, whether its bucket is over. Month of year: every month
+    /// but the running one when the period reaches today. Weekday and day of month: those with an
+    /// occurrence in the period before today. A named axis: every column.
+    pub(super) fn finished(&self, w: &Window, starts: &[Date], columns: usize) -> Vec<bool> {
+        let dim = Dim::from(self.spec.by);
+        match self.spec.by {
+            Axis::MonthOfYear => {
+                let running = point_key(dim, self.today(), self.current());
+                let reaches_today = w.to >= self.today();
+                (1..=columns)
+                    .map(|m| !reaches_today || m.to_string() != running)
+                    .collect()
+            }
+            Axis::Weekday | Axis::DayOfMonth => {
+                let mut done = vec![false; columns];
+                // The last 31 days before today hold every weekday and day of month.
+                let mut day = self.today().yesterday().ok();
+                for _ in 0..31 {
+                    let Some(d) = day.filter(|&d| d >= w.from) else {
+                        break;
+                    };
+                    let month = self.month_of_day(d);
+                    if d <= w.to
+                        && w.months
+                            .is_none_or(|(first, last)| first <= month && month <= last)
+                    {
+                        let key = point_key(dim, d, month);
+                        if let Ok(i) = key.parse::<usize>() {
+                            let i = if self.spec.by == Axis::DayOfMonth {
+                                i - 1
+                            } else {
+                                i
+                            };
+                            if let Some(slot) = done.get_mut(i) {
+                                *slot = true;
+                            }
+                        }
+                    }
+                    day = d.yesterday().ok();
+                }
+                done
+            }
+            _ if starts.is_empty() => vec![true; columns],
+            _ => {
+                let today = self.today_key();
+                starts.iter().map(|&s| s < today).collect()
+            }
         }
-        let today = self.today_key();
-        starts.iter().map(|&s| s < today).collect()
     }
 
     /// Per column, whether it goes into an average (the insight's, the
@@ -286,9 +327,9 @@ impl Frame<'_> {
     /// ledger's first counted transaction. A bucket that holds that
     /// transaction counts; buckets entirely before it are still drawn (as
     /// zero) but are not averaged.
-    pub(super) fn averaged(&self, starts: &[Date], columns: usize) -> Vec<bool> {
+    pub(super) fn averaged(&self, w: &Window, starts: &[Date], columns: usize) -> Vec<bool> {
         let first = self.first_day.map(|d| self.key_of(d));
-        let mut averaged = self.finished(starts, columns);
+        let mut averaged = self.finished(w, starts, columns);
         for (a, &s) in averaged.iter_mut().zip(starts) {
             *a &= first.is_some_and(|f| s >= f);
         }
