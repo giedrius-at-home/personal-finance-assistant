@@ -6,7 +6,7 @@ use leptos::html;
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 
-use super::patterns::{ACTIONS, CHIPS, ERROR_LINE, FIELD_LABEL, GALLERY_GROUP, MUTED};
+use super::patterns::{ACTIONS, CONTROL_ROW, ERROR_LINE, FIELD_LABEL, GALLERY_GROUP, MUTED};
 use super::{Button, CardTitle, Heading, Icon, Input, Lucide, Size, Variant, button_class, cn};
 
 /// The edit controls, in the frame's tools above its top rule.
@@ -135,14 +135,21 @@ pub fn EditBar(
     }
 }
 
-/// One "Add …" chip; its panel id (if any) as `data-panel`, so focus can find it.
-fn add_chip(panel: Option<String>, title: String, on: Callback<()>) -> impl IntoView {
+/// One "Add …" chip; its panel id (if any) as `data-panel`, so focus can find
+/// it. `aria` is its label: "Add <title>" unless given.
+fn add_chip(
+    panel: Option<String>,
+    title: String,
+    aria: Option<String>,
+    on: Callback<()>,
+) -> impl IntoView {
+    let aria = aria.unwrap_or_else(|| format!("Add {title}"));
     view! {
         <span class="contents" data-panel=panel>
             <Button
                 variant=Variant::Secondary
                 size=Size::Sm
-                label=format!("Add {title}")
+                label=aria
                 on_click=Callback::new(move |_| on.run(()))
             >
                 <Lucide icon=Icon::Plus size=14 />
@@ -168,6 +175,9 @@ pub fn Gallery(
     ready: Signal<Vec<String>>,
     /// Adds a copy of the ready-made plot at this index.
     on_ready: Callback<usize>,
+    /// Why the last pick was refused.
+    #[prop(into)]
+    error: Signal<Option<String>>,
     /// The "New plot" button's label, also its `aria-label`.
     #[prop(into)]
     new_label: String,
@@ -183,12 +193,12 @@ pub fn Gallery(
                     view! { <p class=MUTED>"Every panel is on this page."</p> }.into_any()
                 } else {
                     view! {
-                        <div class=CHIPS>
+                        <div class=CONTROL_ROW>
                             {items
                                 .into_iter()
                                 .map(|(id, title)| {
                                     let panel = id.clone();
-                                    add_chip(Some(panel), title, Callback::new(move |()| on_add.run(id.clone())))
+                                    add_chip(Some(panel), title, None, Callback::new(move |()| on_add.run(id.clone())))
                                 })
                                 .collect_view()}
                         </div>
@@ -201,7 +211,7 @@ pub fn Gallery(
                 (!plots.is_empty()).then(|| view! {
                     <div class=GALLERY_GROUP>
                         <h4 class=FIELD_LABEL>"Your plots"</h4>
-                        <div class=CHIPS>
+                        <div class=CONTROL_ROW>
                             {plots
                                 .into_iter()
                                 .map(|(id, title, here)| {
@@ -209,10 +219,10 @@ pub fn Gallery(
                                     let name = if here {
                                         view! { <span class=MUTED>{title.clone()}</span> }.into_any()
                                     } else {
-                                        add_chip(None, title.clone(), Callback::new(move |()| on_add.run(add.clone()))).into_any()
+                                        add_chip(None, title.clone(), None, Callback::new(move |()| on_add.run(add.clone()))).into_any()
                                     };
                                     view! {
-                                        <span class=ACTIONS data-panel=id>
+                                        <span class=CONTROL_ROW data-panel=id>
                                             {name}
                                             <Confirm
                                                 label="Delete"
@@ -233,16 +243,21 @@ pub fn Gallery(
                 (!ready.is_empty()).then(|| view! {
                     <div class=GALLERY_GROUP>
                         <h4 class=FIELD_LABEL>"Ready-made plots"</h4>
-                        <div class=CHIPS>
+                        <div class=CONTROL_ROW>
                             {ready
                                 .into_iter()
                                 .enumerate()
-                                .map(|(i, name)| add_chip(None, name, Callback::new(move |()| on_ready.run(i))))
+                                .map(|(i, name)| {
+                                    // Not "Add <name>": a saved plot may have that name too.
+                                    let aria = format!("Add a copy of {name}");
+                                    add_chip(None, name, Some(aria), Callback::new(move |()| on_ready.run(i)))
+                                })
                                 .collect_view()}
                         </div>
                     </div>
                 })
             }}
+            {move || error.get().map(|why| view! { <p role="alert" class=ERROR_LINE>{why}</p> })}
             <div>
                 <Button
                     variant=Variant::Secondary

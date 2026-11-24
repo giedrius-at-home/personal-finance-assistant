@@ -222,21 +222,29 @@ pub fn panel_sent(l: &mut UiLayout, defs: &[&PanelDef], from: &PageRef, to: &Pag
     panel_added(l, defs, to, panel);
 }
 
-/// What "Add a panel" offers, as (panel id, title): home panels not on the
-/// page, then movable panels of other pages not on it, in registry order,
-/// then saved plots not on it.
+/// The registry panels "Add a panel" offers, as (panel id, title): home
+/// panels not on the page, then movable panels of other pages not on it, in
+/// registry order. Saved plots are listed by [`own_plots`].
 pub fn addable(l: &UiLayout, defs: &[&PanelDef], at: &PageRef) -> Vec<(String, String)> {
     let items = resolve(defs, &l.plots, &at.page, l.page(&at.page));
     let home = defs.iter().filter(|d| d.page == at.page);
     let guests = defs.iter().filter(|d| d.page != at.page && d.movable);
-    let plots = l
-        .plots
-        .iter()
-        .map(|p| (plot_panel_id(&p.id), p.title.clone()));
     home.chain(guests)
         .map(|d| (d.id.to_owned(), d.title.to_owned()))
-        .chain(plots)
         .filter(|(id, _)| !items.iter().any(|i| i.panel == *id))
+        .collect()
+}
+
+/// Every saved plot, for "Your plots": (panel id, title, already on the page).
+pub fn own_plots(l: &UiLayout, defs: &[&PanelDef], at: &PageRef) -> Vec<(String, String, bool)> {
+    let items = resolve(defs, &l.plots, &at.page, l.page(&at.page));
+    l.plots
+        .iter()
+        .map(|p| {
+            let panel = plot_panel_id(&p.id);
+            let here = items.iter().any(|i| i.panel == panel);
+            (panel, p.title.clone(), here)
+        })
         .collect()
 }
 
@@ -1042,24 +1050,26 @@ mod tests {
     }
 
     #[test]
-    fn addable_offers_saved_plots_not_on_the_page() {
+    fn saved_plots_are_listed_once_with_whether_they_are_on_the_page() {
         let r = reg();
         let d: Vec<&PanelDef> = r.iter().collect();
         let mut l = UiLayout::default();
         plot_saved(&mut l, None, "Food", &spec(1)).unwrap();
         plot_saved(&mut l, None, "Food", &spec(2)).unwrap();
-        let offered = |l: &UiLayout| addable(l, &d, &p1());
         let pair = |id: &str, t: &str| (id.to_string(), t.to_string());
+        let mine = |id: &str, here: bool| (id.to_string(), "Food".to_string(), here);
+        // The registry chips never hold plots.
+        assert_eq!(addable(&l, &d, &p1()), [pair("m", "m")]);
         assert_eq!(
-            offered(&l),
-            [
-                pair("m", "m"),
-                pair("plot:p1", "Food"),
-                pair("plot:p2", "Food")
-            ]
+            own_plots(&l, &d, &p1()),
+            [mine("plot:p1", false), mine("plot:p2", false)]
         );
         panel_added(&mut l, &d, &p1(), "plot:p1");
-        assert_eq!(offered(&l), [pair("m", "m"), pair("plot:p2", "Food")]);
+        assert_eq!(addable(&l, &d, &p1()), [pair("m", "m")]);
+        assert_eq!(
+            own_plots(&l, &d, &p1()),
+            [mine("plot:p1", true), mine("plot:p2", false)]
+        );
     }
 
     #[test]

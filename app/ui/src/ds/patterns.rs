@@ -467,5 +467,25 @@ pub const BUILDER_FIELD: &str = "min-w-0 flex-1 basis-40";
 /// A group of "Add a panel": its name over its chips.
 pub const GALLERY_GROUP: &str = "grid gap-2";
 
-/// The plot builder's first row: fields of different heights, tops aligned.
-pub const BUILDER_ROW: &str = "flex flex-wrap items-start gap-3";
+/// A row of controls or objects of unequal height, side by side: all on one
+/// middle line; wraps.
+pub const CONTROL_ROW: &str = "flex flex-wrap items-center gap-3";
+
+/// Controls that stay together on one line, on one middle line, inside a
+/// `CONTROL_ROW`.
+pub const CONTROL_GROUP: &str = "inline-flex items-center gap-3";
+
+/// A select inside a `CONTROL_GROUP`.
+pub const GROUP_SELECT: &str = "w-48";
+
+/// A row of labelled fields: labels above, the controls (all one height)
+/// on one line; wraps.
+pub const FIELD_ROW: &str = "flex flex-wrap items-end gap-3";
+
+/// A switch with its label after it, on one middle line.
+pub const SWITCH_FIELD: &str = "inline-flex items-center gap-2 text-sm text-fg";
+
+/// A chip of a multiple choice: on (`CHIP_ON`) or off (`CHIP_OFF`).
+pub const CHIP: &str = "inline-flex items-center gap-1 rounded-pill border px-3 py-1 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
+pub const CHIP_ON: &str = "border-contrast bg-contrast text-fg-on-contrast";
+pub const CHIP_OFF: &str = "border-border text-fg-muted hover:text-fg";

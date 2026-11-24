@@ -31,7 +31,7 @@ pub fn Heatmap(
     columns: Vec<String>,
     values: Vec<Vec<Option<f64>>>,
     format: Fmt,
-    #[prop(optional, into)] label: String,
+    #[prop(optional, into)] label: Signal<String>,
     /// The last row is unfinished (this week so far): its cells are drawn lighter.
     #[prop(optional)]
     partial_last: bool,
@@ -42,7 +42,7 @@ pub fn Heatmap(
     let max = (0..rows.len())
         .flat_map(|r| (0..n).filter_map(move |c| cell(r, c)))
         .fold(0.0, f64::max);
-    let caption = label.clone();
+    let caption = label;
     let hovered = RwSignal::new(None::<(usize, usize)>);
     let grid = format!("grid-template-columns:auto repeat({n},minmax(0,40px))");
     let cells = rows
@@ -103,7 +103,7 @@ pub fn Heatmap(
         .chain(columns.iter().cloned())
         .collect();
     view! {
-        <div role="figure" aria-label=label class="w-full overflow-x-auto pt-2">
+        <div role="figure" aria-label=move || label.get() class="w-full overflow-x-auto pt-2">
             <div class="grid w-fit items-center gap-[3px]" style=grid on:mouseleave=move |_| hovered.set(None)>
                 {cells}
                 <span></span>

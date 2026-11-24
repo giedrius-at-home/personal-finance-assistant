@@ -17,7 +17,7 @@ pub fn Donut(
     format: Fmt,
     #[prop(optional)] center: Option<Children>,
     #[prop(default = 240)] height: u32,
-    #[prop(optional, into)] label: String,
+    #[prop(optional, into)] label: Signal<String>,
 ) -> impl IntoView {
     let total: f64 = data
         .iter()
@@ -60,7 +60,7 @@ pub fn Donut(
         .collect_view();
     let tip_data = data.clone();
     view! {
-        <div role="figure" aria-label=label class="flex w-full flex-col" style:height=format!("{height}px")>
+        <div role="figure" aria-label=move || label.get() class="flex w-full flex-col" style:height=format!("{height}px")>
             <div class="relative min-h-0 flex-1" on:mouseleave=move |_| hovered.set(None)>
                 <svg class="h-full w-full" viewBox="0 0 100 100">{arcs}</svg>
                 {center.map(|c| {

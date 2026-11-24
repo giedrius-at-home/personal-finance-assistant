@@ -683,10 +683,7 @@ pub fn MultiSelect(
                     <button
                         type="button"
                         aria-pressed=on.to_string()
-                        class=cn([
-                            "inline-flex items-center gap-1 rounded-pill border px-3 py-1 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
-                            if on { "border-contrast bg-contrast text-fg-on-contrast" } else { "border-border text-fg-muted hover:text-fg" },
-                        ])
+                        class=cn([patterns::CHIP, if on { patterns::CHIP_ON } else { patterns::CHIP_OFF }])
                         on:click=move |_| {
                             let next = toggle_name(&list_names(&value.get_untracked()), &name);
                             value.set(next.join(", "));
@@ -725,7 +722,7 @@ pub fn MultiSelect(
 }
 
 /// More options than this and [`MultiSelect`] searches instead of listing.
-const LONG_LIST: usize = 24;
+pub(crate) const LONG_LIST: usize = 24;
 
 /// The chips to show: all of them for a short list (`query` is `None`);
 /// for a long one the chosen names, then the others matching `query`.

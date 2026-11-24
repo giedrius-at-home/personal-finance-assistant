@@ -2,6 +2,7 @@
 //! the spec names, or as a table of its numbers.
 
 pub mod builder;
+pub mod choice;
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -14,12 +15,13 @@ use rust_decimal::Decimal;
 use serde::Serialize;
 
 use crate::api;
+use crate::ds::builder::SwitchField;
 use crate::ds::charts::{
     BarChart, DataTable, Donut, Fmt, Heatmap, Line, LineChart, Ranked, Scatter, Series, Slice, fmt,
     label_step, series_color,
 };
 use crate::ds::patterns::{ERROR_LINE, MUTED, PLOT_FOOT, PLOT_INSIGHT, SKELETON_CARD};
-use crate::ds::{EmptyState, Skeleton, Switch, money};
+use crate::ds::{EmptyState, Skeleton, money};
 use crate::pages::{f, plural};
 
 /// The query's key for the series that folds the rest together.
@@ -243,7 +245,7 @@ fn axis_name(by: Axis) -> &'static str {
 }
 
 /// The numbers: one row per bucket, one column per series.
-fn data_table(spec: &PlotSpec, data: &PlotData, label: String) -> AnyView {
+fn data_table(spec: &PlotSpec, data: &PlotData, label: Signal<String>) -> AnyView {
     let columns = std::iter::once(axis_name(spec.by).to_owned())
         .chain(data.series.iter().map(|s| s.label.clone()))
         .collect();
@@ -279,7 +281,7 @@ fn data_table(spec: &PlotSpec, data: &PlotData, label: String) -> AnyView {
 }
 
 /// The chart `spec.chart` names, over `data`.
-fn drawing(spec: &PlotSpec, data: &PlotData, label: String) -> AnyView {
+fn drawing(spec: &PlotSpec, data: &PlotData, label: Signal<String>) -> AnyView {
     let format = unit_fmt(data.unit, &data.currency);
     let titles = data.titles.clone();
     let (categories, series) = series_for(data);
@@ -483,17 +485,27 @@ pub fn PlotView(
         loaded.data.with(|d| match d {
             None => view! { <Skeleton class=SKELETON_CARD /> }.into_any(),
             Some(Err(e)) => view! { <p role="alert" class=ERROR_LINE>{e.clone()}</p> }.into_any(),
-            Some(Ok(d)) if is_empty(d) => view! { <EmptyState title="Nothing in this period" /> }.into_any(),
+            Some(Ok(d)) if is_empty(d) => {
+                view! { <EmptyState title="Nothing in this period" /> }.into_any()
+            }
             Some(Ok(d)) => {
                 let spec = spec.get_untracked();
                 let table_only = spec.chart == Chart::Table;
                 let subtitle = subtitle_for(&spec, d);
-                let insight = d.insight.as_ref().map(|i| view! { <p class=PLOT_INSIGHT>{i.text.clone()}</p> });
+                let insight = d
+                    .insight
+                    .as_ref()
+                    .map(|i| view! { <p class=PLOT_INSIGHT>{i.text.clone()}</p> });
                 let data = d.clone();
                 let fallback = subtitle.clone();
+                // Without a title the period and filters name the chart; a new
+                // title changes the label only, not the drawing.
+                let label = Signal::derive(move || {
+                    Some(title.get())
+                        .filter(|t| !t.is_empty())
+                        .unwrap_or_else(|| fallback.clone())
+                });
                 let body = move || {
-                    // Without a title the period and filters name the chart.
-                    let label = Some(title.get()).filter(|t| !t.is_empty()).unwrap_or_else(|| fallback.clone());
                     if table_only || numbers.get() {
                         data_table(&spec, &data, label)
                     } else {
@@ -503,14 +515,12 @@ pub fn PlotView(
                 let id = switch_id.clone();
                 let switch = (!table_only).then(|| {
                     view! {
-                        <div class="flex items-center gap-2">
-                            <Switch
-                                id=id.clone()
-                                checked=numbers.into()
-                                on_change=Callback::new(move |v| numbers.set(v))
-                            />
-                            <label for=id class="cursor-pointer text-sm text-fg">"Show numbers"</label>
-                        </div>
+                        <SwitchField
+                            id=id
+                            label="Show numbers"
+                            checked=numbers.into()
+                            on_change=Callback::new(move |v| numbers.set(v))
+                        />
                     }
                 });
                 view! {

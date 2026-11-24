@@ -238,11 +238,15 @@ fn Tooltip(
 /// The chart's values as a visually hidden table, for screen readers: each
 /// row's first cell names it; nothing when there are no rows.
 #[component]
-fn ValueTable(caption: String, head: Vec<String>, rows: Vec<Vec<String>>) -> impl IntoView {
+fn ValueTable(
+    #[prop(into)] caption: Signal<String>,
+    head: Vec<String>,
+    rows: Vec<Vec<String>>,
+) -> impl IntoView {
     (!rows.is_empty()).then(|| {
         view! {
             <table class="sr-only">
-                <caption>{caption}</caption>
+                <caption>{move || caption.get()}</caption>
                 <thead>
                     <tr>{head.into_iter().map(|h| view! { <th scope="col">{h}</th> }).collect_view()}</tr>
                 </thead>

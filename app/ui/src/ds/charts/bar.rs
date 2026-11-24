@@ -14,7 +14,7 @@ pub fn BarChart(
     #[prop(default = 240)] height: u32,
     #[prop(default = 56)] y_axis_width: u32,
     #[prop(optional)] stacked: bool,
-    #[prop(optional, into)] label: String,
+    #[prop(optional, into)] label: Signal<String>,
     #[prop(optional, into)] class: String,
     /// Tooltip title per category (defaults to the category label).
     #[prop(optional)]
@@ -189,12 +189,12 @@ pub fn BarChart(
     let titles = titles.unwrap_or_else(|| categories.clone());
     let table = table.then(|| {
         let (head, rows) = series_table(&titles, &series, &format);
-        view! { <ValueTable caption=label.clone() head=head rows=rows /> }
+        view! { <ValueTable caption=label head=head rows=rows /> }
     });
     let tooltip_series = series.clone();
     let tooltip_format = format.clone();
     view! {
-        <div role="figure" aria-label=label class=cn(["w-full", class.as_str()])>
+        <div role="figure" aria-label=move || label.get() class=cn(["w-full", class.as_str()])>
             <div class="relative" style=format!("height:{plot_h}px;margin-left:{y_axis_width}px;margin-right:8px;margin-top:8px")>
                 <YTicks ticks=tick_views width=y_axis_width />
                 {bars}

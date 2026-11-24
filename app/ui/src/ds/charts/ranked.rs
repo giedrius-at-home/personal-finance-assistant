@@ -19,12 +19,12 @@ pub fn Ranked(
     items: Vec<(String, f64)>,
     format: Fmt,
     #[prop(optional)] two_sided: bool,
-    #[prop(optional, into)] label: String,
+    #[prop(optional, into)] label: Signal<String>,
     /// The last item is "Other": drawn muted.
     #[prop(optional)]
     other_last: bool,
 ) -> impl IntoView {
-    let caption = label.clone();
+    let caption = label;
     let max_abs = items
         .iter()
         .map(|(_, v)| v.abs())
@@ -63,7 +63,7 @@ pub fn Ranked(
         .map(|(name, v)| vec![name.clone(), format(*v)])
         .collect();
     view! {
-        <div role="figure" aria-label=label class="grid w-full gap-2.5">
+        <div role="figure" aria-label=move || label.get() class="grid w-full gap-2.5">
             {rows}
             <ValueTable caption=caption head=vec!["Name".to_owned(), "Value".to_owned()] rows=table_rows />
         </div>

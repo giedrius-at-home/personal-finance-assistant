@@ -47,7 +47,7 @@ pub fn DataTable(
     /// Per value column; a column without one uses `format`.
     #[prop(optional)]
     formats: Vec<Fmt>,
-    #[prop(optional, into)] label: String,
+    #[prop(optional, into)] label: Signal<String>,
 ) -> impl IntoView {
     let sort = RwSignal::new(None::<(usize, bool)>);
     let fmts: Vec<Fmt> = (0..columns.len().saturating_sub(1))
@@ -122,7 +122,7 @@ pub fn DataTable(
         }
     });
     view! {
-        <div tabindex="0" role="region" aria-label=label class=TABLE_CONTAINER>
+        <div tabindex="0" role="region" aria-label=move || label.get() class=TABLE_CONTAINER>
             <table class=TABLE data-density="sm">
                 <thead>
                     <tr>
