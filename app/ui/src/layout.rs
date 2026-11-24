@@ -121,6 +121,7 @@ pub fn registry() -> impl Iterator<Item = &'static PanelDef> {
         .chain(crate::pages::transactions::PANELS)
         .chain(crate::pages::spending::PANELS)
         .chain(crate::pages::organise::PANELS)
+        .chain(crate::pages::plan::PANELS)
 }
 
 fn home_defs(page: &str) -> Vec<&'static PanelDef> {
