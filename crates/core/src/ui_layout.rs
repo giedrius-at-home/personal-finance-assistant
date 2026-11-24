@@ -9,7 +9,8 @@ use crate::writes::{Writer, invalid};
 const MAX_PAYLOAD: usize = 256 * 1024;
 
 /// The stored layout; the default when the table or row is missing or the
-/// payload does not parse, so a bad row never hides the app.
+/// payload does not parse or breaks a layout rule, so a bad row never hides
+/// the app or blocks later saves.
 pub fn load(conn: &Connection) -> Result<UiLayout> {
     let exists: bool = conn.query_row(
         "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'ui_layout')",
@@ -27,7 +28,8 @@ pub fn load(conn: &Connection) -> Result<UiLayout> {
         )
         .optional()?;
     Ok(payload
-        .and_then(|p| serde_json::from_str(&p).ok())
+        .and_then(|p| serde_json::from_str::<UiLayout>(&p).ok())
+        .filter(|l| l.validate().is_ok())
         .unwrap_or_default())
 }
 
@@ -118,6 +120,24 @@ mod tests {
                 .unwrap();
             assert_eq!(load(db.store.connection()).unwrap(), UiLayout::default());
         }
+    }
+
+    #[test]
+    fn a_stored_layout_that_breaks_a_rule_loads_as_default_and_saves_again() {
+        let mut db = crate::writes::fixture::db();
+        let bad = UiLayout {
+            tabs: vec![tab("manage", true)],
+        };
+        db.store
+            .connection()
+            .execute(
+                "INSERT OR REPLACE INTO ui_layout (singleton, payload_json) VALUES (1, ?1)",
+                [serde_json::to_string(&bad).unwrap()],
+            )
+            .unwrap();
+        assert_eq!(load(db.store.connection()).unwrap(), UiLayout::default());
+        db.write(|w, _| save(w, &layout())).unwrap();
+        assert_eq!(load(db.store.connection()).unwrap(), layout());
     }
 
     #[test]
