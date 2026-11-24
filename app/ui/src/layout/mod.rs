@@ -10,10 +10,12 @@ use serde::Serialize;
 
 use crate::api::{self, NoArgs};
 use crate::ds::arrange::{Edited, drop_move, focus_after, focus_on, moves};
-use crate::ds::patterns::ACTIONS;
+use crate::ds::patterns::{ACTIONS, PLOT_UNREADABLE};
 use crate::ds::{
-    Button, Confirm, DropTarget, EditBar, EmptyState, Gallery, PanelFrame, PanelList, Size, Variant,
+    Button, Card, CardHeader, CardTitle, Confirm, DropTarget, EditBar, EmptyState, Gallery,
+    PanelFrame, PanelList, Size, Variant,
 };
+use crate::plots::PlotView;
 use edit::PageRef;
 
 pub mod edit;
@@ -312,13 +314,13 @@ impl LayoutState {
     }
 
     /// The saved plots; reactive.
-    #[allow(dead_code)] // Called by the plot pages (Tasks 6, 7).
+    #[allow(dead_code)] // Called by the plot builder (Task 7).
     pub fn plots(&self) -> Vec<SavedPlot> {
         self.layout.with(|l| l.plots.clone())
     }
 
     /// Saves a plot over `id`, or as a new one; returns its id (see `edit::plot_saved`).
-    #[allow(dead_code)] // Called by the plot pages (Tasks 6, 7).
+    #[allow(dead_code)] // Called by the plot builder (Task 7).
     pub fn save_plot(
         &self,
         id: Option<String>,
@@ -336,7 +338,7 @@ impl LayoutState {
     }
 
     /// Deletes a plot and its panel from every page.
-    #[allow(dead_code)] // Called by the plot pages (Tasks 6, 7).
+    #[allow(dead_code)] // Called by the plot builder (Task 7).
     pub fn delete_plot(&self, id: &str) {
         self.change(|l| edit::plot_deleted(l, id));
     }
@@ -430,6 +432,41 @@ impl LayoutState {
     }
 }
 
+/// A saved plot's panel body: the plot under its title, or a muted card when
+/// this build can't read its spec. Its insight goes to `insight`.
+fn plot_body(
+    state: LayoutState,
+    id: String,
+    title: Memo<String>,
+    insight: RwSignal<Option<String>>,
+) -> AnyView {
+    let spec = Memo::new(move |_| {
+        state.layout.with(|l| {
+            let plot = l.plots.iter().find(|p| p.id == id)?;
+            serde_json::from_value::<PlotSpec>(plot.spec.clone()).ok()
+        })
+    });
+    let readable = Memo::new(move |_| spec.with(Option::is_some));
+    let spec = Signal::derive(move || spec.get().unwrap_or_default());
+    (move || {
+        let body = if readable.get() {
+            view! { <PlotView spec=spec insight=insight /> }.into_any()
+        } else {
+            view! { <p class=PLOT_UNREADABLE>"This plot can't be drawn in this version"</p> }
+                .into_any()
+        };
+        view! {
+            <Card>
+                <CardHeader>
+                    <CardTitle>{move || title.get()}</CardTitle>
+                </CardHeader>
+                {body}
+            </Card>
+        }
+    })
+    .into_any()
+}
+
 /// A page's panels, as its saved layout says, with "Fold all / Open all"; in
 /// Edit layout also each panel's controls, "Add a panel" and "Reset this tab".
 #[component]
@@ -499,50 +536,69 @@ pub fn PageView(
     };
     let target = RwSignal::new(None::<(String, bool)>);
     let panel = move |item: PanelItem| {
-        let def = registry().find(|d| d.id == item.panel)?;
-        let id = def.id;
-        let folded =
-            Signal::derive(move || items.with(|v| v.iter().any(|i| i.panel == id && i.folded)));
-        let summary = Signal::derive(move || {
-            let f = def.summary?;
-            report.data.with(|d| d.as_ref()?.as_ref().ok().and_then(f))
+        let def = registry().find(|d| d.id == item.panel);
+        let plot = edit::plot_id_of(&item.panel).map(str::to_owned);
+        if def.is_none() && plot.is_none() {
+            return None;
+        }
+        let id = StoredValue::new(item.panel);
+        let is = move |panel: &str| id.with_value(|id| id == panel);
+        let title = Memo::new(move |_| {
+            id.with_value(|id| state.layout.with(|l| panel_title(l, id)))
+                .unwrap_or_default()
         });
-        let render = def.render;
-        let half =
-            Signal::derive(move || items.with(|v| v.iter().any(|i| i.panel == id && i.half)));
+        let folded =
+            Signal::derive(move || items.with(|v| v.iter().any(|i| is(&i.panel) && i.folded)));
+        // A plot's summary is its insight, once its data has loaded.
+        let insight = RwSignal::new(None::<String>);
+        let summary = Signal::derive(move || match def {
+            Some(def) => {
+                let f = def.summary?;
+                report.data.with(|d| d.as_ref()?.as_ref().ok().and_then(f))
+            }
+            None => insight.get(),
+        });
+        let half = Signal::derive(move || items.with(|v| v.iter().any(|i| is(&i.panel) && i.half)));
         let ends = Memo::new(move |_| {
             let len = items.with(Vec::len);
-            position(id).map_or((None, None), |p| moves(p, len))
+            id.with_value(|id| position(id))
+                .map_or((None, None), |p| moves(p, len))
         });
         let moved = move |to: Option<usize>, edited: Edited| {
             if let Some(to) = to {
-                edit(&|l, d, a| edit::panel_moved(l, d, a, id, to));
-                refocus(edited, id);
+                id.with_value(|id| {
+                    edit(&|l, d, a| edit::panel_moved(l, d, a, id, to));
+                    refocus(edited, id);
+                });
             }
         };
         let bar = move || {
             editing.get().then(|| {
                 view! {
                     <EditBar
-                        title=def.title
+                        title=title.get()
                         first=Signal::derive(move || ends.get().0.is_none())
                         last=Signal::derive(move || ends.get().1.is_none())
                         half=half
                         on_grab=Callback::new(move |on: bool| {
-                            state.carried.set(on.then(|| (at.get_value(), id.to_string())));
+                            state.carried.set(on.then(|| (at.get_value(), id.get_value())));
                             target.set(None);
                         })
                         on_up=Callback::new(move |()| moved(ends.get_untracked().0, Edited::Up))
                         on_down=Callback::new(move |()| moved(ends.get_untracked().1, Edited::Down))
                         on_half=Callback::new(move |()| {
                             let to = !half.get_untracked();
-                            edit(&|l, d, a| edit::panel_half_set(l, d, a, id, to));
-                            refocus(Edited::Half, id);
+                            id.with_value(|id| {
+                                edit(&|l, d, a| edit::panel_half_set(l, d, a, id, to));
+                                refocus(Edited::Half, id);
+                            });
                         })
                         on_remove=Callback::new(move |()| {
-                            let Some(at) = position(id) else { return };
-                            edit(&|l, d, a| edit::panel_removed(l, d, a, id));
-                            refocus(Edited::Removed(at), id);
+                            id.with_value(|id| {
+                                let Some(at) = position(id) else { return };
+                                edit(&|l, d, a| edit::panel_removed(l, d, a, id));
+                                refocus(Edited::Removed(at), id);
+                            });
                         })
                     />
                 }
@@ -551,16 +607,17 @@ pub fn PageView(
         let drop = DropTarget {
             accepts: Signal::derive(move || dragging().is_some()),
             over: Signal::derive(move || {
-                target.with(|t| t.as_ref().is_some_and(|(t, _)| t == id))
-                    && dragging().as_deref() != Some(id)
+                target.with(|t| t.as_ref().is_some_and(|(t, _)| is(t)))
+                    && !dragging().is_some_and(|d| is(&d))
             }),
             on_over: Callback::new(move |after: bool| {
-                if target.with_untracked(|t| t.as_ref() != Some(&(id.to_string(), after))) {
-                    target.set(Some((id.to_string(), after)));
+                if !target.with_untracked(|t| t.as_ref().is_some_and(|(t, a)| is(t) && *a == after))
+                {
+                    target.set(Some((id.get_value(), after)));
                 }
             }),
             on_leave: Callback::new(move |()| {
-                if target.with_untracked(|t| t.as_ref().is_some_and(|(t, _)| t == id)) {
+                if target.with_untracked(|t| t.as_ref().is_some_and(|(t, _)| is(t))) {
                     target.set(None);
                 }
             }),
@@ -570,7 +627,7 @@ pub fn PageView(
                     return;
                 };
                 // A drop where it already is writes nothing.
-                if let (Some(f), Some(o)) = (position(&from), position(id))
+                if let (Some(f), Some(o)) = (position(&from), id.with_value(|id| position(id)))
                     && let Some(to) = drop_move(f, o, after)
                 {
                     edit(&|l, d, a| edit::panel_moved(l, d, a, &from, to));
@@ -580,22 +637,28 @@ pub fn PageView(
             }),
         };
         // Only Edit layout makes a panel quiet, so outside it a frame is never redrawn.
-        let quiet = Memo::new(move |_| editing.get() && !is_shown(id));
+        let quiet = Memo::new(move |_| editing.get() && !id.with_value(|id| is_shown(id)));
+        let plot = StoredValue::new(plot);
         Some(move || {
             view! {
                 <PanelFrame
-                    panel=id
-                    title=def.title
+                    panel=id.get_value()
+                    title=title.get()
                     summary=summary
                     folded=folded
-                    on_toggle=Callback::new(move |()| at.with_value(|a| state.toggle(&a.tab, &a.tab_name, &a.page, id)))
+                    on_toggle=Callback::new(move |()| {
+                        id.with_value(|id| at.with_value(|a| state.toggle(&a.tab, &a.tab_name, &a.page, id)))
+                    })
                     half=half
                     editing=editing
                     edit=bar
                     drop=drop
                     quiet=quiet.get()
                 >
-                    {render()}
+                    {match def {
+                        Some(def) => (def.render)(),
+                        None => plot_body(state, plot.get_value().unwrap_or_default(), title, insight),
+                    }}
                 </PanelFrame>
             }
         })

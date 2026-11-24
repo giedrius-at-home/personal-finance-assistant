@@ -438,3 +438,22 @@ pub fn Disclosure(
 /// `sm`, on its own row under the full-width bar); it sticks under the
 /// window's drag strip. Only its children take clicks.
 pub const TAB_ROW: &str = "pointer-events-none sticky top-10 z-30 mb-4 flex flex-col items-end gap-2 sm:mb-6 sm:flex-row sm:items-center sm:justify-between sm:gap-3 [&>*]:pointer-events-auto";
+
+/// A sortable table heading's button: the heading's look, an arrow when sorted.
+pub const SORT_BUTTON: &str = "inline-flex items-center gap-1 uppercase tracking-eyebrow hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
+
+/// The name cell at the start of a data table's row.
+pub const TABLE_ROW_HEAD: &str =
+    "px-2 py-2.5 text-left align-top font-medium group-data-[density=sm]/table:py-1.5";
+
+/// A data table's totals row.
+pub const TABLE_TOTAL_ROW: &str = "font-semibold";
+
+/// Under a plot: its period, the insight sentence and "Show numbers".
+pub const PLOT_FOOT: &str = "mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2";
+
+/// The insight sentence under a plot.
+pub const PLOT_INSIGHT: &str = "text-sm text-fg";
+
+/// A saved plot that can't be drawn: a quiet card in its place.
+pub const PLOT_UNREADABLE: &str = "rounded-lg bg-card-muted px-4 py-3 text-sm text-fg-muted";

@@ -208,7 +208,7 @@ pub fn LineChart(
 }
 
 /// The path through one unbroken run of points in a series' line style.
-fn join(points: &[(f64, f64)], line: Line) -> String {
+pub(super) fn join(points: &[(f64, f64)], line: Line) -> String {
     match line {
         Line::Smooth => smooth(points),
         Line::Straight | Line::Dashed => {

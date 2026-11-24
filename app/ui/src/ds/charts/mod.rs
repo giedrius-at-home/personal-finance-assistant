@@ -137,17 +137,16 @@ mod line;
 mod progress;
 mod ranked;
 mod scatter;
+mod table;
 
 pub use bar::BarChart;
 pub use donut::{Donut, Slice};
-#[allow(unused_imports, reason = "plots use these from v0.3 Task 6")]
 pub use heatmap::Heatmap;
 pub use line::LineChart;
 pub use progress::{BarTone, BudgetBar, ProgressBar};
-#[allow(unused_imports, reason = "plots use these from v0.3 Task 6")]
 pub use ranked::Ranked;
-#[allow(unused_imports, reason = "plots use these from v0.3 Task 6")]
 pub use scatter::Scatter;
+pub use table::DataTable;
 
 /// The value axis: grid lines with their labels, each at `top` percent.
 #[component]

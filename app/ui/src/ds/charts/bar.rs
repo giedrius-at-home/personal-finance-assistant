@@ -1,6 +1,9 @@
 use leptos::prelude::*;
 
-use super::{Fmt, Legend, Series, Tooltip, ValueTable, YTicks, cn, nice_axis, pct, series_table};
+use super::line::join;
+use super::{
+    Fmt, Legend, Line, Series, Tooltip, ValueTable, YTicks, cn, nice_axis, pct, series_table,
+};
 
 /// Grouped or stacked bars along a category axis (`BarChart`, layout "horizontal").
 #[component]
@@ -22,6 +25,10 @@ pub fn BarChart(
     /// Also a visually hidden table of the values, for screen readers.
     #[prop(optional)]
     table: bool,
+    /// Series drawn as lines over the bars, on the same axis, through the
+    /// middle of each category.
+    #[prop(optional)]
+    lines: Vec<Series>,
 ) -> impl IntoView {
     let n = categories.len().max(1);
     let totals: Vec<(f64, f64)> = (0..categories.len())
@@ -43,8 +50,21 @@ pub fn BarChart(
             }
         })
         .collect();
-    let lo = totals.iter().map(|t| t.0).fold(0.0, f64::min);
-    let hi = totals.iter().map(|t| t.1).fold(0.0, f64::max);
+    let line_values = || {
+        lines
+            .iter()
+            .flat_map(|s| s.values.iter().flatten().copied())
+    };
+    let lo = totals
+        .iter()
+        .map(|t| t.0)
+        .chain(line_values())
+        .fold(0.0, f64::min);
+    let hi = totals
+        .iter()
+        .map(|t| t.1)
+        .chain(line_values())
+        .fold(0.0, f64::max);
     let (start, end, ticks) = nice_axis(lo, hi);
     let span = (end - start).max(f64::EPSILON);
     let y = move |v: f64| 100.0 - (v - start) / span * 100.0;
@@ -110,9 +130,57 @@ pub fn BarChart(
                 .collect::<Vec<_>>()
         })
         .collect();
+    // Like LineChart: an unfinished last category's segment is dashed.
+    let last = categories.len().checked_sub(1).filter(|_| partial_last);
+    let overlay = lines
+        .iter()
+        .map(|s| {
+            let at = |i: usize| s.values.get(i).copied().flatten().map(|v| (band * (i as f64 + 0.5), y(v)));
+            let mut d = String::new();
+            let mut run = Vec::new();
+            for i in 0..last.unwrap_or(categories.len()) {
+                match at(i) {
+                    Some(p) => run.push(p),
+                    None if !run.is_empty() => {
+                        d.push_str(&join(&run, s.line));
+                        d.push(' ');
+                        run.clear();
+                    }
+                    None => {}
+                }
+            }
+            if !run.is_empty() {
+                d.push_str(&join(&run, s.line));
+            }
+            let tail = last.and_then(|l| Some(join(&[at(l.checked_sub(1)?)?, at(l)?], s.line)));
+            let width = if s.line == Line::Dashed { "1.5" } else { "2" };
+            let color = s.color.clone();
+            view! {
+                <path
+                    d=d
+                    fill="none"
+                    stroke=s.color.clone()
+                    stroke-width=width
+                    stroke-dasharray=(s.line == Line::Dashed).then_some("5 4")
+                    vector-effect="non-scaling-stroke"
+                ></path>
+                {tail.map(|t| {
+                    view! {
+                        <path d=t fill="none" stroke=color stroke-width=width stroke-dasharray="5 4" vector-effect="non-scaling-stroke"></path>
+                    }
+                })}
+            }
+        })
+        .collect_view();
     let tick_views = ticks.iter().map(|t| (y(*t), format(*t))).collect();
+    let dashed = lines
+        .iter()
+        .filter(|s| s.line == Line::Dashed)
+        .map(|s| s.label.clone())
+        .collect::<Vec<_>>();
+    let series: Vec<Series> = series.into_iter().chain(lines).collect();
     let legend = (series.len() > 1).then(|| {
-        view! { <Legend series=series.iter().map(|s| (s.label.clone(), s.color.clone())).collect() /> }
+        view! { <Legend series=series.iter().map(|s| (s.label.clone(), s.color.clone())).collect() dashed=dashed /> }
     });
     let titles = titles.unwrap_or_else(|| categories.clone());
     let table = table.then(|| {
@@ -126,6 +194,13 @@ pub fn BarChart(
             <div class="relative" style=format!("height:{plot_h}px;margin-left:{y_axis_width}px;margin-right:8px;margin-top:8px")>
                 <YTicks ticks=tick_views width=y_axis_width />
                 {bars}
+                <svg
+                    class="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
+                    viewBox="0 0 100 100"
+                    preserveAspectRatio="none"
+                >
+                    {overlay}
+                </svg>
                 <div class="absolute inset-0 flex" on:mouseleave=move |_| hovered.set(None)>
                     {(0..categories.len())
                         .map(|i| {
