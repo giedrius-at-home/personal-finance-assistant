@@ -14,6 +14,11 @@ use rust_decimal::Decimal;
 use serde::Serialize;
 
 use crate::api::{NoArgs, load};
+use crate::ds::patterns::{
+    BADGE_TIGHT, BOARD_TITLE, CARD_NAME, CHECK_LABEL_START, DATE, EVENT_FORM_SPACED, FIGURE,
+    LEGEND_ITEM, METER, METER_SCALE, MUTED, NAME_ROW, PAYMENT_ROW, SKELETON_CARD, SKELETON_SHORT,
+    STACK, STACK_MD, STACK_XS, TRUNCATE,
+};
 use crate::ds::{
     BOARD_CARD, Badge, BoardColumn, Button, CONTROL, Card, Checkbox, Eyebrow, Facts, FactsRow,
     Field, Icon, Lucide, Popup, Size, Skeleton, Tone, Variant, cn,
@@ -229,9 +234,9 @@ pub fn Events() -> impl IntoView {
         });
         view_data.data.with(|data| match data {
             None => view! {
-                <div class="grid gap-4">
-                    <Skeleton class="h-32 rounded-xl" />
-                    <Skeleton class="h-56 rounded-xl" />
+                <div class=STACK>
+                    <Skeleton class=SKELETON_SHORT />
+                    <Skeleton class=SKELETON_CARD />
                 </div>
             }
             .into_any(),
@@ -284,14 +289,14 @@ fn page(ui: Ui, own: Own, view: &EventsView, ctx: Context) -> impl IntoView + us
         })
     };
     let empty = view.events.is_empty().then(|| {
-        view! { <p class="text-sm text-fg-muted">"No events yet."</p> }
+        view! { <p class=MUTED>"No events yet."</p> }
     });
     view! {
-        <div class="grid gap-4">
-            <section aria-label="Events board" class="grid gap-3">
+        <div class=STACK>
+            <section aria-label="Events board" class=STACK_MD>
                 <div>
                     <Eyebrow>"EVENTS"</Eyebrow>
-                    <h2 class="mt-1 text-lg font-semibold">"Planned days and trips"</h2>
+                    <h2 class=BOARD_TITLE>"Planned days and trips"</h2>
                 </div>
                 <div class="grid items-start gap-3 md:grid-cols-3">{board}</div>
                 {empty}
@@ -380,15 +385,15 @@ fn event_box(ui: Ui, event: &EventRow, code: &str) -> impl IntoView + use<> {
                 let cost = part.wish.bought.as_ref().map_or(part.wish.amount, |p| p.amount);
                 view! {
                     <li class="flex items-baseline justify-between gap-2 rounded-sm bg-soft px-2 py-1 text-xs">
-                        <span class=cn(["min-w-0 truncate", if bought { "text-fg-muted" } else { "" }])>
+                        <span class=cn([TRUNCATE, if bought { "text-fg-muted" } else { "" }])>
                             {if bought { "\u{2713} " } else { "" }}{part.wish.name.clone()}
                         </span>
-                        <span class="whitespace-nowrap tabular-nums">{m(cost)}</span>
+                        <span class=FIGURE>{m(cost)}</span>
                     </li>
                 }
             })
             .collect_view();
-        view! { <ul class="grid gap-1">{boxes}</ul> }
+        view! { <ul class=STACK_XS>{boxes}</ul> }
     });
     let total = m(planned_total(event));
     view! {
@@ -400,25 +405,25 @@ fn event_box(ui: Ui, event: &EventRow, code: &str) -> impl IntoView + use<> {
                 ui.selected.set(Some(id.clone()));
             }
         >
-            <span class="flex items-baseline justify-between gap-3">
-                <strong class="min-w-0 truncate font-semibold">{wish.name.clone()}</strong>
-                <strong class="whitespace-nowrap tabular-nums">{total}</strong>
+            <span class=NAME_ROW>
+                <strong class=CARD_NAME>{wish.name.clone()}</strong>
+                <strong class=FIGURE>{total}</strong>
             </span>
             <span class="flex flex-wrap items-center justify-between gap-1.5 text-xs text-fg-muted">
-                <span class="flex items-center gap-1.5">
-                    {wish.must.then(|| view! { <Badge tone=Tone::Accent class="px-2 py-0">"Must"</Badge> })}
-                    {chip.map(|(tone, text)| view! { <Badge tone=tone class="px-2 py-0">{text}</Badge> })}
+                <span class=LEGEND_ITEM>
+                    {wish.must.then(|| view! { <Badge tone=Tone::Accent class=BADGE_TIGHT>"Must"</Badge> })}
+                    {chip.map(|(tone, text)| view! { <Badge tone=tone class=BADGE_TIGHT>{text}</Badge> })}
                 </span>
                 <span class="whitespace-nowrap">{days}</span>
             </span>
-            <span class="grid gap-1">
-                <span role="img" aria-label=format!("{used} used") class="block h-1.5 overflow-hidden rounded-pill bg-soft">
+            <span class=STACK_XS>
+                <span role="img" aria-label=format!("{used} used") class=METER>
                     <i
                         class=cn(["block h-full rounded-pill", if over > Decimal::ZERO { "bg-negative" } else { "bg-accent" }])
                         style:width=format!("{}%", percent.min(100))
                     ></i>
                 </span>
-                <span class="flex justify-between text-xs text-fg-muted">
+                <span class=METER_SCALE>
                     <span>{format!("{used} used")}</span>
                     <span class=cn(["tabular-nums", if over > Decimal::ZERO { "font-semibold text-negative-fg" } else { "" }])>
                         {format!("{percent}%")}
@@ -480,7 +485,7 @@ fn add_form(ui: Ui, own: Own, currency: Currency) -> impl IntoView + use<> {
             <Field label="The amount is" id="event-mode" hint="In total: wishes put into the event come out of it. Extra: it is for the days, and those wishes come on top.">
                 {mode_select("event-mode".into(), own.mode)}
             </Field>
-            <label class="flex items-center gap-2.5 text-sm sm:col-start-1">
+            <label class=CHECK_LABEL_START>
                 <Checkbox
                     checked=Signal::derive(move || own.must.get())
                     on_change=Callback::new(move |v| own.must.set(v))
@@ -551,9 +556,9 @@ fn event_block(
                 }
             });
             view! {
-                <li class="grid grid-cols-[6.5rem_1fr_auto_auto] items-center gap-x-3 border-t border-line py-1.5 text-sm first:border-t-0">
-                    <span class="text-fg-muted tabular-nums">{format::date(&t.on)}</span>
-                    <span class="min-w-0 truncate">
+                <li class=PAYMENT_ROW>
+                    <span class=DATE>{format::date(&t.on)}</span>
+                    <span class=TRUNCATE>
                         {t.description.clone()}
                         {(!note.is_empty()).then(|| view! { <span class="ml-2 text-xs text-fg-muted">{note}</span> })}
                     </span>
@@ -743,7 +748,7 @@ fn event_block(
             </div>
             <Show when=move || is("part")>
                 <form
-                    class="mt-3 grid items-end gap-2 sm:grid-cols-4"
+                    class=EVENT_FORM_SPACED
                     on:submit=move |ev: SubmitEvent| add_part.with_value(|f| f(ev))
                 >
                     <Field label="Part" id=field_id("part-name")>{text_input(field_id("part-name"), own.part_name, "text")}</Field>
@@ -760,7 +765,7 @@ fn event_block(
             />
             <Show when=move || is("dates")>
                 <form
-                    class="mt-3 grid items-end gap-2 sm:grid-cols-4"
+                    class=EVENT_FORM_SPACED
                     on:submit=move |ev: SubmitEvent| save_dates.with_value(|f| f(ev))
                 >
                     <Field label="First day" id=field_id("new-starts")>{text_input(field_id("new-starts"), own.new_starts, "date")}</Field>
