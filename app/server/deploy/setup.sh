@@ -14,6 +14,14 @@ id finance >/dev/null 2>&1 || useradd --system --home-dir /var/lib/finance --she
 install -d -o finance -g finance -m 0700 /var/lib/finance /var/lib/finance/Finance /var/lib/finance/secrets
 install -d -o root -g root -m 0755 /opt/finance /opt/finance/ui
 
+# `dev` builds, runs CI and Claude Code; it has no sudo except the deploy
+# script, and cannot read /var/lib/finance (the ledger and the secrets).
+id dev >/dev/null 2>&1 || useradd --create-home --shell /bin/bash dev
+install -o root -g root -m 0755 "$HERE/finance-deploy" /usr/local/sbin/finance-deploy
+echo 'dev ALL=(root) NOPASSWD: /usr/local/sbin/finance-deploy ""' > /etc/sudoers.d/finance-deploy
+chmod 0440 /etc/sudoers.d/finance-deploy
+visudo -cf /etc/sudoers.d/finance-deploy >/dev/null
+
 token=/var/lib/finance/secrets/server-token
 if [ ! -s "$token" ]; then
   (umask 077; openssl rand -hex 32 > "$token")

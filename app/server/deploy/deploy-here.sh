@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # On the server: build the server and the UI from its own copy of the repo
-# (~/finance.git, pushed to over Tailscale: `git push oracle main`) and
-# restart the service. No Docker and no build on the Mac.
+# (~/finance.git, pushed to over Tailscale: `git push oracle main`, or
+# pulled from GitHub once `gh auth login` was done here) and
+# restart the service. No Docker and no build on the Mac. Run as `dev`, who
+# may run only /usr/local/sbin/finance-deploy as root.
 # usage: ~/finance/app/server/deploy/deploy-here.sh [branch, default main]
 set -euo pipefail
 
@@ -22,10 +24,5 @@ fi
 cargo build --release --locked -p finance-server
 (cd app/ui && trunk build --release)
 
-sudo install -m 0755 target/release/finance-server /opt/finance/finance-server
-sudo rm -rf /opt/finance/ui.new && sudo cp -r app/ui/dist /opt/finance/ui.new
-sudo rm -rf /opt/finance/ui && sudo mv /opt/finance/ui.new /opt/finance/ui
-sudo systemctl restart finance-server
-sleep 2
-systemctl is-active finance-server
+sudo /usr/local/sbin/finance-deploy
 git log --oneline -1
