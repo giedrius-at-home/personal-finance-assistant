@@ -32,6 +32,9 @@ pub fn PanelList(children: Children) -> impl IntoView {
 /// hidden, when it folds again; a panel folded from the start loads nothing.
 #[component]
 pub fn PanelFrame(
+    /// The panel's id, as `data-panel`, so focus can find its controls when titles repeat.
+    #[prop(optional, into)]
+    panel: Option<String>,
     #[prop(into)] title: String,
     #[prop(into)] summary: Signal<Option<String>>,
     #[prop(into)] folded: Signal<bool>,
@@ -85,7 +88,7 @@ pub fn PanelFrame(
     let edit = move || edit.run();
     if quiet {
         return view! {
-            <section class=class on:dragover=on_dragover on:dragleave=on_dragleave on:drop=on_drop>
+            <section class=class data-panel=panel.clone() on:dragover=on_dragover on:dragleave=on_dragleave on:drop=on_drop>
                 {edit.clone()}
                 <div class=QUIET_ROW>
                     <CardTitle level=Heading::Span class="min-w-0 truncate">{title}</CardTitle>
@@ -105,7 +108,7 @@ pub fn PanelFrame(
     ]);
     let label = format!("Fold {title}");
     view! {
-        <section class=class on:dragover=on_dragover on:dragleave=on_dragleave on:drop=on_drop>
+        <section class=class data-panel=panel.clone() on:dragover=on_dragover on:dragleave=on_dragleave on:drop=on_drop>
             {edit.clone()}
             // One button for both states, so focus stays on it across a toggle.
             <button

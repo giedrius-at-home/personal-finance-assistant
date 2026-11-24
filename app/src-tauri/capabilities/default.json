@@ -25,6 +25,7 @@
     "allow-save-wish-settings",
     "allow-ui-layout",
     "allow-save-ui-layout",
+    "allow-plot-query",
     "allow-review",
     "allow-search-transactions",
     "allow-refresh",

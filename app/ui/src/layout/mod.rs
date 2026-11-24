@@ -1,14 +1,15 @@
 //! Panel registry types and the pure logic that turns a saved layout into the
 //! panels a page shows.
 
+use finance_types::plot::PlotSpec;
 use finance_types::report::Dashboard;
-use finance_types::ui::{PageLayout, PanelItem, UiLayout};
+use finance_types::ui::{PageLayout, PanelItem, SavedPlot, UiLayout};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::Serialize;
 
 use crate::api::{self, NoArgs};
-use crate::ds::arrange::{Edited, drop_move, focus_after, focus_label, focus_on, moves};
+use crate::ds::arrange::{Edited, drop_move, focus_after, focus_on, moves};
 use crate::ds::patterns::ACTIONS;
 use crate::ds::{
     Button, Confirm, DropTarget, EditBar, EmptyState, Gallery, PanelFrame, PanelList, Size, Variant,
@@ -54,6 +55,14 @@ fn is_shown(id: &str) -> bool {
         .is_none_or(|f| f())
 }
 
+/// A registry panel's title, or a saved plot's.
+fn panel_title(l: &UiLayout, panel: &str) -> Option<String> {
+    match edit::plot_id_of(panel) {
+        Some(id) => l.plots.iter().find(|p| p.id == id).map(|p| p.title.clone()),
+        None => registry().find(|d| d.id == panel).map(|d| d.title.into()),
+    }
+}
+
 fn item_from_def(d: &PanelDef, folded: bool) -> PanelItem {
     PanelItem {
         panel: d.id.to_string(),
@@ -64,8 +73,14 @@ fn item_from_def(d: &PanelDef, folded: bool) -> PanelItem {
 
 /// The panels page `page` shows, in order. `all` is the registry: its entries
 /// whose home is `page` are the page's own; a saved guest (a panel from another
-/// page) is kept while the registry knows it and it is movable.
-pub fn resolve(all: &[&PanelDef], page: &str, saved: Option<&PageLayout>) -> Vec<PanelItem> {
+/// page) is kept while the registry knows it and it is movable; a saved plot's
+/// panel while `plots` has that plot.
+pub fn resolve(
+    all: &[&PanelDef],
+    plots: &[SavedPlot],
+    page: &str,
+    saved: Option<&PageLayout>,
+) -> Vec<PanelItem> {
     let defs: Vec<&PanelDef> = all.iter().copied().filter(|d| d.page == page).collect();
     let Some(saved) = saved else {
         return defs
@@ -77,9 +92,11 @@ pub fn resolve(all: &[&PanelDef], page: &str, saved: Option<&PageLayout>) -> Vec
     let mut items: Vec<PanelItem> = saved
         .items
         .iter()
-        .filter(|i| {
-            all.iter()
-                .any(|d| d.id == i.panel && (d.page == page || d.movable))
+        .filter(|i| match edit::plot_id_of(&i.panel) {
+            Some(id) => edit::has_plot(plots, id),
+            None => all
+                .iter()
+                .any(|d| d.id == i.panel && (d.page == page || d.movable)),
         })
         .cloned()
         .collect();
@@ -186,7 +203,7 @@ fn write_page(
     if !edit::tab_exists(layout, tab) {
         return;
     }
-    let mut items = resolve(defs, page, layout.page(page));
+    let mut items = resolve(defs, &layout.plots, page, layout.page(page));
     items.iter_mut().for_each(f);
     page_entry(layout, tab, tab_name, page).items = items;
 }
@@ -294,6 +311,31 @@ impl LayoutState {
         self.load.get().may_save()
     }
 
+    /// The saved plots; reactive.
+    #[allow(dead_code)] // Called by the plot pages (Tasks 6, 7).
+    pub fn plots(&self) -> Vec<SavedPlot> {
+        self.layout.with(|l| l.plots.clone())
+    }
+
+    /// Saves a plot over `id`, or as a new one; returns its id (see `edit::plot_saved`).
+    #[allow(dead_code)] // Called by the plot pages (Tasks 6, 7).
+    pub fn save_plot(
+        &self,
+        id: Option<String>,
+        title: String,
+        spec: PlotSpec,
+    ) -> Result<String, String> {
+        let mut out = Err("The layout is still loading".to_string());
+        self.change(|l| out = edit::plot_saved(l, id.as_deref(), &title, &spec));
+        out
+    }
+
+    /// Deletes a plot and its panel from every page.
+    #[allow(dead_code)] // Called by the plot pages (Tasks 6, 7).
+    pub fn delete_plot(&self, id: &str) {
+        self.change(|l| edit::plot_deleted(l, id));
+    }
+
     /// Applies `f`, then saves through the queue (same rules as `toggle`).
     pub fn edit(&self, f: impl FnOnce(&mut UiLayout)) {
         self.change(f);
@@ -335,7 +377,7 @@ impl LayoutState {
     pub fn open(&self, tab: &str, tab_name: &str, page: &str, panel: &str) {
         let defs = defs();
         let folded = self.layout.with_untracked(|l| {
-            resolve(&defs, page, l.page(page))
+            resolve(&defs, &l.plots, page, l.page(page))
                 .iter()
                 .any(|i| i.panel == panel && i.folded)
         });
@@ -404,7 +446,7 @@ pub fn PageView(
         at.with_value(|a| {
             state
                 .layout
-                .with(|l| resolve(&defs(), &a.page, l.page(&a.page)))
+                .with(|l| resolve(&defs(), &l.plots, &a.page, l.page(&a.page)))
         })
     });
     let editing = state.editing;
@@ -427,17 +469,20 @@ pub fn PageView(
     };
     let position = move |id: &str| items.with(|v| v.iter().position(|i| i.panel == id));
     // Focus goes back to a control after the edit redraws, disables or removes the pressed one.
-    let refocus = move |edited: Edited, title: &str| {
-        let after: Vec<(&str, bool)> = items.with_untracked(|v| {
-            v.iter()
-                .filter_map(|i| {
-                    registry()
-                        .find(|d| d.id == i.panel)
-                        .map(|d| (d.title, i.half))
-                })
-                .collect()
+    let refocus = move |edited: Edited, id: &str| {
+        let shown = items.get_untracked();
+        let (title, after) = state.layout.with_untracked(|l| {
+            let after: Vec<(String, String, bool)> = shown
+                .iter()
+                .filter_map(|i| Some((i.panel.clone(), panel_title(l, &i.panel)?, i.half)))
+                .collect();
+            (panel_title(l, id).unwrap_or_default(), after)
         });
-        focus_label(focus_after(edited, title, &after));
+        let after: Vec<(&str, &str, bool)> = after
+            .iter()
+            .map(|(i, t, h)| (i.as_str(), t.as_str(), *h))
+            .collect();
+        focus_on(focus_after(edited, id, &title, &after));
     };
     // The panel of this page being dragged, and the one under the pointer (with "after").
     let dragging = move || {
@@ -467,7 +512,7 @@ pub fn PageView(
         let moved = move |to: Option<usize>, edited: Edited| {
             if let Some(to) = to {
                 edit(&|l, d, a| edit::panel_moved(l, d, a, id, to));
-                refocus(edited, def.title);
+                refocus(edited, id);
             }
         };
         let bar = move || {
@@ -487,12 +532,12 @@ pub fn PageView(
                         on_half=Callback::new(move |()| {
                             let to = !half.get_untracked();
                             edit(&|l, d, a| edit::panel_half_set(l, d, a, id, to));
-                            refocus(Edited::Half, def.title);
+                            refocus(Edited::Half, id);
                         })
                         on_remove=Callback::new(move |()| {
                             let Some(at) = position(id) else { return };
                             edit(&|l, d, a| edit::panel_removed(l, d, a, id));
-                            refocus(Edited::Removed(at), def.title);
+                            refocus(Edited::Removed(at), id);
                         })
                     />
                 }
@@ -533,6 +578,7 @@ pub fn PageView(
         Some(move || {
             view! {
                 <PanelFrame
+                    panel=id
                     title=def.title
                     summary=summary
                     folded=folded
@@ -549,14 +595,7 @@ pub fn PageView(
         })
     };
     let addable = Signal::derive(move || {
-        at.with_value(|a| {
-            state.layout.with(|l| {
-                edit::addable(l, &defs(), a)
-                    .into_iter()
-                    .map(|d| (d.id.to_owned(), d.title.to_owned()))
-                    .collect()
-            })
-        })
+        at.with_value(|a| state.layout.with(|l| edit::addable(l, &defs(), a)))
     });
     // Panels wait for the saved layout, so one saved folded never mounts.
     let ready = move || state.load.get() != Load::Loading;
@@ -591,9 +630,7 @@ pub fn PageView(
                         items=addable
                         on_add=Callback::new(move |id: String| {
                             edit(&|l, d, a| edit::panel_added(l, d, a, &id));
-                            if let Some(d) = registry().find(|d| d.id == id) {
-                                refocus(Edited::Added, d.title);
-                            }
+                            refocus(Edited::Added, &id);
                         })
                     />
                     <div class=ACTIONS>
@@ -695,7 +732,7 @@ mod tests {
     fn first_run_uses_the_defaults() {
         let d = abc();
         let refs: Vec<&PanelDef> = d.iter().collect();
-        let got = resolve(&refs, "p", None);
+        let got = resolve(&refs, &[], "p", None);
         assert_eq!(
             got,
             vec![
@@ -714,7 +751,7 @@ mod tests {
         let d = abc();
         let refs: Vec<&PanelDef> = d.iter().collect();
         let saved = page(vec![it("b", false), it("a", true)], &[]);
-        assert_eq!(resolve(&refs, "p", Some(&saved)), saved.items);
+        assert_eq!(resolve(&refs, &[], "p", Some(&saved)), saved.items);
     }
 
     #[test]
@@ -723,7 +760,7 @@ mod tests {
         let refs: Vec<&PanelDef> = d.iter().collect();
         let saved = page(vec![it("a", false), it("gone.panel", false)], &[]);
         assert_eq!(
-            ids(&resolve(&refs, "p", Some(&saved))),
+            ids(&resolve(&refs, &[], "p", Some(&saved))),
             [("a", false), ("b", true)]
         );
     }
@@ -733,7 +770,7 @@ mod tests {
         let d = abc();
         let refs: Vec<&PanelDef> = d.iter().collect();
         let saved = page(vec![it("a", false)], &["b"]);
-        assert_eq!(resolve(&refs, "p", Some(&saved)), saved.items);
+        assert_eq!(resolve(&refs, &[], "p", Some(&saved)), saved.items);
     }
 
     #[test]
@@ -744,7 +781,7 @@ mod tests {
         ];
         let refs: Vec<&PanelDef> = d.iter().collect();
         let saved = page(vec![it("a", false)], &[]);
-        assert_eq!(resolve(&refs, "p", Some(&saved)), saved.items);
+        assert_eq!(resolve(&refs, &[], "p", Some(&saved)), saved.items);
     }
 
     #[test]
@@ -756,7 +793,7 @@ mod tests {
         ];
         let refs: Vec<&PanelDef> = d.iter().collect();
         let saved = page(vec![it("b", false), it("a", false)], &[]);
-        let got = resolve(&refs, "p", Some(&saved));
+        let got = resolve(&refs, &[], "p", Some(&saved));
         assert_eq!(ids(&got), [("b", false), ("a", false), ("n", true)]);
         assert!(got[2].half);
     }
@@ -770,7 +807,7 @@ mod tests {
         let refs: Vec<&PanelDef> = d.iter().collect();
         let saved = page(vec![it("a", false)], &[]);
         assert_eq!(
-            ids(&resolve(&refs, "p", Some(&saved))),
+            ids(&resolve(&refs, &[], "p", Some(&saved))),
             [("n", true), ("a", false)]
         );
     }
@@ -783,7 +820,7 @@ mod tests {
         ];
         let refs: Vec<&PanelDef> = d.iter().collect();
         let saved = page(vec![it("c", false), it("a", false)], &[]);
-        assert_eq!(resolve(&refs, "p", Some(&saved)), saved.items);
+        assert_eq!(resolve(&refs, &[], "p", Some(&saved)), saved.items);
     }
 
     const AT: (&str, &str, &str) = ("overview", "Overview", "p");
@@ -796,7 +833,7 @@ mod tests {
         toggled(&mut l, &refs, AT, "a");
         assert_eq!(ids(&l.page("p").unwrap().items), [("a", true), ("b", true)]);
         toggled(&mut l, &refs, AT, "a");
-        assert_eq!(l.page("p").unwrap().items, resolve(&refs, "p", None));
+        assert_eq!(l.page("p").unwrap().items, resolve(&refs, &[], "p", None));
     }
 
     #[test]
@@ -805,7 +842,7 @@ mod tests {
         let refs: Vec<&PanelDef> = d.iter().collect();
         let mut l = UiLayout::default();
         opened(&mut l, &refs, AT, "a");
-        assert_eq!(l.page("p").unwrap().items, resolve(&refs, "p", None));
+        assert_eq!(l.page("p").unwrap().items, resolve(&refs, &[], "p", None));
         opened(&mut l, &refs, AT, "b");
         assert_eq!(
             ids(&l.page("p").unwrap().items),

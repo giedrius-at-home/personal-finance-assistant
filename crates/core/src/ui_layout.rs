@@ -178,6 +178,32 @@ mod tests {
     }
 
     #[test]
+    fn a_layout_with_plots_round_trips() {
+        // The largest layout plots allow: MAX_PLOTS full specs, each on a page.
+        let mut db = crate::writes::fixture::db();
+        let spec = serde_json::to_value(finance_types::plot::PlotSpec::default()).unwrap();
+        let mut big = layout();
+        big.plots = (1..=finance_types::ui::MAX_PLOTS)
+            .map(|n| finance_types::ui::SavedPlot {
+                id: format!("p{n}"),
+                title: format!("{:x<40}", format!("Plot {n} ")),
+                spec: spec.clone(),
+            })
+            .collect();
+        big.tabs[0].pages[0].items = big
+            .plots
+            .iter()
+            .map(|p| PanelItem {
+                panel: format!("plot:{}", p.id),
+                folded: false,
+                half: false,
+            })
+            .collect();
+        db.write(|w, _| save(w, &big)).unwrap();
+        assert_eq!(load(db.store.connection()).unwrap(), big);
+    }
+
+    #[test]
     fn save_refuses_hidden_manage_and_keeps_the_old_row() {
         let mut db = crate::writes::fixture::db();
         db.write(|w, _| save(w, &layout())).unwrap();

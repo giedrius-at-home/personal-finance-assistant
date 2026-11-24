@@ -39,6 +39,7 @@ const COMMANDS: &[&str] = &[
     "save_wish_settings",
     "ui_layout",
     "save_ui_layout",
+    "plot_query",
     "save_account_role",
     "unclassified_accounts",
     "manage_workspace",

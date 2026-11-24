@@ -151,16 +151,19 @@ pub fn Gallery(items: Signal<Vec<(String, String)>>, on_add: Callback<String>) -
                             {items
                                 .into_iter()
                                 .map(|(id, title)| {
+                                    let panel = id.clone();
                                     view! {
-                                        <Button
-                                            variant=Variant::Secondary
-                                            size=Size::Sm
-                                            label=format!("Add {title}")
-                                            on_click=Callback::new(move |_| on_add.run(id.clone()))
-                                        >
-                                            <Lucide icon=Icon::Plus size=14 />
-                                            {title}
-                                        </Button>
+                                        <span class="contents" data-panel=panel>
+                                            <Button
+                                                variant=Variant::Secondary
+                                                size=Size::Sm
+                                                label=format!("Add {title}")
+                                                on_click=Callback::new(move |_| on_add.run(id.clone()))
+                                            >
+                                                <Lucide icon=Icon::Plus size=14 />
+                                                {title}
+                                            </Button>
+                                        </span>
                                     }
                                 })
                                 .collect_view()}
@@ -488,36 +491,35 @@ fn first_control(title: &str, at: usize, len: usize, half: bool) -> String {
     }
 }
 
-/// The `aria-label` of the control that takes focus after an edit, so it is
-/// not lost when the pressed control is redrawn, disabled or gone. `items`
-/// are the page's (title, half) after the edit.
-pub fn focus_after(edited: Edited, title: &str, items: &[(&str, bool)]) -> String {
+/// The selector of the control that takes focus after an edit of panel `id`
+/// titled `title`, so it is not lost when the pressed control is redrawn,
+/// disabled or gone. `items` are the page's (id, title, half) after the edit.
+pub fn focus_after(edited: Edited, id: &str, title: &str, items: &[(&str, &str, bool)]) -> String {
     let len = items.len();
-    let at = items.iter().position(|(t, _)| *t == title);
-    let half = at.is_some_and(|p| items[p].1);
-    match (edited, at) {
+    let at = items.iter().position(|(i, _, _)| *i == id);
+    let half = at.is_some_and(|p| items[p].2);
+    let label = match (edited, at) {
         (Edited::Up, Some(0)) => format!("Move {title} down"),
         (Edited::Up, _) => format!("Move {title} up"),
         (Edited::Down, Some(p)) if p + 1 == len => format!("Move {title} up"),
         (Edited::Down, _) => format!("Move {title} down"),
         (Edited::Half, _) => half_label(title, half),
         (Edited::Removed(i), _) => match items.get(i) {
-            Some((next, h)) => first_control(next, i, len, *h),
+            Some((next, t, h)) => return in_panel(next, &first_control(t, i, len, *h)),
             // Nothing after it: its button in "Add a panel".
             None => format!("Add {title}"),
         },
         (Edited::Added, Some(p)) => first_control(title, p, len, half),
         (Edited::Added, None) => format!("Add {title}"),
-    }
+    };
+    in_panel(id, &label)
 }
 
-/// Focuses the button or field labelled `label` once the edit is drawn; a
-/// field's text is selected.
-pub fn focus_label(label: String) {
-    let label = css_escaped(&label);
-    focus_on(format!(
-        "button[aria-label=\"{label}\"], input[aria-label=\"{label}\"]"
-    ));
+/// The selector of the button labelled `label` in panel `id`'s frame or its
+/// "Add a panel" chip: titles repeat (two plots), ids do not.
+pub fn in_panel(id: &str, label: &str) -> String {
+    let (id, label) = (css_escaped(id), css_escaped(label));
+    format!("[data-panel=\"{id}\"] button[aria-label=\"{label}\"]")
 }
 
 /// `s` made safe inside a double-quoted CSS attribute selector value.
@@ -571,31 +573,71 @@ mod tests {
         assert_eq!(drop_move(0, 2, true), Some(2));
     }
 
-    const AFTER: [(&str, bool); 3] = [("A", false), ("B", true), ("C", false)];
+    const AFTER: [(&str, &str, bool); 3] = [("a", "A", false), ("b", "B", true), ("c", "C", false)];
+
+    /// `focus_after` for the panel whose id is its title in lower case.
+    fn after(e: Edited, title: &str, items: &[(&str, &str, bool)]) -> String {
+        focus_after(e, &title.to_lowercase(), title, items)
+    }
 
     #[test]
     fn focus_stays_on_the_pressed_control_or_its_partner() {
-        assert_eq!(focus_after(Edited::Up, "A", &AFTER), "Move A down");
-        assert_eq!(focus_after(Edited::Up, "B", &AFTER), "Move B up");
-        assert_eq!(focus_after(Edited::Down, "C", &AFTER), "Move C up");
-        assert_eq!(focus_after(Edited::Down, "B", &AFTER), "Move B down");
-        assert_eq!(focus_after(Edited::Half, "B", &AFTER), "Make B full width");
-        assert_eq!(focus_after(Edited::Half, "C", &AFTER), "Make C half width");
+        assert_eq!(after(Edited::Up, "A", &AFTER), in_panel("a", "Move A down"));
+        assert_eq!(after(Edited::Up, "B", &AFTER), in_panel("b", "Move B up"));
+        assert_eq!(after(Edited::Down, "C", &AFTER), in_panel("c", "Move C up"));
+        assert_eq!(
+            after(Edited::Down, "B", &AFTER),
+            in_panel("b", "Move B down")
+        );
+        assert_eq!(
+            after(Edited::Half, "B", &AFTER),
+            in_panel("b", "Make B full width")
+        );
+        assert_eq!(
+            after(Edited::Half, "C", &AFTER),
+            in_panel("c", "Make C half width")
+        );
     }
 
     #[test]
     fn focus_after_remove_and_add() {
         // "X" was removed from index 0: A is first now.
-        assert_eq!(focus_after(Edited::Removed(0), "X", &AFTER), "Move A down");
-        assert_eq!(focus_after(Edited::Removed(2), "X", &AFTER), "Move C up");
-        // The last one went: its button in "Add a panel".
-        assert_eq!(focus_after(Edited::Removed(3), "X", &AFTER), "Add X");
-        assert_eq!(focus_after(Edited::Removed(0), "X", &[]), "Add X");
-        assert_eq!(focus_after(Edited::Added, "C", &AFTER), "Move C up");
         assert_eq!(
-            focus_after(Edited::Added, "A", &[("A", true)]),
-            "Make A full width"
+            after(Edited::Removed(0), "X", &AFTER),
+            in_panel("a", "Move A down")
         );
+        assert_eq!(
+            after(Edited::Removed(2), "X", &AFTER),
+            in_panel("c", "Move C up")
+        );
+        // The last one went: its button in "Add a panel".
+        assert_eq!(
+            after(Edited::Removed(3), "X", &AFTER),
+            in_panel("x", "Add X")
+        );
+        assert_eq!(after(Edited::Removed(0), "X", &[]), in_panel("x", "Add X"));
+        assert_eq!(
+            after(Edited::Added, "C", &AFTER),
+            in_panel("c", "Move C up")
+        );
+        assert_eq!(
+            after(Edited::Added, "A", &[("a", "A", true)]),
+            in_panel("a", "Make A full width")
+        );
+    }
+
+    #[test]
+    fn focus_finds_the_edited_panel_when_titles_repeat() {
+        let two = [("plot:p1", "Food", false), ("plot:p2", "Food", false)];
+        assert_eq!(
+            focus_after(Edited::Up, "plot:p2", "Food", &two),
+            in_panel("plot:p2", "Move Food up")
+        );
+        assert_eq!(
+            focus_after(Edited::Down, "plot:p1", "Food", &two),
+            in_panel("plot:p1", "Move Food down")
+        );
+        assert!(in_panel("plot:p2", "Move Food up").starts_with("[data-panel=\"plot:p2\"] "));
     }
 
     #[test]

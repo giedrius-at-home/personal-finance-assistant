@@ -326,6 +326,7 @@ fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
             let a: UiLayoutArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
             ok(service.save_ui_layout(a.layout))
         }
+        "plot_query" => ok(service.plot_query(arg(args.clone(), "spec")?)),
         "save_account_role" => {
             let a: RoleArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
             ok(service.save_account_role(a.role))

@@ -14,6 +14,7 @@ mod update;
 use finance_core::service::Service;
 use finance_secrets::{Item, Secret};
 use finance_types::gateway::{BudgetPlan, EventPick, Wish, WishDraft, WishPurchase, WishSettings};
+use finance_types::plot::{PlotData, PlotSpec};
 use finance_types::report::closure::{
     AccountRoleDraft, ClosureAction, ClosureView, UnclassifiedAccounts,
 };
@@ -260,6 +261,11 @@ fn ui_layout(service: State<'_, Service>) -> Result<UiLayout, String> {
 #[tauri::command(async)]
 fn save_ui_layout(service: State<'_, Service>, layout: UiLayout) -> Result<UiLayout, String> {
     traced("save_ui_layout", service.save_ui_layout(layout))
+}
+
+#[tauri::command(async)]
+fn plot_query(service: State<'_, Service>, spec: PlotSpec) -> Result<PlotData, String> {
+    traced("plot_query", service.plot_query(spec))
 }
 
 #[tauri::command(async)]
@@ -580,6 +586,7 @@ fn main() {
             save_wish_settings,
             ui_layout,
             save_ui_layout,
+            plot_query,
             save_account_role,
             unclassified_accounts,
             manage_workspace,

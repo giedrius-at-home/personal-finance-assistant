@@ -1,7 +1,11 @@
 //! Pure edits of the saved layout for Edit layout mode. Panel edits take the
 //! registry as `defs` and write the page's full resolved list, as `toggled` does.
+//! A saved plot's panel (`plot:<id>`) has no def: the layout's `plots` say it exists.
 
-use finance_types::ui::{MAX_NAME, MAX_TABS, PageLayout, PanelItem, TabLayout, UiLayout};
+use finance_types::plot::PlotSpec;
+use finance_types::ui::{
+    MAX_NAME, MAX_PLOTS, MAX_TABS, PageLayout, PanelItem, SavedPlot, TabLayout, UiLayout,
+};
 
 use super::{PanelDef, page_entry, resolve, write_page};
 
@@ -46,12 +50,79 @@ fn def<'a>(defs: &[&'a PanelDef], panel: &str) -> Option<&'a PanelDef> {
     defs.iter().copied().find(|d| d.id == panel)
 }
 
+/// The panel id of saved plot `id`.
+pub fn plot_panel_id(id: &str) -> String {
+    format!("plot:{id}")
+}
+
+/// The saved plot a panel id shows; None for a registry panel.
+pub fn plot_id_of(panel: &str) -> Option<&str> {
+    panel.strip_prefix("plot:")
+}
+
+pub(super) fn has_plot(plots: &[SavedPlot], id: &str) -> bool {
+    plots.iter().any(|p| p.id == id)
+}
+
+/// May go on any page: a movable registry panel, or a saved plot's panel.
+fn movable(l: &UiLayout, defs: &[&PanelDef], panel: &str) -> bool {
+    match plot_id_of(panel) {
+        Some(id) => has_plot(&l.plots, id),
+        None => def(defs, panel).is_some_and(|d| d.movable),
+    }
+}
+
+/// Saves a plot: over `id` (title and spec replaced), or new with the
+/// smallest free `p<n>`. Returns its id.
+pub fn plot_saved(
+    l: &mut UiLayout,
+    id: Option<&str>,
+    title: &str,
+    spec: &PlotSpec,
+) -> Result<String, String> {
+    let title = title.trim();
+    if title.is_empty() || title.chars().count() > MAX_NAME {
+        return Err(format!("A plot name is 1 to {MAX_NAME} characters"));
+    }
+    let spec = serde_json::to_value(spec).map_err(|e| e.to_string())?;
+    if let Some(id) = id {
+        let plot = l.plots.iter_mut().find(|p| p.id == id);
+        let plot = plot.ok_or("This plot was deleted")?;
+        plot.title = title.into();
+        plot.spec = spec;
+        return Ok(id.into());
+    }
+    if l.plots.len() >= MAX_PLOTS {
+        return Err(format!("At most {MAX_PLOTS} plots"));
+    }
+    let id = (1..)
+        .map(|n| format!("p{n}"))
+        .find(|id| !has_plot(&l.plots, id))
+        .expect("an unused id");
+    l.plots.push(SavedPlot {
+        id: id.clone(),
+        title: title.into(),
+        spec,
+    });
+    Ok(id)
+}
+
+/// The plot gone, and its panel from every page.
+pub fn plot_deleted(l: &mut UiLayout, id: &str) {
+    l.plots.retain(|p| p.id != id);
+    let panel = plot_panel_id(id);
+    for page in l.tabs.iter_mut().flat_map(|t| t.pages.iter_mut()) {
+        page.items.retain(|i| i.panel != panel);
+        page.removed.retain(|r| *r != panel);
+    }
+}
+
 /// `panel` out of the page's items; listed as removed when the page is its home.
 pub fn panel_removed(l: &mut UiLayout, defs: &[&PanelDef], at: &PageRef, panel: &str) {
     if !exists(l, at) {
         return;
     }
-    let mut items = resolve(defs, &at.page, l.page(&at.page));
+    let mut items = resolve(defs, &l.plots, &at.page, l.page(&at.page));
     items.retain(|i| i.panel != panel);
     let home = def(defs, panel).is_some_and(|d| d.page == at.page);
     let page = page_entry(l, &at.tab, &at.tab_name, &at.page);
@@ -67,17 +138,23 @@ pub fn panel_added(l: &mut UiLayout, defs: &[&PanelDef], at: &PageRef, panel: &s
     if !exists(l, at) {
         return;
     }
-    let Some(d) = def(defs, panel).filter(|d| d.page == at.page || d.movable) else {
+    let half = match plot_id_of(panel) {
+        Some(id) => has_plot(&l.plots, id).then_some(false),
+        None => def(defs, panel)
+            .filter(|d| d.page == at.page || d.movable)
+            .map(|d| d.half),
+    };
+    let Some(half) = half else {
         return;
     };
-    let mut items = resolve(defs, &at.page, l.page(&at.page));
+    let mut items = resolve(defs, &l.plots, &at.page, l.page(&at.page));
     if items.iter().any(|i| i.panel == panel) {
         return;
     }
     items.push(PanelItem {
         panel: panel.into(),
         folded: false,
-        half: d.half,
+        half,
     });
     let page = page_entry(l, &at.tab, &at.tab_name, &at.page);
     page.items = items;
@@ -89,7 +166,7 @@ pub fn panel_moved(l: &mut UiLayout, defs: &[&PanelDef], at: &PageRef, panel: &s
     if !exists(l, at) {
         return;
     }
-    let mut items = resolve(defs, &at.page, l.page(&at.page));
+    let mut items = resolve(defs, &l.plots, &at.page, l.page(&at.page));
     let Some(from) = items.iter().position(|i| i.panel == panel) else {
         return;
     };
@@ -109,7 +186,7 @@ pub fn panel_half_set(l: &mut UiLayout, defs: &[&PanelDef], at: &PageRef, panel:
     });
 }
 
-/// `panel` may be sent from `from` to `to`: it is movable, both tabs exist,
+/// `panel` may be sent from `from` to `to`: it is movable (or a plot), both tabs exist,
 /// `to` is another tab and the panel is not on its page yet.
 pub fn sendable(
     l: &UiLayout,
@@ -118,13 +195,13 @@ pub fn sendable(
     to: &PageRef,
     panel: &str,
 ) -> bool {
-    def(defs, panel).is_some_and(|d| d.movable)
+    movable(l, defs, panel)
         && from.tab != to.tab
         && exists(l, from)
         && exists(l, to)
         // A hidden tab's chip is muted: no drops on it.
         && !tabs(l).iter().any(|t| t.id == to.tab && t.hidden)
-        && !resolve(defs, &to.page, l.page(&to.page))
+        && !resolve(defs, &l.plots, &to.page, l.page(&to.page))
             .iter()
             .any(|i| i.panel == panel)
 }
@@ -138,17 +215,22 @@ pub fn panel_sent(l: &mut UiLayout, defs: &[&PanelDef], from: &PageRef, to: &Pag
     panel_added(l, defs, to, panel);
 }
 
-/// What "Add a panel" offers: home panels not on the page, then movable
-/// panels of other pages not on it, in registry order.
-pub fn addable<'a>(l: &UiLayout, defs: &[&'a PanelDef], at: &PageRef) -> Vec<&'a PanelDef> {
-    let items = resolve(defs, &at.page, l.page(&at.page));
-    let off = |d: &&PanelDef| !items.iter().any(|i| i.panel == d.id);
-    let home = defs.iter().copied().filter(|d| d.page == at.page);
-    let guests = defs
+/// What "Add a panel" offers, as (panel id, title): home panels not on the
+/// page, then movable panels of other pages not on it, in registry order,
+/// then saved plots not on it.
+pub fn addable(l: &UiLayout, defs: &[&PanelDef], at: &PageRef) -> Vec<(String, String)> {
+    let items = resolve(defs, &l.plots, &at.page, l.page(&at.page));
+    let home = defs.iter().filter(|d| d.page == at.page);
+    let guests = defs.iter().filter(|d| d.page != at.page && d.movable);
+    let plots = l
+        .plots
         .iter()
-        .copied()
-        .filter(|d| d.page != at.page && d.movable);
-    home.filter(off).chain(guests.filter(off)).collect()
+        .map(|p| (plot_panel_id(&p.id), p.title.clone()));
+    home.chain(guests)
+        .map(|d| (d.id.to_owned(), d.title.to_owned()))
+        .chain(plots)
+        .filter(|(id, _)| !items.iter().any(|i| i.panel == *id))
+        .collect()
 }
 
 /// A tab name as saved (trimmed), or why it is refused.
@@ -374,7 +456,7 @@ mod tests {
         panel_removed(&mut l, &d, &p1(), "a");
         assert_eq!(ids(&l, "p1"), ["b"]);
         assert_eq!(removed(&l, "p1"), ["a"]);
-        let shown = resolve(&d, "p1", l.page("p1"));
+        let shown = resolve(&d, &l.plots, "p1", l.page("p1"));
         assert!(!shown.iter().any(|i| i.panel == "a"));
     }
 
@@ -494,8 +576,8 @@ mod tests {
         let r = reg();
         let d: Vec<&PanelDef> = r.iter().collect();
         let mut l = UiLayout::default();
-        let names = |l: &UiLayout, at: &PageRef| -> Vec<&str> {
-            addable(l, &d, at).iter().map(|d| d.id).collect()
+        let names = |l: &UiLayout, at: &PageRef| -> Vec<String> {
+            addable(l, &d, at).into_iter().map(|(id, _)| id).collect()
         };
         assert_eq!(names(&l, &p1()), ["m"]);
         panel_removed(&mut l, &d, &p1(), "b");
@@ -512,7 +594,7 @@ mod tests {
         let d: Vec<&PanelDef> = r.iter().collect();
         let mut l = UiLayout::default();
         panel_added(&mut l, &d, &p2(), "a");
-        let got: Vec<_> = resolve(&d, "p2", l.page("p2"))
+        let got: Vec<_> = resolve(&d, &l.plots, "p2", l.page("p2"))
             .into_iter()
             .map(|i| i.panel)
             .collect();
@@ -526,7 +608,7 @@ mod tests {
         let mut l = UiLayout::default();
         panel_added(&mut l, &d, &p2(), "a");
         let without_a: Vec<&PanelDef> = r.iter().filter(|d| d.id != "a").collect();
-        let got: Vec<_> = resolve(&without_a, "p2", l.page("p2"))
+        let got: Vec<_> = resolve(&without_a, &l.plots, "p2", l.page("p2"))
             .into_iter()
             .map(|i| i.panel)
             .collect();
@@ -538,7 +620,7 @@ mod tests {
             half: false,
         });
         assert!(
-            !resolve(&d, "p2", l.page("p2"))
+            !resolve(&d, &l.plots, "p2", l.page("p2"))
                 .iter()
                 .any(|i| i.panel == "b")
         );
@@ -779,7 +861,10 @@ mod tests {
         panel_moved(&mut l, &d, &p1(), "m", 0);
         panel_added(&mut l, &d, &p2(), "a");
         page_reset(&mut l, &p1());
-        assert_eq!(resolve(&d, "p1", l.page("p1")), resolve(&d, "p1", None));
+        assert_eq!(
+            resolve(&d, &l.plots, "p1", l.page("p1")),
+            resolve(&d, &[], "p1", None)
+        );
         assert_eq!(ids(&l, "p2"), ["m", "a"]);
     }
 
@@ -810,6 +895,151 @@ mod tests {
         all_reset(&mut l);
         assert_eq!(l.plots, plots);
         assert_eq!(tab_ids(&l), defaults());
+    }
+
+    fn spec(top: u8) -> PlotSpec {
+        PlotSpec {
+            top,
+            ..Default::default()
+        }
+    }
+
+    fn plot_ids(l: &UiLayout) -> Vec<&str> {
+        l.plots.iter().map(|p| p.id.as_str()).collect()
+    }
+
+    #[test]
+    fn saving_a_new_plot_gives_the_smallest_free_id() {
+        let mut l = UiLayout::default();
+        assert_eq!(plot_saved(&mut l, None, "A", &spec(1)).unwrap(), "p1");
+        assert_eq!(plot_saved(&mut l, None, "B", &spec(2)).unwrap(), "p2");
+        plot_deleted(&mut l, "p1");
+        assert_eq!(plot_saved(&mut l, None, "C", &spec(3)).unwrap(), "p1");
+        assert_eq!(plot_ids(&l), ["p2", "p1"]);
+        assert_eq!(l.plots[1].spec, serde_json::to_value(spec(3)).unwrap());
+    }
+
+    #[test]
+    fn saving_over_an_id_replaces_title_and_spec() {
+        let mut l = UiLayout::default();
+        plot_saved(&mut l, None, "A", &spec(1)).unwrap();
+        plot_saved(&mut l, None, "B", &spec(2)).unwrap();
+        assert_eq!(
+            plot_saved(&mut l, Some("p1"), "A2", &spec(9)).unwrap(),
+            "p1"
+        );
+        assert_eq!(plot_ids(&l), ["p1", "p2"]);
+        assert_eq!(l.plots[0].title, "A2");
+        assert_eq!(l.plots[0].spec, serde_json::to_value(spec(9)).unwrap());
+        let before = l.clone();
+        assert!(plot_saved(&mut l, Some("p7"), "Gone", &spec(1)).is_err());
+        assert_eq!(l, before);
+    }
+
+    #[test]
+    fn a_plot_title_is_trimmed_and_checked() {
+        let mut l = UiLayout::default();
+        plot_saved(&mut l, None, "  Food ", &spec(1)).unwrap();
+        assert_eq!(l.plots[0].title, "Food");
+        let before = l.clone();
+        assert!(plot_saved(&mut l, None, "   ", &spec(1)).is_err());
+        assert!(plot_saved(&mut l, None, &"x".repeat(41), &spec(1)).is_err());
+        assert!(plot_saved(&mut l, Some("p1"), " ", &spec(1)).is_err());
+        assert_eq!(l, before);
+        assert!(plot_saved(&mut l, None, &"x".repeat(40), &spec(1)).is_ok());
+    }
+
+    #[test]
+    fn the_two_hundred_and_first_plot_is_refused() {
+        let mut l = UiLayout::default();
+        for _ in 0..MAX_PLOTS {
+            plot_saved(&mut l, None, "P", &spec(1)).unwrap();
+        }
+        let before = l.clone();
+        assert!(plot_saved(&mut l, None, "One more", &spec(1)).is_err());
+        assert_eq!(l, before);
+        // Replacing one still works at the limit.
+        assert!(plot_saved(&mut l, Some("p200"), "Last", &spec(1)).is_ok());
+        assert_eq!(l.validate(), Ok(()));
+    }
+
+    #[test]
+    fn deleting_a_plot_removes_it_from_every_page() {
+        let r = reg();
+        let d: Vec<&PanelDef> = r.iter().collect();
+        let mut l = UiLayout::default();
+        let p1_id = plot_saved(&mut l, None, "A", &spec(1)).unwrap();
+        let p2_id = plot_saved(&mut l, None, "B", &spec(1)).unwrap();
+        let (a, b) = (plot_panel_id(&p1_id), plot_panel_id(&p2_id));
+        panel_added(&mut l, &d, &p1(), &a);
+        panel_added(&mut l, &d, &p2(), &a);
+        panel_added(&mut l, &d, &p2(), &b);
+        l.page_mut("plan", "Plan", "p2").removed.push(a.clone());
+        plot_deleted(&mut l, &p1_id);
+        assert_eq!(plot_ids(&l), ["p2"]);
+        assert_eq!(ids(&l, "p1"), ["a", "b"]);
+        assert_eq!(ids(&l, "p2"), ["m".to_string(), b]);
+        assert!(removed(&l, "p2").is_empty());
+        assert_eq!(l.validate(), Ok(()));
+    }
+
+    #[test]
+    fn a_plot_panel_survives_resolve_and_a_deleted_one_does_not() {
+        let r = reg();
+        let d: Vec<&PanelDef> = r.iter().collect();
+        let mut l = UiLayout::default();
+        let id = plot_saved(&mut l, None, "A", &spec(1)).unwrap();
+        let panel = plot_panel_id(&id);
+        assert_eq!(plot_id_of(&panel), Some(id.as_str()));
+        assert_eq!(plot_id_of("a"), None);
+        // On any page, several at once, and sent between tabs.
+        panel_added(&mut l, &d, &p1(), &panel);
+        panel_added(&mut l, &d, &p2(), &panel);
+        let shown = |l: &UiLayout, page: &str| -> Vec<String> {
+            resolve(&d, &l.plots, page, l.page(page))
+                .into_iter()
+                .map(|i| i.panel)
+                .collect()
+        };
+        assert_eq!(shown(&l, "p1"), ["a", "b", panel.as_str()]);
+        assert_eq!(shown(&l, "p2"), ["m", panel.as_str()]);
+        let own = at("own-1", "own-1");
+        tab_added(&mut l, "Trips").unwrap();
+        assert!(sendable(&l, &d, &p1(), &own, &panel));
+        panel_sent(&mut l, &d, &p1(), &own, &panel);
+        assert_eq!(shown(&l, "p1"), ["a", "b"]);
+        assert!(removed(&l, "p1").is_empty());
+        assert_eq!(shown(&l, "own-1"), [panel.as_str()]);
+        // Removed from a page: just dropped.
+        panel_removed(&mut l, &d, &own, &panel);
+        assert!(removed(&l, "own-1").is_empty());
+        // A plot the layout no longer has is dropped by resolve.
+        l.plots.clear();
+        assert_eq!(shown(&l, "p2"), ["m"]);
+        let before = l.clone();
+        panel_added(&mut l, &d, &p1(), &panel);
+        assert_eq!(l, before);
+    }
+
+    #[test]
+    fn addable_offers_saved_plots_not_on_the_page() {
+        let r = reg();
+        let d: Vec<&PanelDef> = r.iter().collect();
+        let mut l = UiLayout::default();
+        plot_saved(&mut l, None, "Food", &spec(1)).unwrap();
+        plot_saved(&mut l, None, "Food", &spec(2)).unwrap();
+        let offered = |l: &UiLayout| addable(l, &d, &p1());
+        let pair = |id: &str, t: &str| (id.to_string(), t.to_string());
+        assert_eq!(
+            offered(&l),
+            [
+                pair("m", "m"),
+                pair("plot:p1", "Food"),
+                pair("plot:p2", "Food")
+            ]
+        );
+        panel_added(&mut l, &d, &p1(), "plot:p1");
+        assert_eq!(offered(&l), [pair("m", "m"), pair("plot:p2", "Food")]);
     }
 
     #[test]
@@ -857,6 +1087,24 @@ mod tests {
             Box::new(|l| tab_hidden_set(l, "manage", true)),
             Box::new(|l| tab_moved(l, "own-1", 0)),
             Box::new(|l| tab_deleted(l, "own-2")),
+            Box::new(|l| {
+                let _ = plot_saved(l, None, " Food ", &PlotSpec::default());
+            }),
+            Box::new(|l| {
+                let _ = plot_saved(l, None, "Bills", &PlotSpec::default());
+            }),
+            Box::new(|l| {
+                let _ = plot_saved(l, Some("p1"), "Groceries", &PlotSpec::default());
+            }),
+            Box::new(|l| {
+                let _ = plot_saved(l, None, "", &PlotSpec::default());
+            }),
+            Box::new(|l| panel_added(l, &d, &p1(), "plot:p1")),
+            Box::new(|l| panel_added(l, &d, &own_page, "plot:p1")),
+            Box::new(|l| panel_added(l, &d, &p2(), "plot:p2")),
+            Box::new(|l| panel_sent(l, &d, &p2(), &p1(), "plot:p2")),
+            Box::new(|l| panel_removed(l, &d, &p1(), "plot:p2")),
+            Box::new(|l| plot_deleted(l, "p1")),
             Box::new(|l| page_reset(l, &p1())),
             Box::new(|l| all_reset(l)),
         ];
