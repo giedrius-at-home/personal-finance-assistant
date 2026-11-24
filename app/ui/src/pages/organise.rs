@@ -23,7 +23,7 @@ use crate::ds::{
 };
 use crate::layout::{Initial, LayoutState, PageView, PanelDef};
 use crate::pages::{plural, report_is, with_report};
-use crate::{Tab, state};
+use crate::{SpendingSection, Tab, state};
 
 /// The built-in groups, in the order the owner sees them; custom groups follow.
 const GROUPS: [&str; 13] = [
@@ -152,6 +152,8 @@ fn SpendingOrganization(report: Dashboard) -> impl IntoView {
                         variant=Variant::Secondary
                         size=Size::Sm
                         on_click=Callback::new(move |_| {
+                            // The panel may sit on another tab: show Organise first.
+                            app.go_spending(SpendingSection::Organise);
                             if let Some(layout) = layout {
                                 layout.open("spending", "Spending", PAGE, "spending.organise.groups");
                             }
