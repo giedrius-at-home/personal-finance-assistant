@@ -30,6 +30,11 @@ use super::extras::BudgetExtras;
 use super::forecast::DailyForecastPanel;
 use super::month_label;
 use super::visuals::{BudgetVisuals, row_color};
+use crate::ds::patterns::{
+    AMOUNT, AMOUNT_STRONG, CARD_TITLE, CHOICE_GRID, Disclosure, FIELD, FIELD_LABEL, FIELDSET,
+    HEADER_ROW, HINT, LEDGER_ROW, PAGE_TITLE, PLAIN_LIST, SELECT_CHEVRON, SELECT_WRAP, STACK_SM,
+    SUBLINE, SUBSECTION, TITLE, WARN,
+};
 
 #[wasm_bindgen(inline_js = "
 export function random_uuid() {
@@ -315,8 +320,8 @@ fn panel(report: &Dashboard, selection: &str, s: PanelState) -> AnyView {
         .or_else(|| budgets.first())
     else {
         return view! {
-            <Card class="grid gap-2">
-                <h2 class="text-lg font-semibold">"Monthly budget"</h2>
+            <Card class=STACK_SM>
+                <h2 class=CARD_TITLE>"Monthly budget"</h2>
                 <span title="Refresh after the finance service is updated."><Badge tone=Tone::Outline>"Unavailable"</Badge></span>
             </Card>
         }
@@ -495,7 +500,7 @@ fn panel(report: &Dashboard, selection: &str, s: PanelState) -> AnyView {
         let cell = "sm:text-right before:mb-1 before:block before:text-xs before:font-normal before:text-fg-muted before:content-[attr(data-label)] sm:before:hidden";
         view! {
             <div class="grid grid-cols-3 gap-x-2 gap-y-4 border-b border-border bg-card-muted px-3 py-4 text-sm font-semibold tabular-nums sm:grid-cols-[minmax(0,1.8fr)_repeat(3,minmax(105px,1fr))] sm:items-center sm:gap-4">
-                <span class="col-span-3 sm:col-span-1 sm:pl-[26px]">"Total"</span>
+                <span class="col-span-3 sm:col-span-1 sm:pl-6.5">"Total"</span>
                 <span data-label="Planned" class=cell>{m(budget.planned)}</span>
                 <span data-label="Spent" class=cell>{m(budget.spent)}</span>
                 <span data-label="Remaining" class=cn([cell, if net < Decimal::ZERO { "text-over-fg" } else { "" }])>
@@ -518,7 +523,7 @@ fn panel(report: &Dashboard, selection: &str, s: PanelState) -> AnyView {
             <header class="flex flex-col items-start justify-between gap-5 pb-6 sm:flex-row sm:items-center">
                 <div>
                     <Eyebrow level=Heading::P>"YOUR PLAN"</Eyebrow>
-                    <h2 class="mt-1 text-2xl font-semibold tracking-tight">"Monthly budget"</h2>
+                    <h2 class=PAGE_TITLE>"Monthly budget"</h2>
                 </div>
                 <div class="flex w-full flex-wrap items-center gap-3 sm:w-auto">
                     <div class="min-w-48 flex-1 sm:flex-none">
@@ -699,7 +704,7 @@ fn budget_row(budget: &MonthlyBudget, row: &BudgetRow, kind: Kind, s: PanelState
         .into_any()
     } else {
         view! {
-            <ul class="mb-3 mt-2 list-none p-0">
+            <ul class=PLAIN_LIST>
                 {row
                     .categories
                     .iter()
@@ -711,14 +716,14 @@ fn budget_row(budget: &MonthlyBudget, row: &BudgetRow, kind: Kind, s: PanelState
                             if c.spent < Decimal::ZERO { " · Refund" } else { "" },
                         );
                         view! {
-                            <li class="flex justify-between gap-5 border-b border-border py-2.5 text-sm last:border-b-0">
+                            <li class=LEDGER_ROW>
                                 <span class="min-w-0 max-w-md flex-1">
                                     <ProgressBar
                                         label=c.category.clone().unwrap_or_else(|| "Uncategorized".into())
                                         value=f(c.spent).max(0.0)
                                         max=category_total
                                     />
-                                    <small class="mt-1 block text-xs text-fg-muted">{detail}</small>
+                                    <small class=SUBLINE>{detail}</small>
                                 </span>
                                 <strong class="whitespace-nowrap text-right font-medium tabular-nums">{m(c.spent)}</strong>
                             </li>
@@ -731,18 +736,18 @@ fn budget_row(budget: &MonthlyBudget, row: &BudgetRow, kind: Kind, s: PanelState
     };
     let expected = (!row.expected.is_empty()).then(|| {
         view! {
-            <ul class="mb-3 mt-2 list-none p-0" aria-label="Estimates still to pay">
+            <ul class=PLAIN_LIST aria-label="Estimates still to pay">
                 {row
                     .expected
                     .iter()
                     .map(|(label, amount)| {
                         view! {
-                            <li class="flex justify-between gap-5 border-b border-border py-2.5 text-sm last:border-b-0">
+                            <li class=LEDGER_ROW>
                                 <span>
                                     {label.clone()}
-                                    <small class="mt-1 block text-xs text-fg-muted">"Estimate from past months"</small>
+                                    <small class=SUBLINE>"Estimate from past months"</small>
                                 </span>
-                                <strong class="whitespace-nowrap font-medium tabular-nums">{m(*amount)}</strong>
+                                <strong class=AMOUNT_STRONG>{m(*amount)}</strong>
                             </li>
                         }
                     })
@@ -766,26 +771,24 @@ fn budget_row(budget: &MonthlyBudget, row: &BudgetRow, kind: Kind, s: PanelState
     });
     let purchase_list = (!purchases.is_empty()).then(|| {
         let count = purchases.len();
+        let rows = purchases
+            .into_iter()
+            .map(|p| {
+                view! {
+                    <li class=LEDGER_ROW>
+                        <span>
+                            {p.description.clone()}
+                            <small class=SUBLINE>{p.occurred_on.clone()}</small>
+                        </span>
+                        <strong class=AMOUNT_STRONG>{m(p.amount)}</strong>
+                    </li>
+                }
+            })
+            .collect_view();
         view! {
-            <details class="mt-3">
-                <summary class="cursor-pointer text-sm">{format!("Purchases ({count})")}</summary>
-                <ul class="mb-3 mt-2 list-none p-0">
-                    {purchases
-                        .into_iter()
-                        .map(|p| {
-                            view! {
-                                <li class="flex justify-between gap-5 border-b border-border py-2.5 text-sm last:border-b-0">
-                                    <span>
-                                        {p.description.clone()}
-                                        <small class="mt-1 block text-xs text-fg-muted">{p.occurred_on.clone()}</small>
-                                    </span>
-                                    <strong class="whitespace-nowrap font-medium tabular-nums">{m(p.amount)}</strong>
-                                </li>
-                            }
-                        })
-                        .collect_view()}
-                </ul>
-            </details>
+            <Disclosure class="mt-3" summary_class="text-sm" summary=format!("Purchases ({count})")>
+                <ul class=PLAIN_LIST>{rows}</ul>
+            </Disclosure>
         }
     });
     let history = budget
@@ -796,14 +799,16 @@ fn budget_row(budget: &MonthlyBudget, row: &BudgetRow, kind: Kind, s: PanelState
             view! {
                 <span class="grid gap-2 text-xs">
                     <small class="text-fg-muted">{format::month_short(&month[..7.min(month.len())])}</small>
-                    <strong class="font-medium tabular-nums">{m(row.history.get(i).copied().unwrap_or_default())}</strong>
+                    <strong class=AMOUNT>{m(row.history.get(i).copied().unwrap_or_default())}</strong>
                 </span>
             }
         })
         .collect_view();
     view! {
-        <details class="group border-b border-border">
-            <summary class="grid cursor-pointer list-none grid-cols-3 gap-x-2 gap-y-4 px-3 py-4 text-sm hover:bg-card-muted focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring sm:grid-cols-[minmax(0,1.8fr)_repeat(3,minmax(105px,1fr))] sm:items-center sm:gap-4 sm:px-7 [&::-webkit-details-marker]:hidden">
+        <Disclosure
+            class="group border-b border-border"
+            summary_class="grid list-none grid-cols-3 gap-x-2 gap-y-4 px-3 py-4 text-sm hover:bg-card-muted focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring sm:grid-cols-[minmax(0,1.8fr)_repeat(3,minmax(105px,1fr))] sm:items-center sm:gap-4 sm:px-7 [&::-webkit-details-marker]:hidden"
+            summary=view! {
                 <span class="col-span-3 flex min-w-0 items-center gap-2.5 sm:col-span-1">
                     <Lucide icon=Icon::ChevronDown size=16 class="-rotate-90 text-fg-muted group-open:rotate-0" />
                     <span class="min-w-0 flex-1">
@@ -818,21 +823,21 @@ fn budget_row(budget: &MonthlyBudget, row: &BudgetRow, kind: Kind, s: PanelState
                 <span data-label=if estimate { "Expected" } else { "Planned" } class=cn([cell, if estimate { "text-fg-muted" } else { "" }])>{planned}</span>
                 <span data-label="Spent" class=cell>{m(row.spent)}</span>
                 <span data-label="Remaining" class=cn([cell, if estimate { "text-fg-muted" } else { "font-semibold" }, if over { "text-over-fg" } else { "" }])>{remaining}</span>
-            </summary>
-            <div class="px-3 pb-5 pt-1.5 sm:pl-[38px]">
+            }
+        >
+            <div class="px-3 pb-5 pt-1.5 sm:pl-9.5">
                 {edit}
                 {used}
                 {categories}
                 {expected}
                 {bills_link}
                 {purchase_list}
-                <details class="mt-3">
-                    <summary class="cursor-pointer text-sm">"Spending history"</summary>
+                <Disclosure class="mt-3" summary_class="text-sm" summary="Spending history">
                     <Help text="Using this group's current category selection." />
                     <div class="mt-3.5 grid grid-cols-3 gap-3 sm:grid-cols-6">{history}</div>
-                </details>
+                </Disclosure>
             </div>
-        </details>
+        </Disclosure>
     }
     .into_any()
 }
@@ -989,8 +994,8 @@ fn editor_form(
                                 }
                             }
                         >
-                            <div class="flex items-center justify-between gap-3">
-                                <h3 class="text-base font-semibold">{title}</h3>
+                            <div class=HEADER_ROW>
+                                <h3 class=TITLE>{title}</h3>
                                 <button
                                     type="button"
                                     aria-label="Close budget editor"
@@ -1001,10 +1006,10 @@ fn editor_form(
                                     <Lucide icon=Icon::X size=18 />
                                 </button>
                             </div>
-                            <fieldset disabled=move || s.busy.get() class="m-0 min-w-0 border-0 p-0">
+                            <fieldset disabled=move || s.busy.get() class=FIELDSET>
                                 <div class="my-4 grid gap-4 sm:grid-cols-[2fr_1fr_1fr]">
-                                    <div class="grid gap-1.5">
-                                        <label for="budget-group-name" class="text-sm font-medium text-fg">"Name"</label>
+                                    <div class=FIELD>
+                                        <label for="budget-group-name" class=FIELD_LABEL>"Name"</label>
                                         <input
                                             id="budget-group-name"
                                             class=CONTROL
@@ -1016,8 +1021,8 @@ fn editor_form(
                                             on:input=set(|e, v| e.name = v)
                                         />
                                     </div>
-                                    <div class="grid gap-1.5">
-                                        <label for="budget-group-amount" class="text-sm font-medium text-fg">
+                                    <div class=FIELD>
+                                        <label for="budget-group-amount" class=FIELD_LABEL>
                                             {format!("Planned amount ({})", unit.code)}
                                         </label>
                                         <input
@@ -1036,9 +1041,9 @@ fn editor_form(
                                             on:input=set(|e, v| e.amount = v)
                                         />
                                     </div>
-                                    <div class="grid gap-1.5">
-                                        <label for="budget-group-account" class="text-sm font-medium text-fg">"Account"</label>
-                                        <div class="relative w-full">
+                                    <div class=FIELD>
+                                        <label for="budget-group-account" class=FIELD_LABEL>"Account"</label>
+                                        <div class=SELECT_WRAP>
                                             <select
                                                 id="budget-group-account"
                                                 class=cn([CONTROL, "appearance-none pr-9"])
@@ -1047,15 +1052,15 @@ fn editor_form(
                                                 <option value="" selected=editor.account_id.is_empty()>"Choose account"</option>
                                                 {account_options}
                                             </select>
-                                            <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-fg-muted">
+                                            <span class=SELECT_CHEVRON>
                                                 <Lucide icon=Icon::ChevronDown size=16 />
                                             </span>
                                         </div>
                                     </div>
                                 </div>
                                                 <div class="mb-4 grid gap-4 sm:grid-cols-2">
-                                    <div class="grid gap-1.5">
-                                        <label for="budget-group-importance" class="text-sm font-medium text-fg">"Cut order"</label>
+                                    <div class=FIELD>
+                                        <label for="budget-group-importance" class=FIELD_LABEL>"Cut order"</label>
                                         <input
                                             id="budget-group-importance"
                                             class=CONTROL
@@ -1072,12 +1077,12 @@ fn editor_form(
                                             }
                                             on:input=set(|e, v| e.importance = v)
                                         />
-                                        <p id="budget-group-importance-hint" class="text-xs text-fg-muted">
+                                        <p id="budget-group-importance-hint" class=HINT>
                                             "Blank = never cut, 1 = protect most. Wishes cut the highest number first."
                                         </p>
                                     </div>
-                                    <div class="grid gap-1.5">
-                                        <label for="budget-group-floor" class="text-sm font-medium text-fg">
+                                    <div class=FIELD>
+                                        <label for="budget-group-floor" class=FIELD_LABEL>
                                             {format!("Lowest ({})", unit.code)}
                                         </label>
                                         <input
@@ -1095,29 +1100,27 @@ fn editor_form(
                                             }
                                             on:input=set(|e, v| e.floor = v)
                                         />
-                                        <p id="budget-group-floor-hint" class="text-xs text-fg-muted">
+                                        <p id="budget-group-floor-hint" class=HINT>
                                             "A wish never cuts this group below this amount."
                                         </p>
                                     </div>
                                 </div>
                                 <Show when=name_taken>
-                                    <p role="alert" class="text-sm text-negative-fg">"That name is already used this month."</p>
+                                    <p role="alert" class=WARN>"That name is already used this month."</p>
                                 </Show>
                                 <span class="text-sm">"Include spending from"</span>
                                 <Help text="Bills stay under Fixed expenses." />
-                                <div class="my-3 grid max-h-60 grid-cols-2 gap-2.5 overflow-y-auto sm:grid-cols-3">{group_choices}</div>
-                                <details class="mt-4 text-sm">
-                                    <summary class="cursor-pointer">"Choose individual categories"</summary>
+                                <div class=CHOICE_GRID>{group_choices}</div>
+                                <Disclosure class=SUBSECTION summary="Choose individual categories">
                                     <Help text="A selected category uses this budget instead of its broader group." />
-                                    <div class="my-3 grid max-h-60 grid-cols-2 gap-2.5 overflow-y-auto sm:grid-cols-3">{category_choices}</div>
-                                </details>
-                                <details class="mt-4 text-sm">
-                                    <summary class="cursor-pointer">"Choose specific purchases"</summary>
+                                    <div class=CHOICE_GRID>{category_choices}</div>
+                                </Disclosure>
+                                <Disclosure class=SUBSECTION summary="Choose specific purchases">
                                     <Help text="Selected purchases use this budget instead of their category's budget." />
                                     {purchase_choices}
-                                </details>
+                                </Disclosure>
                                 <div class="mt-5 flex flex-col items-start justify-between gap-3 border-t border-border pt-4 sm:flex-row sm:items-center">
-                                    <small class="text-xs text-fg-muted">{format!("For {month} only.")}</small>
+                                    <small class=HINT>{format!("For {month} only.")}</small>
                                     <div class="flex flex-wrap items-center gap-1.5 sm:gap-3">
                                         {remove_button}
                                         <button type="button" class=button_class(Variant::Secondary, Size::Md) on:click=move |_| s.close()>

@@ -6,6 +6,9 @@ use leptos::prelude::*;
 use rust_decimal::{Decimal, RoundingStrategy};
 
 use crate::ds::charts::{LineChart, Series, fmt, series_color};
+use crate::ds::patterns::{
+    COLUMN, Disclosure, EXPLAINER, MUTED, STACK_LG, STACK_MD, STACK_SM, STRONG_SM, TOOLBAR,
+};
 use crate::ds::{
     Badge, Card, CardDescription, CardHeader, CardTitle, Eyebrow, Facts, Heading, METRIC_STRIP,
     Metric, Money, TABLE, TABLE_CONTAINER, TCELL_NUM, TH, TH_NUM, TROW, Tone, cn, money,
@@ -43,7 +46,7 @@ pub fn chart_frame(
         <div class="min-w-0 text-fg">
             <CardHeader>
                 <div class="min-w-0">
-                    <CardTitle class="text-sm text-fg-muted">{title}</CardTitle>
+                    <CardTitle class=MUTED>{title}</CardTitle>
                     {(!description.is_empty()).then(|| view! { <CardDescription>{description}</CardDescription> })}
                 </div>
             </CardHeader>
@@ -66,7 +69,7 @@ pub fn SavingsOutlookPanel(report: Dashboard, currency_code: String) -> impl Int
         .cloned()
     else {
         return view! {
-            <Card class="grid gap-2">
+            <Card class=STACK_SM>
                 <CardTitle>"Three-month outlook"</CardTitle>
                 <span title="Prepared in the background. Refresh shortly."><Badge tone=Tone::Outline>"Preparing"</Badge></span>
             </Card>
@@ -267,14 +270,14 @@ pub fn SavingsOutlookPanel(report: Dashboard, currency_code: String) -> impl Int
                             {r.why}
                             <Badge tone=Tone::Warning>{format!("\u{2212}{} points", r.points)}</Badge>
                         </span>
-                        <strong class="text-sm font-semibold">{r.action}</strong>
+                        <strong class=STRONG_SM>{r.action}</strong>
                         <Facts rows=fix />
                     </li>
                 }
             })
             .collect_view();
         view! {
-            <section aria-label="How to raise the habit score" class="grid gap-3">
+            <section aria-label="How to raise the habit score" class=STACK_MD>
                 <Eyebrow level=Heading::P>"RAISE YOUR SCORE"</Eyebrow>
                 <ul class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{rows}</ul>
             </section>
@@ -301,7 +304,7 @@ pub fn SavingsOutlookPanel(report: Dashboard, currency_code: String) -> impl Int
     ];
     let content = view! {
         <div role="region" aria-label="Three-month savings forecast" class="contents">
-            <header class="flex flex-wrap items-center justify-between gap-3">
+            <header class=TOOLBAR>
                 <div>
                     <Eyebrow level=Heading::P>"NEXT THREE MONTHS"</Eyebrow>
                     <CardTitle>{title}</CardTitle>
@@ -309,7 +312,7 @@ pub fn SavingsOutlookPanel(report: Dashboard, currency_code: String) -> impl Int
                 <Badge tone=status_tone>{status}</Badge>
             </header>
             <div class="grid gap-x-10 gap-y-6 lg:grid-cols-[minmax(240px,.4fr)_minmax(0,1.6fr)]">
-                <div class="grid content-start gap-6">
+                <div class=COLUMN>
                     <Metric label="Gain following your plan" facts=planned_facts>{planned}</Metric>
                     <Metric label="Gain spending like now" facts=expected_facts>{expected}</Metric>
                     {salary_line}
@@ -325,8 +328,7 @@ pub fn SavingsOutlookPanel(report: Dashboard, currency_code: String) -> impl Int
                 <Metric label="Unplanned, next 3 months" size="text-xl" facts=unplanned_facts>{unplanned}</Metric>
             </div>
             {score_help}
-            <details class="grid gap-3 text-sm leading-relaxed [&>*]:mt-3">
-                <summary class="cursor-pointer font-medium">"Unplanned spending, month by month"</summary>
+            <Disclosure class=EXPLAINER summary_class="font-medium" summary="Unplanned spending, month by month">
                 <Facts rows=evidence class="max-w-md" />
                 <div tabindex="0" role="region" aria-label="Unplanned spending by month" class=TABLE_CONTAINER>
                     <table class=TABLE data-density="md">
@@ -343,11 +345,11 @@ pub fn SavingsOutlookPanel(report: Dashboard, currency_code: String) -> impl Int
                         <tbody>{history}</tbody>
                     </table>
                 </div>
-            </details>
+            </Disclosure>
         </div>
     }
     .into_any();
-    view! { <Card class="grid gap-5">{content}</Card> }.into_any()
+    view! { <Card class=STACK_LG>{content}</Card> }.into_any()
 }
 
 /// One thing that costs habit-score points, with the way to win them back.

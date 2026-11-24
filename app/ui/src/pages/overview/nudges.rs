@@ -23,6 +23,7 @@ use crate::pages::with_report;
 use crate::{SpendingSection, state};
 
 use super::{month_name, remaining_days};
+use crate::ds::patterns::{CARD_HEADER, Disclosure, EMPTY_COMPACT, FIGURE_LG};
 
 /// The most a list shows: the heaviest ones.
 const MOST: usize = 6;
@@ -498,7 +499,7 @@ pub fn OverviewNudges() -> impl IntoView {
         let list = nudges(report);
         let body = if list.is_empty() {
             view! {
-                <EmptyState class="mt-3 p-5" icon=Icon::CircleCheck title="Nothing to do. Spending is inside your limits." />
+                <EmptyState class=EMPTY_COMPACT icon=Icon::CircleCheck title="Nothing to do. Spending is inside your limits." />
             }
             .into_any()
         } else {
@@ -508,7 +509,7 @@ pub fn OverviewNudges() -> impl IntoView {
         };
         Some(view! {
             <Card>
-                <header class="flex items-start justify-between gap-4">
+                <header class=CARD_HEADER>
                     <div>
                         <Eyebrow level=Heading::P>"TODAY"</Eyebrow>
                         <CardTitle level=Heading::H2 class="mt-1 text-xl">"Do this now"</CardTitle>
@@ -533,10 +534,9 @@ pub fn OverviewNudges() -> impl IntoView {
 fn tile(n: Nudge) -> impl IntoView {
     let more = (!n.facts.is_empty()).then(|| {
         view! {
-            <details class="mt-1 text-xs">
-                <summary class="cursor-pointer text-fg-muted">"More"</summary>
+            <Disclosure class="mt-1 text-xs" summary_class="text-fg-muted" summary="More">
                 <Facts rows=n.facts class="mt-2" />
-            </details>
+            </Disclosure>
         }
     });
     view! {
@@ -544,7 +544,7 @@ fn tile(n: Nudge) -> impl IntoView {
             <span class="truncate text-eyebrow font-bold uppercase tracking-eyebrow text-fg-muted">{n.label}</span>
             <strong class="text-lg font-semibold leading-tight tracking-tight">{n.action}</strong>
             <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-                <span class=cn(["text-base font-semibold tabular-nums", if n.bad { "text-over-fg" } else { "" }])>{n.value}</span>
+                <span class=cn([FIGURE_LG, if n.bad { "text-over-fg" } else { "" }])>{n.value}</span>
                 {n.chip.map(|(tone, text)| view! { <Badge tone=tone>{text}</Badge> })}
             </div>
             <Facts rows=n.key />

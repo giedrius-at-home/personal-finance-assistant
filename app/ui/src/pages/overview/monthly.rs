@@ -17,6 +17,10 @@ use crate::pages::{f, with_report};
 use crate::{SpendingSection, Tab, state};
 
 use super::{month_name, remaining_days};
+use crate::ds::patterns::{
+    CARD_HEADER, DOT, EMPTY_COMPACT, FIGURE, FIGURE_LG, ITEM_TITLE, LEGEND_ITEM, NUM_HINT, RULED,
+    SIDE_FACTS, SMALL, TITLE,
+};
 
 #[component]
 pub fn OwnerMonthlyOverview() -> impl IntoView {
@@ -30,7 +34,7 @@ pub fn OwnerMonthlyOverview() -> impl IntoView {
                 <Card tone=CardTone::Muted class="mt-3.5 flex items-center gap-3">
                     <Lucide icon=Icon::ShieldCheck size=20 class="text-fg-muted" />
                     <div>
-                        <h2 class="text-base font-semibold">"Monthly plan is waiting for account data."</h2>
+                        <h2 class=TITLE>"Monthly plan is waiting for account data."</h2>
                         <p class="mt-1 text-xs text-fg-muted">"Refresh the banks and add at least one spending group limit."</p>
                     </div>
                 </Card>
@@ -181,7 +185,7 @@ fn BankBalanceBreakdown(allocation: CurrencyAllocation) -> impl IntoView {
                             role="tooltip"
                             class="absolute left-0 top-full z-30 mt-2 max-h-[75vh] w-[min(570px,calc(100vw-7.5rem))] overflow-auto rounded-lg border border-border bg-card-strong p-3 text-left text-xs font-normal tracking-normal text-fg shadow-pop"
                         >
-                            <strong class="block text-sm font-semibold">"Bank balance breakdown"</strong>
+                            <strong class=ITEM_TITLE>"Bank balance breakdown"</strong>
                             <small class="mb-3 mt-0.5 block text-fg-muted">"Recorded balances · reservations shown separately"</small>
                             {if banks.is_empty() {
                                 view! { <p class="text-fg-muted">"Account breakdown unavailable. Refresh the report."</p> }.into_any()
@@ -226,14 +230,14 @@ fn BankBalanceBreakdown(allocation: CurrencyAllocation) -> impl IntoView {
                                         view! {
                                             <div class="flex justify-between gap-4">
                                                 <dt>{label}</dt>
-                                                <dd class="whitespace-nowrap tabular-nums">{value}</dd>
+                                                <dd class=FIGURE>{value}</dd>
                                             </div>
                                         }
                                     })
                                     .collect_view()}
                                 <div class="flex justify-between gap-4 border-t border-line pt-2 font-semibold">
                                     <dt>"Spendable"</dt>
-                                    <dd class="whitespace-nowrap tabular-nums">{headline}</dd>
+                                    <dd class=FIGURE>{headline}</dd>
                                 </div>
                             </dl>
                         </div>
@@ -311,7 +315,7 @@ fn allocation_legend(parts: &[(String, Decimal, Part)], unit: &Currency) -> AnyV
                     aria-label=format!("{label}: {}", money(value, unit))
                     class="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-sm text-xs text-fg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                 >
-                    <i aria-hidden="true" class=cn(["size-2 rounded-pill", tone.fill()])></i>
+                    <i aria-hidden="true" class=cn([DOT, tone.fill()])></i>
                     <b class="truncate font-normal">{label.clone()}</b>
                     <Money value=value unit=unit.clone() neutral=true class="truncate font-medium text-fg" />
                 </span>
@@ -326,7 +330,7 @@ fn allocation_result(label: &str, value: Decimal, unit: &Currency, negative: boo
         <div class="mt-3 flex items-baseline justify-between gap-4 border-t border-line pt-3 text-sm text-fg-muted">
             <span>{label.to_owned()}</span>
             <strong class=cn([
-                "text-base font-semibold tabular-nums",
+                FIGURE_LG,
                 if negative { "text-over-fg" } else { "text-positive-fg" },
             ])>{money(value, unit)}</strong>
         </div>
@@ -368,7 +372,7 @@ fn forecast_row(
         .into_any()
     } else {
         view! {
-            <p class="text-xs tabular-nums text-fg-muted">
+            <p class=NUM_HINT>
                 {format!("{} spent · forecast {}", money(forecast.spent, &unit), money(forecast.expected, &unit))}
             </p>
         }
@@ -376,23 +380,23 @@ fn forecast_row(
     };
     let action = if has_limit {
         view! {
-            <strong class=cn(["block text-sm font-semibold", if over { "text-over-fg" } else { "" }])>
+            <strong class=cn([ITEM_TITLE, if over { "text-over-fg" } else { "" }])>
                 {if over { "Slow down" } else { "On track" }}
             </strong>
-            <small class="block text-xs text-fg-muted">{format!("{}/day left", money(daily_room, &unit))}</small>
+            <small class=SMALL>{format!("{}/day left", money(daily_room, &unit))}</small>
         }
         .into_any()
     } else {
         view! {
-            <strong class="block text-sm font-semibold">"No limit"</strong>
-            <small class="block text-xs text-fg-muted">"Set in Spending"</small>
+            <strong class=ITEM_TITLE>"No limit"</strong>
+            <small class=SMALL>"Set in Spending"</small>
         }
         .into_any()
     };
     view! {
         <tr class=cn([TROW, "align-middle"])>
             <th scope="row" class="px-2 py-2.5 text-left align-middle">
-                <strong class="block text-sm font-semibold">{forecast.group.clone()}</strong>
+                <strong class=ITEM_TITLE>{forecast.group.clone()}</strong>
             </th>
             <td class=cn([TCELL, "hidden align-middle md:table-cell"])>{bar}</td>
             <td class=cn([TCELL, "align-middle"])>
@@ -538,7 +542,7 @@ fn CurrencyOverview(
         format!("To wishes in {}", month_name(&a.funded_month)),
         wish_shares(to_wishes, wishes_now, &needs),
     )
-    .map(|rows| view! { <div class="mt-3 border-t border-line pt-3">{rows}</div> });
+    .map(|rows| view! { <div class=RULED>{rows}</div> });
 
     let limit_of = |group: &str| {
         a.groups
@@ -564,7 +568,7 @@ fn CurrencyOverview(
     let expected_note = (a.current_expected_income > zero).then(|| {
         view! {
             <Facts
-                class="mt-3 border-t border-line pt-3"
+                class=RULED
                 rows=vec![
                     ("Expected extra income".to_owned(), money(a.current_expected_income, &unit)),
                     ("Wiggle room with it".to_owned(), money(a.current_planned_wiggle_room, &unit)),
@@ -592,7 +596,7 @@ fn CurrencyOverview(
     let forecast_card = show_forecast.then(|| {
         let table = if ordered.is_empty() {
             view! {
-                <EmptyState class="mt-3 p-5" icon=Icon::TrendingDown title="Add group limits to see month-end forecasts." />
+                <EmptyState class=EMPTY_COMPACT icon=Icon::TrendingDown title="Add group limits to see month-end forecasts." />
             }
             .into_any()
         } else {
@@ -635,15 +639,15 @@ fn CurrencyOverview(
                 </header>
                 {table}
                 <footer class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-fg-muted">
-                    <span class="flex items-center gap-1.5" tabindex="0" aria-label="Spent">
+                    <span class=LEGEND_ITEM tabindex="0" aria-label="Spent">
                         <i aria-hidden="true" class="h-1.5 w-2.5 rounded-pill bg-chart-1"></i>
                         <b class="font-normal">"spent"</b>
                     </span>
-                    <span class="flex items-center gap-1.5" tabindex="0" aria-label="Forecast">
+                    <span class=LEGEND_ITEM tabindex="0" aria-label="Forecast">
                         <i aria-hidden="true" class="h-1.5 w-2.5 rounded-pill bg-chart-1/30"></i>
                         <b class="font-normal">"forecast"</b>
                     </span>
-                    <span class="flex items-center gap-1.5" tabindex="0" aria-label="Limit">
+                    <span class=LEGEND_ITEM tabindex="0" aria-label="Limit">
                         <i aria-hidden="true" class="h-2.5 w-0.5 rounded-pill bg-chart-limit"></i>
                         <b class="font-normal">"limit"</b>
                     </span>
@@ -699,12 +703,12 @@ fn CurrencyOverview(
         <section class="flex flex-col gap-5 text-fg" aria-label=section_label>
             <div class="grid grid-cols-1 gap-x-12 gap-y-8 md:grid-cols-2">
                 <Card class="min-w-0">
-                    <header class="flex items-start justify-between gap-4">
+                    <header class=CARD_HEADER>
                         <div class="min-w-0">
                             <Eyebrow level=Heading::P>{this_month}</Eyebrow>
                             {breakdown}
                         </div>
-                        <Facts rows=bank_facts class="hidden w-56 sm:grid" />
+                        <Facts rows=bank_facts class=SIDE_FACTS />
                     </header>
                     {current_bar}
                     {current_legend}
@@ -713,14 +717,14 @@ fn CurrencyOverview(
                     {expected_note}
                 </Card>
                 <Card class="min-w-0">
-                    <header class="flex items-start justify-between gap-4">
+                    <header class=CARD_HEADER>
                         <div class="min-w-0">
                             <Eyebrow level=Heading::P>{funds}</Eyebrow>
                             <h2 class="mt-1 text-2xl font-semibold tracking-tight tabular-nums sm:text-display">
                                 {next_funds}
                             </h2>
                         </div>
-                        <Facts rows=next_facts class="hidden w-56 sm:grid" />
+                        <Facts rows=next_facts class=SIDE_FACTS />
                         <button
                             type="button"
                             class=cn([button_class(Variant::Ghost, Size::Sm).as_str(), "shrink-0 text-accent"])

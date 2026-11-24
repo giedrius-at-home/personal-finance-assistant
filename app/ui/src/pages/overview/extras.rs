@@ -9,6 +9,7 @@ use leptos::prelude::*;
 use rust_decimal::Decimal;
 
 use crate::ds::charts::{BarTone, ProgressBar};
+use crate::ds::patterns::STACK_SM;
 use crate::ds::{
     Eyebrow, Facts, Heading, Icon, Lucide, Metric, Money, Size, Variant, button_class, cn, money,
 };
@@ -64,7 +65,7 @@ pub fn BudgetExtras(
             let outstanding = totals(direction, false);
             let total = completed + outstanding;
             view! {
-                <div class="grid gap-2">
+                <div class=STACK_SM>
                     <span class=cn([
                         "flex items-center gap-1.5 text-sm",
                         if inflow { "text-positive-fg" } else { "text-warning-fg" },
