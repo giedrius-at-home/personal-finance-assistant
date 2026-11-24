@@ -59,8 +59,7 @@ These are the choices the owner left to me. Each is a default he can reject.
    the headline number.
 5. Panels are **full width or half width**. No free resizing.
 6. Built-in tabs can be reordered and hidden, **except Manage**, which
-   always stays (it holds Settings and the reset buttons). Own tabs can be
-   renamed and deleted.
+   always stays (it holds Settings). Own tabs can be renamed and deleted.
 7. A panel that only reads the shared report can be **added to any tab**,
    and to more than one. A panel that depends on its page's own controls
    stays on its home tab, where it can still be folded, moved and removed.
@@ -69,6 +68,25 @@ These are the choices the owner left to me. Each is a default he can reject.
 9. Insight sentences under a plot are **computed, not written by the AI**:
    the same input always gives the same sentence.
 10. Clicking a bar to open the matching transactions is **left for later**.
+11. **Which "spent" a plot shows.** The app has three: calendar months of
+    all spending (Trends), the budget's months that start at the month
+    closure, and variable spending only (the Habits switch). A plot uses
+    calendar months and all spending unless told otherwise; the builder
+    offers "Budget months" as a period basis and "Variable only" as a
+    filter, and the plot's subtitle always says which it is. A plot left on
+    the defaults will not equal the Monthly budget panel in a month whose
+    closure was not on the 1st; one set to "Budget months" will.
+12. **Links between tabs keep going to the tab**, not to a panel. A link to
+    a hidden tab opens it anyway; it shows in the tab bar while it is open.
+    A link whose panel is folded or removed lands on the tab as it is.
+13. **Saving the layout makes no backup of the ledger.** The first write of
+    a session backs the database up and only ten backups are kept; folding
+    panels must not push real backups out.
+14. **"Merchant" is the bank's counterparty name**, tidied with the app's
+    existing merchant normaliser. Categories here often are stores already
+    ("Jumbo"), so this is checked against the real ledger when phase 3 is
+    planned; if counterparty names turn out too fragmented, Merchant is
+    dropped and Category serves.
 
 ## Goals
 
@@ -95,8 +113,9 @@ These are the choices the owner left to me. Each is a default he can reject.
 ## Anti-goals
 
 - **A number that disagrees.** A plot of "spent by month" that differs from
-  Spending → history would undo the audit's P0 work. Plot sums use the same
-  rules as Trends.
+  the six months in the report's trends (`report.time_trends`) would undo
+  the audit's P0 work. Plot sums use the same rules as Trends, and a plot
+  says which months and which spending it counts (my call 11).
 - **A lost panel.** Anything removed is listed in "Add a panel". "Reset this
   tab" and "Reset everything" restore the shipped layout.
 - **A lost layout.** An app update never resets it. A panel added in a later
@@ -134,15 +153,21 @@ These are the choices the owner left to me. Each is a default he can reject.
   existing pages".
 - The UI is Leptos (Rust, WASM) with no JavaScript chart or drag library.
   Charts are the house components in `app/ui/src/ds/charts.rs` (bars, line
-  and area, donut). Drag and drop already exists on the Plan, Wishes and
-  Events boards (`BoardColumn` in `app/ui/src/ds/mod.rs`); the same browser
-  drag events are used here. No new dependency.
+  and area, donut). Drag and drop exists on the Plan and Wishes boards, but
+  only as "drop a box on a column" (`BoardColumn` in `app/ui/src/ds/mod.rs`,
+  drag start written by hand in `plan.rs` and `wishes.rs`). The same browser
+  drag events are used here; reordering with an insert position is new code,
+  written once as a `ds` part. No new dependency.
 - Every backend command exists twice: as a Tauri command in
   `app/src-tauri/src/main.rs` and in `app/devserver/src/main.rs`.
 - Money is summed as `Decimal` on the backend. `f64` is for chart geometry
   only (`pages::f`).
 - A write through `Service::write` drops the cached snapshot. Layout saves
-  use `Service::write_raw`, which leaves it in place.
+  leave it in place, as `Service::write_raw` does, and unlike `write_raw`
+  they do not trigger the session's first-write backup.
+- A read opens the database without running migrations, so until the first
+  write after the update the `ui_layout` table does not exist. Reading the
+  layout then gives the default layout, not an error.
 - New tables come in through a numbered migration in
   `crates/storage/src/lib.rs`, in the style of `wishes.sql`.
 - Each merge to main ships a release. The first pull request raises
@@ -244,8 +269,7 @@ plot redrawing on every change:
   payment, Largest payment. Up to three measures can be shown together when
   there is no split (for example Income and Spent).
 - **by** (the axis): Day, Week, Month, Quarter, Year, Weekday, Day of the
-  month, Category, Group, Merchant, Account, or Bills against everything
-  else.
+  month, Category, Group, Merchant, Account, or Fixed against variable.
 - **split by** (the series): none, or Category, Group, Merchant, Account,
   Weekday or Year. Splitting months by year gives a year-on-year plot. The
   five largest are drawn and the rest are summed as "Other"; the count can
@@ -277,7 +301,7 @@ Each is a saved description the owner can add and then edit:
 | Income and spending | Income and Spent per month with Net as a line, last 12 months |
 | Year on year | Spent per month, one line per year |
 | Small payments | Payments under €10, counted per merchant, ranked |
-| Bills against the rest | Stacked per month, last 12 months |
+| Fixed against variable | Stacked per month, last 12 months |
 | Biggest changes | Change per category against the period before, ranked up and down |
 
 ### The insight sentence
@@ -335,20 +359,33 @@ one panel, where the cards do not share local state.
 
 ### Plot query (types, core, commands)
 
-    PlotSpec { measures, by, split, top, period, filters,
-               chart, cumulative, compare_previous, average_line, currency }
+    PlotSpec { measures: [ { measure, draw } ], by, split, top,
+               period, period_basis, filters, chart, value,
+               cumulative, compare, average_line, currency }
     PlotData { categories, series: [ { label, values } ], previous,
                partial_last, insight, currency }
 
 - Command `plot_query(spec) -> PlotData`, a read, in Tauri and devserver.
-- It reads `Snapshot::transactions` (after the shared-spending rewrites),
-  as Trends does, and uses the same helpers for what counts as spending
+- The ready-made plots must all be expressible as a `PlotSpec`, so beyond
+  the builder's first row it carries: a measure "Average per day"; `draw`
+  per measure (bars or line), for Net as a line over Income and Spent
+  bars; `compare` as none, the period before, or the average of the three
+  periods before; and `value` as the amount or its change against the
+  period before. `PlotSpec` is saved JSON: every field added later has a
+  default, so plots saved earlier still load.
+- It reads what Trends reads: `budget::spending_transactions` (settlements
+  removed, reimbursements of planned payments netted), built with `Ctx` as
+  `dashboard.rs` does, and the same helpers for what counts as spending
   (`groups::net`, `forecast::signed`): transfers between own accounts are
   out, refunds reduce spending.
+- "Variable only" and the axis "Fixed against variable" use
+  `groups::non_variable_ids`, the rule behind the Habits switch.
+- "Budget months" uses the period resolver the budget uses
+  (`period.rs`, the closure cut-off).
 - One currency per plot: the main currency unless the owner picks another.
   The picker shows only when there is more than one.
-- Dates use the transaction's month date (`Tx::effective_on`), as budgets
-  do. Weeks start on Monday.
+- Buckets are calendar days, weeks and months by `Tx::effective_on`, as in
+  Trends. Weeks start on Monday.
 - The insight sentence is built in the backend from the same sums, so it is
   tested with them.
 - An impossible description (Donut with a split, Scatter with one measure)
@@ -360,8 +397,9 @@ Bars, line, area and donut exist. New in `ds/charts.rs`, in the same style
 (percent-based SVG, the `--ds-chart-*` palette, hover tooltip, legend):
 Heatmap, Ranked (horizontal bars, also two-sided for changes) and Scatter.
 The lighter drawing of an unfinished bucket is added to bars and line.
-Each split value keeps one colour across a plot; groups use the fixed group
-colours where the app already has them.
+Each split value keeps one colour across a plot, from the six chart colours
+the app has (`--ds-chart-1` to `-6`) plus the named `fixed`, `free` and
+`limit`. A split never draws more than six series; the rest are "Other".
 
 ## Style cleanup of existing pages
 
