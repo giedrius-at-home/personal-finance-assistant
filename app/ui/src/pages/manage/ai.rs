@@ -9,6 +9,7 @@ use serde::Serialize;
 
 use super::ui::{ERROR, FEEDBACK, Ops};
 use crate::api::{NoArgs, load};
+use crate::ds::patterns::{ACTIONS, CHECK_SLOT, OPTION_SPACED, SETTINGS_GRID, SMALL};
 use crate::ds::{
     Button, CONTROL, Card, CardTitle, Checkbox, Eyebrow, FactsRow, Field, Heading, Help, Input,
     Select, Size, Variant, cn,
@@ -253,7 +254,7 @@ pub fn AiSuggestions() -> impl IntoView {
             <Eyebrow level=Heading::P>"CATEGORIES"</Eyebrow>
             <CardTitle level=Heading::H2 class="mt-1">"AI suggestions"</CardTitle>
             <Help text="Suggestions only fill the review inbox; nothing changes a category until you approve it, unless automatic approval is on." />
-            <div class="my-5 grid gap-5 md:grid-cols-3">
+            <div class=SETTINGS_GRID>
                 <Field label="Classifier" id="ai-classifier">
                     <Select
                         id="ai-classifier"
@@ -313,7 +314,7 @@ pub fn AiSuggestions() -> impl IntoView {
                 }}
             </Show>
             <label class="mb-3 flex items-start gap-2.5 text-sm leading-relaxed">
-                <span class="mt-1 flex">
+                <span class=CHECK_SLOT>
                     <Checkbox
                         checked=Signal::derive(move || d.research.get())
                         disabled=Signal::derive(move || busy.get())
@@ -322,11 +323,11 @@ pub fn AiSuggestions() -> impl IntoView {
                 </span>
                 <span>
                     "Public merchant research"
-                    <span class="block text-xs text-fg-muted">"Looks up a public business name on Wikipedia when you ask, or for Jev group suggestions. Only the name leaves this Mac."</span>
+                    <span class=SMALL>"Looks up a public business name on Wikipedia when you ask, or for Jev group suggestions. Only the name leaves this Mac."</span>
                 </span>
             </label>
-            <label class="mb-5 flex items-start gap-2.5 text-sm leading-relaxed">
-                <span class="mt-1 flex">
+            <label class=OPTION_SPACED>
+                <span class=CHECK_SLOT>
                     <Checkbox
                         checked=Signal::derive(move || d.auto_apply.get())
                         disabled=Signal::derive(move || busy.get())
@@ -335,10 +336,10 @@ pub fn AiSuggestions() -> impl IntoView {
                 </span>
                 <span>
                     "Save confident suggestions automatically"
-                    <span class="block text-xs text-fg-muted">"Jev suggestions at 90%+ category probability, with no conflicting merchant history, are saved without asking. Every one stays visible in the daily review."</span>
+                    <span class=SMALL>"Jev suggestions at 90%+ category probability, with no conflicting merchant history, are saved without asking. Every one stays visible in the daily review."</span>
                 </span>
             </label>
-            <div class="flex flex-wrap items-center gap-2">
+            <div class=ACTIONS>
                 <Button disabled=Signal::derive(move || busy.get()) on_click=Callback::new(save)>
                     "Save AI settings"
                 </Button>

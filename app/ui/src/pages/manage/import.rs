@@ -10,6 +10,9 @@ use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
 use super::ui::{CONTROLS, FIELDSET, FILE_INPUT, Ops, frame, load_workspace};
+use crate::ds::patterns::{
+    ACTIONS, CHECK_SLOT, MUTED, OPTION, ROW_TITLE, SUBLINE, TITLE, WARNING_TEXT,
+};
 use crate::ds::{
     Button, CONTROL, Card, CardTitle, CardTone, Checkbox, Eyebrow, Field, Heading, Help, Money,
     Select, TABLE, TABLE_CONTAINER, TCELL, TCELL_NUM, TH, TH_NUM, TROW, Variant, cn,
@@ -234,7 +237,7 @@ fn PreviewView(
     let rejected = p.rejected_rows.clone();
     view! {
         <div class="mt-8 grid gap-4">
-            <h3 class="text-base font-semibold">{format!("{} → {}", p.bank_label, p.account_name)}</h3>
+            <h3 class=TITLE>{format!("{} → {}", p.bank_label, p.account_name)}</h3>
             <div class="grid grid-cols-2 gap-3 md:grid-cols-4">
                 {counts
                     .into_iter()
@@ -267,8 +270,8 @@ fn PreviewView(
                                     <tr class=TROW>
                                         <td class=cn([TCELL, "text-fg-muted tabular-nums"])>{r.line_number}</td>
                                         <td class=TCELL>
-                                            <strong class="block font-semibold">{r.description}</strong>
-                                            <small class="mt-1 block text-xs text-fg-muted">{r.booked_on}</small>
+                                            <strong class=ROW_TITLE>{r.description}</strong>
+                                            <small class=SUBLINE>{r.booked_on}</small>
                                         </td>
                                         <td class=cn([TCELL_NUM, "whitespace-nowrap"])>
                                             <Money value=r.amount unit=Currency::new(&r.currency) neutral=true />
@@ -281,12 +284,12 @@ fn PreviewView(
                     </tbody>
                 </table>
             </div>
-            {more.map(|m| view! { <p class="text-sm text-fg-muted">{m}</p> })}
+            {more.map(|m| view! { <p class=MUTED>{m}</p> })}
             {rejected
                 .into_iter()
                 .map(|r| {
                     view! {
-                        <p class="text-sm text-warning-fg">
+                        <p class=WARNING_TEXT>
                             {format!("Line {}: {}", r.line_number, r.reason.replace('_', " "))}
                         </p>
                     }
@@ -296,8 +299,8 @@ fn PreviewView(
                 .then(|| {
                     view! {
                         <Card tone=CardTone::Muted class="p-4 sm:p-4">
-                            <label class="flex items-start gap-2.5 text-sm leading-relaxed">
-                                <span class="mt-1 flex">
+                            <label class=OPTION>
+                                <span class=CHECK_SLOT>
                                     <Checkbox
                                         checked=Signal::derive(move || skip.get())
                                         disabled=Signal::derive(move || busy.get())
@@ -313,7 +316,7 @@ fn PreviewView(
                         </Card>
                     }
                 })}
-            <div class="flex flex-wrap items-center gap-2">
+            <div class=ACTIONS>
                 <Button
                     disabled=Signal::derive(move || busy.get() || new_count == 0 || (!committable && !skip.get()))
                     on_click=confirm

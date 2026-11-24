@@ -22,6 +22,10 @@ use wasm_bindgen::prelude::*;
 
 use super::ui::{ERROR, FEEDBACK, FILE_INPUT, Messages, Ops, local_date};
 use crate::api::{NoArgs, invoke, load};
+use crate::ds::patterns::{
+    DD, DL_THREE, Disclosure, FACT_ROW, FILE_FORM, HINT, LIST_STACK, MUTED, ROW_TITLE,
+    SECTION_STACK, SUBLINE, TOOLBAR,
+};
 use crate::ds::{
     Badge, Button, CONTROL, Card, CardHeader, CardTitle, Eyebrow, FactsRow, Field, Heading, Help,
     Input, Select, Size, TABLE, TABLE_CONTAINER, TCELL, TCELL_NUM, TH, TH_NUM, TROW, Tone, Variant,
@@ -243,7 +247,7 @@ pub fn Banks() -> impl IntoView {
     };
 
     view! {
-        <div class="mb-6 grid gap-4">
+        <div class=SECTION_STACK>
             <Messages ops=ops />
             {move || match status.data.get() {
                 Some(Err(e)) => Some(view! { <p role="alert" class=ERROR>{e}</p> }),
@@ -411,22 +415,22 @@ fn BankBox(
                 <strong class="font-semibold">{name.clone()}</strong>
                 <span class=cn(["text-sm", if attention { "text-warning-fg" } else { "text-accent" }])>{headline}</span>
             </div>
-            {note.map(|d| view! { <p class="text-sm text-fg-muted">{d}</p> })}
-            <dl class="grid gap-4 sm:grid-cols-3">
+            {note.map(|d| view! { <p class=MUTED>{d}</p> })}
+            <dl class=DL_THREE>
                 {facts
                     .into_iter()
                     .map(|(term, value)| {
                         view! {
                             <div>
-                                <dt class="text-xs text-fg-muted">{term}</dt>
-                                <dd class="mt-1.5 text-sm">{value}</dd>
+                                <dt class=HINT>{term}</dt>
+                                <dd class=DD>{value}</dd>
                             </div>
                         }
                     })
                     .collect_view()}
             </dl>
-            {result.filter(|r| !r.is_empty()).map(|r| view! { <p class="text-sm text-fg-muted">{r}</p> })}
-            <div class="flex flex-wrap items-end gap-x-6 gap-y-2">
+            {result.filter(|r| !r.is_empty()).map(|r| view! { <p class=MUTED>{r}</p> })}
+            <div class=FACT_ROW>
                 <FactsRow rows={
                     let mut rows = Vec::new();
                     if let Some(l) = linked {
@@ -548,8 +552,8 @@ fn AccountTable(name: String, accounts: Vec<BankAccount>) -> impl IntoView {
             view! {
                 <tr class=TROW>
                     <td class=TCELL>
-                        <strong class="block font-semibold">{a.account.name.clone()}</strong>
-                        {(!a.active).then(|| view! { <small class="mt-1 block text-xs text-fg-muted">"Closed"</small> })}
+                        <strong class=ROW_TITLE>{a.account.name.clone()}</strong>
+                        {(!a.active).then(|| view! { <small class=SUBLINE>"Closed"</small> })}
                     </td>
                     <td class=cn([TCELL, "whitespace-nowrap text-fg-muted tabular-nums"])>
                         {a.account.iban_tail.map(|t| format!("•••• {t}")).unwrap_or_else(|| "—".into())}
@@ -778,8 +782,8 @@ fn ConsentCard(
                     view! {
                         <tr class=TROW>
                             <td class=TCELL>
-                                <strong class="block font-semibold">{a.name.clone()}</strong>
-                                <small class="mt-1 block text-xs text-fg-muted">{detail}</small>
+                                <strong class=ROW_TITLE>{a.name.clone()}</strong>
+                                <small class=SUBLINE>{detail}</small>
                             </td>
                             <td class=TCELL>
                                 <Select id=id value=target options=Signal::derive(move || options.clone()) label="Ledger account" />
@@ -789,7 +793,7 @@ fn ConsentCard(
                 })
                 .collect_view();
             view! {
-                <div class="mt-4 grid gap-3">
+                <div class=LIST_STACK>
                     <div class=TABLE_CONTAINER tabindex="0" role="region" aria-label="Shared bank accounts">
                         <table class=TABLE data-density="sm">
                             <thead class="text-left">
@@ -838,7 +842,7 @@ fn ConsentCard(
                 </Button>
             </div>
             {move || started.get().then(|| view! {
-                <form class="mt-4 grid items-end gap-4 sm:grid-cols-[minmax(0,1fr)_auto]" on:submit=finish>
+                <form class=FILE_FORM on:submit=finish>
                     <Field label="Address after approval" id="consent-address">
                         <Input id="consent-address" value=address placeholder="https://localhost:8444/eb-callback?state=…&code=…" />
                     </Field>
@@ -849,9 +853,8 @@ fn ConsentCard(
             })}
             {mapping}
             <Help text="Existing accounts must stay mapped to the same ledger accounts; new accounts may be added." />
-            <details class=cn([super::ui::DETAILS, "mt-4 pb-0"])>
-                <summary class=super::ui::SUMMARY>"Renew from an importer configuration file"</summary>
-                <form class="mt-4 grid items-end gap-4 sm:grid-cols-[minmax(0,1fr)_auto]" on:submit=submit_file>
+            <Disclosure class=cn([super::ui::DETAILS, "mt-4 pb-0"]) summary_class=super::ui::SUMMARY summary="Renew from an importer configuration file">
+                <form class=FILE_FORM on:submit=submit_file>
                     <Field label="Configuration" id="consent-file">
                         <input
                             id="consent-file"
@@ -869,7 +872,7 @@ fn ConsentCard(
                         "Renew consent"
                     </Button>
                 </form>
-            </details>
+            </Disclosure>
         </Card>
     }
 }
@@ -952,7 +955,7 @@ fn KeyCard(
             <Help text="Every bank request is signed with your Enable Banking application key. The id and key stay in a private file on this Mac that only your user can read." />
             {move || if stored() {
                 view! {
-                    <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div class=TOOLBAR>
                         <p class="text-sm">"Stored privately on this Mac."</p>
                         <Button variant=Variant::Secondary size=Size::Sm disabled=busy on_click=Callback::new(forget)>
                             "Remove key"

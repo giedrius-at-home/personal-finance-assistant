@@ -11,13 +11,15 @@ use serde::Serialize;
 
 use super::ui::{DETAILS, FIELDSET, Ops, PREVIEW, SUMMARY, frame, load_workspace, local_date};
 use crate::api::{NoArgs, load};
+use crate::ds::patterns::{
+    ACTIONS, CHECK_SLOT, DD, DD_NUM, DL_THREE_SPACED, Disclosure, HINT, MUTED, OPTION_SPACED,
+    SECRET_FORM, SECTION_STACK, SETTINGS_GRID, STACK_XS, STATUS_NOTE, SUBSECTION, SUBSTACK, TITLE,
+};
 use crate::ds::{
     Button, CONTROL, Card, CardTitle, Checkbox, Eyebrow, Field, Heading, Help, Input, Select, Size,
     TABLE, TABLE_CONTAINER, TCELL, TH, TROW, Variant, cn,
 };
 use crate::{format, state};
-
-const GRID: &str = "my-5 grid gap-5 md:grid-cols-3";
 
 fn label(key: &str) -> &str {
     match key {
@@ -215,7 +217,7 @@ pub fn Settings() -> impl IntoView {
         {frame(ops, workspace, retry, move |ws| {
             view! { <SettingsCard ws=ws ops=ops draft=draft preview=preview rollback=rollback /> }.into_any()
         })}
-        <div class="mb-6 grid gap-4">
+        <div class=SECTION_STACK>
             <super::email::EmailCard />
             <super::ai::AiSuggestions />
             {move || workspace.data.get().and_then(Result::ok).map(|ws| view! { <LocalData ws=ws /> })}
@@ -300,7 +302,7 @@ fn SettingsCard(
             // Any edit invalidates the previewed change, as in the site.
             <form on:submit=submit on:input=move |_| preview.set(None)>
                 <fieldset disabled=move || busy.get() class=FIELDSET>
-                    <div class=GRID>
+                    <div class=SETTINGS_GRID>
                         <Field label="Usual monthly payday" id="set-payday" hint="Shorter months use their final day.">
                             <Input id="set-payday" value=draft.payday kind="number" min="1" max="31" placeholder="Not configured" />
                         </Field>
@@ -336,8 +338,8 @@ fn SettingsCard(
                             <Input id="set-hour" value=draft.hour kind="number" min="0" max="23" />
                         </Field>
                     </div>
-                    <label class="mb-5 flex items-start gap-2.5 text-sm leading-relaxed">
-                        <span class="mt-1 flex">
+                    <label class=OPTION_SPACED>
+                        <span class=CHECK_SLOT>
                             <Checkbox
                                 checked=Signal::derive(move || draft.notifications.get())
                                 disabled=Signal::derive(move || !notifications_available || busy.get())
@@ -356,9 +358,8 @@ fn SettingsCard(
                             }}
                         </span>
                     </label>
-                    <details class=cn([DETAILS, "mb-5"])>
-                        <summary class=SUMMARY>"Alert thresholds & cooldowns"</summary>
-                        <div class=GRID>
+                    <Disclosure class=cn([DETAILS, "mb-5"]) summary_class=SUMMARY summary="Alert thresholds & cooldowns">
+                        <div class=SETTINGS_GRID>
                             {thresholds
                                 .into_iter()
                                 .map(|(key, value, min, max, step)| {
@@ -372,7 +373,7 @@ fn SettingsCard(
                                 .collect_view()}
                         </div>
                         <Help text="Higher-severity alerts use shorter cooldowns." />
-                    </details>
+                    </Disclosure>
                     <Button submit=true variant=Variant::Secondary disabled=Signal::derive(move || busy.get())>
                         {move || if busy.get() { "Working…" } else { "Review changes" }}
                     </Button>
@@ -402,7 +403,7 @@ fn SettingsCard(
                         };
                         view! {
                             <div class=cn([PREVIEW, "mt-5"])>
-                                <h3 class="text-base font-semibold">"Review changes"</h3>
+                                <h3 class=TITLE>"Review changes"</h3>
                                 <div class=TABLE_CONTAINER tabindex="0" role="region" aria-label="Settings changes">
                                     <table class=TABLE data-density="sm">
                                         <thead class="text-left">
@@ -415,7 +416,7 @@ fn SettingsCard(
                                         <tbody>{rows}</tbody>
                                     </table>
                                 </div>
-                                <div class="flex flex-wrap items-center gap-2">
+                                <div class=ACTIONS>
                                     <Button
                                         disabled=Signal::derive(move || busy.get())
                                         on_click=Callback::new(move |_| {
@@ -444,8 +445,7 @@ fn SettingsCard(
                         }
                     })
             }}
-            <details class=cn([DETAILS, "mt-5 pb-0"])>
-                <summary class=SUMMARY>{format!("Previous settings ({revision_count})")}</summary>
+            <Disclosure class=cn([DETAILS, "mt-5 pb-0"]) summary_class=SUMMARY summary=format!("Previous settings ({revision_count})")>
                 {if revisions.is_empty() {
                     view! { <p class="pt-3 text-sm">"No saved revisions."</p> }.into_any()
                 } else {
@@ -482,7 +482,7 @@ fn SettingsCard(
                                                 view! {
                                                     <div class=cn([PREVIEW, "w-full"])>
                                                         <p class="text-sm">"Restore these settings?"</p>
-                                                        <div class="flex flex-wrap items-center gap-2">
+                                                        <div class=ACTIONS>
                                                             <Button
                                                                 disabled=Signal::derive(move || busy.get())
                                                                 on_click=Callback::new(move |_| {
@@ -518,7 +518,7 @@ fn SettingsCard(
                         .collect_view()
                         .into_any()
                 }}
-            </details>
+            </Disclosure>
         </Card>
     }
 }
@@ -549,8 +549,8 @@ fn LocalData(ws: ManageWorkspace) -> impl IntoView {
                     .map(|(term, value)| {
                         view! {
                             <div>
-                                <dt class="text-xs text-fg-muted">{term}</dt>
-                                <dd class="mt-1.5 text-sm tabular-nums">{value}</dd>
+                                <dt class=HINT>{term}</dt>
+                                <dd class=DD_NUM>{value}</dd>
                             </div>
                         }
                     })
@@ -619,23 +619,23 @@ fn ForecastModel() -> impl IntoView {
         let failed = s.error.is_some();
         let offer = !s.available && s.downloading.is_none();
         view! {
-            <dl class="mt-5 grid gap-4 sm:grid-cols-3">
+            <dl class=DL_THREE_SPACED>
                 <div>
-                    <dt class="text-xs text-fg-muted">"Model"</dt>
-                    <dd class="mt-1.5 text-sm">"TimesFM 3.0"</dd>
+                    <dt class=HINT>"Model"</dt>
+                    <dd class=DD>"TimesFM 3.0"</dd>
                 </div>
                 <div class="sm:col-span-2">
-                    <dt class="text-xs text-fg-muted">"Status"</dt>
-                    <dd class="mt-1.5 text-sm tabular-nums">{line}</dd>
+                    <dt class=HINT>"Status"</dt>
+                    <dd class=DD_NUM>{line}</dd>
                 </div>
             </dl>
             {s.error.map(|e| {
-                view! { <p class=cn(["mt-4 text-sm", if failed { "text-negative-fg" } else { "" }])>{format!("Last attempt failed: {e}")}</p> }
+                view! { <p class=cn([SUBSECTION, if failed { "text-negative-fg" } else { "" }])>{format!("Last attempt failed: {e}")}</p> }
             })}
             {offer.then(|| {
                 view! {
-                    <div class="mt-5 grid gap-3">
-                        <p class="text-sm text-fg-muted">
+                    <div class=SUBSTACK>
+                        <p class=MUTED>
                             {format!(
                                 "Google's time-series model forecasts daily spending, group month-end totals and the three-month outlook; each is kept only where it beats the simple baseline on your own history. The download is {} from Hugging Face (google/timesfm-3.0-pytorch); it runs on this Mac only.",
                                 gigabytes(s.download_bytes),
@@ -656,9 +656,9 @@ fn ForecastModel() -> impl IntoView {
             <Eyebrow level=Heading::P>"FORECASTS"</Eyebrow>
             <CardTitle level=Heading::H2 class="mt-1">"Forecast model"</CardTitle>
             {move || match status.data.get() {
-                None => view! { <p class="mt-5 text-sm text-fg-muted">"Checking the model…"</p> }.into_any(),
+                None => view! { <p class=STATUS_NOTE>"Checking the model…"</p> }.into_any(),
                 Some(Err(e)) => {
-                    view! { <p class="mt-5 text-sm text-fg-muted">{format!("The model is not available here ({e}).")}</p> }
+                    view! { <p class=STATUS_NOTE>{format!("The model is not available here ({e}).")}</p> }
                         .into_any()
                 }
                 Some(Ok(s)) => body(s).into_any(),
@@ -720,14 +720,14 @@ fn Updates() -> impl IntoView {
         let failed = u.error.is_some();
         let (installing, checking) = (u.installing, u.checking);
         view! {
-            <dl class="mt-5 grid gap-4 sm:grid-cols-3">
+            <dl class=DL_THREE_SPACED>
                 <div>
-                    <dt class="text-xs text-fg-muted">"Installed version"</dt>
-                    <dd class="mt-1.5 text-sm tabular-nums">{u.current_version.clone()}</dd>
+                    <dt class=HINT>"Installed version"</dt>
+                    <dd class=DD_NUM>{u.current_version.clone()}</dd>
                 </div>
                 <div class="sm:col-span-2">
-                    <dt class="text-xs text-fg-muted">"Status"</dt>
-                    <dd class=cn(["mt-1.5 text-sm", if failed { "text-negative-fg" } else { "" }])>{status_line}</dd>
+                    <dt class=HINT>"Status"</dt>
+                    <dd class=cn([DD, if failed { "text-negative-fg" } else { "" }])>{status_line}</dd>
                 </div>
             </dl>
             {u
@@ -736,7 +736,7 @@ fn Updates() -> impl IntoView {
                 .map(|a| {
                     view! {
                         <div class=cn([PREVIEW, "mt-5 sm:grid-cols-[1fr_auto] sm:items-center"])>
-                            <div class="grid gap-1">
+                            <div class=STACK_XS>
                                 <strong class="font-semibold">
                                     {format!("Version {} is available", a.version)}
                                     {a.date.map(|d| view! { <span class="font-normal text-fg-muted">{format!(" · {}", format::date(&d))}</span> })}
@@ -776,13 +776,13 @@ fn Updates() -> impl IntoView {
                     .into_any()
             } else {
                 view! {
-                    <div class="mt-5 grid gap-3">
-                        <p class="text-sm text-fg-muted">
+                    <div class=SUBSTACK>
+                        <p class=MUTED>
                             "Updates come from this app's GitHub releases. Paste a fine-grained GitHub token with read-only "
                             <em>"Contents"</em>
                             " access to the personal-finance-assistant repository. It is kept privately on this Mac."
                         </p>
-                        <form class="flex flex-col gap-3 sm:flex-row sm:items-end" on:submit=save_token>
+                        <form class=SECRET_FORM on:submit=save_token>
                             <input
                                 node_ref=token_input
                                 class=cn([CONTROL, "sm:max-w-sm"])
@@ -806,9 +806,9 @@ fn Updates() -> impl IntoView {
             <Eyebrow level=Heading::P>"APP"</Eyebrow>
             <CardTitle level=Heading::H2 class="mt-1">"Updates"</CardTitle>
             {move || match updates.data.get() {
-                None => view! { <p class="mt-5 text-sm text-fg-muted">"Checking update state…"</p> }.into_any(),
+                None => view! { <p class=STATUS_NOTE>"Checking update state…"</p> }.into_any(),
                 Some(Err(e)) => {
-                    view! { <p class="mt-5 text-sm text-fg-muted">{format!("Updates are not available here ({e}).")}</p> }
+                    view! { <p class=STATUS_NOTE>{format!("Updates are not available here ({e}).")}</p> }
                         .into_any()
                 }
                 Some(Ok(u)) => body(u).into_any(),

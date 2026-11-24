@@ -9,6 +9,7 @@ use leptos::prelude::*;
 
 use super::ui::{FEEDBACK, Ops, PREVIEW, frame, load_workspace, local_date};
 use crate::api::{NoArgs, load};
+use crate::ds::patterns::{CARD_TITLE, TITLE, TWO_COLUMNS, TWO_COLUMNS_TIGHT};
 use crate::ds::{
     Badge, Button, Card, CardHeader, CardTitle, Eyebrow, FactsRow, Heading, Help, Icon, Lucide,
     Size, Tone, Variant, cn,
@@ -28,7 +29,7 @@ pub fn Status() -> impl IntoView {
     });
     view! {
         {frame(ops, workspace, retry, move |ws| view! { <Connections ws=ws ops=ops /> }.into_any())}
-        <div class="grid gap-3 md:grid-cols-2">
+        <div class=TWO_COLUMNS_TIGHT>
             <CategoryReview review=review />
             {with_report(|report| {
                 let accounts = report.cash_overview.accounts.clone();
@@ -40,7 +41,7 @@ pub fn Status() -> impl IntoView {
                             <CardTitle level=Heading::H2>"Account data health"</CardTitle>
                             <span aria-hidden="true" class="text-fg-muted"><Lucide icon=Icon::Database size=17 /></span>
                         </CardHeader>
-                        <h3 class="text-base font-semibold">
+                        <h3 class=TITLE>
                             {if failed {
                                 "Refresh failed"
                             } else if refreshed.is_some() {
@@ -177,13 +178,13 @@ fn Connections(ws: ManageWorkspace, ops: Ops) -> impl IntoView {
                 </button>
                 "."
             </p>
-            <div class="grid gap-4 md:grid-cols-2">
+            <div class=TWO_COLUMNS>
                 {cards
                     .into_iter()
                     .map(|(name, ok, facts)| {
                         view! {
                             <div class="grid content-start gap-3 rounded-lg border border-border p-5">
-                                <h3 class="text-lg font-semibold">{name}</h3>
+                                <h3 class=CARD_TITLE>{name}</h3>
                                 <Badge class="justify-self-start" tone=if ok { Tone::Positive } else { Tone::Warning }>
                                     {if ok { "success" } else { "not recorded" }}
                                 </Badge>
@@ -226,7 +227,7 @@ fn CategoryReview(review: crate::api::Loaded<ReviewReport>) -> impl IntoView {
                         <CardTitle level=Heading::H2>"Category review"</CardTitle>
                         <Badge tone=Tone::Outline>{format!("{count} proposals")}</Badge>
                     </CardHeader>
-                    <h3 class="text-base font-semibold">
+                    <h3 class=TITLE>
                         {if count == 0 { "Nothing to review" } else { "Waiting for you" }}
                     </h3>
                     <button
