@@ -563,6 +563,13 @@ impl Service {
         self.read(|_, snap| review::search_transactions(&Ctx::new(snap, &Zoned::now()), query))
     }
 
+    pub fn plot_query(
+        &self,
+        spec: finance_types::plot::PlotSpec,
+    ) -> Result<finance_types::plot::PlotData, String> {
+        self.read(|_, snap| crate::plot::plot_query(&Ctx::new(snap, &Zoned::now()), &spec))
+    }
+
     pub fn save_budget_plan(
         &self,
         plan: finance_types::gateway::BudgetPlan,

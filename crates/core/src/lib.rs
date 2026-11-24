@@ -28,6 +28,7 @@ pub mod outlook;
 pub mod period;
 pub mod personal;
 pub mod plans;
+pub mod plot;
 pub mod pyfmt;
 pub mod reporting;
 pub mod review;

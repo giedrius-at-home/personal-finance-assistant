@@ -1,0 +1,501 @@
+use std::collections::HashSet;
+
+use finance_types::plot::{
+    Axis, Chart, Filters, Measure, MeasureSpec, Period, PlotData, PlotSpec, Split,
+};
+use finance_types::report::Currency;
+use jiff::Zoned;
+use rust_decimal::Decimal;
+
+use super::plot_query;
+use crate::closure::tests::{account, snapshot};
+use crate::model::{Kind, Tx};
+use crate::trends::tests::{mapping, tx};
+use crate::trends::{local_day, time_trends};
+use crate::{Ctx, Snapshot, budget, groups, plans};
+
+fn now() -> Zoned {
+    "2026-11-24T12:00:00+01:00[Europe/Amsterdam]"
+        .parse()
+        .unwrap()
+}
+
+fn dec(s: &str) -> Decimal {
+    s.parse().unwrap()
+}
+
+fn on(day: &str) -> String {
+    format!("{day}T12:00:00+00:00[UTC]")
+}
+
+fn named(t: Tx, merchant: &str) -> Tx {
+    Tx {
+        counterparty_name: Some(merchant.into()),
+        ..t
+    }
+}
+
+fn out(id: &str, amount: &str, category: Option<&str>, day: &str) -> Tx {
+    tx(id, amount, Kind::Outflow, category, &on(day))
+}
+
+/// Groceries, eating out, a fixed rent, one refund, one own transfer, one
+/// income, one future payment, one in dollars.
+fn ledger() -> Vec<Tx> {
+    let mut usd = out("usd", "15", Some("Restaurant"), "2026-11-12");
+    usd.currency = Currency::new("USD");
+    vec![
+        named(out("g1", "40", Some("Jumbo"), "2026-11-03"), "Jumbo"),
+        named(out("g2", "25", Some("Jumbo"), "2026-10-15"), "Jumbo"),
+        named(out("g3", "30", Some("Jumbo"), "2026-08-07"), "Jumbo"),
+        named(out("e1", "60", Some("Restaurant"), "2026-11-20"), "Bistro"),
+        named(out("e2", "35", Some("Restaurant"), "2026-09-12"), "Bistro"),
+        out("p1", "8", Some("Pharmacy"), "2026-11-15"),
+        out("n1", "12", None, "2026-10-02"),
+        out("rent", "800", Some("Rent"), "2026-11-01"),
+        out("old", "50", Some("Jumbo"), "2026-03-10"),
+        tx("r1", "10", Kind::Refund, Some("Jumbo"), &on("2026-11-05")),
+        tx("t1", "500", Kind::Transfer, None, &on("2026-11-10")),
+        tx("i1", "3000", Kind::Inflow, None, &on("2026-11-01")),
+        // Later today: dated after now.
+        tx(
+            "f1",
+            "999",
+            Kind::Outflow,
+            Some("Jumbo"),
+            "2026-11-24T20:00:00+00:00[UTC]",
+        ),
+        usd,
+    ]
+}
+
+fn snap(transactions: Vec<Tx>) -> Snapshot {
+    let mut snap = snapshot(
+        vec![account("firefly:1"), account("firefly:2")],
+        transactions,
+        &[],
+    );
+    snap.group_mappings = vec![
+        mapping("Jumbo", "Groceries"),
+        mapping("Restaurant", "Eating out"),
+    ];
+    snap.settings.predicted_bill_categories = vec!["Rent".into()];
+    snap
+}
+
+fn spec(by: Axis, period: Period, measures: &[Measure]) -> PlotSpec {
+    PlotSpec {
+        by,
+        period,
+        measures: measures
+            .iter()
+            .map(|&measure| MeasureSpec {
+                measure,
+                ..Default::default()
+            })
+            .collect(),
+        top: 20,
+        ..Default::default()
+    }
+}
+
+fn query(snap: &Snapshot, spec: &PlotSpec) -> PlotData {
+    plot_query(&Ctx::new(snap, &now()), spec).unwrap()
+}
+
+fn spending(snap: &Snapshot) -> Vec<Tx> {
+    let ctx = Ctx::new(snap, &now());
+    budget::spending_transactions(&ctx, &plans::planned_payment_views(&ctx))
+}
+
+/// The value at `label` in the first series.
+fn at(data: &PlotData, label: &str) -> Option<Decimal> {
+    let i = data.categories.iter().position(|c| c == label).unwrap();
+    data.series[0].values[i]
+}
+
+fn total(data: &PlotData) -> Decimal {
+    data.series[0].values.iter().flatten().sum()
+}
+
+#[test]
+fn spent_by_month_equals_time_trends() {
+    let snap = snap(ledger());
+    let data = query(
+        &snap,
+        &spec(Axis::Month, Period::Last6Months, &[Measure::Spent]),
+    );
+    let trends = time_trends(
+        &spending(&snap),
+        &snap.group_mappings,
+        &now(),
+        &HashSet::new(),
+    );
+    let eur = &trends.currencies[0];
+    assert_eq!(eur.currency, Currency::eur());
+    let expected: Vec<_> = eur
+        .months
+        .iter()
+        .map(|m| Some(m.spending.unwrap_or_default()))
+        .collect();
+    assert_eq!(data.series[0].values, expected);
+    assert_eq!(data.categories, ["Jun", "Jul", "Aug", "Sep", "Oct", "Nov"]);
+}
+
+#[test]
+fn spent_by_group_equals_time_trends_group_totals() {
+    let snap = snap(ledger());
+    let data = query(
+        &snap,
+        &spec(Axis::Group, Period::Last6Months, &[Measure::Spent]),
+    );
+    let trends = time_trends(
+        &spending(&snap),
+        &snap.group_mappings,
+        &now(),
+        &HashSet::new(),
+    );
+    for group in &trends.currencies[0].groups {
+        match group.group.as_deref() {
+            Some(name) => assert_eq!(at(&data, name), Some(group.total)),
+            None => assert_eq!(
+                at(&data, "No group").unwrap() + at(&data, "Uncategorised").unwrap(),
+                group.total
+            ),
+        }
+    }
+    assert_eq!(at(&data, "Groceries"), Some(dec("85")));
+}
+
+#[test]
+fn spent_by_weekday_equals_net_of_the_same_rows() {
+    let snap = snap(ledger());
+    let data = query(
+        &snap,
+        &spec(Axis::Weekday, Period::Last6Months, &[Measure::Spent]),
+    );
+    let rows = spending(&snap);
+    let zone = now().time_zone().clone();
+    let start = jiff::civil::date(2026, 6, 1);
+    for (weekday, value) in data.series[0].values.iter().enumerate() {
+        let same: Vec<&Tx> = rows
+            .iter()
+            .filter(|t| matches!(t.kind, Kind::Outflow | Kind::Refund))
+            .filter(|t| t.currency == Currency::eur())
+            .filter(|t| t.occurred_at.timestamp() <= now().timestamp())
+            .filter(|t| {
+                let day = local_day(t, &zone);
+                day >= start && day.weekday().to_monday_zero_offset() as usize == weekday
+            })
+            .collect();
+        assert_eq!(*value, Some(groups::net(&same)));
+    }
+    assert_eq!(data.categories.len(), 7);
+}
+
+#[test]
+fn refunds_reduce_and_transfers_are_out() {
+    let data = query(
+        &snap(ledger()),
+        &spec(Axis::Month, Period::ThisMonth, &[Measure::Spent]),
+    );
+    // 40 + 60 + 8 + 800 − 10; the 500 transfer and the future 999 are out.
+    assert_eq!(data.series[0].values, [Some(dec("898"))]);
+}
+
+#[test]
+fn a_future_payment_is_ignored() {
+    let data = query(
+        &snap(ledger()),
+        &spec(Axis::Day, Period::ThisMonth, &[Measure::Largest]),
+    );
+    assert_eq!(data.categories.last().unwrap(), "24 Nov");
+    assert_eq!(data.series[0].values.last().unwrap(), &None);
+}
+
+#[test]
+fn income_and_net() {
+    let data = query(
+        &snap(ledger()),
+        &spec(
+            Axis::Month,
+            Period::ThisMonth,
+            &[Measure::Income, Measure::Net],
+        ),
+    );
+    assert_eq!(data.series[0].values, [Some(dec("3000"))]);
+    assert_eq!(data.series[1].values, [Some(dec("2102"))]);
+}
+
+#[test]
+fn count_average_largest() {
+    let mut s = spec(
+        Axis::Month,
+        Period::ThisYear,
+        &[Measure::Count, Measure::Average, Measure::Largest],
+    );
+    s.chart = Chart::Table;
+    let data = query(&snap(ledger()), &s);
+    assert_eq!(data.categories.len(), 11);
+    let column =
+        |i: usize| -> Vec<Option<Decimal>> { data.series.iter().map(|s| s.values[i]).collect() };
+    // November: four purchases, 898 spent, the rent the largest.
+    assert_eq!(
+        column(10),
+        [Some(dec("4")), Some(dec("224.50")), Some(dec("800"))]
+    );
+    assert_eq!(column(0), [Some(Decimal::ZERO), None, None]);
+    assert_eq!(
+        data.series.iter().map(|s| s.unit).collect::<Vec<_>>(),
+        [
+            finance_types::plot::Unit::Count,
+            finance_types::plot::Unit::Money,
+            finance_types::plot::Unit::Money
+        ]
+    );
+}
+
+#[test]
+fn every_bucket_exists_even_when_empty() {
+    let snap = snap(ledger());
+    let data = query(
+        &snap,
+        &spec(Axis::Month, Period::Last12Months, &[Measure::Spent]),
+    );
+    assert_eq!(data.categories.len(), 12);
+    assert_eq!(data.categories[0], "Dec 2025");
+    assert_eq!(data.series[0].values[0], Some(Decimal::ZERO));
+    let days = query(
+        &snap,
+        &spec(Axis::Day, Period::ThisMonth, &[Measure::Spent]),
+    );
+    assert_eq!(days.categories.len(), 24);
+    assert!(days.series[0].values.iter().all(Option::is_some));
+    let weeks = query(
+        &snap,
+        &spec(Axis::Week, Period::ThisMonth, &[Measure::Spent]),
+    );
+    assert_eq!(weeks.categories[0], "26 Oct");
+    assert_eq!(
+        weeks.series[0].values.iter().flatten().sum::<Decimal>(),
+        dec("898")
+    );
+}
+
+fn thirty_merchants() -> Vec<Tx> {
+    (1..=30)
+        .map(|i| {
+            named(
+                out(&format!("m{i}"), &i.to_string(), Some("Shop"), "2026-11-10"),
+                &format!("Shop {i}"),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn top_n_and_other_sum_to_the_total() {
+    let mut s = spec(Axis::Merchant, Period::ThisMonth, &[Measure::Spent]);
+    s.top = 5;
+    let data = query(&snap(thirty_merchants()), &s);
+    assert_eq!(
+        data.categories,
+        [
+            "Shop 30", "Shop 29", "Shop 28", "Shop 27", "Shop 26", "Other"
+        ]
+    );
+    assert_eq!(total(&data), dec("465"));
+}
+
+#[test]
+fn left_out_counts_what_other_holds() {
+    let mut s = spec(Axis::Merchant, Period::ThisMonth, &[Measure::Spent]);
+    s.top = 5;
+    let data = query(&snap(thirty_merchants()), &s);
+    assert_eq!(data.left_out, 25);
+    // 1 + 2 + … + 25.
+    assert_eq!(at(&data, "Other"), Some(dec("325")));
+}
+
+#[test]
+fn split_keeps_six_series_at_most() {
+    let mut s = spec(Axis::Month, Period::ThisMonth, &[Measure::Spent]);
+    s.split = Some(Split::Merchant);
+    s.split_top = 6;
+    let data = query(&snap(thirty_merchants()), &s);
+    assert_eq!(data.series.len(), 6);
+    assert_eq!(data.series[0].label, "Shop 30");
+    assert_eq!(data.series[5].label, "Other");
+    let sum: Decimal = data.series.iter().flat_map(|s| s.values[0]).sum();
+    assert_eq!(sum, dec("465"));
+    assert_eq!(data.left_out, 25);
+}
+
+#[test]
+fn filters_combine() {
+    let mut s = spec(Axis::Month, Period::Last6Months, &[Measure::Spent]);
+    s.filters = Filters {
+        categories: vec!["Jumbo".into()],
+        min: Some(dec("26")),
+        accounts: vec!["firefly:1".into()],
+        ..Default::default()
+    };
+    let data = query(&snap(ledger()), &s);
+    // g1 40 and g3 30; g2 25 and the 10 refund are under the minimum.
+    assert_eq!(total(&data), dec("70"));
+    s.filters.merchant = "UMB".into();
+    assert_eq!(total(&query(&snap(ledger()), &s)), dec("70"));
+    s.filters.max = Some(dec("35"));
+    assert_eq!(total(&query(&snap(ledger()), &s)), dec("30"));
+    s.filters.accounts = vec!["firefly:2".into()];
+    assert_eq!(total(&query(&snap(ledger()), &s)), Decimal::ZERO);
+}
+
+#[test]
+fn a_filter_on_a_missing_category_matches_nothing() {
+    let mut s = spec(Axis::Month, Period::Last6Months, &[Measure::Spent]);
+    s.filters.categories = vec!["Nope".into()];
+    let data = query(&snap(ledger()), &s);
+    assert_eq!(data.series[0].values, vec![Some(Decimal::ZERO); 6]);
+}
+
+#[test]
+fn variable_only_equals_the_variable_time_trends() {
+    let snap = snap(ledger());
+    let mut s = spec(Axis::Month, Period::Last6Months, &[Measure::Spent]);
+    s.filters.variable_only = true;
+    let data = query(&snap, &s);
+    let mut fixed_categories =
+        groups::fixed_category_names(&snap.bills, &snap.group_mappings, &snap.subscription_rules);
+    fixed_categories.extend(groups::predicted_category_names(
+        &snap.settings.predicted_bill_categories,
+    ));
+    let fixed_ids = groups::non_variable_ids(&snap.transactions, &fixed_categories);
+    let variable = time_trends(&spending(&snap), &snap.group_mappings, &now(), &fixed_ids);
+    let expected: Vec<_> = variable.currencies[0]
+        .months
+        .iter()
+        .map(|m| Some(m.spending.unwrap_or_default()))
+        .collect();
+    assert_eq!(data.series[0].values, expected);
+    assert_eq!(data.series[0].values[5], Some(dec("98")));
+    assert!(data.subtitle.contains("variable only"));
+}
+
+#[test]
+fn fixed_or_variable_axis_sums_to_spent() {
+    let snap = snap(ledger());
+    let data = query(
+        &snap,
+        &spec(Axis::FixedOrVariable, Period::ThisMonth, &[Measure::Spent]),
+    );
+    assert_eq!(at(&data, "Fixed"), Some(dec("800")));
+    assert_eq!(at(&data, "Variable"), Some(dec("98")));
+    assert_eq!(total(&data), dec("898"));
+}
+
+#[test]
+fn merchant_spellings_merge_under_one_label() {
+    let rows = vec![
+        named(out("a", "10", None, "2026-11-02"), "Albert Heijn"),
+        named(out("b", "20", None, "2026-11-03"), "Albert  Heijn"),
+        named(out("c", "30", None, "2026-11-04"), "ALBERT HEIJN"),
+        named(out("d", "5", None, "2026-11-05"), "Albert  Heijn"),
+        out("e", "7", None, "2026-11-06"),
+    ];
+    let data = query(
+        &snap(rows),
+        &spec(Axis::Merchant, Period::ThisMonth, &[Measure::Spent]),
+    );
+    assert_eq!(data.categories, ["Albert  Heijn", "Unknown"]);
+    assert_eq!(data.series[0].values, [Some(dec("65")), Some(dec("7"))]);
+}
+
+#[test]
+fn the_other_currency_is_a_separate_plot() {
+    let snap = snap(ledger());
+    let mut s = spec(Axis::Month, Period::ThisMonth, &[Measure::Spent]);
+    s.currency = Some("USD".into());
+    let data = query(&snap, &s);
+    assert_eq!(data.currency, Currency::new("USD"));
+    assert_eq!(data.series[0].values, [Some(dec("15"))]);
+    s.currency = None;
+    assert_eq!(query(&snap, &s).currency, Currency::eur());
+}
+
+#[test]
+fn an_empty_period_gives_zeroes_and_no_division() {
+    let s = spec(
+        Axis::Day,
+        Period::Between {
+            from: "2025-01-01".into(),
+            to: "2025-01-31".into(),
+        },
+        &[Measure::Spent, Measure::Average],
+    );
+    let data = query(&snap(ledger()), &s);
+    assert_eq!(data.categories.len(), 31);
+    assert!(
+        data.series[0]
+            .values
+            .iter()
+            .all(|v| *v == Some(Decimal::ZERO))
+    );
+    assert!(data.series[1].values.iter().all(Option::is_none));
+    assert!(!data.partial_last);
+}
+
+#[test]
+fn an_empty_ledger_gives_no_series() {
+    let data = query(
+        &snap(Vec::new()),
+        &spec(Axis::Month, Period::Last6Months, &[Measure::Spent]),
+    );
+    assert!(data.series.is_empty());
+}
+
+#[test]
+fn a_bucket_where_refunds_exceed_spending_is_negative() {
+    let rows = vec![
+        out("a", "20", Some("Jumbo"), "2026-11-02"),
+        tx("b", "50", Kind::Refund, Some("Jumbo"), &on("2026-11-03")),
+    ];
+    let data = query(
+        &snap(rows),
+        &spec(Axis::Month, Period::ThisMonth, &[Measure::Spent]),
+    );
+    assert_eq!(data.series[0].values, [Some(dec("-30"))]);
+}
+
+#[test]
+fn an_invalid_spec_is_refused() {
+    let s = spec(Axis::Month, Period::ThisMonth, &[]);
+    let err = plot_query(&Ctx::new(&snap(ledger()), &now()), &s).unwrap_err();
+    assert_eq!(err.to_string(), s.validate().unwrap_err());
+}
+
+#[test]
+fn last_bucket_is_partial_only_when_unfinished() {
+    let snap = snap(ledger());
+    let partial = |by, period| query(&snap, &spec(by, period, &[Measure::Spent])).partial_last;
+    assert!(partial(Axis::Month, Period::Last6Months));
+    assert!(partial(Axis::Day, Period::ThisMonth));
+    assert!(!partial(Axis::Month, Period::LastMonth));
+    assert!(!partial(Axis::Weekday, Period::ThisMonth));
+    assert!(!partial(Axis::Category, Period::ThisMonth));
+}
+
+#[test]
+fn a_day_axis_over_all_time_is_refused_past_the_limit() {
+    let mut rows = ledger();
+    rows.push(out("ancient", "5", None, "2020-01-01"));
+    let s = spec(Axis::Day, Period::AllTime, &[Measure::Spent]);
+    let err = plot_query(&Ctx::new(&snap(rows), &now()), &s).unwrap_err();
+    assert!(err.to_string().contains("366"), "{err}");
+    let months = query(
+        &snap(ledger()),
+        &spec(Axis::Month, Period::AllTime, &[Measure::Spent]),
+    );
+    assert_eq!(months.categories.first().unwrap(), "Mar");
+    assert_eq!(total(&months), dec("1050"));
+}

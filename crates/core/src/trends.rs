@@ -166,7 +166,7 @@ pub(crate) fn cents(d: Decimal) -> Decimal {
 
 /// The day a payment counts on: a card purchase's own day, as the budget
 /// counts it, else its local booking day.
-fn local_day(t: &Tx, zone: &TimeZone) -> Date {
+pub(crate) fn local_day(t: &Tx, zone: &TimeZone) -> Date {
     t.purchased_on
         .unwrap_or_else(|| t.occurred_at.with_time_zone(zone.clone()).date())
 }
