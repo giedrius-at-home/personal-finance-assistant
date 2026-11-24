@@ -11,7 +11,7 @@ use crate::api::{self, NoArgs};
 use crate::ds::arrange::{Edited, drop_move, focus_after, focus_label, focus_on, moves};
 use crate::ds::patterns::ACTIONS;
 use crate::ds::{
-    Button, Confirm, DropTarget, EditBar, Gallery, PanelFrame, PanelList, Size, Variant,
+    Button, Confirm, DropTarget, EditBar, EmptyState, Gallery, PanelFrame, PanelList, Size, Variant,
 };
 use edit::PageRef;
 
@@ -393,6 +393,8 @@ pub fn PageView(
 ) -> impl IntoView {
     let state = expect_context::<LayoutState>();
     let report = crate::state().report;
+    // An own tab (not a built-in one) is emptied rather than reset.
+    let own = crate::Tab::from_id(&tab).is_none();
     let at = StoredValue::new(PageRef {
         tab,
         tab_name,
@@ -578,6 +580,12 @@ pub fn PageView(
                 <PanelList>
                     <For each=listed key=|i| i.panel.clone() children=panel />
                 </PanelList>
+                {move || (own && !editing.get() && items.with(Vec::is_empty)).then(|| view! {
+                    <EmptyState
+                        title="Nothing on this tab yet"
+                        description="Turn on Edit layout to add panels."
+                    />
+                })}
                 {move || editing.get().then(|| view! {
                     <Gallery
                         items=addable
@@ -590,8 +598,12 @@ pub fn PageView(
                     />
                     <div class=ACTIONS>
                         <Confirm
-                            label="Reset this tab"
-                            question="Put this tab back as it shipped?"
+                            label=if own { "Empty this tab" } else { "Reset this tab" }
+                            question=if own {
+                                "Remove every panel from this tab?"
+                            } else {
+                                "Put this tab back as it shipped?"
+                            }
                             on_yes=Callback::new(move |()| edit(&|l, _, a| edit::page_reset(l, a)))
                         />
                         <Confirm
