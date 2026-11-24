@@ -514,10 +514,15 @@ pub fn focus_after(edited: Edited, title: &str, items: &[(&str, bool)]) -> Strin
 /// Focuses the button or field labelled `label` once the edit is drawn; a
 /// field's text is selected.
 pub fn focus_label(label: String) {
-    let label = label.replace('"', "\\\"");
+    let label = css_escaped(&label);
     focus_on(format!(
         "button[aria-label=\"{label}\"], input[aria-label=\"{label}\"]"
     ));
+}
+
+/// `s` made safe inside a double-quoted CSS attribute selector value.
+pub fn css_escaped(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 /// Focuses the first element matching `selector` once the edit is drawn.

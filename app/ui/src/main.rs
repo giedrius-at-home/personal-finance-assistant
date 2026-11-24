@@ -16,7 +16,9 @@ use leptos::prelude::*;
 use leptos::tachys::reactive_graph::OwnedView;
 
 use crate::api::{Loaded, NoArgs, load};
-use crate::ds::arrange::{DropTarget, TAB_ALERT, TAB_EDITOR, drop_index, drop_move, focus_on};
+use crate::ds::arrange::{
+    DropTarget, TAB_ALERT, TAB_EDITOR, css_escaped, drop_index, drop_move, focus_on,
+};
 use crate::ds::patterns::{ERROR_LINE, TAB_ROW, TAB_SCROLL};
 use crate::ds::{
     Button, Eyebrow, Heading, Icon, Lucide, SegmentedControl, Size, TABS_LIST, TABS_TRIGGER,
@@ -749,7 +751,7 @@ pub enum TabEdited {
 /// The selector of the control labelled `label` in the chip of tab `id`:
 /// names repeat ("New tab"), ids do not.
 pub fn in_tab(id: &str, label: &str) -> String {
-    let (id, label) = (id.replace('"', "\\\""), label.replace('"', "\\\""));
+    let (id, label) = (css_escaped(id), css_escaped(label));
     format!(
         "[data-tab=\"{id}\"] button[aria-label=\"{label}\"], [data-tab=\"{id}\"] input[aria-label=\"{label}\"]"
     )
@@ -801,6 +803,12 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn in_tab_escapes_backslash_and_quote() {
+        let s = in_tab(r#"own-1"#, r#"Rename a\b"c"#);
+        assert!(s.contains(r#"button[aria-label="Rename a\\b\"c"]"#), "{s}");
+    }
 
     fn tab(id: &str, hidden: bool) -> TabView {
         TabView {
