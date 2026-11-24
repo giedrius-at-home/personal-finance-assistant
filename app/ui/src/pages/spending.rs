@@ -5,6 +5,7 @@ use finance_types::report::trends::CurrencyTrends;
 use leptos::prelude::*;
 
 use crate::ds::charts::ProgressBar;
+use crate::ds::patterns::{Disclosure, HINT, LEGEND_ITEM, STACK_XS, STRONG, TWO_COLUMNS_TIGHT};
 use crate::ds::{
     Badge, Card, Eyebrow, Facts, Heading, Help, Icon, Lucide, Money, Size, Switch, Tone, Variant,
     button_class, money,
@@ -76,14 +77,16 @@ fn SpendingAnalysis(trend: CurrencyTrends, variable_only: bool) -> impl IntoView
     view! {
         <section class="mb-6 w-full min-w-0" aria-label=label>
             <Card class="p-0 sm:p-0">
-                <details>
-                    <summary class="flex cursor-pointer items-center justify-between gap-4 px-4 py-3.5 [&::-webkit-details-marker]:hidden">
-                        <div class="grid gap-1">
+                <Disclosure
+                    summary_class="flex items-center justify-between gap-4 px-4 py-3.5 [&::-webkit-details-marker]:hidden"
+                    summary=view! {
+                        <div class=STACK_XS>
                             <Eyebrow>"SECONDARY PATTERN"</Eyebrow>
                             <strong class="font-semibold">"Spending by weekday"</strong>
                         </div>
-                        <span class="text-xs text-fg-muted">"View details"</span>
-                    </summary>
+                        <span class=HINT>"View details"</span>
+                    }
+                >
                     <div class="grid gap-3 border-t border-border p-4">
                         {trend
                             .weekdays
@@ -104,7 +107,7 @@ fn SpendingAnalysis(trend: CurrencyTrends, variable_only: bool) -> impl IntoView
                         <Badge tone=Tone::Outline>{if variable_only { "Variable only" } else { "All spending" }}</Badge>
                         <Help text="Average purchases per active spending day across six months." />
                     </div>
-                </details>
+                </Disclosure>
             </Card>
         </section>
     }
@@ -150,14 +153,17 @@ pub fn History() -> impl IntoView {
                                 .map(|group| {
                                     let unit = unit.clone();
                                     view! {
-                                        <details class="group border-t border-line py-3.5">
-                                            <summary class="flex cursor-pointer list-none items-center justify-between gap-3 text-sm [&::-webkit-details-marker]:hidden">
-                                                <span class="flex items-center gap-1.5">
+                                        <Disclosure
+                                            class="group border-t border-line py-3.5"
+                                            summary_class="flex list-none items-center justify-between gap-3 text-sm [&::-webkit-details-marker]:hidden"
+                                            summary=view! {
+                                                <span class=LEGEND_ITEM>
                                                     <Lucide icon=Icon::ChevronDown size=14 class="-rotate-90 text-fg-muted transition-transform group-open:rotate-0" />
                                                     {group.group.unwrap_or_else(|| "Needs a group".into())}
                                                 </span>
                                                 <Money value=group.spending unit=unit.clone() neutral=true />
-                                            </summary>
+                                            }
+                                        >
                                             {group
                                                 .stores
                                                 .into_iter()
@@ -170,12 +176,12 @@ pub fn History() -> impl IntoView {
                                                     view! {
                                                         <p class="mt-3 flex justify-between gap-3 text-xs text-fg-muted">
                                                             <span>{text}</span>
-                                                            <Money value=store.spending unit=unit.clone() neutral=true class="font-semibold text-fg" />
+                                                            <Money value=store.spending unit=unit.clone() neutral=true class=STRONG />
                                                         </p>
                                                     }
                                                 })
                                                 .collect_view()}
-                                        </details>
+                                        </Disclosure>
                                     }
                                 })
                                 .collect_view()}
@@ -194,7 +200,7 @@ pub fn History() -> impl IntoView {
             })
             .collect_view();
         view! {
-            <div class="grid gap-3 md:grid-cols-2">{cards}</div>
+            <div class=TWO_COLUMNS_TIGHT>{cards}</div>
             {compare}
         }
     })

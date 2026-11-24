@@ -9,6 +9,7 @@ use leptos::prelude::*;
 use rust_decimal::{Decimal, RoundingStrategy};
 
 use crate::api::{NoArgs, load};
+use crate::ds::patterns::{FILL_MIN, STACK_XS};
 use crate::ds::{
     Badge, Card, CardHeader, CardTitle, Eyebrow, METRIC_STRIP, Metric, Size, TABLE,
     TABLE_CONTAINER, TCELL, TH, TH_NUM, TROW, Tone, Variant, button_class, cn,
@@ -198,10 +199,10 @@ fn card(view: &WishesView) -> Option<AnyView> {
     });
     Some(
         view! {
-            <section class="w-full min-w-0" aria-label="Goals against habits">
+            <section class=FILL_MIN aria-label="Goals against habits">
                 <Card>
                     <CardHeader>
-                        <div class="grid gap-1">
+                        <div class=STACK_XS>
                             <Eyebrow><span title=HABITS_NOTE>"WHAT YOUR GOALS ASK OF YOUR SPENDING"</span></Eyebrow>
                             <CardTitle>"Goals"</CardTitle>
                         </div>

@@ -12,6 +12,9 @@ use rust_decimal::{Decimal, RoundingStrategy};
 use serde::Serialize;
 
 use crate::api::invoke;
+use crate::ds::patterns::{
+    Disclosure, FILL_MIN, NUM, NUM_MUTED, SCROLL_X, STACK_XS, SUB_ROW, WIDE_TABLE,
+};
 use crate::ds::{
     Badge, Card, CardHeader, CardTitle, Eyebrow, METRIC_STRIP, Metric, Size, Tone, Variant,
     button_class, cn, money,
@@ -425,7 +428,7 @@ fn action_view(line: &Line, budget: &MonthlyBudget, state: CardState) -> AnyView
                     }
                 }
             >
-                <span class="text-sm tabular-nums">{change.clone()}</span>
+                <span class=NUM>{change.clone()}</span>
                 <button
                     type="button"
                     class=button_class(Variant::Primary, Size::Sm)
@@ -521,16 +524,15 @@ fn line_view(line: &Line, budget: &MonthlyBudget, days: usize, state: CardState)
                         <span class="pl-5 text-fg">{driver.category.clone()}</span>
                         <span class="text-right">{driver.visits}</span>
                         <span class="text-right">{ticket}</span>
-                        <span class="text-right text-fg-muted">{usual.map_or_else(dash, |(v, _)| one_decimal(v))}</span>
-                        <span class="text-right text-fg-muted">{usual.map_or_else(dash, |(v, s)| money(s / v, unit))}</span>
+                        <span class=NUM_MUTED>{usual.map_or_else(dash, |(v, _)| one_decimal(v))}</span>
+                        <span class=NUM_MUTED>{usual.map_or_else(dash, |(v, s)| money(s / v, unit))}</span>
                         <span class="text-right">{driver.new.then(|| view! { <Badge tone=Tone::Accent>"New"</Badge> })}</span>
                     </div>
                 }
             })
             .collect_view();
         view! {
-            <details class="text-sm tabular-nums">
-                <summary class="cursor-pointer pl-5 text-xs text-fg-muted">"What drives it"</summary>
+            <Disclosure class=NUM summary_class="pl-5 text-xs text-fg-muted" summary="What drives it">
                 <div class=format!("{DRIVER_GRID} pt-2 text-xs text-fg-muted")>
                     <span class="pl-5">"Store"</span>
                     <span class="text-right">"visits"</span>
@@ -540,11 +542,11 @@ fn line_view(line: &Line, budget: &MonthlyBudget, days: usize, state: CardState)
                     <span></span>
                 </div>
                 {rows}
-            </details>
+            </Disclosure>
         }
     });
     view! {
-        <li class="grid gap-2 py-3">
+        <li class=SUB_ROW>
             <div class=format!("{LINE_GRID} text-sm tabular-nums")>
                 <span class="flex min-w-0 items-center gap-2.5">
                     <span aria-hidden="true" class="size-2.5 shrink-0 rounded-full" style=format!("background:{dot}") />
@@ -579,13 +581,13 @@ fn habit_cells(habit: &Habit, unit: &Currency) -> impl IntoView + use<> {
     };
     view! {
         <span class=week_class>{habit.visits_this_week}</span>
-        <span class="text-right text-fg-muted">{per_week(habit.typical_week_visits)}</span>
+        <span class=NUM_MUTED>{per_week(habit.typical_week_visits)}</span>
         <span class="text-right">{habit.visits}</span>
-        <span class="text-right text-fg-muted">
+        <span class=NUM_MUTED>
             {habit.typical_visits.map_or("—".to_owned(), one_decimal)}
         </span>
         <span class="text-right">{ticket}</span>
-        <span class="text-right text-fg-muted">{mostly(&habit.weekday_visits)}</span>
+        <span class=NUM_MUTED>{mostly(&habit.weekday_visits)}</span>
     }
 }
 
@@ -599,25 +601,30 @@ fn habits_view(report: &Adjustments) -> Option<AnyView> {
         return None;
     }
     let render = |row: &AdjustmentRow| {
-        let stores: Vec<_> = row.stores.iter().filter(|s| shown(&s.habit)).collect();
+        let store_rows = row
+            .stores
+            .iter()
+            .filter(|s| shown(&s.habit))
+            .map(|store| {
+                view! {
+                    <div class=format!("{HABIT_GRID} pt-1.5 text-fg-muted")>
+                        <span class="pl-4 text-fg">{store.category.clone()}</span>
+                        {habit_cells(&store.habit, unit)}
+                    </div>
+                }
+            })
+            .collect_view();
         view! {
-            <details class="border-t border-border py-2">
-                <summary class=format!("{HABIT_GRID} cursor-pointer")>
+            <Disclosure
+                class="border-t border-border py-2"
+                summary_class=HABIT_GRID
+                summary=view! {
                     <strong class="font-semibold">{row.row.name.clone()}</strong>
                     {habit_cells(&row.habit, unit)}
-                </summary>
-                {stores
-                    .into_iter()
-                    .map(|store| {
-                        view! {
-                            <div class=format!("{HABIT_GRID} pt-1.5 text-fg-muted")>
-                                <span class="pl-4 text-fg">{store.category.clone()}</span>
-                                {habit_cells(&store.habit, unit)}
-                            </div>
-                        }
-                    })
-                    .collect_view()}
-            </details>
+                }
+            >
+                {store_rows}
+            </Disclosure>
         }
     };
     let rows = often.iter().map(|row| render(row)).collect_view();
@@ -627,8 +634,8 @@ fn habits_view(report: &Adjustments) -> Option<AnyView> {
         view! {
             <section class="min-w-0" aria-label="Habits">
                 <Eyebrow>"HABITS · HOW OFTEN YOU GO"</Eyebrow>
-                <div class="mt-2 overflow-x-auto">
-                    <div class="min-w-[44rem] text-sm tabular-nums">
+                <div class=SCROLL_X>
+                    <div class=WIDE_TABLE>
                         <div class=format!("{HABIT_GRID} pb-2 text-xs text-fg-muted")>
                             <span></span>
                             <span class="text-right">"this week"</span>
@@ -642,12 +649,11 @@ fn habits_view(report: &Adjustments) -> Option<AnyView> {
                     </div>
                 </div>
                 {(seldom_count > 0).then(|| view! {
-                    <details class="mt-3">
-                        <summary class="cursor-pointer text-sm text-accent">{format!("{seldom_count} more, less often")}</summary>
-                        <div class="mt-2 overflow-x-auto">
-                            <div class="min-w-[44rem] text-sm tabular-nums">{seldom_rows}</div>
+                    <Disclosure class="mt-3" summary_class="text-sm text-accent" summary=format!("{seldom_count} more, less often")>
+                        <div class=SCROLL_X>
+                            <div class=WIDE_TABLE>{seldom_rows}</div>
                         </div>
-                    </details>
+                    </Disclosure>
                 })}
             </section>
         }
@@ -700,10 +706,10 @@ fn card(report: &Adjustments, dashboard: &Dashboard, state: CardState) -> Option
     let habits = habits_view(report);
     Some(
         view! {
-            <section class="w-full min-w-0" aria-label=label>
+            <section class=FILL_MIN aria-label=label>
                 <Card>
                     <CardHeader>
-                        <div class="grid gap-1">
+                        <div class=STACK_XS>
                             <Eyebrow>
                                 <span title="Typical is the median of your earlier months with spending. Bills and other fixed costs are left out.">
                                     "AGAINST YOUR OWN NORM"
