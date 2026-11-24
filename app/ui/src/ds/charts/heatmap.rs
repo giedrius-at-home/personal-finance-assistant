@@ -20,6 +20,9 @@ const LEVELS: [&str; 5] = [
     "bg-chart-1",
 ];
 
+/// An unfinished row's cells, like `BarChart`'s unfinished bar: lighter, with a dashed edge.
+const PARTIAL: &str = " opacity-45 outline-2 -outline-offset-2 outline-dashed outline-chart-1";
+
 /// Values in a grid of squares, darker for more (`values[row][column]`;
 /// `None` is a cell with no data, drawn as an empty outline).
 #[component]
@@ -29,6 +32,9 @@ pub fn Heatmap(
     values: Vec<Vec<Option<f64>>>,
     format: Fmt,
     #[prop(optional, into)] label: String,
+    /// The last row is unfinished (this week so far): its cells are drawn lighter.
+    #[prop(optional)]
+    partial_last: bool,
 ) -> impl IntoView {
     let cell = |r: usize, c: usize| values.get(r).and_then(|row| row.get(c).copied().flatten());
     let n = columns.len();
@@ -46,8 +52,13 @@ pub fn Heatmap(
             let cells = (0..n)
                 .map(|c| {
                     let value = cell(r, c);
+                    let partial = partial_last && r + 1 == rows.len();
                     let class = match value {
-                        Some(v) => format!("relative aspect-square rounded-[4px] {}", LEVELS[heat_level(v, max) as usize]),
+                        Some(v) => format!(
+                            "relative aspect-square rounded-[4px] {}{}",
+                            LEVELS[heat_level(v, max) as usize],
+                            if partial { PARTIAL } else { "" },
+                        ),
                         None => "relative aspect-square rounded-[4px] border border-dashed border-line".to_owned(),
                     };
                     let title = format!("{row} · {}", columns[c]);

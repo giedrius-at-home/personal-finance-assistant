@@ -25,6 +25,9 @@ pub fn Scatter(
     y_format: Fmt,
     #[prop(optional, into)] x_label: String,
     #[prop(optional, into)] y_label: String,
+    /// The last point is an unfinished bucket: drawn as an outline, not filled.
+    #[prop(optional)]
+    partial_last: bool,
 ) -> impl IntoView {
     const Y_AXIS_WIDTH: u32 = 56;
     const PLOT_H: u32 = 216;
@@ -38,13 +41,19 @@ pub fn Scatter(
     let y = move |v: f64| 100.0 - (v - y0) / (y1 - y0).max(f64::EPSILON) * 100.0;
     let hovered = RwSignal::new(None::<usize>);
     let y_ticks = y_ticks.iter().map(|t| (y(*t), y_format(*t))).collect();
+    let last = points.len().checked_sub(1).filter(|_| partial_last);
     let dots = points
         .iter()
         .enumerate()
         .map(|(i, (_, px, py))| {
+            let class = if Some(i) == last {
+                "absolute size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-chart-1 bg-card-strong"
+            } else {
+                "absolute size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-card-strong bg-chart-1"
+            };
             view! {
                 <div
-                    class="absolute size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-card-strong bg-chart-1"
+                    class=class
                     style=format!("left:{};top:{}", pct(x(*px)), pct(y(*py)))
                     on:mouseenter=move |_| hovered.set(Some(i))
                     on:mouseleave=move |_| hovered.set(None)

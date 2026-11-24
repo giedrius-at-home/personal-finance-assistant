@@ -440,17 +440,19 @@ fn plot_body(
     title: Memo<String>,
     insight: RwSignal<Option<String>>,
 ) -> AnyView {
-    let spec = Memo::new(move |_| {
-        state.layout.with(|l| {
-            let plot = l.plots.iter().find(|p| p.id == id)?;
-            serde_json::from_value::<PlotSpec>(plot.spec.clone()).ok()
-        })
+    // The raw JSON first, so other layout changes (folds, moves) don't re-parse the spec.
+    let raw = Memo::new(move |_| {
+        state
+            .layout
+            .with(|l| l.plots.iter().find(|p| p.id == id).map(|p| p.spec.clone()))
     });
+    let spec =
+        Memo::new(move |_| raw.with(|r| serde_json::from_value::<PlotSpec>(r.clone()?).ok()));
     let readable = Memo::new(move |_| spec.with(Option::is_some));
     let spec = Signal::derive(move || spec.get().unwrap_or_default());
     (move || {
         let body = if readable.get() {
-            view! { <PlotView spec=spec insight=insight /> }.into_any()
+            view! { <PlotView spec=spec insight=insight title=title /> }.into_any()
         } else {
             view! { <p class=PLOT_UNREADABLE>"This plot can't be drawn in this version"</p> }
                 .into_any()
@@ -643,7 +645,7 @@ pub fn PageView(
             view! {
                 <PanelFrame
                     panel=id.get_value()
-                    title=title.get()
+                    title=title
                     summary=summary
                     folded=folded
                     on_toggle=Callback::new(move |()| {

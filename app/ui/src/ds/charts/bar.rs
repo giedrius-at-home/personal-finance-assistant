@@ -29,6 +29,9 @@ pub fn BarChart(
     /// middle of each category.
     #[prop(optional)]
     lines: Vec<Series>,
+    /// Show every n-th category label (long daily axes; see `label_step`).
+    #[prop(default = 1)]
+    label_every: usize,
 ) -> impl IntoView {
     let n = categories.len().max(1);
     let totals: Vec<(f64, f64)> = (0..categories.len())
@@ -130,6 +133,7 @@ pub fn BarChart(
                 .collect::<Vec<_>>()
         })
         .collect();
+    let has_lines = !lines.is_empty();
     // Like LineChart: an unfinished last category's segment is dashed.
     let last = categories.len().checked_sub(1).filter(|_| partial_last);
     let overlay = lines
@@ -194,13 +198,15 @@ pub fn BarChart(
             <div class="relative" style=format!("height:{plot_h}px;margin-left:{y_axis_width}px;margin-right:8px;margin-top:8px")>
                 <YTicks ticks=tick_views width=y_axis_width />
                 {bars}
-                <svg
-                    class="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
-                    viewBox="0 0 100 100"
-                    preserveAspectRatio="none"
-                >
-                    {overlay}
-                </svg>
+                {has_lines.then(|| view! {
+                    <svg
+                        class="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
+                        viewBox="0 0 100 100"
+                        preserveAspectRatio="none"
+                    >
+                        {overlay}
+                    </svg>
+                })}
                 <div class="absolute inset-0 flex" on:mouseleave=move |_| hovered.set(None)>
                     {(0..categories.len())
                         .map(|i| {
@@ -239,12 +245,36 @@ pub fn BarChart(
                         })
                 }}
             </div>
-            <div class="flex text-eyebrow text-chart-axis" style=format!("margin-left:{y_axis_width}px;margin-right:8px")>
-                {categories
-                    .iter()
-                    .map(|c| view! { <span class="flex-1 truncate pt-2 text-center">{c.clone()}</span> })
-                    .collect_view()}
-            </div>
+            {if label_every > 1 {
+                // Thinned labels sit at their band's centre and may be wider than it.
+                view! {
+                    <div class="relative h-6 text-eyebrow text-chart-axis" style=format!("margin-left:{y_axis_width}px;margin-right:8px")>
+                        {categories
+                            .iter()
+                            .enumerate()
+                            .filter(|(i, _)| i % label_every == 0)
+                            .map(|(i, c)| {
+                                view! {
+                                    <span class="absolute top-2 -translate-x-1/2 whitespace-nowrap" style:left=pct(band * (i as f64 + 0.5))>
+                                        {c.clone()}
+                                    </span>
+                                }
+                            })
+                            .collect_view()}
+                    </div>
+                }
+                    .into_any()
+            } else {
+                view! {
+                    <div class="flex text-eyebrow text-chart-axis" style=format!("margin-left:{y_axis_width}px;margin-right:8px")>
+                        {categories
+                            .iter()
+                            .map(|c| view! { <span class="flex-1 truncate pt-2 text-center">{c.clone()}</span> })
+                            .collect_view()}
+                    </div>
+                }
+                    .into_any()
+            }}
             {legend}
             {table}
         </div>

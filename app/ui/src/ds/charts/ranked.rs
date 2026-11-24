@@ -20,6 +20,9 @@ pub fn Ranked(
     format: Fmt,
     #[prop(optional)] two_sided: bool,
     #[prop(optional, into)] label: String,
+    /// The last item is "Other": drawn muted.
+    #[prop(optional)]
+    other_last: bool,
 ) -> impl IntoView {
     let caption = label.clone();
     let max_abs = items
@@ -27,11 +30,17 @@ pub fn Ranked(
         .map(|(_, v)| v.abs())
         .filter(|v| v.is_finite())
         .fold(0.0, f64::max);
+    let other = items.len().checked_sub(1).filter(|_| other_last);
     let rows = items
         .iter()
-        .map(|(name, v)| {
+        .enumerate()
+        .map(|(i, (name, v))| {
             let width = ranked_width(*v, max_abs);
-            let fill = if *v < 0.0 { "bg-negative" } else { "bg-chart-1" };
+            let fill = match (*v < 0.0, Some(i) == other) {
+                (true, _) => "bg-negative",
+                (false, true) => "bg-chart-limit",
+                (false, false) => "bg-chart-1",
+            };
             let style = match (two_sided, *v < 0.0) {
                 (false, _) => format!("left:0;width:{}", pct(width)),
                 (true, true) => format!("right:50%;width:{}", pct(width / 2.0)),

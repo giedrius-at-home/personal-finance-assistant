@@ -302,6 +302,13 @@ fn clamp_percent(value: f64, max: f64) -> f64 {
     }
 }
 
+/// How often to label a category axis: day-style labels ("23 Nov") need
+/// more room than month-style ones ("Nov"). For `label_every`.
+pub fn label_step(categories: &[String]) -> usize {
+    let long = categories.iter().any(|c| c.chars().count() > 4);
+    categories.len().div_ceil(if long { 6 } else { 12 }).max(1)
+}
+
 /// A shared, cheap-to-clone formatter.
 pub fn fmt(f: impl Fn(f64) -> String + Send + Sync + 'static) -> Fmt {
     Arc::new(f)
@@ -309,7 +316,17 @@ pub fn fmt(f: impl Fn(f64) -> String + Send + Sync + 'static) -> Fmt {
 
 #[cfg(test)]
 mod tests {
-    use super::nice_axis;
+    use super::{label_step, nice_axis};
+
+    #[test]
+    fn long_axes_label_every_few_categories() {
+        let days: Vec<String> = (1..=24).map(|d| format!("{d} Nov")).collect();
+        let months: Vec<String> = ["Jan", "Feb", "Mar"].map(String::from).to_vec();
+        assert_eq!(label_step(&days), 4);
+        assert_eq!(label_step(&days[..6]), 1);
+        assert_eq!(label_step(&months), 1);
+        assert_eq!(label_step(&[]), 1);
+    }
 
     #[test]
     fn ticks_follow_recharts() {

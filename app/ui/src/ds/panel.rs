@@ -35,7 +35,9 @@ pub fn PanelFrame(
     /// The panel's id, as `data-panel`, so focus can find its controls when titles repeat.
     #[prop(optional, into)]
     panel: Option<String>,
-    #[prop(into)] title: String,
+    /// Reactive, so a rename redraws the title without remounting the body.
+    #[prop(into)]
+    title: Signal<String>,
     #[prop(into)] summary: Signal<Option<String>>,
     #[prop(into)] folded: Signal<bool>,
     on_toggle: Callback<()>,
@@ -91,7 +93,7 @@ pub fn PanelFrame(
             <section class=class data-panel=panel.clone() on:dragover=on_dragover on:dragleave=on_dragleave on:drop=on_drop>
                 {edit.clone()}
                 <div class=QUIET_ROW>
-                    <CardTitle level=Heading::Span class="min-w-0 truncate">{title}</CardTitle>
+                    <CardTitle level=Heading::Span class="min-w-0 truncate">{move || title.get()}</CardTitle>
                     <span class="ml-auto truncate text-sm">"Nothing to show now"</span>
                 </div>
             </section>
@@ -106,7 +108,6 @@ pub fn PanelFrame(
         button_class(Variant::Ghost, Size::IconSm).as_str(),
         FOLD_BUTTON,
     ]);
-    let label = format!("Fold {title}");
     view! {
         <section class=class data-panel=panel.clone() on:dragover=on_dragover on:dragleave=on_dragleave on:drop=on_drop>
             {edit.clone()}
@@ -116,16 +117,15 @@ pub fn PanelFrame(
                 class=move || if folded.get() { FOLDED_ROW.to_owned() } else { open_class.clone() }
                 aria-expanded=move || (!folded.get()).to_string()
                 aria-controls=body_id.clone()
-                aria-label=move || (!folded.get()).then(|| label.clone())
+                aria-label=move || (!folded.get()).then(|| format!("Fold {}", title.get()))
                 on:click=move |_| on_toggle.run(())
             >
                 {move || {
-                    let title = title.clone();
                     folded
                         .get()
                         .then(move || {
                             view! {
-                                <CardTitle level=Heading::Span class="min-w-0 truncate">{title}</CardTitle>
+                                <CardTitle level=Heading::Span class="min-w-0 truncate">{move || title.get()}</CardTitle>
                                 <span class="ml-auto truncate text-sm text-fg-muted">{move || summary.get()}</span>
                             }
                         })
