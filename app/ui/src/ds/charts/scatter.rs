@@ -1,0 +1,143 @@
+use leptos::prelude::*;
+
+use super::{Fmt, Tooltip, ValueTable, nice_axis, pct};
+
+/// The x and y axes `(start, end, ticks)`: each from zero to past its
+/// furthest point; an empty set gets the default 0..4 frame.
+fn scatter_axes(points: &[(String, f64, f64)]) -> [(f64, f64, Vec<f64>); 2] {
+    let range = |values: Vec<f64>| {
+        let lo = values.iter().copied().fold(0.0, f64::min);
+        let hi = values.iter().copied().fold(0.0, f64::max);
+        nice_axis(lo, hi)
+    };
+    [
+        range(points.iter().map(|p| p.1).collect()),
+        range(points.iter().map(|p| p.2).collect()),
+    ]
+}
+
+/// Named points on two value axes, in the `LineChart` frame.
+#[component]
+pub fn Scatter(
+    points: Vec<(String, f64, f64)>,
+    x_format: Fmt,
+    y_format: Fmt,
+    #[prop(optional, into)] x_label: String,
+    #[prop(optional, into)] y_label: String,
+) -> impl IntoView {
+    const Y_AXIS_WIDTH: u32 = 56;
+    const PLOT_H: u32 = 216;
+    let [(x0, x1, x_ticks), (y0, y1, y_ticks)] = scatter_axes(&points);
+    let x = move |v: f64| (v - x0) / (x1 - x0).max(f64::EPSILON) * 100.0;
+    let y = move |v: f64| 100.0 - (v - y0) / (y1 - y0).max(f64::EPSILON) * 100.0;
+    let hovered = RwSignal::new(None::<usize>);
+    let tick_views = y_ticks
+        .iter()
+        .map(|t| {
+            let top = pct(y(*t));
+            view! {
+                <div class="absolute inset-x-0 border-t border-chart-grid" style:top=top.clone()></div>
+                <span
+                    class="absolute -translate-y-1/2 pr-2 text-right text-eyebrow text-chart-axis tabular-nums"
+                    style=format!("top:{top};right:100%;width:{Y_AXIS_WIDTH}px")
+                >
+                    {y_format(*t)}
+                </span>
+            }
+        })
+        .collect_view();
+    let dots = points
+        .iter()
+        .enumerate()
+        .map(|(i, (_, px, py))| {
+            view! {
+                <div
+                    class="absolute size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-card-strong bg-chart-1"
+                    style=format!("left:{};top:{}", pct(x(*px)), pct(y(*py)))
+                    on:mouseenter=move |_| hovered.set(Some(i))
+                    on:mouseleave=move |_| hovered.set(None)
+                ></div>
+            }
+        })
+        .collect_view();
+    let axis_name = |name: &str, fallback: &str| {
+        if name.is_empty() {
+            fallback.to_owned()
+        } else {
+            name.to_owned()
+        }
+    };
+    let (x_name, y_name) = (axis_name(&x_label, "x"), axis_name(&y_label, "y"));
+    let caption = format!("{y_name} against {x_name}");
+    let table_rows = points
+        .iter()
+        .map(|(name, px, py)| vec![name.clone(), x_format(*px), y_format(*py)])
+        .collect();
+    let head = vec![String::new(), x_name.clone(), y_name.clone()];
+    let table_caption = caption.clone();
+    let tip_points = points.clone();
+    let (tip_x, tip_y) = (x_format.clone(), y_format.clone());
+    view! {
+        <div role="figure" aria-label=caption class="w-full">
+            {(!y_label.is_empty())
+                .then(|| view! { <div class="text-eyebrow text-chart-axis" style=format!("margin-left:{Y_AXIS_WIDTH}px")>{y_label}</div> })}
+            <div class="relative" style=format!("height:{PLOT_H}px;margin-left:{Y_AXIS_WIDTH}px;margin-right:8px;margin-top:8px")>
+                {tick_views}
+                {dots}
+                {move || {
+                    hovered
+                        .get()
+                        .and_then(|i| tip_points.get(i))
+                        .map(|(name, px, py)| {
+                            let rows = vec![
+                                (x_name.clone(), tip_x(*px), "var(--ds-chart-1)".to_owned()),
+                                (y_name.clone(), tip_y(*py), "var(--ds-chart-1)".to_owned()),
+                            ];
+                            view! { <Tooltip title=name.clone() rows=rows at=x(*px) /> }
+                        })
+                }}
+            </div>
+            <div class="relative h-6 text-eyebrow text-chart-axis" style=format!("margin-left:{Y_AXIS_WIDTH}px;margin-right:8px")>
+                {x_ticks
+                    .iter()
+                    .map(|t| {
+                        view! {
+                            <span class="absolute top-2 -translate-x-1/2 whitespace-nowrap tabular-nums" style:left=pct(x(*t))>
+                                {x_format(*t)}
+                            </span>
+                        }
+                    })
+                    .collect_view()}
+            </div>
+            {(!x_label.is_empty())
+                .then(|| {
+                    view! { <div class="pt-1 text-center text-eyebrow text-chart-axis" style=format!("margin-left:{Y_AXIS_WIDTH}px")>{x_label}</div> }
+                })}
+            <ValueTable caption=table_caption head=head rows=table_rows />
+        </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::scatter_axes;
+
+    #[test]
+    fn scatter_axes_include_zero_and_every_point() {
+        let points = vec![
+            ("a".to_owned(), 12.0, 340.0),
+            ("b".to_owned(), -3.0, 90.0),
+            ("c".to_owned(), 30.0, 1200.0),
+        ];
+        let [(x0, x1, _), (y0, y1, _)] = scatter_axes(&points);
+        assert!(x0 <= 0.0 && x1 >= 0.0 && y0 <= 0.0 && y1 >= 0.0);
+        for (_, x, y) in &points {
+            assert!((x0..=x1).contains(x) && (y0..=y1).contains(y));
+        }
+        let [(x0, x1, xt), (y0, y1, _)] = scatter_axes(&[]);
+        assert!(
+            x1 > x0 && y1 > y0 && xt.len() == 5,
+            "empty set draws a frame"
+        );
+    }
+}
