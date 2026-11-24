@@ -2,6 +2,7 @@
 //! month stands, in numbers, before any detail.
 
 use finance_types::report::Dashboard;
+use finance_types::report::allocation::CurrencyAllocation;
 use leptos::prelude::*;
 use rust_decimal::Decimal;
 
@@ -25,8 +26,13 @@ pub(super) fn bank_gap(spendable: Decimal, savings_room: Decimal) -> (Decimal, D
     (from_savings, gap - from_savings)
 }
 
+/// The currency the strip shows; without one it draws nothing.
+pub(super) fn first_allocation(report: &Dashboard) -> Option<&CurrencyAllocation> {
+    report.monthly_allocation.as_ref()?.currencies.first()
+}
+
 fn strip(report: &Dashboard) -> Option<AnyView> {
-    let a = report.monthly_allocation.as_ref()?.currencies.first()?;
+    let a = first_allocation(report)?;
     let unit = a.currency.clone();
     let m = |v: Decimal| money(v, &unit);
     let zero = Decimal::ZERO;
@@ -146,7 +152,7 @@ fn strip(report: &Dashboard) -> Option<AnyView> {
         .iter()
         .find(|d| d.currency.code == unit.code)
         .map(|d| {
-            let value = m(d.next_week_habit + d.next_week_planned);
+            let value = m(super::forecast::next_week(d));
             let facts = vec![
                 ("Habits".to_owned(), m(d.next_week_habit)),
                 ("Planned".to_owned(), m(d.next_week_planned)),

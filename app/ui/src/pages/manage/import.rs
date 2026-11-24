@@ -9,7 +9,9 @@ use leptos::task::spawn_local;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
-use super::ui::{CONTROLS, FIELDSET, FILE_INPUT, Ops, frame, load_workspace};
+use super::ui::{
+    CONTROLS, FIELDSET, FILE_INPUT, Ops, frame, load_workspace, with_workspace, workspace_loaded,
+};
 use crate::ds::patterns::{
     ACTIONS, CHECK_SLOT, MUTED, OPTION, ROW_TITLE, SUBLINE, TITLE, WARNING_LINE,
 };
@@ -17,6 +19,7 @@ use crate::ds::{
     Button, CONTROL, Card, CardTitle, CardTone, Checkbox, Eyebrow, Field, Heading, Help, Money,
     Select, TABLE, TABLE_CONTAINER, TCELL, TCELL_NUM, TH, TH_NUM, TROW, Variant, cn,
 };
+use crate::layout::{Initial, PageView, PanelDef};
 use crate::state;
 
 #[wasm_bindgen(inline_js = "
@@ -73,11 +76,51 @@ pub fn Import() -> impl IntoView {
         }
         current
     });
-    frame(ops, workspace, retry, move |ws| {
-        view! { <ImportCard ws=ws ops=ops account=account has_file=has_file csv=csv skip=skip file_input=file_input /> }
-            .into_any()
-    })
+    provide_context(Page {
+        ops,
+        account,
+        has_file,
+        csv,
+        skip,
+        file_input,
+    });
+    frame(
+        ops,
+        workspace,
+        retry,
+        view! { <PageView tab="manage" tab_name="Manage" page=PAGE /> },
+    )
 }
+
+/// The Import screen's state, for its panel.
+#[derive(Clone, Copy)]
+struct Page {
+    ops: Ops,
+    account: RwSignal<String>,
+    has_file: RwSignal<bool>,
+    csv: RwSignal<Option<CsvPreview>>,
+    skip: RwSignal<bool>,
+    file_input: NodeRef<Input>,
+}
+
+const PAGE: &str = "manage.import";
+
+pub const PANELS: &[PanelDef] = &[PanelDef {
+    id: "manage.import.csv",
+    title: "Import transactions",
+    page: PAGE,
+    movable: false,
+    initial: Initial::Open,
+    half: false,
+    render: || {
+        let p = expect_context::<Page>();
+        with_workspace(move |ws| {
+            view! { <ImportCard ws=ws ops=p.ops account=p.account has_file=p.has_file csv=p.csv skip=p.skip file_input=p.file_input /> }
+        })
+    },
+    summary: None,
+    shown: Some(workspace_loaded),
+}];
 
 #[component]
 fn ImportCard(

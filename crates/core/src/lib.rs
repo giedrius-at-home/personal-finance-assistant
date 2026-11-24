@@ -37,6 +37,7 @@ pub mod subscriptions;
 pub mod text;
 pub mod transfers;
 pub mod trends;
+pub mod ui_layout;
 pub mod wishes;
 pub mod writes;
 

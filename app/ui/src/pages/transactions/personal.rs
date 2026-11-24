@@ -14,8 +14,8 @@ use serde::Serialize;
 use super::{Choice, TextInput, clean_error, options, report_categories};
 use crate::api::invoke;
 use crate::ds::patterns::{
-    Disclosure, ERROR_LINE, FILTER_ROW, FORM_FIELD_NARROW, FORM_FIELD_WIDE, MUTED, SECTION_HEADING,
-    SPLIT_ROW, SUBLINE, TRAILING, WRAP_TEXT,
+    Disclosure, ERROR_LINE, FILTER_ROW, FORM_FIELD_NARROW, FORM_FIELD_WIDE, MUTED, SECTION_GRID,
+    SECTION_HEADING, SPLIT_ROW, SUBLINE, TRAILING, WRAP_TEXT,
 };
 use crate::ds::{
     CardTone, Eyebrow, FactsRow, Field, Heading, Help, Money, Size, Variant, button_class,
@@ -239,7 +239,7 @@ pub fn PersonalSpending() -> impl IntoView {
     };
 
     view! {
-        <section class=cn([card_class(CardTone::Default), "my-5 grid min-w-0 gap-4"]) aria-label="Personal payments">
+        <section class=cn([card_class(CardTone::Default), SECTION_GRID]) aria-label="Personal payments">
             <div>
                 <Eyebrow level=Heading::P>
                     {move || {

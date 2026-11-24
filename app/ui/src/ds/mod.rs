@@ -5,10 +5,12 @@ pub mod charts;
 mod cn;
 pub mod icons;
 pub mod money_plan;
+pub mod panel;
 pub mod patterns;
 
 pub use cn::cn;
 pub use icons::{Icon, Lucide};
+pub use panel::{PanelFrame, PanelList};
 
 use finance_types::report::Currency;
 use leptos::html;

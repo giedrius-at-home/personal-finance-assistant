@@ -2,6 +2,7 @@
 
 use finance_types::gateway::Direction;
 use finance_types::report::Dashboard;
+use finance_types::report::outlook::DailySpendingForecast;
 use leptos::prelude::*;
 use rust_decimal::Decimal;
 
@@ -16,6 +17,11 @@ use crate::pages::f;
 use super::outlook::{CAPTION, ROW_HEADER, chart_frame, percent};
 use super::weekday;
 use crate::ds::patterns::{COLUMN, Disclosure, EXPLAINER, INSIGHT_CARD, PENDING_CARD};
+
+/// What the next seven days are expected to cost: habits and planned payments.
+pub fn next_week(forecast: &DailySpendingForecast) -> Decimal {
+    forecast.next_week_habit + forecast.next_week_planned
+}
 
 #[component]
 pub fn DailyForecastPanel(report: Dashboard, currency_code: String) -> impl IntoView {
@@ -158,7 +164,7 @@ pub fn DailyForecastPanel(report: Dashboard, currency_code: String) -> impl Into
             ),
         );
     }
-    let next_week = amount(forecast.next_week_habit + forecast.next_week_planned, "");
+    let next_week = amount(next_week(&forecast), "");
     let next_week_facts = vec![
         ("Habits".to_owned(), m(forecast.next_week_habit)),
         (

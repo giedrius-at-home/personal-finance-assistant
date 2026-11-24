@@ -17,15 +17,51 @@ use wasm_bindgen::prelude::*;
 
 use crate::ds::patterns::{SELECT_CHEVRON, SELECT_WRAP};
 use crate::ds::{CONTROL, Icon, Lucide, cn};
+use crate::layout::{Initial, PageView, PanelDef};
 use crate::state;
+
+/// Transactions' panels, in their first-run order.
+pub const PANELS: &[PanelDef] = &[
+    PanelDef {
+        id: "transactions.search",
+        title: "All transactions",
+        page: PAGE,
+        movable: true,
+        initial: Initial::Open,
+        half: false,
+        render: || search::TransactionSearch().into_any(),
+        summary: None,
+        shown: None,
+    },
+    PanelDef {
+        id: "transactions.personal",
+        title: "Shared spending and money back",
+        page: PAGE,
+        movable: true,
+        initial: Initial::Folded,
+        half: false,
+        render: || personal::PersonalSpending().into_any(),
+        summary: None,
+        shown: None,
+    },
+    PanelDef {
+        id: "transactions.inbox",
+        title: "Transaction inbox",
+        page: PAGE,
+        movable: true,
+        initial: Initial::Open,
+        half: false,
+        render: || review::OwnerReview().into_any(),
+        summary: None,
+        shown: None,
+    },
+];
+
+const PAGE: &str = "transactions";
 
 #[component]
 pub fn Transactions() -> impl IntoView {
-    view! {
-        <search::TransactionSearch />
-        <personal::PersonalSpending />
-        <review::OwnerReview />
-    }
+    view! { <PageView tab="transactions" tab_name="Transactions" page=PAGE /> }
 }
 
 #[wasm_bindgen(inline_js = "

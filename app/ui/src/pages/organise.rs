@@ -21,7 +21,8 @@ use crate::ds::{
     Badge, Button, CONTROL, Card, CardHeader, CardTitle, CardTone, Eyebrow, Field, Heading, Icon,
     Input, Lucide, Money, Select, Size, Tone, Variant, cn, money,
 };
-use crate::pages::{plural, with_report};
+use crate::layout::{Initial, LayoutState, PageView, PanelDef};
+use crate::pages::{plural, report_is, with_report};
 use crate::{Tab, state};
 
 /// The built-in groups, in the order the owner sees them; custom groups follow.
@@ -41,20 +42,53 @@ const GROUPS: [&str; 13] = [
     "Other",
 ];
 
+/// Organise categories' panels, in their first-run order.
+pub const PANELS: &[PanelDef] = &[
+    PanelDef {
+        id: "spending.organise.coverage",
+        title: "Category coverage",
+        page: PAGE,
+        movable: true,
+        initial: Initial::Open,
+        half: false,
+        render: || with_report(|r| view! { <SpendingOrganization report=r.clone() /> }).into_any(),
+        summary: None,
+        shown: None,
+    },
+    PanelDef {
+        id: "spending.organise.bulk",
+        title: "Purchases paid together later",
+        page: PAGE,
+        movable: true,
+        initial: Initial::Folded,
+        half: false,
+        render: || {
+            with_report(|r| view! { <BulkPayments payments=r.bulk_payments.clone() /> }).into_any()
+        },
+        summary: None,
+        shown: None,
+    },
+    PanelDef {
+        id: "spending.organise.groups",
+        title: "Organise spending",
+        page: PAGE,
+        movable: true,
+        initial: Initial::Open,
+        half: false,
+        render: || {
+            view! { <div id="spending-category-groups"><OwnerCategoryGroups /></div> }.into_any()
+        },
+        summary: None,
+        // The groups wait for the report and draw nothing until it loads.
+        shown: Some(|| report_is(|_| true)),
+    },
+];
+
+const PAGE: &str = "spending.organise";
+
 #[component]
 pub fn Organise() -> impl IntoView {
-    let app = state();
-    let loaded = move || app.report.data.with(|d| matches!(d, Some(Ok(_))));
-    view! {
-        {with_report(|report| view! {
-            <SpendingOrganization report=report.clone() />
-            <BulkPayments payments=report.bulk_payments.clone() />
-
-        })}
-        <Show when=loaded>
-            <div id="spending-category-groups"><OwnerCategoryGroups /></div>
-        </Show>
-    }
+    view! { <PageView tab="spending" tab_name="Spending" page=PAGE /> }
 }
 
 /// One cell of the coverage strip (`Metric`).
@@ -72,6 +106,7 @@ fn metric(label: String, value: AnyView, note: Option<String>) -> impl IntoView 
 #[component]
 fn SpendingOrganization(report: Dashboard) -> impl IntoView {
     let app = state();
+    let layout = use_context::<LayoutState>();
     let rows = report
         .monthly_spending
         .currencies
@@ -116,10 +151,19 @@ fn SpendingOrganization(report: Dashboard) -> impl IntoView {
                     <Button
                         variant=Variant::Secondary
                         size=Size::Sm
-                        on_click=Callback::new(|_| {
-                            if let Some(el) = document().get_element_by_id("spending-category-groups") {
-                                el.scroll_into_view();
+                        on_click=Callback::new(move |_| {
+                            if let Some(layout) = layout {
+                                layout.open("spending", "Spending", PAGE, "spending.organise.groups");
                             }
+                            // On the next tick, once the opened panel is drawn.
+                            set_timeout(
+                                || {
+                                    if let Some(el) = document().get_element_by_id("spending-category-groups") {
+                                        el.scroll_into_view();
+                                    }
+                                },
+                                std::time::Duration::ZERO,
+                            );
                         })
                     >
                         "Organise"
@@ -182,7 +226,7 @@ fn BulkPayments(payments: Vec<BulkPaymentSummary>) -> impl IntoView {
             .into_any()
     };
     view! {
-        <Card class="my-6">
+        <Card>
             <CardHeader>
                 <div>
                     <Eyebrow level=Heading::P>"Bulk payments"</Eyebrow>

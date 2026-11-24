@@ -30,8 +30,10 @@ use crate::ds::patterns::{
 };
 use crate::ds::{
     BOARD, BOARD_CARD, Badge, BoardColumn, Button, CONTROL, Card, CardTone, Checkbox, Eyebrow,
-    Facts, FactsRow, Field, Help, Icon, Lucide, Popup, Size, Skeleton, Stat, Tone, Variant, cn,
+    Facts, FactsRow, Field, Help, Icon, Lucide, Popup, Size, Skeleton, Stat, Tone, Variant,
+    card_class, cn,
 };
+use crate::layout::{Initial, PageView, PanelDef};
 use crate::pages::Problem;
 use crate::pages::payment_pick::{Ask, PaymentPicker};
 use crate::{format, state};
@@ -925,6 +927,122 @@ fn select(
     }
 }
 
+/// Wishes' panels, in their first-run order.
+pub const PANELS: &[PanelDef] = &[
+    PanelDef {
+        id: "wishes.board",
+        title: "Wishes",
+        page: PAGE,
+        movable: false,
+        initial: Initial::Open,
+        half: false,
+        render: || with_data(board).into_any(),
+        summary: None,
+        shown: None,
+    },
+    PanelDef {
+        id: "wishes.add",
+        title: "Add a wish",
+        page: PAGE,
+        movable: false,
+        initial: Initial::Folded,
+        half: false,
+        render: || with_data(add).into_any(),
+        summary: None,
+        shown: None,
+    },
+    PanelDef {
+        id: "wishes.done",
+        title: "Bought and dropped",
+        page: PAGE,
+        movable: false,
+        initial: Initial::Folded,
+        half: false,
+        render: || with_data(done).into_any(),
+        summary: None,
+        shown: Some(|| has(|d| !d.done.is_empty())),
+    },
+    PanelDef {
+        id: "wishes.months",
+        title: "Month by month",
+        page: PAGE,
+        movable: false,
+        initial: Initial::Folded,
+        half: false,
+        render: || with_data(months).into_any(),
+        summary: None,
+        shown: Some(|| has(|d| !d.view.months.is_empty())),
+    },
+    PanelDef {
+        id: "wishes.cards",
+        title: "Credit cards",
+        page: PAGE,
+        movable: false,
+        initial: Initial::Folded,
+        half: false,
+        render: || {
+            with_data(|ui, d| card_strip(ui, &d.view, &d.ctx, d.forms).into_any()).into_any()
+        },
+        summary: None,
+        shown: None,
+    },
+    PanelDef {
+        id: "wishes.fund",
+        title: "Emergency fund",
+        page: PAGE,
+        movable: false,
+        initial: Initial::Folded,
+        half: false,
+        render: || with_data(|ui, d| fund_block(ui, &d.view, d.forms).into_any()).into_any(),
+        summary: None,
+        shown: None,
+    },
+];
+
+const PAGE: &str = "wishes";
+
+/// One load of the view, with what the page reads from the report.
+#[derive(Clone)]
+struct Data {
+    view: WishesView,
+    /// The report's context with the view's cards and events.
+    ctx: Context,
+    /// Planned wishes, then bought and dropped ones.
+    open: Vec<WishRow>,
+    done: Vec<WishRow>,
+    /// The cards and the fund are one stored record: each form saves what is
+    /// typed in the other too, so neither discards the other's edits.
+    forms: SettingsForms,
+}
+
+impl Data {
+    fn new(view: &WishesView, ctx: Context) -> Self {
+        let (open, done) = view
+            .wishes
+            .iter()
+            .cloned()
+            .partition(|r| r.wish.status == WishStatus::Planned);
+        Self {
+            ctx: Context {
+                cards: view.settings.cards.clone(),
+                events: view.events.clone(),
+                ..ctx
+            },
+            open,
+            done,
+            forms: SettingsForms {
+                rows: RwSignal::new(card_rows(view)),
+                months: RwSignal::new(view.settings.emergency_months.to_string()),
+                groups: RwSignal::new(view.settings.essential_groups.join(", ")),
+                stored: StoredValue::new(view.settings.clone()),
+            },
+            view: view.clone(),
+        }
+    }
+}
+
+/// The page state and each load by context; the picked wish and the payment
+/// picker open over the page, outside the panels.
 #[component]
 pub fn Wishes() -> impl IntoView {
     let ui = Ui::new();
@@ -933,72 +1051,130 @@ pub fn Wishes() -> impl IntoView {
         revision.track();
         NoArgs {}
     });
-    move || {
-        let ctx = ui.app.report.data.with(|d| {
-            d.as_ref()
-                .and_then(|r| r.as_ref().ok())
-                .map(Context::from)
-                .unwrap_or_default()
+    // Rebuilt, with fresh forms, and every panel redrawn on each load or
+    // report change, as the whole page was.
+    let data = Memo::new_with_compare(
+        move |_| {
+            let ctx = ui.app.report.data.with(|d| {
+                d.as_ref()
+                    .and_then(|r| r.as_ref().ok())
+                    .map(Context::from)
+                    .unwrap_or_default()
+            });
+            view_data
+                .data
+                .with(|d| d.as_ref()?.as_ref().ok().map(|view| Data::new(view, ctx)))
+        },
+        |_, _| true,
+    );
+    provide_context(ui);
+    provide_context(data);
+    let picked = move || {
+        let id = ui.selected.get()?;
+        let (row, months, ctx) = data.with(|d| {
+            let d = d.as_ref()?;
+            let row = d.open.iter().find(|r| r.wish.wish_id == id).cloned()?;
+            Some((row, d.view.months.clone(), d.ctx.clone()))
+        })?;
+        let (months, ctx) = (StoredValue::new(months), StoredValue::new(ctx));
+        let title = row.wish.name.clone();
+        let close = Callback::new(move |()| {
+            ui.close_forms();
+            ui.selected.set(None);
         });
-        view_data.data.with(|data| match data {
-            None => view! {
-                <div class=STACK>
-                    <Skeleton class=SKELETON_HEADER />
-                    <Skeleton class=SKELETON_CARD />
-                </div>
-            }
-            .into_any(),
-            Some(Err(e)) => view! { <Problem error=e.clone() /> }.into_any(),
-            Some(Ok(view)) => page(ui, view, &ctx).into_any(),
+        Some(view! {
+            <Popup title=title class="w-[min(94vw,60rem)]" on_close=close>
+                <div class="grid">{wish_row(ui, row, months, ctx)}</div>
+            </Popup>
         })
+    };
+    let buy = Callback::new(move |(ask, paid): (Ask, SearchRow)| {
+        let purchase = WishPurchase {
+            amount: paid.amount.amount,
+            on: paid.occurred_on.chars().take(10).collect(),
+            source: WishSource::Account {
+                account_id: paid.account_id,
+            },
+            cards: Vec::new(),
+            transaction_id: Some(paid.transaction_id.clone()),
+        };
+        ui.write(
+            "dropped".into(),
+            "mark_wish_bought",
+            BoughtArgs {
+                wish_id: ask.id,
+                purchase,
+            },
+            "Marked as bought.",
+            move || ui.ask.set(None),
+        );
+    });
+    // None while loading, then the error, if any.
+    let status = Memo::new(move |_| {
+        view_data
+            .data
+            .with(|d| d.as_ref().map(|r| r.as_ref().err().cloned()))
+    });
+    move || {
+        match status.get() {
+        None => view! {
+            <div class=STACK>
+                <Skeleton class=SKELETON_HEADER />
+                <Skeleton class=SKELETON_CARD />
+            </div>
+        }
+        .into_any(),
+        Some(Some(e)) => view! { <Problem error=e /> }.into_any(),
+        Some(None) => view! {
+            <PageView tab="wishes" tab_name="Wishes" page=PAGE />
+            {picked}
+            <PaymentPicker
+                ask=ui.ask
+                busy=ui.busy
+                on_pick=buy
+                otherwise="Newest first, the ones of the same amount on top. Paid by card or not in the bank yet? Close this, open the box and use Bought."
+            />
+        }
+        .into_any(),
+    }
     }
 }
 
-fn page(ui: Ui, view: &WishesView, ctx: &Context) -> impl IntoView + use<> {
-    let months = StoredValue::new(view.months.clone());
-    let ctx = StoredValue::new(Context {
-        cards: view.settings.cards.clone(),
-        events: view.events.clone(),
-        ..ctx.clone()
-    });
+/// `f` over the page state and the loaded view.
+fn with_data(f: fn(Ui, &Data) -> AnyView) -> impl IntoView {
+    let ui = expect_context::<Ui>();
+    let data = expect_context::<Memo<Option<Data>>>();
+    move || data.with(|d| d.as_ref().map(|d| f(ui, d)))
+}
+
+/// `f` of the loaded view; false before it loads.
+fn has(f: fn(&Data) -> bool) -> bool {
+    use_context::<Memo<Option<Data>>>().is_some_and(|m| m.with(|d| d.as_ref().is_some_and(f)))
+}
+
+/// The board: every wish a box in the column of its state; the box picked
+/// opens over the page with all its controls. A wish dragged to Bought asks
+/// for the payment that bought it.
+fn board(ui: Ui, d: &Data) -> AnyView {
+    let view = &d.view;
     let currency = view.currency.clone();
-    let (open, done): (Vec<WishRow>, Vec<WishRow>) = view
-        .wishes
-        .iter()
-        .cloned()
-        .partition(|r| r.wish.status == WishStatus::Planned);
-    let parents: Vec<(String, String)> = open
-        .iter()
-        .filter(|r| r.wish.parent_id.is_none() && r.wish.kind == WishKind::OneOff)
-        .map(|r| (r.wish.wish_id.clone(), r.wish.name.clone()))
-        .chain(
-            view.events
-                .iter()
-                .filter(|e| e.currency == view.currency && !e.over)
-                .map(|e| (e.wish_id.clone(), e.name.clone())),
-        )
-        .collect();
-    let empty = open.is_empty() && done.is_empty();
-    let done_count = done.len();
-    // The board: every wish a box in the column of its state; the box
-    // picked opens over the page with all its controls. A wish dragged to
-    // Bought asks for the payment that bought it.
+    let empty = d.open.is_empty() && d.done.is_empty();
     let mut columns: [(Decimal, Vec<AnyView>); 4] = Default::default();
-    let bought = done
+    let bought = d
+        .done
         .iter()
         .filter(|r| r.wish.status != WishStatus::Dropped)
         .take(DONE_ON_BOARD);
-    for row in open.iter().chain(bought) {
+    for row in d.open.iter().chain(bought) {
         let column = &mut columns[wish_stage(row) as usize];
         if row.wish.status == WishStatus::Planned {
             column.0 += row.wish.amount;
         }
-        column
-            .1
-            .push(wish_box(ui, row, &ctx.get_value()).into_any());
+        column.1.push(wish_box(ui, row, &d.ctx).into_any());
     }
     let asks = StoredValue::new(
-        open.iter()
+        d.open
+            .iter()
             .filter(|row| can_buy(row))
             .map(|row| Ask {
                 id: row.wish.wish_id.clone(),
@@ -1036,49 +1212,6 @@ fn page(ui: Ui, view: &WishesView, ctx: &Context) -> impl IntoView + use<> {
             }
         })
         .collect_view();
-    let open = StoredValue::new(open);
-    let picked = move || {
-        let id = ui.selected.get()?;
-        let row = open.with_value(|rows| rows.iter().find(|r| r.wish.wish_id == id).cloned())?;
-        let title = row.wish.name.clone();
-        let close = Callback::new(move |()| {
-            ui.close_forms();
-            ui.selected.set(None);
-        });
-        Some(view! {
-            <Popup title=title class="w-[min(94vw,60rem)]" on_close=close>
-                <div class="grid">{wish_row(ui, row, months, ctx)}</div>
-            </Popup>
-        })
-    };
-    let buy = Callback::new(move |(ask, paid): (Ask, SearchRow)| {
-        let purchase = WishPurchase {
-            amount: paid.amount.amount,
-            on: paid.occurred_on.chars().take(10).collect(),
-            source: WishSource::Account {
-                account_id: paid.account_id,
-            },
-            cards: Vec::new(),
-            transaction_id: Some(paid.transaction_id.clone()),
-        };
-        ui.write(
-            "dropped".into(),
-            "mark_wish_bought",
-            BoughtArgs {
-                wish_id: ask.id,
-                purchase,
-            },
-            "Marked as bought.",
-            move || ui.ask.set(None),
-        );
-    });
-    let done_rows = done_list(ui, done, ctx);
-    let month_cards = view
-        .months
-        .iter()
-        .map(|m| month_card(m, &currency.code))
-        .collect_view();
-    let has_months = !view.months.is_empty();
     let savings = savings_fields(&view.months, view.savings_must_keep).map(|(total, saved, room)| {
         let negative = room < Decimal::ZERO;
         let (total, saved, room) = (
@@ -1094,66 +1227,81 @@ fn page(ui: Ui, view: &WishesView, ctx: &Context) -> impl IntoView + use<> {
             </div>
         }
     });
-    // The cards and the fund are one stored record: each form saves what is
-    // typed in the other too, so neither discards the other's edits.
-    let shared = SettingsForms {
-        rows: RwSignal::new(card_rows(view)),
-        months: RwSignal::new(view.settings.emergency_months.to_string()),
-        groups: RwSignal::new(view.settings.essential_groups.join(", ")),
-        stored: StoredValue::new(view.settings.clone()),
-    };
-    let strip = card_strip(ui, view, &ctx.get_value(), shared);
-    let fund = fund_block(ui, view, shared);
+    view! {
+        <section aria-label="Wishes board" class=cn([card_class(CardTone::Default), BOARD_SECTION])>
+            <div>
+                <Eyebrow>"WISHES"</Eyebrow>
+                <h2 class=BOARD_TITLE>"From someday to bought"</h2>
+            </div>
+            {savings}
+            <p class=HINT>"Open a box for its details. Drag one to Bought to name the payment that bought it."</p>
+            {feedback(ui, "dropped".into())}
+            <div class=BOARD>{board}</div>
+            {empty.then(|| view! { <p class=MUTED>"No wishes yet."</p> })}
+        </section>
+    }
+    .into_any()
+}
+
+fn add(ui: Ui, d: &Data) -> AnyView {
+    let view = &d.view;
+    let parents: Vec<(String, String)> = d
+        .open
+        .iter()
+        .filter(|r| r.wish.parent_id.is_none() && r.wish.kind == WishKind::OneOff)
+        .map(|r| (r.wish.wish_id.clone(), r.wish.name.clone()))
+        .chain(
+            view.events
+                .iter()
+                .filter(|e| e.currency == view.currency && !e.over)
+                .map(|e| (e.wish_id.clone(), e.name.clone())),
+        )
+        .collect();
     let form = add_form(
         ui,
-        &ctx.get_value(),
+        &d.ctx,
         &view.changeable_bills,
         parents,
-        currency,
+        view.currency.clone(),
     );
     view! {
-        <div class=STACK>
-            <section aria-label="Wishes board" class=BOARD_SECTION>
-                <div>
-                    <Eyebrow>"WISHES"</Eyebrow>
-                    <h2 class=BOARD_TITLE>"From someday to bought"</h2>
-                </div>
-                {savings}
-                <p class=HINT>"Open a box for its details. Drag one to Bought to name the payment that bought it."</p>
-                {feedback(ui, "dropped".into())}
-                <div class=BOARD>{board}</div>
-                {empty.then(|| view! { <p class=MUTED>"No wishes yet."</p> })}
-            </section>
-            {picked}
-            <PaymentPicker
-                ask=ui.ask
-                busy=ui.busy
-                on_pick=buy
-                otherwise="Newest first, the ones of the same amount on top. Paid by card or not in the bank yet? Close this, open the box and use Bought."
-            />
-            <Card>
-                <Eyebrow>"NEW WISH"</Eyebrow>
-                <h2 class=PANEL_TITLE>"Add a wish"</h2>
-                {form}
-            </Card>
-            {(done_count > 0).then(|| view! {
-                <Card>
-                    <Disclosure class="text-sm" summary_class="font-medium" summary=format!("Bought and dropped ({done_count})")>
-                        <div class="mt-2">{done_rows}</div>
-                    </Disclosure>
-                </Card>
-            })}
-            {has_months.then(|| view! {
-                <Card>
-                    <Disclosure summary_class="text-sm font-medium" summary="Month by month">
-                        <div class="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{month_cards}</div>
-                    </Disclosure>
-                </Card>
-            })}
-            {strip}
-            {fund}
-        </div>
+        <Card>
+            <Eyebrow>"NEW WISH"</Eyebrow>
+            <h2 class=PANEL_TITLE>"Add a wish"</h2>
+            {form}
+        </Card>
     }
+    .into_any()
+}
+
+fn done(ui: Ui, d: &Data) -> AnyView {
+    let done_count = d.done.len();
+    let done_rows = done_list(ui, d.done.clone(), StoredValue::new(d.ctx.clone()));
+    view! {
+        <Card>
+            <Disclosure class="text-sm" summary_class="font-medium" summary=format!("Bought and dropped ({done_count})")>
+                <div class="mt-2">{done_rows}</div>
+            </Disclosure>
+        </Card>
+    }
+    .into_any()
+}
+
+fn months(_: Ui, d: &Data) -> AnyView {
+    let month_cards = d
+        .view
+        .months
+        .iter()
+        .map(|m| month_card(m, &d.view.currency.code))
+        .collect_view();
+    view! {
+        <Card>
+            <Disclosure summary_class="text-sm font-medium" summary="Month by month">
+                <div class="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{month_cards}</div>
+            </Disclosure>
+        </Card>
+    }
+    .into_any()
 }
 
 /// How many done wishes the board's last column shows; the rest are in

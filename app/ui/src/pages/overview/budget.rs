@@ -7,6 +7,7 @@ use std::str::FromStr;
 
 use finance_types::gateway::{BudgetGroup, BudgetPlan};
 use finance_types::report::Dashboard;
+use finance_types::report::allocation::CurrencyAllocation;
 use finance_types::report::budget::{BudgetPurchase, BudgetRow, MonthlyBudget};
 use leptos::html;
 use leptos::prelude::*;
@@ -27,7 +28,7 @@ use crate::pages::{f, with_report};
 use crate::{Tab, state};
 
 use super::extras::BudgetExtras;
-use super::forecast::DailyForecastPanel;
+use super::forecast::{DailyForecastPanel, next_week};
 use super::month_label;
 use super::visuals::{BudgetVisuals, row_color};
 use crate::ds::patterns::{
@@ -163,9 +164,10 @@ impl Editor {
     }
 }
 
-/// The panel's own state; it outlives report refreshes so notices stay.
+/// The budget panels' shared state, provided by `Overview`; it outlives
+/// report refreshes so notices stay.
 #[derive(Clone, Copy, Debug)]
-struct PanelState {
+pub struct PanelState {
     selection: RwSignal<String>,
     editor: RwSignal<Option<Editor>>,
     busy: RwSignal<bool>,
@@ -178,6 +180,19 @@ struct PanelState {
 }
 
 impl PanelState {
+    pub fn new() -> Self {
+        Self {
+            selection: RwSignal::new(String::new()),
+            editor: RwSignal::new(None),
+            busy: RwSignal::new(false),
+            error: RwSignal::new(String::new()),
+            notice: RwSignal::new(String::new()),
+            confirm_remove: RwSignal::new(false),
+            add_button: NodeRef::new(),
+            trajectory: RwSignal::new("all".to_owned()),
+        }
+    }
+
     fn edit(&self, plan: &BudgetPlan, group: Option<&BudgetGroup>) {
         self.error.set(String::new());
         self.notice.set(String::new());
@@ -288,16 +303,7 @@ impl PanelState {
 
 #[component]
 pub fn MonthlyBudgetPanel() -> impl IntoView {
-    let s = PanelState {
-        selection: RwSignal::new(String::new()),
-        editor: RwSignal::new(None),
-        busy: RwSignal::new(false),
-        error: RwSignal::new(String::new()),
-        notice: RwSignal::new(String::new()),
-        confirm_remove: RwSignal::new(false),
-        add_button: NodeRef::new(),
-        trajectory: RwSignal::new("all".to_owned()),
-    };
+    let s = expect_context::<PanelState>();
     with_report(move |report| {
         let report = StoredValue::new(report.clone());
         // Only the month picker re-renders the panel; editing is fine-grained.
@@ -312,13 +318,151 @@ fn key(budget: &MonthlyBudget) -> String {
     format!("{}:{}", budget.plan.month, budget.plan.currency.code)
 }
 
-fn panel(report: &Dashboard, selection: &str, s: PanelState) -> AnyView {
+/// `2026-10-01` for the month the report runs through.
+fn current_month(report: &Dashboard) -> String {
+    let through = &report.monthly_spending.through;
+    format!("{}-01", &through[..7.min(through.len())])
+}
+
+/// The budget the month picker shows: the picked one, else the first (the
+/// page's default month). Every budget panel uses this, so they agree.
+fn selected<'a>(report: &'a Dashboard, selection: &str) -> Option<&'a MonthlyBudget> {
     let budgets = &report.monthly_budgets;
-    let Some(budget) = budgets
+    budgets
         .iter()
         .find(|b| key(b) == selection)
         .or_else(|| budgets.first())
-    else {
+}
+
+fn is_current(report: &Dashboard, budget: &MonthlyBudget) -> bool {
+    budget.plan.month == current_month(report)
+}
+
+/// `overview.week` draws only for this month's budget.
+pub fn week_shown() -> bool {
+    super::report_is(|r| selected(r, &picked_selection()).is_some_and(|b| is_current(r, b)))
+}
+
+/// `overview.trajectory` and `overview.extras` draw only with a budget.
+pub fn budget_shown() -> bool {
+    super::report_is(|r| selected(r, &picked_selection()).is_some())
+}
+
+/// The picked budget month; the default month off Overview (no panels' state there).
+fn picked_selection() -> String {
+    use_context::<PanelState>().map_or_else(String::new, |s| s.selection.get())
+}
+
+fn allocation_for(report: &Dashboard, budget: &MonthlyBudget) -> Option<CurrencyAllocation> {
+    report
+        .monthly_allocation
+        .as_ref()
+        .and_then(|a| {
+            a.currencies
+                .iter()
+                .find(|c| c.currency.code == budget.plan.currency.code)
+        })
+        .cloned()
+}
+
+/// This month: the wiggle room. Another month: what is left, or short (negative).
+fn available(allocation: Option<&CurrencyAllocation>, is_current: bool) -> Option<Decimal> {
+    allocation.map(|a| {
+        if is_current {
+            a.current_wiggle_room
+        } else if a.next_shortfall > Decimal::ZERO {
+            -a.next_shortfall
+        } else {
+            a.next_wiggle_room
+        }
+    })
+}
+
+/// "€spent of €planned" for the picked budget month.
+pub fn summary(report: &Dashboard) -> Option<String> {
+    let b = selected(report, &picked_selection())?;
+    let unit = &b.plan.currency;
+    Some(format!(
+        "{} of {}",
+        money(b.spent, unit),
+        money(b.planned, unit)
+    ))
+}
+
+/// A panel that follows the month picked in the budget panel.
+fn for_selected(
+    f: impl Fn(&Dashboard, &MonthlyBudget) -> Option<AnyView> + Copy + Send + Sync + 'static,
+) -> AnyView {
+    with_report(move |report| {
+        let report = StoredValue::new(report.clone());
+        move || {
+            let selection = picked_selection();
+            report.with_value(|r| selected(r, &selection).and_then(|b| f(r, b)))
+        }
+    })
+    .into_any()
+}
+
+/// The `overview.week` panel: the daily forecast while the picked month is this one.
+pub fn week() -> AnyView {
+    for_selected(|report, budget| {
+        is_current(report, budget).then(|| {
+            let code = budget.plan.currency.code.clone();
+            view! { <DailyForecastPanel report=report.clone() currency_code=code /> }.into_any()
+        })
+    })
+}
+
+/// "≈ €X expected" over the next seven days, as the week panel shows it.
+pub fn week_summary(report: &Dashboard) -> Option<String> {
+    let budget = selected(report, &picked_selection())?;
+    if !is_current(report, budget) {
+        return None;
+    }
+    let forecast = report
+        .daily_forecasts
+        .iter()
+        .find(|d| d.currency.code == budget.plan.currency.code)?;
+    Some(format!(
+        "\u{2248} {} expected",
+        money(next_week(forecast), &forecast.currency)
+    ))
+}
+
+/// The `overview.trajectory` panel (not movable: Overview always provides the state).
+pub fn trajectory() -> AnyView {
+    let s = expect_context::<PanelState>();
+    for_selected(move |report, budget| {
+        Some(
+            view! {
+                <BudgetVisuals
+                    budget=budget.clone()
+                    allocation=allocation_for(report, budget)
+                    current_month=current_month(report)
+                    selection=s.trajectory
+                />
+            }
+            .into_any(),
+        )
+    })
+}
+
+/// The `overview.extras` panel.
+pub fn extras() -> AnyView {
+    for_selected(|report, budget| {
+        let available = available(
+            allocation_for(report, budget).as_ref(),
+            is_current(report, budget),
+        );
+        Some(
+            view! { <BudgetExtras report=report.clone() budget=budget.clone() available=available /> }
+                .into_any(),
+        )
+    })
+}
+
+fn panel(report: &Dashboard, selection: &str, s: PanelState) -> AnyView {
+    let Some(budget) = selected(report, selection) else {
         return view! {
             <Card class=PENDING_CARD>
                 <h2 class=CARD_TITLE>"Monthly budget"</h2>
@@ -333,25 +477,9 @@ fn panel(report: &Dashboard, selection: &str, s: PanelState) -> AnyView {
         let unit = unit.clone();
         move |v: Decimal| money(v, &unit)
     };
-    let current_month = format!(
-        "{}-01",
-        &report.monthly_spending.through[..7.min(report.monthly_spending.through.len())]
-    );
-    let is_current = plan.month == current_month;
-    let allocation = report
-        .monthly_allocation
-        .as_ref()
-        .and_then(|a| a.currencies.iter().find(|c| c.currency.code == unit.code))
-        .cloned();
-    let savings = allocation.as_ref().map(|a| {
-        if is_current {
-            a.current_wiggle_room
-        } else if a.next_shortfall > Decimal::ZERO {
-            -a.next_shortfall
-        } else {
-            a.next_wiggle_room
-        }
-    });
+    let is_current = is_current(report, budget);
+    let allocation = allocation_for(report, budget);
+    let savings = available(allocation.as_ref(), is_current);
 
     // Choices for the editor.
     let groups: BTreeSet<String> = report
@@ -389,7 +517,8 @@ fn panel(report: &Dashboard, selection: &str, s: PanelState) -> AnyView {
         .map(|a| (a.account_id.clone(), a.name.clone()))
         .collect();
 
-    let options: Vec<(String, String)> = budgets
+    let options: Vec<(String, String)> = report
+        .monthly_budgets
         .iter()
         .map(|b| {
             (
@@ -452,9 +581,6 @@ fn panel(report: &Dashboard, selection: &str, s: PanelState) -> AnyView {
         })
         .collect_view();
 
-    let code = unit.code.clone();
-    let daily = is_current
-        .then(|| view! { <DailyForecastPanel report=report.clone() currency_code=code.clone() /> });
     let editing = move || s.busy.get() || s.editor.with(Option::is_some);
     let plan_for_add = plan.clone();
     let add_button = view! {
@@ -544,8 +670,6 @@ fn panel(report: &Dashboard, selection: &str, s: PanelState) -> AnyView {
                     {totals}
                 </div>
             })}
-            <div class="grid gap-8 pb-8">{daily}</div>
-            <BudgetVisuals budget=budget.clone() allocation=allocation.clone() current_month=current_month.clone() selection=s.trajectory />
             {move || {
                 let notice = s.notice.get();
                 (!notice.is_empty()).then(|| view! { <p class="my-4 text-sm" role="status">{notice}</p> })
@@ -567,7 +691,6 @@ fn panel(report: &Dashboard, selection: &str, s: PanelState) -> AnyView {
             </div>
             {rows}
             {totals_row}
-            <BudgetExtras report=report.clone() budget=budget.clone() available=savings />
         </section>
     }
     .into_any()

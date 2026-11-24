@@ -14,6 +14,12 @@ pub const HINT: &str = "text-xs text-fg-muted";
 /// Vertical stack of sections or cards.
 pub const STACK: &str = "grid gap-4";
 
+/// A page section whose blocks stack.
+pub const SECTION_GRID: &str = "grid min-w-0 gap-4";
+
+/// One section per currency inside a panel, spaced like the page's sections.
+pub const REPEAT_STACK: &str = "grid gap-6";
+
 /// A label over its control.
 pub const FIELD: &str = "grid gap-1.5";
 

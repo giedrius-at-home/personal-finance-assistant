@@ -13,8 +13,8 @@ use serde::Serialize;
 
 use crate::api::invoke;
 use crate::ds::patterns::{
-    DELTA, DRIVER_DETAILS, Disclosure, NUM_MUTED, PAGE_SECTION, SUB_ROW, TABLE_SCROLL, TITLE_BLOCK,
-    WIDE_TABLE,
+    DELTA, DRIVER_DETAILS, Disclosure, NUM_MUTED, PAGE_SECTION, REPEAT_STACK, SUB_ROW,
+    TABLE_SCROLL, TITLE_BLOCK, WIDE_TABLE,
 };
 use crate::ds::{
     Badge, Card, CardHeader, CardTitle, Eyebrow, METRIC_STRIP, Metric, Size, Tone, Variant,
@@ -760,11 +760,12 @@ pub fn AdjustmentsCard() -> impl IntoView {
         error: RwSignal::new(None),
     };
     with_report(move |report| {
-        report
+        let cards: Vec<AnyView> = report
             .adjustments
             .iter()
             .filter_map(|adjustments| card(adjustments, report, state))
-            .collect_view()
+            .collect();
+        (!cards.is_empty()).then(|| view! { <div class=REPEAT_STACK>{cards}</div> })
     })
 }
 

@@ -15,6 +15,8 @@ pub mod visuals;
 use leptos::prelude::*;
 
 use crate::format;
+use crate::layout::{Initial, PageView, PanelDef};
+use crate::pages::report_is;
 
 /// Where the site shows `MonthClosureBanner` (`month-closure.tsx`): the nudge
 /// to close last month, above the Overview.
@@ -22,14 +24,106 @@ fn month_closure_banner() -> impl IntoView {
     crate::pages::closure::MonthClosureBanner()
 }
 
+/// Overview's panels, in their first-run order.
+pub const PANELS: &[PanelDef] = &[
+    PanelDef {
+        id: "overview.kpis",
+        title: "This month at a glance",
+        page: PAGE,
+        movable: true,
+        initial: Initial::Open,
+        half: false,
+        render: || kpis::OverviewKpis().into_any(),
+        summary: None,
+        shown: Some(|| report_is(|r| kpis::first_allocation(r).is_some())),
+    },
+    PanelDef {
+        id: "overview.nudges",
+        title: "Do this now",
+        page: PAGE,
+        movable: true,
+        initial: Initial::Open,
+        half: false,
+        render: || nudges::OverviewNudges().into_any(),
+        summary: Some(nudges::summary),
+        shown: Some(|| report_is(|r| r.monthly_allocation.is_some())),
+    },
+    PanelDef {
+        id: "overview.spendable",
+        title: "Spendable and From salary",
+        page: PAGE,
+        movable: true,
+        initial: Initial::Folded,
+        half: false,
+        render: || monthly::OwnerMonthlyOverview().into_any(),
+        summary: Some(monthly::spendable_summary),
+        shown: None,
+    },
+    PanelDef {
+        id: "overview.heading",
+        title: "Where this month is heading",
+        page: PAGE,
+        movable: true,
+        initial: Initial::Folded,
+        half: false,
+        render: || monthly::MonthHeading().into_any(),
+        summary: None,
+        shown: Some(|| report_is(|r| monthly::heading_allocation(r).is_some())),
+    },
+    PanelDef {
+        id: "overview.budget",
+        title: "Monthly budget",
+        page: PAGE,
+        movable: false,
+        initial: Initial::Open,
+        half: false,
+        render: || budget::MonthlyBudgetPanel().into_any(),
+        summary: Some(budget::summary),
+        shown: None,
+    },
+    PanelDef {
+        id: "overview.week",
+        title: "The next seven days",
+        page: PAGE,
+        movable: true,
+        initial: Initial::Folded,
+        half: false,
+        render: budget::week,
+        summary: Some(budget::week_summary),
+        shown: Some(budget::week_shown),
+    },
+    PanelDef {
+        id: "overview.trajectory",
+        title: "Spending trajectory",
+        page: PAGE,
+        movable: false,
+        initial: Initial::Folded,
+        half: false,
+        render: budget::trajectory,
+        summary: None,
+        shown: Some(budget::budget_shown),
+    },
+    PanelDef {
+        id: "overview.extras",
+        title: "This month only",
+        page: PAGE,
+        movable: false,
+        initial: Initial::Folded,
+        half: false,
+        render: budget::extras,
+        summary: None,
+        shown: Some(budget::budget_shown),
+    },
+];
+
+const PAGE: &str = "overview";
+
 #[component]
 pub fn Overview() -> impl IntoView {
+    provide_context(budget::PanelState::new());
     view! {
         {month_closure_banner()}
-        <kpis::OverviewKpis />
-        <nudges::OverviewNudges />
-        <monthly::OwnerMonthlyOverview />
-        <budget::MonthlyBudgetPanel />
+        <PageView tab="overview" tab_name="Overview" page=PAGE />
     }
 }
 

@@ -26,16 +26,18 @@ use crate::ds::money_plan::MoneyPlanFields;
 use crate::ds::patterns::{
     ADD_FORM, BADGE_TIGHT, BOARD_SECTION, BOARD_TITLE, BUTTON_GROUP, CARD_NAME, DATE, Disclosure,
     DisclosureKind, FEEDBACK_LINE, FIGURE, HINT, INLINE_TOOLS, LIST_STACK, META_LINE, MORE_DETAILS,
-    MUTED, NAME_ROW, PANEL_TITLE, PAYMENT_ROW, ROW_LIST, SELECT_CHEVRON, SELECT_WRAP, STACK,
+    MUTED, NAME_ROW, PANEL_TITLE, PAYMENT_ROW, ROW_LIST, SECTION_GRID, SELECT_CHEVRON, SELECT_WRAP,
     TRUNCATE, WARNING_LINE,
 };
 use crate::ds::sync_value;
 use crate::ds::{
     BOARD, BOARD_CARD, Badge, BoardColumn, Button, CONTROL, Card, CardTone, Eyebrow, Facts,
-    FactsRow, Field, Help, Icon, Lucide, Money, MonthSwitcher, Popup, Size, Tone, Variant, cn,
+    FactsRow, Field, Help, Icon, Lucide, Money, MonthSwitcher, Popup, Size, Tone, Variant,
+    card_class, cn,
 };
+use crate::layout::{Initial, PageView, PanelDef};
 use crate::pages::payment_pick::{Ask, PaymentPicker};
-use crate::pages::with_report;
+use crate::pages::{report_is, with_report};
 use crate::{ManageSection, format, state};
 
 /// The single argument of the write commands.
@@ -245,110 +247,163 @@ fn select_class() -> String {
     cn([CONTROL, "appearance-none pr-9"])
 }
 
+/// Plan's panels, in their first-run order.
+pub const PANELS: &[PanelDef] = &[
+    PanelDef {
+        id: "plan.salary",
+        title: "Salary and where the money goes",
+        page: PAGE,
+        movable: true,
+        initial: Initial::Open,
+        half: false,
+        render: || with_report(salary).into_any(),
+        summary: None,
+        shown: Some(|| report_is(|r| r.cash_overview.payday_status.is_some())),
+    },
+    PanelDef {
+        id: "plan.payments",
+        title: "Payments",
+        page: PAGE,
+        movable: false,
+        initial: Initial::Open,
+        half: false,
+        render: || with_month(payments).into_any(),
+        summary: None,
+        shown: None,
+    },
+    PanelDef {
+        id: "plan.add",
+        title: "Add a payment or income",
+        page: PAGE,
+        movable: false,
+        initial: Initial::Folded,
+        half: false,
+        render: || with_month(add).into_any(),
+        summary: None,
+        shown: None,
+    },
+    PanelDef {
+        id: "plan.bills",
+        title: "Bills",
+        page: PAGE,
+        movable: false,
+        initial: Initial::Folded,
+        half: false,
+        render: || with_month(bills).into_any(),
+        summary: None,
+        shown: None,
+    },
+];
+
+const PAGE: &str = "plan";
+
+/// The page state and the shown month, by context; the removal notice, the
+/// plan box and the payment picker sit outside the panels.
 #[component]
 pub fn Plan() -> impl IntoView {
     let ui = Ui::new();
-    with_report(move |report| page(ui, report))
+    let month = Memo::new(move |_| {
+        ui.app.report.data.with(|d| match d {
+            Some(Ok(report)) => Some(Shared::new(ui, report)),
+            _ => None,
+        })
+    });
+    provide_context(ui);
+    provide_context(month);
+    view! {
+        // Outside the panels: "Add" starts folded, and a removal happens on the board.
+        {feedback(ui, "plan-removed".into())}
+        <PageView tab="plan" tab_name="Plan" page=PAGE />
+        {move || {
+            let id = ui.open_plan.get()?;
+            let plan = month.with(|m| m.as_ref()?.plans.iter().find(|p| p.plan_id == id).cloned())?;
+            Some(plan_popup(ui, plan))
+        }}
+        <PaymentPicker
+            ask=ui.ask
+            busy=ui.plan_busy
+            on_pick=Callback::new(move |(ask, row): (Ask, finance_types::report::review::SearchRow)| {
+                tie_plan(ui, ask.id, Some(row.transaction_id));
+            })
+            otherwise="Newest first, the ones of the same amount on top. No payment yet? Close this: the box stays where it is."
+        />
+    }
 }
 
-fn page(ui: Ui, report: &Dashboard) -> impl IntoView + use<> {
-    let next = ui.next_month.get() && report.next_month_subscriptions.is_some();
-    let active = if next {
-        report
-            .next_month_subscriptions
-            .clone()
-            .unwrap_or_else(|| report.subscriptions.clone())
-    } else {
-        report.subscriptions.clone()
-    };
-    let removed_bills = ui.removed_bills.get();
-    let rows: Vec<SubscriptionRow> = active
-        .rows
-        .iter()
-        .filter(|b| !removed_bills.contains(&b.bill_id))
-        .cloned()
-        .collect();
-    let month_of = |date: &str| date.get(..7).unwrap_or(date).to_owned();
-    let active_month = month_of(&active.through_date);
-    let active_label = format::month_long(&active_month);
-    let current_month = month_of(&report.subscriptions.through_date);
-    let next_month = report
-        .next_month_subscriptions
-        .as_ref()
-        .map_or_else(|| current_month.clone(), |n| month_of(&n.through_date));
-    let active_end = format::month_end(&active_month);
-    // What an expected income may pay back: the shown month's purchases.
-    let reimbursable: Vec<(String, String)> = report
-        .monthly_budgets
-        .iter()
-        .filter(|b| b.plan.month.starts_with(&active_month))
-        .flat_map(|b| {
-            b.purchases
-                .iter()
-                .filter(|p| p.amount > Decimal::ZERO)
-                .map(|p| {
-                    let amount = crate::ds::money(p.amount, &b.plan.currency);
-                    (p.id.clone(), format!("{} · {amount}", p.description))
-                })
-        })
-        .collect();
-    let removed_plans = ui.removed_plans.get();
-    let month_start = format!("{active_month}-01");
-    let plans: Vec<PlannedPaymentView> = report
-        .planned_payments
-        .iter()
-        .filter(|p| {
-            !removed_plans.contains(&p.plan_id)
-                && (p.due_on.starts_with(&active_month)
-                    || (!next
-                        && p.pending
-                        && p.status != PlanStatus::Paid
-                        && p.due_on < month_start))
-        })
-        .cloned()
-        .collect();
-    let mut currencies: Vec<String> = Vec::new();
-    for c in &report.net_worth.components {
-        if !currencies.contains(&c.currency.code) {
-            currencies.push(c.currency.code.clone());
-        }
-    }
-    let available = plan_categories(report);
-    let subscription_categories = unique_categories(
-        report
-            .monthly_spending
-            .mappings
-            .iter()
-            .map(|m| m.category.clone())
-            .chain(
-                report
-                    .subscriptions
-                    .rows
-                    .iter()
-                    .flat_map(|r| r.category_match_categories.clone()),
-            )
-            .chain(candidate_categories(report)),
-    );
-    // Lower-cased category → (bill id, bill name).
-    let mut owners: HashMap<String, (String, String)> = HashMap::new();
-    for row in &report.subscriptions.rows {
-        for category in &row.category_match_categories {
-            owners.insert(
-                category.to_lowercase(),
-                (row.bill_id.clone(), row.name.clone()),
-            );
-        }
-    }
-    let accounts: Vec<(String, String)> = report
+/// `f` over the page state and the shown month, once the report has loaded.
+fn with_month(f: fn(Ui, &Shared, &Dashboard) -> AnyView) -> impl IntoView {
+    let ui = expect_context::<Ui>();
+    let month = expect_context::<Memo<Option<Shared>>>();
+    with_report(move |report| month.with(|m| m.as_ref().map(|m| f(ui, m, report))))
+}
+
+/// Account id → name pairs.
+fn accounts(report: &Dashboard) -> Vec<(String, String)> {
+    report
         .cash_overview
         .accounts
         .iter()
         .map(|a| (a.account_id.clone(), a.name.clone()))
-        .collect();
-    let stale = active.stale;
-    let scheduled = active.scheduled_payments.clone();
-    let today = report.generated_at.get(..10).unwrap_or_default().to_owned();
-    let mut boxes: Vec<Boxed> = scheduled
+        .collect()
+}
+
+/// The salary card; it reads only the report, so it may sit on any tab.
+fn salary(report: &Dashboard) -> impl IntoView + use<> {
+    report.cash_overview.payday_status.clone().map(|payday| {
+        let body = match &payday.received_on {
+            Some(day) => {
+                let amounts = payday
+                    .received_amounts
+                    .iter()
+                    .enumerate()
+                    .map(|(i, a)| {
+                        view! {
+                            <span>
+                                {(i > 0).then_some(" · ")}
+                                <Money value=a.amount unit=a.currency.clone() />
+                            </span>
+                        }
+                    })
+                    .collect_view();
+                view! {
+                    <strong class="mt-1 block text-2xl font-semibold">{amounts}</strong>
+                    <Facts class="mt-2" rows=vec![("On".to_owned(), format::day_month(day))] />
+                }
+                .into_any()
+            }
+            None => view! { <Facts class="mt-2" rows=vec![("Expected".to_owned(), format::day_month(&payday.due_on))] /> }.into_any(),
+        };
+        let title = if payday.received_on.is_some() {
+            "Received"
+        } else {
+            "Not in yet"
+        };
+        let plan_fields = report.money_plan.clone().map(|plan| {
+            let names: HashMap<String, String> = accounts(report).into_iter().collect();
+            view! {
+                <div class="mt-4 border-t border-line pt-4">
+                    <Eyebrow>"WHERE THE MONEY GOES"</Eyebrow>
+                    <div class="mt-3"><MoneyPlanFields plan=plan names=names /></div>
+                </div>
+            }
+        });
+        view! {
+            <Card>
+                <Eyebrow>"SALARY"</Eyebrow>
+                <h2 class=PANEL_TITLE>{title}</h2>
+                {body}
+                {plan_fields}
+            </Card>
+        }
+    })
+}
+
+/// The month switcher, then the payments board.
+fn payments(ui: Ui, s: &Shared, report: &Dashboard) -> AnyView {
+    let active_month = &s.active_month;
+    let today = &s.today;
+    let mut boxes: Vec<Boxed> = s
+        .scheduled
         .iter()
         // A bill of nothing (a card with no charge) is not a payment.
         .filter(|payment| payment.paid_on.is_some() || payment.amount.amount > Decimal::ZERO)
@@ -357,7 +412,7 @@ fn page(ui: Ui, report: &Dashboard) -> impl IntoView + use<> {
                 payment.paid_on.is_some(),
                 !payment.candidate_ids.is_empty(),
                 &payment.due_on,
-                &today,
+                today,
             );
             let day = payment
                 .paid_on
@@ -391,68 +446,13 @@ fn page(ui: Ui, report: &Dashboard) -> impl IntoView + use<> {
             (column, day, payment.amount.amount, view)
         })
         .collect();
-    let shared = StoredValue::new(Shared {
-        active_month: active_month.clone(),
-        stale,
-        scheduled,
-        subscription_categories,
-        owners: owners.clone(),
-    });
 
-    let payday = report.cash_overview.payday_status.clone().map(|payday| {
-        let body = match &payday.received_on {
-            Some(day) => {
-                let amounts = payday
-                    .received_amounts
-                    .iter()
-                    .enumerate()
-                    .map(|(i, a)| {
-                        view! {
-                            <span>
-                                {(i > 0).then_some(" · ")}
-                                <Money value=a.amount unit=a.currency.clone() />
-                            </span>
-                        }
-                    })
-                    .collect_view();
-                view! {
-                    <strong class="mt-1 block text-2xl font-semibold">{amounts}</strong>
-                    <Facts class="mt-2" rows=vec![("On".to_owned(), format::day_month(day))] />
-                }
-                .into_any()
-            }
-            None => view! { <Facts class="mt-2" rows=vec![("Expected".to_owned(), format::day_month(&payday.due_on))] /> }.into_any(),
-        };
-        let title = if payday.received_on.is_some() {
-            "Received"
-        } else {
-            "Not in yet"
-        };
-        let plan_fields = report.money_plan.clone().map(|plan| {
-            let names: HashMap<String, String> = accounts.iter().cloned().collect();
-            view! {
-                <div class="mt-4 border-t border-line pt-4">
-                    <Eyebrow>"WHERE THE MONEY GOES"</Eyebrow>
-                    <div class="mt-3"><MoneyPlanFields plan=plan names=names /></div>
-                </div>
-            }
-        });
-        view! {
-            <Card>
-                <Eyebrow>"SALARY"</Eyebrow>
-                <h2 class=PANEL_TITLE>{title}</h2>
-                {body}
-                {plan_fields}
-            </Card>
-        }
-    });
-
-    let switcher_month = if next {
-        next_month.clone()
+    let switcher_month = if s.next {
+        s.next_month.clone()
     } else {
-        current_month.clone()
+        s.current_month.clone()
     };
-    let current_for_switch = current_month.clone();
+    let current_for_switch = s.current_month.clone();
     let on_month = Callback::new(move |month: String| {
         ui.next_month.set(month != current_for_switch);
         // The due date belongs to the month shown (the form keyed it).
@@ -464,7 +464,7 @@ fn page(ui: Ui, report: &Dashboard) -> impl IntoView + use<> {
         let Some(month) = event
             .months
             .iter()
-            .find(|m| m.month.starts_with(&active_month))
+            .find(|m| m.month.starts_with(active_month.as_str()))
         else {
             continue;
         };
@@ -490,8 +490,8 @@ fn page(ui: Ui, report: &Dashboard) -> impl IntoView + use<> {
         .into_any();
         boxes.push((Column::Due, dates.starts_on.clone(), month.share, view));
     }
-    boxes.extend(plans.iter().map(|plan| plan_card(ui, plan)));
-    let plans = StoredValue::new(plans);
+    boxes.extend(s.plans.iter().map(|plan| plan_card(ui, plan)));
+    let plans = StoredValue::new(s.plans.clone());
     let ask_for = move |id: &str| {
         plans.with_value(|all| {
             all.iter().find(|p| p.plan_id == id).map(|p| Ask {
@@ -580,74 +580,210 @@ fn page(ui: Ui, report: &Dashboard) -> impl IntoView + use<> {
             }
         })
         .collect_view();
-    let no_bills = rows.is_empty();
-    let bill_cards = rows
-        .into_iter()
-        .map(|bill| view! { <BillCard ui=ui bill=bill shared=shared /> })
-        .collect_view();
 
     view! {
-        <div class=STACK>
-            {payday}
+        <div class=cn([card_class(CardTone::Default), SECTION_GRID])>
             <div role="group" aria-label="Planning month" class="justify-self-start">
                 <MonthSwitcher
                     month=Signal::derive(move || switcher_month.clone())
                     on_change=on_month
-                    min=current_month.clone()
-                    max=next_month.clone()
+                    min=s.current_month.clone()
+                    max=s.next_month.clone()
                 />
             </div>
             <section aria-label="Payments board" class=BOARD_SECTION>
                 <div>
                     <Eyebrow>"PAYMENTS"</Eyebrow>
-                    <h2 class=BOARD_TITLE>{active_label.clone()}</h2>
+                    <h2 class=BOARD_TITLE>{s.active_label.clone()}</h2>
                 </div>
                 <p class=HINT>"Open a box for its details. Drag a payment to Paid to link the bank payment."</p>
                 {feedback(ui, "board".into())}
                 <div class=BOARD>{board}</div>
             </section>
-            {move || {
-                let id = ui.open_plan.get()?;
-                let plan = plans.with_value(|all| all.iter().find(|p| p.plan_id == id).cloned())?;
-                Some(plan_popup(ui, plan))
-            }}
-            <PaymentPicker
-                ask=ui.ask
-                busy=ui.plan_busy
-                on_pick=Callback::new(move |(ask, row): (Ask, finance_types::report::review::SearchRow)| {
-                    tie_plan(ui, ask.id, Some(row.transaction_id));
-                })
-                otherwise="Newest first, the ones of the same amount on top. No payment yet? Close this: the box stays where it is."
-            />
-            <Card>
-                <Eyebrow>"NEW"</Eyebrow>
-                <h2 class=PANEL_TITLE>"Add a payment or income"</h2>
-                {create_form(ui, &available, &owners, &accounts, &currencies, &active_month, &active_end, reimbursable)}
-                {feedback(ui, "plan-removed".into())}
-            </Card>
-            <section aria-label="Bills" class=BOARD_SECTION>
-                <div>
-                    <Eyebrow>"EVERY MONTH"</Eyebrow>
-                    <h2 class=BOARD_TITLE>"Bills"</h2>
-                </div>
-                {stale.then(|| view! {
-                    <p role="status" class=WARNING_LINE>"Out of date. Refresh first."</p>
-                })}
-                {feedback(ui, "bill-removed".into())}
-                {no_bills.then(|| view! { <p class=MUTED>"No bills this month."</p> })}
-                <div class="grid items-start gap-3 sm:grid-cols-2 xl:grid-cols-4">{bill_cards}</div>
-            </section>
         </div>
     }
+    .into_any()
 }
 
-/// What every bill card reads from the report.
+/// The form that adds a plan or a recurring bill.
+fn add(ui: Ui, s: &Shared, _: &Dashboard) -> AnyView {
+    let form = create_form(
+        ui,
+        &s.available,
+        &s.owners,
+        &s.accounts,
+        &s.currencies,
+        &s.active_month,
+        &s.active_end,
+        s.reimbursable.clone(),
+    );
+    view! {
+        <Card>
+            <Eyebrow>"NEW"</Eyebrow>
+            <h2 class=PANEL_TITLE>"Add a payment or income"</h2>
+            {form}
+        </Card>
+    }
+    .into_any()
+}
+
+/// The shown month's bills.
+fn bills(ui: Ui, s: &Shared, _: &Dashboard) -> AnyView {
+    let shared = StoredValue::new(s.clone());
+    let bill_cards = s
+        .rows
+        .iter()
+        .map(|bill| view! { <BillCard ui=ui bill=bill.clone() shared=shared /> })
+        .collect_view();
+    view! {
+        <section aria-label="Bills" class=cn([card_class(CardTone::Default), BOARD_SECTION])>
+            <div>
+                <Eyebrow>"EVERY MONTH"</Eyebrow>
+                <h2 class=BOARD_TITLE>"Bills"</h2>
+            </div>
+            {s.stale.then(|| view! {
+                <p role="status" class=WARNING_LINE>"Out of date. Refresh first."</p>
+            })}
+            {feedback(ui, "bill-removed".into())}
+            {s.rows.is_empty().then(|| view! { <p class=MUTED>"No bills this month."</p> })}
+            <div class="grid items-start gap-3 sm:grid-cols-2 xl:grid-cols-4">{bill_cards}</div>
+        </section>
+    }
+    .into_any()
+}
+
+/// The shown month as the panels read it, rebuilt when the report, the
+/// month or a removal changes.
+#[derive(Clone, PartialEq)]
 struct Shared {
+    /// Next month is shown.
+    next: bool,
     active_month: String,
+    active_label: String,
+    active_end: String,
+    current_month: String,
+    next_month: String,
     stale: bool,
+    today: String,
     scheduled: Vec<ScheduledBillPayment>,
+    /// The shown bills, less the ones just removed.
+    rows: Vec<SubscriptionRow>,
+    /// The shown plans, less the ones just removed.
+    plans: Vec<PlannedPaymentView>,
+    /// What an expected income may pay back: the shown month's purchases.
+    reimbursable: Vec<(String, String)>,
+    currencies: Vec<String>,
+    available: Vec<String>,
+    accounts: Vec<(String, String)>,
     subscription_categories: Vec<String>,
+    /// Lower-cased category → (bill id, bill name).
     owners: HashMap<String, (String, String)>,
+}
+
+impl Shared {
+    fn new(ui: Ui, report: &Dashboard) -> Self {
+        let next = ui.next_month.get() && report.next_month_subscriptions.is_some();
+        let active = if next {
+            report
+                .next_month_subscriptions
+                .as_ref()
+                .unwrap_or(&report.subscriptions)
+        } else {
+            &report.subscriptions
+        };
+        let removed_bills = ui.removed_bills.get();
+        let rows: Vec<SubscriptionRow> = active
+            .rows
+            .iter()
+            .filter(|b| !removed_bills.contains(&b.bill_id))
+            .cloned()
+            .collect();
+        let month_of = |date: &str| date.get(..7).unwrap_or(date).to_owned();
+        let active_month = month_of(&active.through_date);
+        let current_month = month_of(&report.subscriptions.through_date);
+        let next_month = report
+            .next_month_subscriptions
+            .as_ref()
+            .map_or_else(|| current_month.clone(), |n| month_of(&n.through_date));
+        let reimbursable: Vec<(String, String)> = report
+            .monthly_budgets
+            .iter()
+            .filter(|b| b.plan.month.starts_with(&active_month))
+            .flat_map(|b| {
+                b.purchases
+                    .iter()
+                    .filter(|p| p.amount > Decimal::ZERO)
+                    .map(|p| {
+                        let amount = crate::ds::money(p.amount, &b.plan.currency);
+                        (p.id.clone(), format!("{} · {amount}", p.description))
+                    })
+            })
+            .collect();
+        let removed_plans = ui.removed_plans.get();
+        let month_start = format!("{active_month}-01");
+        let plans: Vec<PlannedPaymentView> = report
+            .planned_payments
+            .iter()
+            .filter(|p| {
+                !removed_plans.contains(&p.plan_id)
+                    && (p.due_on.starts_with(&active_month)
+                        || (!next
+                            && p.pending
+                            && p.status != PlanStatus::Paid
+                            && p.due_on < month_start))
+            })
+            .cloned()
+            .collect();
+        let mut currencies: Vec<String> = Vec::new();
+        for c in &report.net_worth.components {
+            if !currencies.contains(&c.currency.code) {
+                currencies.push(c.currency.code.clone());
+            }
+        }
+        let subscription_categories = unique_categories(
+            report
+                .monthly_spending
+                .mappings
+                .iter()
+                .map(|m| m.category.clone())
+                .chain(
+                    report
+                        .subscriptions
+                        .rows
+                        .iter()
+                        .flat_map(|r| r.category_match_categories.clone()),
+                )
+                .chain(candidate_categories(report)),
+        );
+        let mut owners: HashMap<String, (String, String)> = HashMap::new();
+        for row in &report.subscriptions.rows {
+            for category in &row.category_match_categories {
+                owners.insert(
+                    category.to_lowercase(),
+                    (row.bill_id.clone(), row.name.clone()),
+                );
+            }
+        }
+        Self {
+            next,
+            active_label: format::month_long(&active_month),
+            active_end: format::month_end(&active_month),
+            stale: active.stale,
+            today: report.generated_at.get(..10).unwrap_or_default().to_owned(),
+            scheduled: active.scheduled_payments.clone(),
+            rows,
+            plans,
+            reimbursable,
+            currencies,
+            available: plan_categories(report),
+            accounts: accounts(report),
+            subscription_categories,
+            owners,
+            active_month,
+            current_month,
+            next_month,
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

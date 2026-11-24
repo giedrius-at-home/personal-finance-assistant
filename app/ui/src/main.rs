@@ -7,6 +7,7 @@ mod api;
 #[allow(dead_code)]
 mod ds;
 mod format;
+mod layout;
 mod pages;
 
 use finance_types::report::Dashboard;
@@ -167,6 +168,8 @@ fn App() -> impl IntoView {
         }),
     };
     provide_context(app);
+    // Separate from `AppState`: a layout change never bumps `revision`.
+    provide_context(layout::LayoutState::load());
     Effect::new(move |_| {
         if let Some(result) = app.report.data.get() {
             app.busy.set(app.report.loading.get());

@@ -105,6 +105,11 @@ struct WishSettingsArgs {
 }
 
 #[derive(Deserialize)]
+struct UiLayoutArgs {
+    layout: finance_types::ui::UiLayout,
+}
+
+#[derive(Deserialize)]
 struct RoleArgs {
     role: finance_types::report::closure::AccountRoleDraft,
 }
@@ -315,6 +320,11 @@ fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
         "save_wish_settings" => {
             let a: WishSettingsArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
             ok(service.save_wish_settings(a.settings))
+        }
+        "ui_layout" => ok(service.ui_layout()),
+        "save_ui_layout" => {
+            let a: UiLayoutArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
+            ok(service.save_ui_layout(a.layout))
         }
         "save_account_role" => {
             let a: RoleArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
