@@ -1,17 +1,15 @@
 name: Release
 
-# Every merge to main builds, signs and publishes Finance.app as a new
-# release. The installed app finds it through latest.json and verifies the
-# update signature.
+# Builds, signs and publishes Finance.app as a new release, only when asked
+# (Actions -> Release -> Run workflow, or `gh workflow run release.yml`):
+# macOS minutes count ten times against the free plan's quota, and a release
+# per merge used it up. The installed app finds a release through
+# latest.json and verifies the update signature.
 #
 # The version is the one in tauri.conf.json when a PR raised it past the
 # latest release (minor and major bumps); otherwise the latest release's
-# patch plus one. main only takes PRs, so the version is stamped into this
-# build and the tag, not committed back.
+# patch plus one, stamped into this build and the tag, not committed back.
 on:
-  push:
-    branches: [main]
-    paths-ignore: ["**.md", "docs/**", "design/**"]
   workflow_dispatch:
 
 permissions:

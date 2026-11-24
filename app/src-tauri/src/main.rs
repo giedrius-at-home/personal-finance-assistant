@@ -9,6 +9,7 @@ mod ai;
 mod bank;
 mod model;
 mod notify;
+mod remote;
 mod update;
 
 use finance_core::service::Service;
@@ -536,17 +537,14 @@ fn decline_bill_match(
 
 fn main() {
     let path = finance_storage::default_db_path().expect("application data folder");
-    tauri::Builder::default()
-        .plugin(tauri_plugin_updater::Builder::new().build())
-        // Reopen with the size and position the owner left the window at.
-        .plugin(tauri_plugin_window_state::Builder::new().build())
-        .plugin(tauri_plugin_notification::init())
-        .manage(Service::new(path))
-        .manage(Updates::default())
-        .manage(finance_bank::Syncer::default())
-        .manage(model::Model::default())
-        .manage(finance_ai::Assistant::default())
-        .invoke_handler(tauri::generate_handler![
+    // Server mode (`remote.rs`): the server answers the commands and does
+    // the background work; a bad address stops the app rather than quietly
+    // using the local ledger.
+    let remote: Option<&'static remote::Remote> = remote::Remote::configured()
+        .expect("Finance/server-url")
+        .map(|r| &*Box::leak(Box::new(r)));
+    let local: Box<dyn Fn(tauri::ipc::Invoke) -> bool + Send + Sync> =
+        Box::new(tauri::generate_handler![
             dashboard,
             review,
             search_transactions,
@@ -629,14 +627,33 @@ fn main() {
             ai::suggest_categories,
             ai::suggest_spending_group,
             ai::research_merchant,
-        ])
-        .setup(|app| {
+        ]);
+    tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        // Reopen with the size and position the owner left the window at.
+        .plugin(tauri_plugin_window_state::Builder::new().build())
+        .plugin(tauri_plugin_notification::init())
+        .manage(Service::new(path))
+        .manage(Updates::default())
+        .manage(finance_bank::Syncer::default())
+        .manage(model::Model::default())
+        .manage(finance_ai::Assistant::default())
+        .invoke_handler(move |invoke| match remote {
+            Some(remote) if remote.takes(invoke.message.command()) => {
+                remote.forward(invoke);
+                true
+            }
+            _ => local(invoke),
+        })
+        .setup(move |app| {
             update::schedule(app.handle().clone());
-            bank::schedule(app.handle().clone());
-            notify::register(app.handle());
-            notify::schedule(app.handle().clone());
-            model::install(app.handle());
-            ai::schedule(app.handle().clone());
+            if remote.is_none() {
+                bank::schedule(app.handle().clone());
+                notify::register(app.handle());
+                notify::schedule(app.handle().clone());
+                model::install(app.handle());
+                ai::schedule(app.handle().clone());
+            }
             #[cfg(target_os = "macos")]
             if let Some(window) = app.get_webview_window("main") {
                 apply_glass(&window);
