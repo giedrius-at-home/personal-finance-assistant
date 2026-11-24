@@ -1495,10 +1495,9 @@ dependencies = [
  "anyhow",
  "finance-ai",
  "finance-core",
+ "finance-server",
  "finance-storage",
  "finance-types",
- "rust_decimal",
- "serde",
  "serde_json",
 ]
 
@@ -1533,6 +1532,25 @@ version = "0.3.0"
 dependencies = [
  "thiserror 2.0.21",
  "zeroize",
+]
+
+[[package]]
+name = "finance-server"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "finance-ai",
+ "finance-bank",
+ "finance-core",
+ "finance-notify",
+ "finance-secrets",
+ "finance-storage",
+ "finance-timesfm",
+ "finance-types",
+ "jiff",
+ "rust_decimal",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

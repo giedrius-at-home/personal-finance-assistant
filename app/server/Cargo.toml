@@ -1,0 +1,26 @@
+[package]
+name = "finance-server"
+description = "The app's commands, bank sync, email, suggestions and forecasts as a headless server on a private network, for the phone and a closed laptop. Also the command table the devserver uses."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+finance-ai.workspace = true
+finance-bank.workspace = true
+finance-core.workspace = true
+finance-notify.workspace = true
+finance-secrets.workspace = true
+finance-storage.workspace = true
+finance-timesfm.workspace = true
+finance-types.workspace = true
+anyhow.workspace = true
+jiff = "0.2.38"
+rust_decimal.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

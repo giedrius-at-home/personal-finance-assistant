@@ -1,123 +1,23 @@
 //! Development only. Serves `app/ui/dist` and `POST /invoke/<command>` on
 //! 127.0.0.1 so the UI can be exercised in a browser against the real local
-//! database. Never shipped in the app bundle.
+//! database. Never shipped in the app bundle. The command table is the
+//! server's (`finance_server::commands`); bank sync, email and updates are
+//! refused here.
 
-use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use finance_core::service::Service;
-use finance_types::report::review::TransactionSearchQuery;
-use serde::Deserialize;
+use finance_server::commands::{self, ok};
+use finance_server::http::{self, respond};
 use serde_json::Value;
 
 /// One AI runner for the server's lifetime, without secret store access.
 static ASSISTANT: std::sync::LazyLock<finance_ai::Assistant> =
     std::sync::LazyLock::new(|| finance_ai::Assistant::new(false));
-
-#[derive(Deserialize)]
-struct PlanArgs {
-    plan: finance_types::gateway::BudgetPlan,
-}
-
-#[derive(Deserialize)]
-struct PlannedPaymentArgs {
-    request: finance_types::gateway::PlannedPaymentRequest,
-}
-
-#[derive(Deserialize)]
-struct ArchivePlanArgs {
-    plan_id: String,
-}
-
-#[derive(Deserialize)]
-struct MonthArgs {
-    month: String,
-}
-
-#[derive(Deserialize)]
-struct ClosureActionArgs {
-    action: finance_types::report::closure::ClosureAction,
-}
-
-#[derive(Deserialize)]
-struct WishDraftArgs {
-    draft: finance_types::gateway::WishDraft,
-}
-
-#[derive(Deserialize)]
-struct WishSavedArgs {
-    wish_id: String,
-    saved: rust_decimal::Decimal,
-}
-
-#[derive(Deserialize)]
-struct MoveWishArgs {
-    wish_id: String,
-    #[serde(default)]
-    event_id: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct WishIdArgs {
-    wish_id: String,
-}
-
-#[derive(Deserialize)]
-struct EventDatesArgs {
-    wish_id: String,
-    starts_on: String,
-    ends_on: String,
-}
-
-#[derive(Deserialize)]
-struct EventTransactionArgs {
-    wish_id: String,
-    transaction_id: String,
-    pick: finance_types::gateway::EventPick,
-}
-
-#[derive(Deserialize)]
-struct WishMustArgs {
-    wish_id: String,
-    must: bool,
-}
-
-#[derive(Deserialize)]
-struct WishBoughtArgs {
-    wish_id: String,
-    purchase: finance_types::gateway::WishPurchase,
-}
-
-#[derive(Deserialize)]
-struct WishStartArgs {
-    wish_id: String,
-    #[serde(default)]
-    match_category: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct WishSettingsArgs {
-    settings: finance_types::gateway::WishSettings,
-}
-
-#[derive(Deserialize)]
-struct UiLayoutArgs {
-    layout: finance_types::ui::UiLayout,
-}
-
-#[derive(Deserialize)]
-struct RoleArgs {
-    role: finance_types::report::closure::AccountRoleDraft,
-}
-
-#[derive(Deserialize)]
-struct SearchArgs {
-    query: TransactionSearchQuery,
-}
 
 fn main() -> Result<()> {
     let dist = PathBuf::from(
@@ -148,51 +48,28 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-/// Requests larger than this are refused before reading the body.
-const MAX_BODY: usize = 8 << 20;
-
 fn handle(stream: &mut TcpStream, store: &Service, dist: &Path, port: &str) -> Result<()> {
-    let mut reader = BufReader::new(stream.try_clone()?);
-    let mut request_line = String::new();
-    reader.read_line(&mut request_line)?;
-    let (mut length, mut host, mut origin) = (0, String::new(), None);
-    loop {
-        let mut line = String::new();
-        reader.read_line(&mut line)?;
-        if line.trim().is_empty() {
-            break;
-        }
-        let lower = line.to_ascii_lowercase();
-        if let Some(v) = lower.strip_prefix("content-length:") {
-            length = v.trim().parse().unwrap_or(0);
-        } else if let Some(v) = lower.strip_prefix("host:") {
-            host = v.trim().to_owned();
-        } else if let Some(v) = lower.strip_prefix("origin:") {
-            origin = Some(v.trim().to_owned());
-        }
-    }
+    let Some(request) = http::read(stream)? else {
+        return respond(stream, "403 Forbidden", "text/plain", b"forbidden");
+    };
     // Only this machine's own pages: other sites (or DNS rebinding) must
     // not drive writes against the real ledger.
     let local = [format!("127.0.0.1:{port}"), format!("localhost:{port}")];
+    let host = request.header("host").unwrap_or("").to_ascii_lowercase();
     let trusted = local.contains(&host)
-        && origin.as_deref().is_none_or(|o| {
-            o.strip_prefix("http://")
+        && request.header("origin").is_none_or(|o| {
+            o.to_ascii_lowercase()
+                .strip_prefix("http://")
                 .is_some_and(|o| local.iter().any(|l| l == o))
         });
-    if !trusted || length > MAX_BODY {
+    if !trusted {
         return respond(stream, "403 Forbidden", "text/plain", b"forbidden");
     }
-    let mut body = vec![0; length];
-    reader.read_exact(&mut body)?;
-    let mut parts = request_line.split_whitespace();
-    let (method, path) = (parts.next().unwrap_or(""), parts.next().unwrap_or("/"));
-
-    if method == "POST"
-        && let Some(cmd) = path.strip_prefix("/invoke/")
+    if request.method == "POST"
+        && let Some(cmd) = request.route().strip_prefix("/invoke/")
     {
-        let args: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
-        let result = run(store, cmd, args);
-        return match result {
+        let args: Value = serde_json::from_slice(&request.body).unwrap_or(Value::Null);
+        return match run(store, cmd, args) {
             Ok(v) => respond(
                 stream,
                 "200 OK",
@@ -207,148 +84,11 @@ fn handle(stream: &mut TcpStream, store: &Service, dist: &Path, port: &str) -> R
             ),
         };
     }
-    let rel = path
-        .split('?')
-        .next()
-        .unwrap_or("/")
-        .trim_start_matches('/');
-    let rel = if rel.is_empty() { "index.html" } else { rel };
-    if rel.contains("..") {
-        return respond(stream, "404 Not Found", "text/plain", b"not found");
-    }
-    match std::fs::read(dist.join(rel)) {
-        Ok(bytes) => respond(stream, "200 OK", mime(rel), &bytes),
-        Err(_) => respond(stream, "404 Not Found", "text/plain", b"not found"),
-    }
-}
-
-fn ok<T: serde::Serialize>(result: Result<T, String>) -> Result<Value, String> {
-    result.and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string()))
+    http::serve_file(stream, dist, request.route())
 }
 
 fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
     match cmd {
-        "dashboard" => ok(service.dashboard()),
-        "review" => ok(service.review()),
-        "status" => ok(service.status()),
-        "refresh" => {
-            service.refresh();
-            // No notifier here: due alerts are recorded as `unavailable`
-            // (or `disabled`), never shown.
-            let _ = service.evaluate_alerts_now();
-            Ok(Value::Null)
-        }
-        "save_budget_plan" => {
-            let a: PlanArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
-            ok(service.save_budget_plan(a.plan))
-        }
-        "save_spending_group" => {
-            let a: GroupArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
-            ok(service.save_spending_group(&a.category, a.group.as_deref(), a.revision))
-        }
-        "create_spending_group" => {
-            let a: NewGroupArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
-            ok(service.create_spending_group(&a.group))
-        }
-        "create_planned_payment" => {
-            let a: PlannedPaymentArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
-            ok(service.create_planned_payment(&a.request))
-        }
-        "archive_planned_payment" => {
-            let a: ArchivePlanArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
-            ok(service.archive_planned_payment(&a.plan_id))
-        }
-        "tie_planned_payment" => ok(service.tie_planned_payment(
-            &arg::<String>(args.clone(), "plan_id")?,
-            arg::<Option<String>>(args, "transaction_id")?.as_deref(),
-        )),
-        "search_transactions" => {
-            let a: SearchArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
-            ok(service.search(&a.query))
-        }
-        "closure" => {
-            let a: MonthArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
-            ok(service.closure(&a.month))
-        }
-        "closure_action" => {
-            let a: ClosureActionArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
-            ok(service.closure_action(a.action))
-        }
-        "wishes" => ok(service.wishes()),
-        "save_wish" => {
-            let a: WishDraftArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
-            ok(service.save_wish(a.draft))
-        }
-        "record_wish_saved" => {
-            let a: WishSavedArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
-            ok(service.record_wish_saved(&a.wish_id, a.saved))
-        }
-        "drop_wish" => {
-            let a: WishIdArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
-            ok(service.drop_wish(&a.wish_id))
-        }
-        "events" => ok(service.events()),
-        "plan_wish_as_event" => {
-            let a: EventDatesArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
-            ok(service.plan_wish_as_event(&a.wish_id, &a.starts_on, &a.ends_on))
-        }
-        "wish_back_from_event" => {
-            let a: WishIdArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
-            ok(service.wish_back_from_event(&a.wish_id))
-        }
-        "move_wish" => {
-            let a: MoveWishArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
-            ok(service.move_wish(&a.wish_id, a.event_id.as_deref()))
-        }
-        "set_event_transaction" => {
-            let a: EventTransactionArgs =
-                serde_json::from_value(args).map_err(|e| e.to_string())?;
-            ok(service.set_event_transaction(&a.wish_id, &a.transaction_id, a.pick))
-        }
-        "set_wish_must" => {
-            let a: WishMustArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
-            ok(service.set_wish_must(&a.wish_id, a.must))
-        }
-        "mark_wish_bought" => {
-            let a: WishBoughtArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
-            ok(service.mark_wish_bought(&a.wish_id, a.purchase))
-        }
-        "start_wish" => {
-            let a: WishStartArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
-            ok(service.start_wish(&a.wish_id, a.match_category))
-        }
-        "save_wish_settings" => {
-            let a: WishSettingsArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
-            ok(service.save_wish_settings(a.settings))
-        }
-        "ui_layout" => ok(service.ui_layout()),
-        "save_ui_layout" => {
-            let a: UiLayoutArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
-            ok(service.save_ui_layout(a.layout))
-        }
-        "plot_query" => ok(service.plot_query(arg(args.clone(), "spec")?)),
-        "save_account_role" => {
-            let a: RoleArgs = serde_json::from_value(args).map_err(|e| e.to_string())?;
-            ok(service.save_account_role(a.role))
-        }
-        "unclassified_accounts" => ok(service.unclassified_accounts()),
-        "personal_transactions" => {
-            ok(service.personal_transactions(&arg::<String>(args.clone(), "query")?))
-        }
-        "save_personal_choice" => ok(service.save_personal_choice(arg(args.clone(), "choice")?)),
-        "set_transaction_category" => {
-            ok(service.set_transaction_category(arg(args.clone(), "change")?))
-        }
-        "review_decisions" => ok(service.review_decisions(arg(args.clone(), "decisions")?)),
-        "review_batch" => ok(service.review_batch(arg(args.clone(), "items")?)),
-        "save_review_details" => ok(service.save_review_details(arg(args.clone(), "details")?)),
-        "audit_daily_review" => {
-            ok(service.audit_daily_review(&arg::<String>(args.clone(), "transaction")?))
-        }
-        "preview_consolidation" => {
-            ok(service.preview_consolidation(&arg(args.clone(), "request")?))
-        }
-        "apply_consolidation" => ok(service.apply_consolidation(arg(args.clone(), "request")?)),
         // Updates only exist in the app; show a plausible state for layout checks.
         "update_status" => {
             let available = std::env::var("DEV_FAKE_UPDATE").ok().map(|version| {
@@ -373,21 +113,9 @@ fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
             ..Default::default()
         })
         .map_err(|e| e.to_string()),
-        "create_bill" => ok(service.create_bill(request(args)?)),
-        "edit_bill" => ok(service.edit_bill(request(args)?)),
-        "archive_bill" => ok(service.archive_bill(request(args)?)),
-        "save_subscription_categories" => ok(service.save_subscription_categories(request(args)?)),
-        "link_bill_payment" => ok(service.link_bill_payment(request(args)?)),
-        "decline_bill_match" => ok(service.decline_bill_match(request(args)?)),
-        "manage_workspace" => ok(service.manage_workspace()),
-        "banks" => ok(service.banks()),
         // The secret store belongs to the app; here the Banks screen shows the
         // stored runs only and syncs are refused.
         "bank_sync_status" => ok(service.bank_sync_report(Default::default())),
-        "reconcile_bank_account" => ok(service.reconcile_bank_account(
-            &arg::<String>(args.clone(), "bank")?,
-            arg::<i64>(args, "account_id")?,
-        )),
         "sync_bank"
         | "renew_bank_consent"
         | "adopt_bank_consents"
@@ -396,84 +124,18 @@ fn run(service: &Service, cmd: &str, args: Value) -> Result<Value, String> {
         | "bank_link_start"
         | "bank_link_finish"
         | "bank_link_confirm" => Err("Bank sync runs in the app only.".to_owned()),
-        // AI suggestions against the local Ollama; TypeSafe needs the
-        // secret store, so its key cannot be set here.
-        "ai_status" => ok(ASSISTANT.status(service)),
-        "save_ai_settings" => ok(ASSISTANT.save_settings(service, arg(args, "settings")?)),
-        "set_typesafe_key" => ok(ASSISTANT.set_typesafe_key(&arg::<String>(args, "key")?)),
-        "forget_typesafe_key" => ok(ASSISTANT.forget_typesafe_key()),
-        "suggest_categories" => ok(ASSISTANT.suggest_now(service)),
-        "suggest_spending_group" => {
-            ok(ASSISTANT.suggest_group(service, &arg::<String>(args, "category")?))
-        }
-        "research_merchant" => ok(ASSISTANT.research_merchant(
-            service,
-            &arg::<String>(args.clone(), "proposal")?,
-            &arg::<String>(args, "public_name")?,
-        )),
-        "preview_csv_import" => ok(service.preview_csv_import(arg(args, "upload")?)),
-        "commit_csv_import" => ok(service.commit_csv_import(arg(args, "commit")?)),
-        "preview_settings" => ok(service.preview_settings(arg(args, "form")?)),
-        "apply_settings" => ok(service.apply_settings(arg(args, "apply")?)),
-        "rollback_settings" => ok(service.rollback_settings(arg(args, "revision")?)),
         // The secret store and the mail server belong to the app: settings can
         // be edited here, but no password is stored and nothing is sent.
         "email_status" => ok(service.email_status(false)),
         "save_email_settings" => {
-            let saved = service.save_email_settings(arg(args, "settings")?);
+            let saved =
+                commands::arg(args, "settings").and_then(|s| service.save_email_settings(s));
             ok(saved.and_then(|_| service.email_status(false)))
         }
         "set_smtp_password" | "forget_smtp_password" | "send_test_email" => {
             Err("Email runs in the app only.".to_owned())
         }
-        _ => Err(format!("unknown command {cmd}")),
+        _ => commands::run(service, &ASSISTANT, cmd, args)
+            .unwrap_or_else(|| Err(format!("unknown command {cmd}"))),
     }
-}
-
-/// The command argument `name`, as Tauri would pass it.
-fn arg<T: serde::de::DeserializeOwned>(mut args: Value, name: &str) -> Result<T, String> {
-    serde_json::from_value(args.get_mut(name).map(Value::take).unwrap_or(Value::Null))
-        .map_err(|e| e.to_string())
-}
-
-fn mime(path: &str) -> &'static str {
-    match path.rsplit('.').next() {
-        Some("html") => "text/html; charset=utf-8",
-        Some("js") => "text/javascript",
-        Some("wasm") => "application/wasm",
-        Some("css") => "text/css",
-        _ => "application/octet-stream",
-    }
-}
-
-fn respond(stream: &mut TcpStream, status: &str, kind: &str, body: &[u8]) -> Result<()> {
-    write!(
-        stream,
-        "HTTP/1.1 {status}\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n",
-        body.len()
-    )?;
-    stream.write_all(body).context("write body")
-}
-
-#[derive(Deserialize)]
-struct GroupArgs {
-    category: String,
-    group: Option<String>,
-    revision: u32,
-}
-
-#[derive(Deserialize)]
-struct NewGroupArgs {
-    group: String,
-}
-
-/// The `request` argument of a write command.
-fn request<T: serde::de::DeserializeOwned>(args: Value) -> Result<T, String> {
-    #[derive(Deserialize)]
-    struct Args<T> {
-        request: T,
-    }
-    serde_json::from_value::<Args<T>>(args)
-        .map(|a| a.request)
-        .map_err(|e| e.to_string())
 }

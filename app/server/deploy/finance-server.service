@@ -1,0 +1,31 @@
+[Unit]
+Description=Finance server (ledger, bank sync, email, forecasts) on the tailnet
+Wants=network-online.target tailscaled.service
+After=network-online.target tailscaled.service
+
+[Service]
+User=finance
+Group=finance
+EnvironmentFile=/etc/finance-server.env
+Environment=XDG_DATA_HOME=/var/lib/finance
+Environment=FINANCE_SECRETS_DIR=/var/lib/finance/secrets
+Environment=FINANCE_UI_DIST=/opt/finance/ui
+ExecStart=/opt/finance/finance-server
+# The tailnet address may not exist yet at boot: try again.
+Restart=always
+RestartSec=5
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+ReadWritePaths=/var/lib/finance
+
+[Install]
+WantedBy=multi-user.target
