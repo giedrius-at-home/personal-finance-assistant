@@ -5,7 +5,7 @@
 
 use finance_types::ui::{MAX_NAME, MAX_TABS, PageLayout, PanelItem, TabLayout, UiLayout};
 
-use super::{PanelDef, resolve, write_page};
+use super::{PanelDef, page_entry, resolve, write_page};
 
 /// Where a page lives: its tab id and name, and the page id.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -35,16 +35,24 @@ pub const BUILT_IN: [(&str, &str); 7] = [
     ("manage", "Manage"),
 ];
 
+/// False for a deleted own tab: `page_mut` would recreate it as a built-in one.
+fn exists(l: &UiLayout, at: &PageRef) -> bool {
+    BUILT_IN.iter().any(|(b, _)| *b == at.tab) || l.tabs.iter().any(|t| t.id == at.tab)
+}
+
 fn def<'a>(defs: &[&'a PanelDef], panel: &str) -> Option<&'a PanelDef> {
     defs.iter().copied().find(|d| d.id == panel)
 }
 
 /// `panel` out of the page's items; listed as removed when the page is its home.
 pub fn panel_removed(l: &mut UiLayout, defs: &[&PanelDef], at: &PageRef, panel: &str) {
+    if !exists(l, at) {
+        return;
+    }
     let mut items = resolve(defs, &at.page, l.page(&at.page));
     items.retain(|i| i.panel != panel);
     let home = def(defs, panel).is_some_and(|d| d.page == at.page);
-    let page = l.page_mut(&at.tab, &at.tab_name, &at.page);
+    let page = page_entry(l, &at.tab, &at.tab_name, &at.page);
     page.items = items;
     if home && !page.removed.iter().any(|r| r == panel) {
         page.removed.push(panel.into());
@@ -54,6 +62,9 @@ pub fn panel_removed(l: &mut UiLayout, defs: &[&PanelDef], at: &PageRef, panel: 
 /// `panel` appended open and no longer removed; nothing when it is already
 /// there, unknown, or a guest that may not move.
 pub fn panel_added(l: &mut UiLayout, defs: &[&PanelDef], at: &PageRef, panel: &str) {
+    if !exists(l, at) {
+        return;
+    }
     let Some(d) = def(defs, panel).filter(|d| d.page == at.page || d.movable) else {
         return;
     };
@@ -66,23 +77,29 @@ pub fn panel_added(l: &mut UiLayout, defs: &[&PanelDef], at: &PageRef, panel: &s
         folded: false,
         half: d.half,
     });
-    let page = l.page_mut(&at.tab, &at.tab_name, &at.page);
+    let page = page_entry(l, &at.tab, &at.tab_name, &at.page);
     page.items = items;
     page.removed.retain(|r| r != panel);
 }
 
 /// `panel` moved to index `to` of the list without it (clamped).
 pub fn panel_moved(l: &mut UiLayout, defs: &[&PanelDef], at: &PageRef, panel: &str, to: usize) {
+    if !exists(l, at) {
+        return;
+    }
     let mut items = resolve(defs, &at.page, l.page(&at.page));
     let Some(from) = items.iter().position(|i| i.panel == panel) else {
         return;
     };
     let item = items.remove(from);
     items.insert(to.min(items.len()), item);
-    l.page_mut(&at.tab, &at.tab_name, &at.page).items = items;
+    page_entry(l, &at.tab, &at.tab_name, &at.page).items = items;
 }
 
 pub fn panel_half_set(l: &mut UiLayout, defs: &[&PanelDef], at: &PageRef, panel: &str, half: bool) {
+    if !exists(l, at) {
+        return;
+    }
     write_page(l, defs, (&at.tab, &at.tab_name, &at.page), |i| {
         if i.panel == panel {
             i.half = half;
@@ -90,9 +107,10 @@ pub fn panel_half_set(l: &mut UiLayout, defs: &[&PanelDef], at: &PageRef, panel:
     });
 }
 
-/// `panel` taken off `from` and added to `to`; nothing when it may not move.
+/// `panel` taken off `from` and added to `to`; nothing when it may not move
+/// or either tab is gone.
 pub fn panel_sent(l: &mut UiLayout, defs: &[&PanelDef], from: &PageRef, to: &PageRef, panel: &str) {
-    if !def(defs, panel).is_some_and(|d| d.movable) {
+    if !def(defs, panel).is_some_and(|d| d.movable) || !exists(l, from) || !exists(l, to) {
         return;
     }
     panel_removed(l, defs, from, panel);
@@ -157,7 +175,7 @@ pub fn tab_deleted(l: &mut UiLayout, id: &str) {
 }
 
 /// Writes the full tab list into `l.tabs`, keeping each saved tab's pages.
-fn materialised(l: &mut UiLayout) {
+pub(super) fn materialised(l: &mut UiLayout) {
     let order = tabs(l);
     let mut saved = std::mem::take(&mut l.tabs);
     l.tabs = order
@@ -278,11 +296,11 @@ mod tests {
     }
 
     fn p1() -> PageRef {
-        at("t1", "p1")
+        at("overview", "p1")
     }
 
     fn p2() -> PageRef {
-        at("t2", "p2")
+        at("plan", "p2")
     }
 
     fn ids(l: &UiLayout, page: &str) -> Vec<String> {
@@ -629,6 +647,23 @@ mod tests {
         all_reset(&mut l);
         assert_eq!(l, UiLayout::default());
         assert_eq!(tab_ids(&l), defaults());
+    }
+
+    #[test]
+    fn an_edit_on_a_deleted_own_tab_changes_nothing() {
+        let r = reg();
+        let d: Vec<&PanelDef> = r.iter().collect();
+        let mut l = UiLayout::default();
+        let own = tab_added(&mut l, "Trips").unwrap();
+        tab_deleted(&mut l, &own);
+        let gone = at(&own, &own);
+        panel_added(&mut l, &d, &gone, "m");
+        panel_removed(&mut l, &d, &gone, "m");
+        panel_moved(&mut l, &d, &gone, "m", 0);
+        panel_half_set(&mut l, &d, &gone, "m", true);
+        panel_sent(&mut l, &d, &p2(), &gone, "m");
+        panel_sent(&mut l, &d, &gone, &p1(), "m");
+        assert_eq!(l, UiLayout::default());
     }
 
     #[test]

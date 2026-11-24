@@ -13,6 +13,7 @@ mod pages;
 use finance_types::report::Dashboard;
 use leptos::ev;
 use leptos::prelude::*;
+use leptos::tachys::reactive_graph::OwnedView;
 
 use crate::api::{Loaded, NoArgs, load};
 use crate::ds::patterns::TAB_SCROLL;
@@ -20,6 +21,8 @@ use crate::ds::{
     Eyebrow, Heading, Icon, Lucide, SegmentedControl, Size, TABS_LIST, TABS_TRIGGER, Variant,
     button_class, cn,
 };
+use crate::layout::PageView;
+use crate::layout::edit::TabView;
 
 /// The seven primary sections (the site's top tabs).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,16 +47,20 @@ impl Tab {
         Self::Manage,
     ];
 
-    fn label(self) -> &'static str {
+    pub fn id(self) -> &'static str {
         match self {
-            Self::Overview => "Overview",
-            Self::Transactions => "Transactions",
-            Self::Spending => "Spending",
-            Self::Plan => "Plan",
-            Self::Wishes => "Wishes",
-            Self::Events => "Events",
-            Self::Manage => "Manage",
+            Self::Overview => "overview",
+            Self::Transactions => "transactions",
+            Self::Spending => "spending",
+            Self::Plan => "plan",
+            Self::Wishes => "wishes",
+            Self::Events => "events",
+            Self::Manage => "manage",
         }
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|t| t.id() == id)
     }
 }
 
@@ -116,6 +123,8 @@ pub struct AppState {
     /// When the shown data was built (local `YYYY-MM-DD HH:MM`).
     pub updated: RwSignal<Option<String>>,
     pub refresh_failed: RwSignal<bool>,
+    /// Some(id): an own tab is shown instead of `tab`.
+    pub own_tab: RwSignal<Option<String>>,
     pub busy: RwSignal<bool>,
     /// The dashboard report every screen reads; reloaded on `revision`.
     pub report: Loaded<Dashboard>,
@@ -123,17 +132,37 @@ pub struct AppState {
 
 impl AppState {
     pub fn go(&self, tab: Tab) {
+        self.own_tab.set(None);
         self.tab.set(tab);
+    }
+
+    pub fn go_own(&self, id: &str) {
+        self.own_tab.set(Some(id.into()));
+    }
+
+    /// The id of what is on screen ("plan", "own-2", …); reactive.
+    pub fn shown_id(&self) -> String {
+        self.own_tab
+            .get()
+            .unwrap_or_else(|| self.tab.get().id().into())
+    }
+
+    /// Shows the tab `id`, built-in or own.
+    fn go_id(&self, id: &str) {
+        match Tab::from_id(id) {
+            Some(tab) => self.go(tab),
+            None => self.go_own(id),
+        }
     }
 
     pub fn go_spending(&self, section: SpendingSection) {
         self.spending.set(section);
-        self.tab.set(Tab::Spending);
+        self.go(Tab::Spending);
     }
 
     pub fn go_manage(&self, section: ManageSection) {
         self.manage.set(section);
-        self.tab.set(Tab::Manage);
+        self.go(Tab::Manage);
     }
 
     /// Re-read the data from disk and reload every screen.
@@ -161,6 +190,7 @@ fn App() -> impl IntoView {
         revision,
         updated: RwSignal::new(None),
         refresh_failed: RwSignal::new(false),
+        own_tab: RwSignal::new(None),
         busy: RwSignal::new(false),
         report: load("dashboard", move || {
             revision.track();
@@ -169,7 +199,24 @@ fn App() -> impl IntoView {
     };
     provide_context(app);
     // Separate from `AppState`: a layout change never bumps `revision`.
-    provide_context(layout::LayoutState::load());
+    let layout = layout::LayoutState::load();
+    provide_context(layout);
+    // The default layout while it loads: the seven built-in tabs.
+    let tabs = Memo::new(move |_| layout.tabs());
+    let visible = Memo::new(move |_| tabs.with(|t| visible_tabs(t, &app.shown_id())));
+    // What is on screen was deleted, or hidden by an edit while it was shown.
+    Effect::new(move |prev: Option<(String, bool)>| {
+        let shown = app.shown_id();
+        let hidden = tabs.with(|t| t.iter().find(|v| v.id == shown).map(|v| v.hidden));
+        let gone = match hidden {
+            None => true,
+            Some(h) => h && prev.is_some_and(|(p, was)| p == shown && !was),
+        };
+        if gone {
+            app.go_id(&tabs.with_untracked(|t| fallback_tab(t, &shown)));
+        }
+        (shown, hidden.unwrap_or(true))
+    });
     Effect::new(move |_| {
         if let Some(result) = app.report.data.get() {
             app.busy.set(app.report.loading.get());
@@ -203,7 +250,7 @@ fn App() -> impl IntoView {
     api::listen("daily-forecast", &on_forecast);
     on_forecast.forget();
 
-    // ⌘1–6 switch sections, ⌘R refreshes.
+    // ⌘1–9 pick a tab of the bar by position, ⌘R refreshes.
     let handle = window_event_listener(ev::keydown, move |e| {
         if !e.meta_key() || e.shift_key() || e.alt_key() || e.ctrl_key() {
             return;
@@ -212,10 +259,11 @@ fn App() -> impl IntoView {
         if let Some(tab) = key
             .parse::<usize>()
             .ok()
-            .and_then(|n| Tab::ALL.get(n.wrapping_sub(1)))
+            .filter(|n| (1..=9).contains(n))
+            .and_then(|n| visible.with_untracked(|v| v.get(n - 1).cloned()))
         {
             e.prevent_default();
-            app.go(*tab);
+            app.go_id(&tab.id);
         } else if key == "r" {
             e.prevent_default();
             app.refresh();
@@ -228,16 +276,31 @@ fn App() -> impl IntoView {
             <div class="fixed inset-x-0 top-0 z-40 h-10" data-tauri-drag-region=""></div>
             <div class="w-full min-w-0 px-5 pb-12 pt-12 sm:px-8 sm:pt-14 xl:px-12">
                 <Header />
-                <Tabs />
+                <Tabs visible />
                 <div role="tabpanel" class="page-stack mt-0 min-w-0">
-                    {move || match app.tab.get() {
-                        Tab::Overview => pages::overview::Overview().into_any(),
-                        Tab::Transactions => pages::transactions::Transactions().into_any(),
-                        Tab::Spending => view! { <SpendingTabs /> }.into_any(),
-                        Tab::Plan => pages::plan::Plan().into_any(),
-                        Tab::Wishes => pages::wishes::Wishes().into_any(),
-                        Tab::Events => pages::events::Events().into_any(),
-                        Tab::Manage => view! { <ManageTabs /> }.into_any(),
+                    {move || {
+                        // A page's own owner: the contexts it provides (Overview's
+                        // `PanelState`, …) end with it instead of reaching the next page.
+                        let owner = Owner::new();
+                        let page = owner.with(|| match app.own_tab.get() {
+                            Some(id) => {
+                                let name = tabs.with_untracked(|t| {
+                                    t.iter().find(|v| v.id == id).map(|v| v.name.clone())
+                                });
+                                let name = name.unwrap_or_default();
+                                view! { <PageView tab=id.clone() tab_name=name page=id /> }.into_any()
+                            }
+                            None => match app.tab.get() {
+                                Tab::Overview => pages::overview::Overview().into_any(),
+                                Tab::Transactions => pages::transactions::Transactions().into_any(),
+                                Tab::Spending => view! { <SpendingTabs /> }.into_any(),
+                                Tab::Plan => pages::plan::Plan().into_any(),
+                                Tab::Wishes => pages::wishes::Wishes().into_any(),
+                                Tab::Events => pages::events::Events().into_any(),
+                                Tab::Manage => view! { <ManageTabs /> }.into_any(),
+                            },
+                        });
+                        OwnedView::new_with_owner(page, owner)
                     }}
                 </div>
             </div>
@@ -283,7 +346,7 @@ fn Header() -> impl IntoView {
 }
 
 #[component]
-fn Tabs() -> impl IntoView {
+fn Tabs(visible: Memo<Vec<TabView>>) -> impl IntoView {
     let app = state();
     view! {
         <div
@@ -291,21 +354,25 @@ fn Tabs() -> impl IntoView {
             aria-label="Finance sections"
             class=cn([TABS_LIST, "glass-bar sticky top-10 z-30 mb-4 flex w-full gap-0.5 sm:mb-6 sm:inline-flex sm:w-auto sm:gap-1"])
         >
-            {Tab::ALL
+            {move || visible
+                .get()
                 .into_iter()
                 .enumerate()
                 .map(|(i, tab)| {
+                    let id = StoredValue::new(tab.id);
+                    let on = move || id.with_value(|id| app.shown_id() == *id);
+                    let title = if i < 9 { format!("{} (⌘{})", tab.name, i + 1) } else { tab.name.clone() };
                     view! {
                         <button
                             type="button"
                             role="tab"
-                            aria-selected=move || (app.tab.get() == tab).to_string()
-                            data-state=move || if app.tab.get() == tab { "active" } else { "inactive" }
-                            title=format!("{} (⌘{})", tab.label(), i + 1)
+                            aria-selected=move || on().to_string()
+                            data-state=move || if on() { "active" } else { "inactive" }
+                            title=title
                             class=cn([TABS_TRIGGER, "min-w-0 grow justify-center truncate px-1.5 text-eyebrow sm:grow-0 sm:px-4 sm:text-xs"])
-                            on:click=move |_| app.go(tab)
+                            on:click=move |_| id.with_value(|id| app.go_id(id))
                         >
-                            {tab.label()}
+                            {tab.name}
                         </button>
                     }
                 })
@@ -366,8 +433,92 @@ fn ManageTabs() -> impl IntoView {
     }
 }
 
+/// What the tab bar shows: every tab that is not hidden, plus a hidden one while it is on screen.
+pub fn visible_tabs(tabs: &[TabView], shown: &str) -> Vec<TabView> {
+    tabs.iter()
+        .filter(|t| !t.hidden || t.id == shown)
+        .cloned()
+        .collect()
+}
+
+/// The tab to show after `gone` disappears (deleted or hidden while on screen): the first visible one.
+pub fn fallback_tab(tabs: &[TabView], gone: &str) -> String {
+    tabs.iter()
+        .find(|t| !t.hidden && t.id != gone)
+        // Manage is never hidden, so this is only a guard.
+        .map_or_else(|| Tab::Manage.id().into(), |t| t.id.clone())
+}
+
 fn main() {
     console_error_panic_hook::set_once();
     api::keep_details_open();
     leptos::mount::mount_to_body(App);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tab(id: &str, hidden: bool) -> TabView {
+        TabView {
+            id: id.into(),
+            name: id.into(),
+            built_in: true,
+            hidden,
+        }
+    }
+
+    fn ids(tabs: &[TabView]) -> Vec<&str> {
+        tabs.iter().map(|t| t.id.as_str()).collect()
+    }
+
+    #[test]
+    fn a_hidden_tab_is_not_in_the_bar() {
+        let tabs = [
+            tab("overview", false),
+            tab("plan", true),
+            tab("manage", false),
+        ];
+        assert_eq!(
+            ids(&visible_tabs(&tabs, "overview")),
+            ["overview", "manage"]
+        );
+    }
+
+    #[test]
+    fn a_hidden_tab_shows_while_it_is_open() {
+        let tabs = [
+            tab("overview", false),
+            tab("plan", true),
+            tab("manage", false),
+        ];
+        assert_eq!(
+            ids(&visible_tabs(&tabs, "plan")),
+            ["overview", "plan", "manage"]
+        );
+    }
+
+    #[test]
+    fn the_fallback_is_the_first_visible_tab() {
+        let tabs = [tab("overview", false), tab("manage", false)];
+        assert_eq!(fallback_tab(&tabs, "own-1"), "overview");
+    }
+
+    #[test]
+    fn the_fallback_skips_hidden_tabs() {
+        let tabs = [
+            tab("overview", true),
+            tab("plan", true),
+            tab("manage", false),
+        ];
+        assert_eq!(fallback_tab(&tabs, "plan"), "manage");
+    }
+
+    #[test]
+    fn tab_ids_round_trip() {
+        for t in Tab::ALL {
+            assert_eq!(Tab::from_id(t.id()), Some(t));
+        }
+        assert_eq!(Tab::from_id("own-1"), None);
+    }
 }

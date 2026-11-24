@@ -156,6 +156,20 @@ fn defs() -> Vec<&'static PanelDef> {
     registry().collect()
 }
 
+/// The page's entry. A tab not saved yet is written in with the whole bar
+/// first: `page_mut` would append it, moving it to the end of the bar.
+fn page_entry<'a>(
+    l: &'a mut UiLayout,
+    tab: &str,
+    tab_name: &str,
+    page: &str,
+) -> &'a mut PageLayout {
+    if !l.tabs.iter().any(|t| t.id == tab) {
+        edit::materialised(l);
+    }
+    l.page_mut(tab, tab_name, page)
+}
+
 /// Write the page's full resolved list, changed by `f`, into `layout`.
 fn write_page(
     layout: &mut UiLayout,
@@ -165,7 +179,7 @@ fn write_page(
 ) {
     let mut items = resolve(defs, page, layout.page(page));
     items.iter_mut().for_each(f);
-    layout.page_mut(tab, tab_name, page).items = items;
+    page_entry(layout, tab, tab_name, page).items = items;
 }
 
 /// `layout` with one panel's fold state flipped.
@@ -245,18 +259,17 @@ impl LayoutState {
         state
     }
 
-    pub fn toggle(
-        &self,
-        tab: &'static str,
-        tab_name: &'static str,
-        page: &'static str,
-        panel: &str,
-    ) {
+    /// The tab bar's tabs; reactive.
+    pub fn tabs(&self) -> Vec<edit::TabView> {
+        self.layout.with(edit::tabs)
+    }
+
+    pub fn toggle(&self, tab: &str, tab_name: &str, page: &str, panel: &str) {
         self.change(|l| toggled(l, &defs(), (tab, tab_name, page), panel));
     }
 
     /// Unfolds `panel`, for a link that points at it; nothing when it is open.
-    pub fn open(&self, tab: &'static str, tab_name: &'static str, page: &'static str, panel: &str) {
+    pub fn open(&self, tab: &str, tab_name: &str, page: &str, panel: &str) {
         let defs = defs();
         let folded = self.layout.with_untracked(|l| {
             resolve(&defs, page, l.page(page))
@@ -268,13 +281,7 @@ impl LayoutState {
         }
     }
 
-    pub fn set_all(
-        &self,
-        tab: &'static str,
-        tab_name: &'static str,
-        page: &'static str,
-        folded: bool,
-    ) {
+    pub fn set_all(&self, tab: &str, tab_name: &str, page: &str, folded: bool) {
         self.change(|l| all_set(l, &defs(), (tab, tab_name, page), folded));
     }
 
@@ -314,10 +321,17 @@ impl LayoutState {
 
 /// A page's panels, as its saved layout says, with "Fold all / Open all".
 #[component]
-pub fn PageView(tab: &'static str, tab_name: &'static str, page: &'static str) -> impl IntoView {
+pub fn PageView(
+    #[prop(into)] tab: String,
+    #[prop(into)] tab_name: String,
+    #[prop(into)] page: String,
+) -> impl IntoView {
     let state = expect_context::<LayoutState>();
     let report = crate::state().report;
-    let items = Memo::new(move |_| state.layout.with(|l| resolve(&defs(), page, l.page(page))));
+    let at = StoredValue::new((tab, tab_name, page));
+    let items = Memo::new(move |_| {
+        at.with_value(|(_, _, page)| state.layout.with(|l| resolve(&defs(), page, l.page(page))))
+    });
     // Read inside reactive closures, so `shown` may track signals.
     let visible = move || items.with(|v| drawn(v, is_shown));
     let all_folded = move || visible().iter().all(|i| i.folded);
@@ -339,7 +353,7 @@ pub fn PageView(tab: &'static str, tab_name: &'static str, page: &'static str) -
                 title=def.title
                 summary=summary
                 folded=folded
-                on_toggle=Callback::new(move |()| state.toggle(tab, tab_name, page, id))
+                on_toggle=Callback::new(move |()| at.with_value(|(t, n, p)| state.toggle(t, n, p, id)))
                 half=item.half
             >
                 {render()}
@@ -349,22 +363,27 @@ pub fn PageView(tab: &'static str, tab_name: &'static str, page: &'static str) -
     // Panels wait for the saved layout, so one saved folded never mounts.
     let ready = move || state.load.get() != Load::Loading;
     move || {
-        ready().then(|| view! {
-        {move || any_drawn.get().then(|| view! {
-            <div class="flex justify-end">
-                <Button
-                    variant=Variant::Ghost
-                    size=Size::Sm
-                    on_click=Callback::new(move |_| state.set_all(tab, tab_name, page, !all_folded()))
-                >
-                    {move || if all_folded() { "Open all" } else { "Fold all" }}
-                </Button>
-            </div>
-        })}
-        <PanelList>
-            <For each=visible key=|i| (i.panel.clone(), i.half) children=panel />
-        </PanelList>
-    })
+        ready().then(|| {
+            view! {
+                {move || any_drawn.get().then(|| view! {
+                    <div class="flex justify-end">
+                        <Button
+                            variant=Variant::Ghost
+                            size=Size::Sm
+                            on_click=Callback::new(move |_| {
+                                let folded = !all_folded();
+                                at.with_value(|(t, n, p)| state.set_all(t, n, p, folded));
+                            })
+                        >
+                            {move || if all_folded() { "Open all" } else { "Fold all" }}
+                        </Button>
+                    </div>
+                })}
+                <PanelList>
+                    <For each=visible key=|i| (i.panel.clone(), i.half) children=panel />
+                </PanelList>
+            }
+        })
     }
 }
 
@@ -582,6 +601,21 @@ mod tests {
         let other = l.page("q").cloned();
         toggled(&mut l, &refs, AT, "a");
         assert_eq!(l.page("q").cloned(), other);
+    }
+
+    #[test]
+    fn saving_a_page_keeps_the_tab_order() {
+        let d = abc();
+        let refs: Vec<&PanelDef> = d.iter().collect();
+        let mut l = UiLayout::default();
+        toggled(&mut l, &refs, ("plan", "Plan", "p"), "a");
+        toggled(&mut l, &refs, ("overview", "Overview", "p"), "a");
+        let order: Vec<_> = edit::tabs(&l).into_iter().map(|t| t.id).collect();
+        let want: Vec<_> = edit::BUILT_IN
+            .iter()
+            .map(|(id, _)| id.to_string())
+            .collect();
+        assert_eq!(order, want);
     }
 
     #[test]
