@@ -7,6 +7,7 @@ use leptos::task::spawn_local;
 use serde::Serialize;
 
 use crate::api::{NoArgs, invoke};
+use crate::ds::patterns::{ACTIONS_LOOSE, MUTED, WARN};
 use crate::ds::{Button, Field, Help, Input, Variant};
 use crate::state;
 
@@ -57,7 +58,7 @@ pub fn MerchantResearch(#[prop(into)] id: String) -> impl IntoView {
             </Button>
             {move || {
                 let e = error.get();
-                (!e.is_empty()).then(|| view! { <p role="alert" class="text-sm text-negative-fg">{e}</p> })
+                (!e.is_empty()).then(|| view! { <p role="alert" class=WARN>{e}</p> })
             }}
             {move || result.get().map(|r| {
                 let status = r
@@ -120,13 +121,13 @@ pub fn RequestSuggestions() -> impl IntoView {
         });
     };
     view! {
-        <div class="flex flex-wrap items-center gap-3">
+        <div class=ACTIONS_LOOSE>
             <Button variant=Variant::Secondary disabled=Signal::derive(move || busy.get()) on_click=Callback::new(request)>
                 "Request local category suggestions"
             </Button>
             {move || {
                 let n = notice.get();
-                (!n.is_empty()).then(|| view! { <p role="status" class="text-sm text-fg-muted">{n}</p> })
+                (!n.is_empty()).then(|| view! { <p role="status" class=MUTED>{n}</p> })
             }}
         </div>
     }

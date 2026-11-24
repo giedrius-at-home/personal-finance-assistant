@@ -13,6 +13,10 @@ use serde::Serialize;
 
 use super::{Choice, TextInput, clean_error, options, report_categories};
 use crate::api::invoke;
+use crate::ds::patterns::{
+    Disclosure, FILTER_ROW, GROW_40, GROW_56, MUTED, SECTION_HEADING, SUBLINE, TRAILING, WARN,
+    WRAP_TEXT,
+};
 use crate::ds::{
     CardTone, Eyebrow, FactsRow, Field, Heading, Help, Money, Size, Variant, button_class,
     card_class, cn,
@@ -243,17 +247,17 @@ pub fn PersonalSpending() -> impl IntoView {
                         if s.is_empty() { "YOUR CHOICE".to_owned() } else { format!("YOUR CHOICE · SINCE {}", s.to_uppercase()) }
                     }}
                 </Eyebrow>
-                <h2 class="mt-1 text-xl font-semibold">"Shared spending & money back"</h2>
+                <h2 class=SECTION_HEADING>"Shared spending & money back"</h2>
             </div>
             <Help text="Money back reduces the category you choose. Money sent adds to it. No purchase link needed; no AI decisions. Bank memo cues only; nothing is assigned automatically." />
             <form
-                class="flex flex-wrap items-end gap-2"
+                class=FILTER_ROW
                 on:submit=move |e| {
                     e.prevent_default();
                     search.set(query.get_untracked().trim().to_owned());
                 }
             >
-                <Field label="Find a person" id="personal-query" class="min-w-0 flex-1 basis-56">
+                <Field label="Find a person" id="personal-query" class=GROW_56>
                     <TextInput id="personal-query" kind="search" value=query maxlength=128 placeholder="e.g. Yuri or Nicolas" />
                 </Field>
                 <button type="submit" class=button_class(Variant::Primary, Size::Md)>"Search"</button>
@@ -270,11 +274,11 @@ pub fn PersonalSpending() -> impl IntoView {
             </form>
             {move || {
                 let e = error.get();
-                (!e.is_empty()).then(|| view! { <p role="alert" class="text-sm text-negative-fg">{e}</p> })
+                (!e.is_empty()).then(|| view! { <p role="alert" class=WARN>{e}</p> })
             }}
             {move || {
                 if loading.get() {
-                    return view! { <p role="status" class="text-sm text-fg-muted">"Loading payments…"</p> }.into_any();
+                    return view! { <p role="status" class=MUTED>"Loading payments…"</p> }.into_any();
                 }
                 let (p, r, all) = (pending.get().len(), reviewed.get().len(), rows.with(Vec::len));
                 let shown_total = total.get();
@@ -305,7 +309,7 @@ pub fn PersonalSpending() -> impl IntoView {
                             children=row_view
                         />
                     </div>
-                    {(p == 0).then(|| view! { <p class="text-sm text-fg-muted">{empty}</p> })}
+                    {(p == 0).then(|| view! { <p class=MUTED>{empty}</p> })}
                     {(r > 0).then(|| view! {
                         <button
                             type="button"
@@ -364,7 +368,7 @@ fn UndoToast(toast: Toast, on_undo: Callback<Toast>, on_expire: Callback<u64>) -
         <div class="pointer-events-auto flex items-center justify-between gap-4 rounded-lg bg-contrast px-4 py-3 text-fg-on-contrast shadow-pop" role="status">
             <span class="min-w-0 text-sm">
                 {message}" "
-                <small class="block break-words text-xs opacity-75">{description}</small>
+                <small class="block break-words text-xs text-fg-on-contrast/75">{description}</small>
             </span>
             <button
                 type="button"
@@ -461,22 +465,25 @@ fn PersonalPayment(
     let id = StoredValue::new(format!("personal-{}", r.transaction_id));
     let category_id = StoredValue::new(format!("{}-category", id.get_value()));
     view! {
-        <details class="border-t border-line py-3">
-            <summary class="flex cursor-pointer justify-between gap-4">
-                <span class="min-w-0 break-words">
+        <Disclosure
+            class="border-t border-line py-3"
+            summary_class="flex justify-between gap-4"
+            summary=view! {
+                <span class=WRAP_TEXT>
                     <strong class="font-semibold">{r.description.clone()}</strong>
-                    <small class="mt-1 block text-xs text-fg-muted">
+                    <small class=SUBLINE>
                         {format!("{} · {}", r.occurred_on, if incoming { "Received" } else { "Sent" })}
                     </small>
                 </span>
-                <span class="shrink-0 text-right">
+                <span class=TRAILING>
                     {if incoming { "+" } else { "−" }}
                     <Money value=r.amount.amount unit=r.amount.currency.clone() neutral=true />
-                    <small class="mt-1 block text-xs text-fg-muted">{status}</small>
+                    <small class=SUBLINE>{status}</small>
                 </span>
-            </summary>
+            }
+        >
             <fieldset disabled=move || busy.get() class="flex min-w-0 flex-wrap items-end gap-3 border-0 px-0 pb-2 pt-4">
-                <Field label="This was" id=format!("{}-role", id.get_value()) class="min-w-0 flex-1 basis-56">
+                <Field label="This was" id=format!("{}-role", id.get_value()) class=GROW_56>
                     <Choice
                         id=format!("{}-role", id.get_value())
                         value=role
@@ -489,7 +496,7 @@ fn PersonalPayment(
                         on_change=Callback::new(move |v| role.set(v))
                     />
                 </Field>
-                <Field label="For" id=format!("{}-for", id.get_value()) class="min-w-0 flex-1 basis-40">
+                <Field label="For" id=format!("{}-for", id.get_value()) class=GROW_40>
                     <Choice
                         id=format!("{}-for", id.get_value())
                         disabled=Signal::derive(move || role.get() == "ignore")
@@ -502,7 +509,7 @@ fn PersonalPayment(
                     />
                 </Field>
                 <Show when=move || other.get()>
-                    <Field label="Category" id=category_id.get_value() class="min-w-0 flex-1 basis-40">
+                    <Field label="Category" id=category_id.get_value() class=GROW_40>
                         <Choice
                             id=category_id.get_value()
                             value=category
@@ -535,8 +542,8 @@ fn PersonalPayment(
             <Help text="Applies to this transaction across spending, budgets and forecasts. Your bank amount stays unchanged." />
             {move || {
                 let e = error.get();
-                (!e.is_empty()).then(|| view! { <p role="alert" class="text-sm text-negative-fg">{e}</p> })
+                (!e.is_empty()).then(|| view! { <p role="alert" class=WARN>{e}</p> })
             }}
-        </details>
+        </Disclosure>
     }
 }

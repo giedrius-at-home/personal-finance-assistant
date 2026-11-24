@@ -21,6 +21,10 @@ use super::details::TransactionDetails;
 use super::research::{MerchantResearch, RequestSuggestions};
 use super::{Choice, clean_error, focus_id, options, region_name};
 use crate::api::{NoArgs, invoke, load};
+use crate::ds::patterns::{
+    BOARD_TITLE, CHIPS, Disclosure, HINT, INSET, ITEM_HEADING, MUTED, PAIR, QUEUE_TITLE, STACK,
+    STACK_SM, STRONG_SM, WARNING_TEXT,
+};
 use crate::ds::{
     Badge, CONTROL, CardTone, EmptyState, Eyebrow, FactsRow, Field, Heading, Money, Size, Skeleton,
     Tone, Variant, button_class, card_class, cn,
@@ -760,8 +764,8 @@ pub fn OwnerReview() -> impl IntoView {
                         }
                         on:click=move |_| active_id.set(click_id.clone())
                     >
-                        <span class="block min-w-0 truncate text-sm font-semibold">{name}</span>
-                        <span class="text-xs text-fg-muted">
+                        <span class=QUEUE_TITLE>{name}</span>
+                        <span class=HINT>
                             {format!("{when} · ")}
                             {match amount {
                                 Some((value, unit)) => view! { <Money value=value unit=unit neutral=true /> }.into_any(),
@@ -817,8 +821,8 @@ pub fn OwnerReview() -> impl IntoView {
                         }
                         on:click=move |_| active_id.set(click_id.clone())
                     >
-                        <span class="block min-w-0 truncate text-sm font-semibold">{queue_name(&item)}</span>
-                        <span class="text-xs text-fg-muted">
+                        <span class=QUEUE_TITLE>{queue_name(&item)}</span>
+                        <span class=HINT>
                             {format!("{when} · ")}
                             {match amount {
                                 Some((value, unit)) => view! { <Money value=value unit=unit neutral=true /> }.into_any(),
@@ -851,7 +855,7 @@ pub fn OwnerReview() -> impl IntoView {
         view! {
             <div class=FOCUS_NAV>
                 <span>{format!("{} of {len} · {label}", index + 1)}</span>
-                <div class="flex gap-2">
+                <div class=PAIR>
                     <button
                         type="button"
                         class=button_class(Variant::Secondary, Size::Sm)
@@ -926,7 +930,7 @@ pub fn OwnerReview() -> impl IntoView {
                     let busy2 = busy_here.clone();
                     let busy3 = busy_here.clone();
                     view! {
-                        <div class="grid gap-4">
+                        <div class=STACK>
                             <div>
                                 <Eyebrow level=Heading::P>"CATEGORY"</Eyebrow>
                                 <h3 class="mt-1 break-words text-xl font-semibold">{description.clone()}</h3>
@@ -946,7 +950,7 @@ pub fn OwnerReview() -> impl IntoView {
                                     on_change=Callback::new(move |v| correct_inventory(id.clone(), current.clone(), v))
                                 />
                             </Field>
-                            <div class="flex flex-wrap gap-2">
+                            <div class=CHIPS>
                                 <button
                                     type="button"
                                     class=button_class(Variant::Primary, Size::Md)
@@ -962,8 +966,8 @@ pub fn OwnerReview() -> impl IntoView {
                     .into_any()
                 }
                 ("done", proposal) => view! {
-                    <div class="grid gap-2">
-                        <h3 class="break-words text-xl font-semibold">{description}</h3>
+                    <div class=STACK_SM>
+                        <h3 class=ITEM_HEADING>{description}</h3>
                         <FactsRow rows=vec![("Completed".to_owned(), entry.entry.resolution.clone().unwrap_or_default())] />
                         {proposal.map(|p| view! { <TransactionDetails item=p /> })}
                     </div>
@@ -974,9 +978,9 @@ pub fn OwnerReview() -> impl IntoView {
                 }
                 .into_any(),
                 (_, None) => view! {
-                    <div class="grid gap-2">
-                        <h3 class="break-words text-xl font-semibold">{description}</h3>
-                        <p class="text-sm text-fg-muted">"Category is being prepared."</p>
+                    <div class=STACK_SM>
+                        <h3 class=ITEM_HEADING>{description}</h3>
+                        <p class=MUTED>"Category is being prepared."</p>
                     </div>
                 }
                 .into_any(),
@@ -1050,7 +1054,7 @@ pub fn OwnerReview() -> impl IntoView {
                     when=move || view_model.with(|m| m.daily)
                     fallback=move || {
                         view! {
-                            <div class="flex flex-wrap gap-2">
+                            <div class=CHIPS>
                                 <button
                                     type="button"
                                     class=button_class(Variant::Secondary, Size::Md)
@@ -1079,7 +1083,7 @@ pub fn OwnerReview() -> impl IntoView {
                         let items = batch.get();
                         (!items.is_empty()).then(|| view! { <BatchReview items=items categories=categories /> })
                     }}
-                    <div class="flex flex-wrap gap-2" aria-label="Filter transactions">
+                    <div class=CHIPS aria-label="Filter transactions">
                         {move || {
                             let m = view_model.get();
                             [
@@ -1127,7 +1131,7 @@ pub fn OwnerReview() -> impl IntoView {
                                     {focus_body}
                                     {move || {
                                         let m = inventory_message.get();
-                                        (!m.is_empty()).then(|| view! { <p role="status" class="text-sm text-fg-muted">{m}</p> })
+                                        (!m.is_empty()).then(|| view! { <p role="status" class=MUTED>{m}</p> })
                                     }}
                                 </div>
                             </div>
@@ -1222,7 +1226,7 @@ fn BatchReview(items: Vec<ReviewItem>, categories: Memo<Vec<String>>) -> impl In
             <div class="flex flex-col items-stretch justify-between gap-3 sm:flex-row sm:items-center">
                 <div>
                     <Eyebrow level=Heading::P>"CURRENT BATCH"</Eyebrow>
-                    <h3 class="mt-1 text-lg font-semibold">{format!("{count} ready")}</h3>
+                    <h3 class=BOARD_TITLE>{format!("{count} ready")}</h3>
                 </div>
                 <button
                     type="button"
@@ -1266,7 +1270,7 @@ fn BatchReview(items: Vec<ReviewItem>, categories: Memo<Vec<String>>) -> impl In
                             <label class="grid items-center gap-2 border-b border-line py-2.5 sm:grid-cols-[minmax(0,1fr)_minmax(150px,210px)] sm:gap-3.5">
                                 <span class="grid min-w-0 gap-0.5">
                                     <strong class="truncate text-sm font-semibold">{queue_name(&item)}</strong>
-                                    <small class="text-xs text-fg-muted">
+                                    <small class=HINT>
                                         {when}
                                         {amount.map(|(value, unit)| view! { " · " <Money value=value unit=unit neutral=true /> })}
                                     </small>
@@ -1285,7 +1289,7 @@ fn BatchReview(items: Vec<ReviewItem>, categories: Memo<Vec<String>>) -> impl In
             </div>
             {move || {
                 let m = message.get();
-                (!m.is_empty()).then(|| view! { <p role="status" class="text-sm text-fg-muted">{m}</p> })
+                (!m.is_empty()).then(|| view! { <p role="status" class=MUTED>{m}</p> })
             }}
         </section>
     }
@@ -1504,7 +1508,7 @@ fn ReviewRow(
                     <Eyebrow level=Heading::P>"TRANSACTION"</Eyebrow>
                     <h3 class="mt-1 break-words text-xl font-semibold leading-tight sm:text-2xl">{title}</h3>
                     {(suggested_merchant.is_some() && saved_merchant.is_none()).then(|| view! {
-                        <span class="text-xs text-fg-muted">"Suggested name"</span>
+                        <span class=HINT>"Suggested name"</span>
                     })}
                 </div>
                 {amount.map(|(value, unit)| view! {
@@ -1512,7 +1516,7 @@ fn ReviewRow(
                 })}
             </div>
             <FactsRow rows=date_line />
-            <div class="rounded-lg border border-border bg-card-muted px-4 py-3">
+            <div class=INSET>
                 <Eyebrow level=Heading::P>"BANK DESCRIPTION"</Eyebrow>
                 <p class="mt-1.5 whitespace-pre-wrap break-words text-sm leading-relaxed">
                     {if missing_description { "The bank import did not include a description.".to_owned() } else { description }}
@@ -1521,7 +1525,7 @@ fn ReviewRow(
             <div class="flex flex-wrap items-center gap-2.5 border-b border-line pb-3 text-sm">
                 <Badge tone=Tone::Outline>{original}</Badge>
                 <span aria-hidden="true" class="text-fg-muted">"→"</span>
-                <Badge tone=Tone::Accent class="text-sm font-semibold"><strong>{suggestion}</strong></Badge>
+                <Badge tone=Tone::Accent class=STRONG_SM><strong>{suggestion}</strong></Badge>
             </div>
             <FactsRow rows=method_line />
             {(!ranked.is_empty()).then(|| view! {
@@ -1541,12 +1545,11 @@ fn ReviewRow(
             })}
             {hint.map(|h| view! { <FactsRow rows=h /> })}
             <TransactionDetails item=i.clone() on_editing=Callback::new(move |dirty| details_editing.set(dirty)) />
-            <details class="text-sm">
-                <summary class="cursor-pointer text-sm font-medium text-fg-muted">"Unfamiliar merchant?"</summary>
+            <Disclosure class="text-sm" summary_class="text-sm font-medium text-fg-muted" summary="Unfamiliar merchant?">
                 <div class="mt-3"><MerchantResearch id=i.proposal_id.clone() /></div>
-            </details>
+            </Disclosure>
             <Show when=move || details_editing.get()>
-                <p role="status" class="text-sm text-warning-fg">"Save or discard your detail edits before deciding on the category."</p>
+                <p role="status" class=WARNING_TEXT>"Save or discard your detail edits before deciding on the category."</p>
             </Show>
             <div>
                 <div
@@ -1631,8 +1634,7 @@ fn ReviewRow(
                             })
                         />
                     </Field>
-                    <details class="grid gap-3 border-t border-line pt-2">
-                        <summary class="cursor-pointer text-fg-muted">"Create a new category only if none fits"</summary>
+                    <Disclosure class="grid gap-3 border-t border-line pt-2" summary_class="text-fg-muted" summary="Create a new category only if none fits">
                         <div class="mt-3 grid gap-3">
                             <Field label="New category name" id=format!("new-category-{}", item.with_value(|i| i.proposal_id.clone()))>
                                 <input
@@ -1660,7 +1662,7 @@ fn ReviewRow(
                                 {move || if busy.get() { "Saving…" } else { "Create and use category" }}
                             </button>
                         </div>
-                    </details>
+                    </Disclosure>
                 </div>
             </Show>
         </article>

@@ -9,6 +9,7 @@ use serde::Serialize;
 
 use super::{Choice, clean_error, options};
 use crate::api::invoke;
+use crate::ds::patterns::{Disclosure, DisclosureKind, GROW_48, HINT, INLINE_FORM, MUTED};
 use crate::ds::{Field, Help, Size, Variant, button_class, cn};
 use crate::state;
 
@@ -99,8 +100,7 @@ pub fn CategoryConsolidation(catalog: CategoryCatalog) -> impl IntoView {
         list
     };
     view! {
-        <details class="rounded-lg border border-border bg-card-muted px-4 py-3">
-            <summary class="cursor-pointer text-sm font-semibold">{summary}</summary>
+        <Disclosure kind=DisclosureKind::Panel summary=summary>
             <div class="mt-3 grid gap-4">
                 <Help text="Checked whenever reports refresh. Review meaning before merging similar names. Extra tags stay attached to their transactions." />
                 {catalog
@@ -113,7 +113,7 @@ pub fn CategoryConsolidation(catalog: CategoryCatalog) -> impl IntoView {
                                 <span class="min-w-0 break-words text-sm">
                                     {format!("{} → {} · {} transactions", pair.source, pair.target, pair.count)}
                                     <br />
-                                    <small class="text-xs text-fg-muted">{pair.reason}</small>
+                                    <small class=HINT>{pair.reason}</small>
                                 </span>
                                 <button
                                     type="button"
@@ -131,13 +131,13 @@ pub fn CategoryConsolidation(catalog: CategoryCatalog) -> impl IntoView {
                         }
                     })
                     .collect_view()}
-                <div class="flex flex-wrap items-end gap-3">
+                <div class=INLINE_FORM>
                     {[("From", source, "consolidate-from"), ("Keep", target, "consolidate-keep")]
                         .into_iter()
                         .map(|(label, value, id)| {
                             let choices = choices.clone();
                             view! {
-                                <Field label=label id=id class="min-w-0 flex-1 basis-48">
+                                <Field label=label id=id class=GROW_48>
                                     <Choice
                                         id=id
                                         value=value
@@ -184,9 +184,9 @@ pub fn CategoryConsolidation(catalog: CategoryCatalog) -> impl IntoView {
                 })}
                 {move || {
                     let m = message.get();
-                    (!m.is_empty()).then(|| view! { <p role="status" class="text-sm text-fg-muted">{m}</p> })
+                    (!m.is_empty()).then(|| view! { <p role="status" class=MUTED>{m}</p> })
                 }}
             </div>
-        </details>
+        </Disclosure>
     }
 }
