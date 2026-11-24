@@ -17,6 +17,7 @@ use super::ui::{
     ACTIONS, Choice, FieldBox, GROW, INLINE_FORM, SMALL, TextBox, WARN, decimal_places, field_id,
     fixed, minor_amount, money, new_id, next_month, options, parse_amount,
 };
+use crate::ds::patterns::{NUM, STACK};
 use crate::ds::{Button, Size, Variant, cn};
 
 /// One line as typed.
@@ -637,7 +638,7 @@ pub fn SplitEditor(
                                     "Enter positive amounts".to_owned()
                                 };
                                 view! {
-                                    <strong class=cn(["text-sm tabular-nums", if ok { "" } else { "text-negative-fg" }])>{text}</strong>
+                                    <strong class=cn([NUM, if ok { "" } else { "text-negative-fg" }])>{text}</strong>
                                 }
                             })}
                         </div>
@@ -648,7 +649,7 @@ pub fn SplitEditor(
         .collect_view();
     let submit_label = StoredValue::new(submit_label);
     view! {
-        <div class="grid gap-4">
+        <div class=STACK>
             {suggestion_view}
             {fieldsets}
             <div>

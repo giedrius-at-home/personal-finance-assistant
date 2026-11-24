@@ -9,6 +9,7 @@ use rust_decimal::Decimal;
 
 use super::Wizard;
 use super::ui::{ACTIONS, CALLOUT, FOOTNOTE, SMALL, WARN, money};
+use crate::ds::patterns::STACK_SM;
 use crate::ds::{Button, Checkbox, Size, Variant, cn};
 
 /// A routed line's hop index, or the direct transfer of an unrouted line.
@@ -187,7 +188,7 @@ pub fn LegStatus(
                 <p class=FOOTNOTE>
                     {format!("Bank transfers from {from_name} to {to_name} since the split. Pick the ones that made this move.")}
                 </p>
-                <ul class="grid gap-2">{items}</ul>
+                <ul class=STACK_SM>{items}</ul>
             }
             .into_any()
         };
