@@ -325,9 +325,14 @@ impl LayoutState {
         title: String,
         spec: PlotSpec,
     ) -> Result<String, String> {
-        let mut out = Err("The layout is still loading".to_string());
-        self.change(|l| out = edit::plot_saved(l, id.as_deref(), &title, &spec));
-        out
+        if !self.load.get_untracked().may_change() {
+            return Err("The layout is still loading".to_string());
+        }
+        // Edited on a copy, so a refused save changes and saves nothing.
+        let mut next = self.layout.get_untracked();
+        let out = edit::plot_saved(&mut next, id.as_deref(), &title, &spec)?;
+        self.change(|l| *l = next);
+        Ok(out)
     }
 
     /// Deletes a plot and its panel from every page.
