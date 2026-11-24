@@ -266,7 +266,7 @@ pub struct LayoutState {
     editing: RwSignal<bool>,
     save_failed: RwSignal<bool>,
     /// The panel being dragged, with the page it is on.
-    carried: RwSignal<Option<(PageRef, &'static str)>>,
+    carried: RwSignal<Option<(PageRef, String)>>,
 }
 
 impl LayoutState {
@@ -369,7 +369,7 @@ impl LayoutState {
     /// Sends the dragged panel to `to` and ends the drag.
     pub fn send(&self, to: &PageRef) {
         if let Some((from, panel)) = self.carried.get_untracked() {
-            self.edit(|l| edit::panel_sent(l, &defs(), &from, to, panel));
+            self.edit(|l| edit::panel_sent(l, &defs(), &from, to, &panel));
         }
         self.carried.set(None);
     }
@@ -494,10 +494,10 @@ pub fn PageView(
         state.carried.with(|c| {
             c.as_ref()
                 .filter(|(a, _)| at.with_value(|at| a.page == at.page))
-                .map(|(_, id)| *id)
+                .map(|(_, id)| id.clone())
         })
     };
-    let target = RwSignal::new(None::<(&'static str, bool)>);
+    let target = RwSignal::new(None::<(String, bool)>);
     let panel = move |item: PanelItem| {
         let def = registry().find(|d| d.id == item.panel)?;
         let id = def.id;
@@ -529,7 +529,7 @@ pub fn PageView(
                         last=Signal::derive(move || ends.get().1.is_none())
                         half=half
                         on_grab=Callback::new(move |on: bool| {
-                            state.carried.set(on.then(|| (at.get_value(), id)));
+                            state.carried.set(on.then(|| (at.get_value(), id.to_string())));
                             target.set(None);
                         })
                         on_up=Callback::new(move |()| moved(ends.get_untracked().0, Edited::Up))
@@ -551,15 +551,16 @@ pub fn PageView(
         let drop = DropTarget {
             accepts: Signal::derive(move || dragging().is_some()),
             over: Signal::derive(move || {
-                target.get().is_some_and(|(t, _)| t == id) && dragging() != Some(id)
+                target.with(|t| t.as_ref().is_some_and(|(t, _)| t == id))
+                    && dragging().as_deref() != Some(id)
             }),
             on_over: Callback::new(move |after: bool| {
-                if target.get_untracked() != Some((id, after)) {
-                    target.set(Some((id, after)));
+                if target.with_untracked(|t| t.as_ref() != Some(&(id.to_string(), after))) {
+                    target.set(Some((id.to_string(), after)));
                 }
             }),
             on_leave: Callback::new(move |()| {
-                if target.get_untracked().is_some_and(|(t, _)| t == id) {
+                if target.with_untracked(|t| t.as_ref().is_some_and(|(t, _)| t == id)) {
                     target.set(None);
                 }
             }),
@@ -569,10 +570,10 @@ pub fn PageView(
                     return;
                 };
                 // A drop where it already is writes nothing.
-                if let (Some(f), Some(o)) = (position(from), position(id))
+                if let (Some(f), Some(o)) = (position(&from), position(id))
                     && let Some(to) = drop_move(f, o, after)
                 {
-                    edit(&|l, d, a| edit::panel_moved(l, d, a, from, to));
+                    edit(&|l, d, a| edit::panel_moved(l, d, a, &from, to));
                 }
                 state.carried.set(None);
                 target.set(None);
