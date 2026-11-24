@@ -38,6 +38,13 @@ himself, including charts the app does not ship with.
 9. **Everything is a reusable object under the style** ("everything is an
    object, no? … not just hardcoding things but putting under the style").
    Nothing new is hand-wired per page or styled in place.
+11. **Tables can be built and worked with too**, not only panels and plots
+    ("also tables are workable too, not only objects and plots", said while
+    the work was under way). My reading, not confirmed: in the builder,
+    "Table" is one of the drawings; a saved table is a panel like a saved
+    plot; its columns sort on click and it has a totals row. If the owner
+    meant changing the columns of the app's existing tables, that is a
+    further piece.
 10. **The existing pages are cleaned up the same way, as part of this
     work**, by a second agent, and the result is verified ("while you make
     the change, do that too, with another agent and verify"). I had
@@ -281,7 +288,11 @@ plot redrawing on every change:
 - **as** (the drawing): the builder offers only the drawings that fit the
   choices. Donut and Ranked need a named axis (Category, Merchant…) and no
   split. Heatmap needs two axes. Scatter needs two measures.
-- **Show numbers** swaps the drawing for the table behind it.
+- **Table** is also one of the drawings: rows are the axis, columns are
+  the measures (or the split's values), with a totals row; a click on a
+  column heading sorts by it, a second click reverses. A saved table is a
+  panel like a saved plot.
+- **Show numbers** swaps any drawing for the table behind it.
 
 A saved plot is a panel. Its header carries a small "Edit plot" control
 that opens the same builder. Its folded summary is its insight sentence.
