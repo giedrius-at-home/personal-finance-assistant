@@ -33,7 +33,7 @@ reqwest = { version = "0.13.5", default-features = false, features = ["blocking"
 sha2 = "0.10.9"
 tauri-plugin-window-state = "2.5.0"
 tauri-plugin-notification = "2.7.0"
-tauri-plugin-updater = { version = "2.14.0", default-features = false, features = ["rustls-tls", "zip"] }
+tauri-plugin-updater = { version = "2.14.1", default-features = false, features = ["rustls-tls", "zip"] }
 tokio = { version = "1.54.1", features = ["time"] }
 
 [lints]
