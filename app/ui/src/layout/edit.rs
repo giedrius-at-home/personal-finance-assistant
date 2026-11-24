@@ -649,6 +649,7 @@ mod tests {
             .map(tab)
             .into(),
             tabs_ordered: true,
+            ..Default::default()
         };
         assert_eq!(
             tab_ids(&l),
@@ -666,6 +667,7 @@ mod tests {
         let l = UiLayout {
             tabs: vec![tab("plan")],
             tabs_ordered: true,
+            ..Default::default()
         };
         assert_eq!(tab_ids(&l), defaults());
     }
@@ -694,6 +696,7 @@ mod tests {
         UiLayout {
             tabs: vec![spending, built_in("overview")],
             tabs_ordered: false,
+            ..Default::default()
         }
     }
 
@@ -731,6 +734,7 @@ mod tests {
         let l = UiLayout {
             tabs: order.map(built_in).into(),
             tabs_ordered: true,
+            ..Default::default()
         };
         assert_eq!(tab_ids(&l), order);
     }

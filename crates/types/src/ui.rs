@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 pub const MAX_TABS: usize = 50;
 pub const MAX_NAME: usize = 40;
+pub const MAX_PLOTS: usize = 200;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UiLayout {
@@ -13,6 +14,20 @@ pub struct UiLayout {
     /// folds in click order, so the built-in tabs show in their default order.
     #[serde(default)]
     pub tabs_ordered: bool,
+    #[serde(default)]
+    pub plots: Vec<SavedPlot>,
+}
+
+/// A plot the owner saved. `spec` is kept as JSON (a `PlotSpec` when readable)
+/// so one plot an older or newer build can't read cannot fail the layout.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavedPlot {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub spec: serde_json::Value,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -105,6 +120,17 @@ impl UiLayout {
                         return Err(format!("panel {} listed twice on page {}", it.panel, p.id));
                     }
                 }
+            }
+        }
+        if self.plots.len() > MAX_PLOTS {
+            return Err(format!("at most {MAX_PLOTS} plots"));
+        }
+        for (i, p) in self.plots.iter().enumerate() {
+            if self.plots[..i].iter().any(|o| o.id == p.id) {
+                return Err(format!("plot id {} used twice", p.id));
+            }
+            if p.title.is_empty() || p.title.chars().count() > MAX_NAME {
+                return Err(format!("plot title must be 1 to {MAX_NAME} characters"));
             }
         }
         Ok(())
@@ -207,5 +233,50 @@ mod tests {
                 .validate()
                 .is_err()
         );
+    }
+
+    #[test]
+    fn plots_default_to_empty_for_old_layouts() {
+        let l: UiLayout = serde_json::from_str(r#"{"tabs":[]}"#).unwrap();
+        assert!(l.plots.is_empty());
+    }
+
+    #[test]
+    fn a_layout_with_an_unreadable_plot_still_loads() {
+        let json = r#"{"tabs":[],"plots":[{"id":"p1","title":"Moon","spec":{"by":"moon_phase"}}]}"#;
+        let l: UiLayout = serde_json::from_str(json).unwrap();
+        assert_eq!(l.plots[0].title, "Moon");
+        assert!(l.validate().is_ok());
+        let spec = serde_json::from_value::<crate::plot::PlotSpec>(l.plots[0].spec.clone());
+        assert!(spec.is_err());
+    }
+
+    #[test]
+    fn validate_rules_for_plots() {
+        let plot = |id: &str, title: &str| SavedPlot {
+            id: id.into(),
+            title: title.into(),
+            spec: serde_json::json!({}),
+        };
+        let with = |plots| UiLayout {
+            plots,
+            ..Default::default()
+        };
+        assert!(
+            with(vec![plot("a", "A"), plot("b", "A")])
+                .validate()
+                .is_ok()
+        );
+        assert!(
+            with(vec![plot("a", "A"), plot("a", "B")])
+                .validate()
+                .is_err()
+        );
+        assert!(with(vec![plot("a", "")]).validate().is_err());
+        assert!(with(vec![plot("a", &"x".repeat(41))]).validate().is_err());
+        let many = (0..=MAX_PLOTS)
+            .map(|i| plot(&format!("p{i}"), "P"))
+            .collect();
+        assert!(with(many).validate().is_err());
     }
 }

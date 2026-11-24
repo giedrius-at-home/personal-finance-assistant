@@ -9,6 +9,7 @@ pub mod bank;
 pub mod gateway;
 pub mod manage;
 pub mod notify;
+pub mod plot;
 pub mod report;
 pub mod ui;
 
