@@ -334,6 +334,20 @@ impl PlotSpec {
     }
 }
 
+/// What the plot query refuses before it reads any rows, beyond `validate`:
+/// comparing or changing over all time, and an average line on a running total.
+pub fn refusal_before_rows(spec: &PlotSpec) -> Option<String> {
+    if spec.period == Period::AllTime
+        && (spec.compare != Compare::None || spec.value == Value::Change)
+    {
+        return Some("All time has no period before it to compare with.".into());
+    }
+    if spec.average_line && spec.cumulative {
+        return Some("An average line can't go with a running total.".into());
+    }
+    None
+}
+
 /// `YYYY-MM-DD` as (year, month, day), `None` unless it is a real day.
 fn ymd(s: &str) -> Option<(i64, i64, i64)> {
     let b = s.as_bytes();

@@ -12,6 +12,11 @@ use crate::model::Tx;
 use crate::period::shift_month;
 use crate::{Error, Result};
 
+/// The most buckets one plot shows, per time unit.
+const LIMIT_DAYS: i64 = 366;
+const LIMIT_WEEKS: i64 = 260;
+const LIMIT_MONTHS: i64 = 240;
+
 /// The days a period covers, both included, cut at today. Month-based
 /// periods also hold their months: a row counts by its month then.
 #[derive(Clone, Copy)]
@@ -54,6 +59,35 @@ impl Frame<'_> {
         }
     }
 
+    /// All time on a Day, Week or Month axis holding more buckets than one
+    /// plot shows: the first day of the most recent ones kept, and what is
+    /// shown ("last 366 days"). None when everything fits.
+    pub(super) fn all_time_cap(&self) -> Option<(Date, &'static str)> {
+        if self.spec.period != Period::AllTime {
+            return None;
+        }
+        let today = self.today();
+        let (from, shown) = match self.spec.by {
+            Axis::Day => (
+                today.checked_sub(Span::new().days(LIMIT_DAYS - 1)).ok()?,
+                "last 366 days",
+            ),
+            Axis::Week => (
+                bucket_start(Axis::Week, today)
+                    .checked_sub(Span::new().days((LIMIT_WEEKS - 1) * 7))
+                    .ok()?,
+                "last 260 weeks",
+            ),
+            Axis::Month => (
+                self.month_start(shift_month(self.current(), -(LIMIT_MONTHS as i32 - 1))),
+                "last 240 months",
+            ),
+            _ => return None,
+        };
+        let first = self.rows.iter().map(|r| r.day).min()?;
+        (first < from).then_some((from, shown))
+    }
+
     /// The plot's period (`back` 0), or the one of equal length `back`
     /// periods before it.
     pub(super) fn window(&self, back: i32) -> Result<Window> {
@@ -80,7 +114,13 @@ impl Frame<'_> {
             Period::Last12Months => months(shift_month(current, -11), current),
             Period::ThisYear => months(current.first_of_year(), current),
             Period::AllTime => Window {
-                from: self.rows.iter().map(|r| r.day).min().unwrap_or(today),
+                from: self
+                    .rows
+                    .iter()
+                    .map(|r| r.day)
+                    .min()
+                    .unwrap_or(today)
+                    .max(self.all_time_cap().map_or(Date::MIN, |(from, _)| from)),
                 to: today,
                 months: None,
             },
@@ -374,9 +414,9 @@ fn next_bucket(axis: Axis, start: Date) -> Option<Date> {
 /// Every bucket from `from` through `to`, refused past the limit for its unit.
 fn buckets(axis: Axis, from: Date, to: Date) -> Result<Vec<Date>> {
     let (limit, unit) = match axis {
-        Axis::Day => (366, "days"),
-        Axis::Week => (260, "weeks"),
-        Axis::Month => (240, "months"),
+        Axis::Day => (LIMIT_DAYS as usize, "days"),
+        Axis::Week => (LIMIT_WEEKS as usize, "weeks"),
+        Axis::Month => (LIMIT_MONTHS as usize, "months"),
         _ => (usize::MAX, ""),
     };
     let mut starts = Vec::new();

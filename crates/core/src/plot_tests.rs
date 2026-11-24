@@ -499,8 +499,32 @@ fn a_day_axis_over_all_time_is_refused_past_the_limit() {
     let mut rows = ledger();
     rows.push(out("ancient", "5", None, "2020-01-01"));
     let s = spec(Axis::Day, Period::AllTime, &[Measure::Spent]);
-    let err = plot_query(&Ctx::new(&snap(rows), &now()), &s).unwrap_err();
+    // All time keeps the most recent 366 days and says so.
+    let days = query(&snap(rows.clone()), &s);
+    assert_eq!(days.categories.len(), 366);
+    assert_eq!(
+        days.titles.last(),
+        Some(&"Tuesday 24 November 2026".to_owned())
+    );
+    assert!(
+        days.subtitle.starts_with("All time, last 366 days shown"),
+        "{}",
+        days.subtitle
+    );
+    assert_eq!(total(&days), dec("1050"), "the 2020 row is left out");
+    // A Between period over the limit is still refused.
+    let between = PlotSpec {
+        period: Period::Between {
+            from: "2020-01-01".into(),
+            to: "2026-11-24".into(),
+        },
+        ..s.clone()
+    };
+    let err = plot_query(&Ctx::new(&snap(rows), &now()), &between).unwrap_err();
     assert!(err.to_string().contains("366"), "{err}");
+    // Within the limit nothing is cut.
+    let fits = query(&snap(ledger()), &s);
+    assert!(fits.subtitle.starts_with("All time ·"), "{}", fits.subtitle);
     let months = query(
         &snap(ledger()),
         &spec(Axis::Month, Period::AllTime, &[Measure::Spent]),

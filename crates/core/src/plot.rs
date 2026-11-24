@@ -9,8 +9,8 @@ mod options;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use finance_types::plot::{
-    Axis, Compare, Draw, Filters, Measure, MeasureSpec, Period, PeriodBasis, PlotData, PlotSeries,
-    PlotSpec, Split, Unit, Value,
+    Axis, Draw, Filters, Measure, MeasureSpec, Period, PeriodBasis, PlotData, PlotSeries, PlotSpec,
+    Split, Unit, Value, refusal_before_rows,
 };
 use finance_types::report::Currency;
 use jiff::civil::Date;
@@ -214,17 +214,8 @@ struct Frame<'a> {
 
 pub fn plot_query(ctx: &Ctx<'_>, spec: &PlotSpec) -> Result<PlotData> {
     spec.validate().map_err(Error::Rejected)?;
-    if spec.period == Period::AllTime
-        && (spec.compare != Compare::None || spec.value == Value::Change)
-    {
-        return Err(Error::Rejected(
-            "All time has no period before it to compare with.".into(),
-        ));
-    }
-    if spec.average_line && spec.cumulative {
-        return Err(Error::Rejected(
-            "An average line can't go with a running total.".into(),
-        ));
+    if let Some(why) = refusal_before_rows(spec) {
+        return Err(Error::Rejected(why));
     }
     let snap = ctx.snap;
     let payments = plans::planned_payment_views(ctx);
@@ -428,7 +419,7 @@ pub fn plot_query(ctx: &Ctx<'_>, spec: &PlotSpec) -> Result<PlotData> {
         } else {
             Unit::Money
         },
-        subtitle: subtitle(spec),
+        subtitle: subtitle(spec, frame.all_time_cap().map(|(_, shown)| shown)),
         left_out: axis_left_out + split_left_out,
     })
 }
@@ -603,7 +594,8 @@ fn spellings(rows: &[Row]) -> HashMap<String, String> {
         .collect()
 }
 
-fn subtitle(spec: &PlotSpec) -> String {
+/// `capped`: All time cut to its most recent buckets ("last 366 days").
+fn subtitle(spec: &PlotSpec, capped: Option<&str>) -> String {
     let period = match &spec.period {
         Period::ThisMonth => "This month".to_owned(),
         Period::LastMonth => "Last month".to_owned(),
@@ -611,7 +603,10 @@ fn subtitle(spec: &PlotSpec) -> String {
         Period::Last6Months => "Last 6 months".to_owned(),
         Period::Last12Months => "Last 12 months".to_owned(),
         Period::ThisYear => "This year".to_owned(),
-        Period::AllTime => "All time".to_owned(),
+        Period::AllTime => match capped {
+            Some(shown) => format!("All time, {shown} shown"),
+            None => "All time".to_owned(),
+        },
         Period::Between { from, to } => format!("{from} to {to}"),
     };
     let basis = match spec.period_basis {
