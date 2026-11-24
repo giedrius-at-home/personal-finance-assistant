@@ -140,28 +140,51 @@ struct SaveArgs {
     layout: UiLayout,
 }
 
+/// How far the `ui_layout` read got.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Load {
+    Loading,
+    Loaded,
+    /// The saved state is unknown: saving would write over it.
+    Failed,
+}
+
+impl Load {
+    /// A click may change the screen.
+    fn may_change(self) -> bool {
+        self != Self::Loading
+    }
+
+    /// A change may be saved.
+    fn may_save(self) -> bool {
+        self == Self::Loaded
+    }
+}
+
 /// The saved layout, shared by every page; changes are saved in the background.
 #[derive(Clone, Copy)]
 pub struct LayoutState {
     layout: RwSignal<UiLayout>,
     queue: StoredValue<SaveQueue>,
-    /// Changes wait for the saved layout, so an early click cannot save over it.
-    ready: StoredValue<bool>,
+    load: RwSignal<Load>,
 }
 
 impl LayoutState {
-    /// Reads `ui_layout` once; the default until it arrives or when it fails.
+    /// Reads `ui_layout` once. After a failed read the default shows and changes are not saved.
     pub fn load() -> Self {
         let state = Self {
             layout: RwSignal::new(UiLayout::default()),
             queue: StoredValue::new(SaveQueue::default()),
-            ready: StoredValue::new(false),
+            load: RwSignal::new(Load::Loading),
         };
         spawn_local(async move {
-            if let Ok(layout) = api::invoke::<UiLayout>("ui_layout", &NoArgs {}).await {
-                state.layout.set(layout);
+            match api::invoke::<UiLayout>("ui_layout", &NoArgs {}).await {
+                Ok(layout) => {
+                    state.layout.set(layout);
+                    state.load.set(Load::Loaded);
+                }
+                Err(_) => state.load.set(Load::Failed),
             }
-            state.ready.set_value(true);
         });
         state
     }
@@ -187,14 +210,16 @@ impl LayoutState {
     }
 
     fn change(&self, f: impl FnOnce(&mut UiLayout)) {
-        if !self.ready.get_value() {
+        let load = self.load.get_untracked();
+        if !load.may_change() {
             return;
         }
         self.layout.update(f);
-        if self
-            .queue
-            .try_update_value(SaveQueue::changed)
-            .unwrap_or(false)
+        if load.may_save()
+            && self
+                .queue
+                .try_update_value(SaveQueue::changed)
+                .unwrap_or(false)
         {
             self.save();
         }
@@ -262,7 +287,10 @@ pub mod page_view {
                 </PanelFrame>
             })
         };
-        view! {
+        // Panels wait for the saved layout, so one saved folded never mounts.
+        let ready = move || state.load.get() != Load::Loading;
+        move || {
+            ready().then(|| view! {
             <div class="flex justify-end">
                 <Button
                     variant=Variant::Ghost
@@ -275,6 +303,7 @@ pub mod page_view {
             <PanelList>
                 <For each=move || items.get() key=|i| (i.panel.clone(), i.half) children=panel />
             </PanelList>
+        })
         }
     }
 }
@@ -456,6 +485,13 @@ mod tests {
         let other = l.page("q").cloned();
         toggled(&mut l, &refs, AT, "a");
         assert_eq!(l.page("q").cloned(), other);
+    }
+
+    #[test]
+    fn clicks_wait_for_the_read_and_are_not_saved_after_a_failed_one() {
+        let got =
+            [Load::Loading, Load::Loaded, Load::Failed].map(|l| (l.may_change(), l.may_save()));
+        assert_eq!(got, [(false, false), (true, true), (true, false)]);
     }
 
     #[test]
