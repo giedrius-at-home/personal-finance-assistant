@@ -7,13 +7,16 @@ use finance_types::manage::{ImportRun, ManageWorkspace};
 use finance_types::report::ReviewReport;
 use leptos::prelude::*;
 
-use super::ui::{FEEDBACK, Ops, PREVIEW, frame, load_workspace, local_date};
-use crate::api::{NoArgs, load};
-use crate::ds::patterns::{CARD_GRID, CARD_TITLE, REVIEW_GRID, TITLE};
+use super::ui::{
+    FEEDBACK, Ops, PREVIEW, frame, load_workspace, local_date, with_workspace, workspace_loaded,
+};
+use crate::api::{Loaded, NoArgs, load};
+use crate::ds::patterns::{CARD_GRID, CARD_TITLE, TITLE};
 use crate::ds::{
     Badge, Button, Card, CardHeader, CardTitle, Eyebrow, FactsRow, Heading, Help, Icon, Lucide,
     Size, Tone, Variant, cn,
 };
+use crate::layout::{Initial, PageView, PanelDef};
 use crate::pages::with_report;
 use crate::{ManageSection, state};
 
@@ -27,65 +30,121 @@ pub fn Status() -> impl IntoView {
         app.revision.track();
         NoArgs {}
     });
-    view! {
-        {frame(ops, workspace, retry, move |ws| view! { <Connections ws=ws ops=ops /> }.into_any())}
-        <div class=REVIEW_GRID>
-            <CategoryReview review=review />
-            {with_report(|report| {
-                let accounts = report.cash_overview.accounts.clone();
-                let refreshed = report.last_firefly_refresh.clone();
-                let failed = report.firefly_refresh_failed;
-                view! {
-                    <Card>
-                        <CardHeader class="mb-2">
-                            <CardTitle level=Heading::H2>"Account data health"</CardTitle>
-                            <span aria-hidden="true" class="text-fg-muted"><Lucide icon=Icon::Database size=17 /></span>
-                        </CardHeader>
-                        <h3 class=TITLE>
-                            {if failed {
-                                "Refresh failed"
-                            } else if refreshed.is_some() {
-                                "Refresh recorded"
-                            } else {
-                                "No bank refresh recorded."
-                            }}
-                        </h3>
-                        <p class="mb-4 mt-1 text-sm text-fg-muted">
-                            {refreshed
-                                .map(|r| local_date(Some(&r)))
-                                .unwrap_or_else(|| "No source refresh timestamp is available.".into())}
-                        </p>
-                        {accounts
-                            .into_iter()
-                            .map(|account| {
-                                view! {
-                                    <div class="grid gap-1.5 border-t border-line py-4 text-xs text-fg-muted">
-                                        <strong class="text-sm font-semibold text-fg">{account.name}</strong>
-                                        <span>{format!("{} recorded transactions", account.transaction_count)}</span>
-                                        <span>
-                                            {format!(
-                                                "{} of {} expenses uncategorised",
-                                                account.uncategorised_outflows,
-                                                account.outflow_count,
-                                            )}
-                                        </span>
-                                        <span>
-                                            {format!(
-                                                "History: {} — {}",
-                                                account.first_transaction_on.as_deref().unwrap_or("Unknown"),
-                                                account.last_transaction_on.as_deref().unwrap_or("Unknown"),
-                                            )}
-                                        </span>
-                                    </div>
-                                }
-                            })
-                            .collect_view()}
-                        <Help text="Record freshness is distinct from bank import completeness." />
-                    </Card>
-                }
-            })}
-        </div>
-    }
+    provide_context(Page { ops, review });
+    frame(
+        ops,
+        workspace,
+        retry,
+        view! { <PageView tab="manage" tab_name="Manage" page=PAGE /> },
+    )
+}
+
+/// The Status screen's state, for its panels.
+#[derive(Clone, Copy)]
+struct Page {
+    ops: Ops,
+    review: Loaded<ReviewReport>,
+}
+
+const PAGE: &str = "manage.status";
+
+pub const PANELS: &[PanelDef] = &[
+    PanelDef {
+        id: "manage.status.connections",
+        title: "Connections",
+        page: PAGE,
+        movable: false,
+        initial: Initial::Open,
+        half: false,
+        render: || {
+            let ops = expect_context::<Page>().ops;
+            with_workspace(move |ws| view! { <Connections ws=ws ops=ops /> })
+        },
+        summary: None,
+        shown: Some(workspace_loaded),
+    },
+    PanelDef {
+        id: "manage.status.review",
+        title: "Category review",
+        page: PAGE,
+        movable: false,
+        initial: Initial::Open,
+        half: true,
+        render: || {
+            let review = expect_context::<Page>().review;
+            view! { <CategoryReview review=review /> }.into_any()
+        },
+        summary: None,
+        shown: None,
+    },
+    PanelDef {
+        id: "manage.status.health",
+        title: "Account data health",
+        page: PAGE,
+        movable: false,
+        initial: Initial::Open,
+        half: true,
+        render: || health().into_any(),
+        summary: None,
+        shown: None,
+    },
+];
+
+/// The ledger's accounts and the last bank refresh.
+fn health() -> impl IntoView {
+    with_report(|report| {
+        let accounts = report.cash_overview.accounts.clone();
+        let refreshed = report.last_firefly_refresh.clone();
+        let failed = report.firefly_refresh_failed;
+        view! {
+            <Card>
+                <CardHeader class="mb-2">
+                    <CardTitle level=Heading::H2>"Account data health"</CardTitle>
+                    <span aria-hidden="true" class="text-fg-muted"><Lucide icon=Icon::Database size=17 /></span>
+                </CardHeader>
+                <h3 class=TITLE>
+                    {if failed {
+                        "Refresh failed"
+                    } else if refreshed.is_some() {
+                        "Refresh recorded"
+                    } else {
+                        "No bank refresh recorded."
+                    }}
+                </h3>
+                <p class="mb-4 mt-1 text-sm text-fg-muted">
+                    {refreshed
+                        .map(|r| local_date(Some(&r)))
+                        .unwrap_or_else(|| "No source refresh timestamp is available.".into())}
+                </p>
+                {accounts
+                    .into_iter()
+                    .map(|account| {
+                        view! {
+                            <div class="grid gap-1.5 border-t border-line py-4 text-xs text-fg-muted">
+                                <strong class="text-sm font-semibold text-fg">{account.name}</strong>
+                                <span>{format!("{} recorded transactions", account.transaction_count)}</span>
+                                <span>
+                                    {format!(
+                                        "{} of {} expenses uncategorised",
+                                        account.uncategorised_outflows,
+                                        account.outflow_count,
+                                    )}
+                                </span>
+                                <span>
+                                    {format!(
+                                        "History: {} — {}",
+                                        account.first_transaction_on.as_deref().unwrap_or("Unknown"),
+                                        account.last_transaction_on.as_deref().unwrap_or("Unknown"),
+                                    )}
+                                </span>
+                            </div>
+                        }
+                    })
+                    .collect_view()}
+                <Help text="Record freshness is distinct from bank import completeness." />
+            </Card>
+        }
+    })
 }
 
 fn source_label(run: &ImportRun) -> String {
@@ -214,7 +273,7 @@ fn Connections(ws: ManageWorkspace, ops: Ops) -> impl IntoView {
 
 /// The queue lives on the Transactions tab; this card only counts it.
 #[component]
-fn CategoryReview(review: crate::api::Loaded<ReviewReport>) -> impl IntoView {
+fn CategoryReview(review: Loaded<ReviewReport>) -> impl IntoView {
     let app = state();
     view! {
         <Card>

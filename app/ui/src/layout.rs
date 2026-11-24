@@ -124,6 +124,7 @@ pub fn registry() -> impl Iterator<Item = &'static PanelDef> {
         .chain(crate::pages::plan::PANELS)
         .chain(crate::pages::wishes::PANELS)
         .chain(crate::pages::events::PANELS)
+        .chain(crate::pages::manage::panels())
 }
 
 fn home_defs(page: &str) -> Vec<&'static PanelDef> {
@@ -277,6 +278,9 @@ pub fn PageView(tab: &'static str, tab_name: &'static str, page: &'static str) -
     // Read inside reactive closures, so `shown` may track signals.
     let visible = move || items.with(|v| drawn(v, is_shown));
     let all_folded = move || visible().iter().all(|i| i.folded);
+    // Nothing drawn (e.g. a Manage workspace still loading): no "Fold all".
+    // A memo, so only the control redraws when the first panel shows.
+    let any_drawn = Memo::new(move |_| !visible().is_empty());
     let panel = move |item: PanelItem| {
         let def = registry().find(|d| d.id == item.panel)?;
         let id = def.id;
@@ -303,15 +307,17 @@ pub fn PageView(tab: &'static str, tab_name: &'static str, page: &'static str) -
     let ready = move || state.load.get() != Load::Loading;
     move || {
         ready().then(|| view! {
-        <div class="flex justify-end">
-            <Button
-                variant=Variant::Ghost
-                size=Size::Sm
-                on_click=Callback::new(move |_| state.set_all(tab, tab_name, page, !all_folded()))
-            >
-                {move || if all_folded() { "Open all" } else { "Fold all" }}
-            </Button>
-        </div>
+        {move || any_drawn.get().then(|| view! {
+            <div class="flex justify-end">
+                <Button
+                    variant=Variant::Ghost
+                    size=Size::Sm
+                    on_click=Callback::new(move |_| state.set_all(tab, tab_name, page, !all_folded()))
+                >
+                    {move || if all_folded() { "Open all" } else { "Fold all" }}
+                </Button>
+            </div>
+        })}
         <PanelList>
             <For each=visible key=|i| (i.panel.clone(), i.half) children=panel />
         </PanelList>

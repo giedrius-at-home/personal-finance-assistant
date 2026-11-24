@@ -113,23 +113,41 @@ pub fn Messages(ops: Ops) -> impl IntoView {
     }
 }
 
-/// The workspace, reloaded after every write and on `retry`.
+/// The workspace, reloaded after every write and on `retry`; provided by
+/// context for the section's panels.
 pub fn load_workspace(retry: RwSignal<u32>) -> Loaded<ManageWorkspace> {
     let app = state();
-    load("manage_workspace", move || {
+    let workspace = load("manage_workspace", move || {
         app.revision.track();
         retry.track();
         NoArgs {}
-    })
+    });
+    provide_context(workspace);
+    workspace
 }
 
-/// The owner-operations frame: messages, then `body` once the workspace is
-/// loaded (or the loading / retry card).
+/// A panel's `shown`: the section's workspace has loaded.
+pub fn workspace_loaded() -> bool {
+    use_context::<Loaded<ManageWorkspace>>()
+        .is_some_and(|w| w.data.with(|d| matches!(d, Some(Ok(_)))))
+}
+
+/// `f` with the loaded workspace, drawn again after every reload.
+pub fn with_workspace<V: IntoView + 'static>(
+    f: impl Fn(ManageWorkspace) -> V + Send + Sync + 'static,
+) -> AnyView {
+    let workspace = expect_context::<Loaded<ManageWorkspace>>();
+    (move || workspace.data.get().and_then(Result::ok).map(&f)).into_any()
+}
+
+/// The owner-operations frame: messages, the loading / retry card until the
+/// workspace is loaded, then the section's panel `list` (whose workspace
+/// panels wait for it through `workspace_loaded`).
 pub fn frame(
     ops: Ops,
     workspace: Loaded<ManageWorkspace>,
     retry: RwSignal<u32>,
-    body: impl Fn(ManageWorkspace) -> AnyView + Send + Sync + 'static,
+    list: impl IntoView + 'static,
 ) -> impl IntoView {
     Effect::new(move |_| {
         if let Some(Err(e)) = workspace.data.get() {
@@ -140,10 +158,10 @@ pub fn frame(
         <div class=SECTION_STACK>
             <Messages ops=ops />
             {move || match workspace.data.get() {
-                Some(Ok(ws)) => body(ws),
+                Some(Ok(_)) => None,
                 other => {
                     let failed = matches!(other, Some(Err(_)));
-                    view! {
+                    Some(view! {
                         <Card class="grid justify-items-start gap-3">
                             <p class="text-sm">
                                 {if failed { "Owner workspace could not be loaded." } else { "Loading owner workspace…" }}
@@ -158,10 +176,10 @@ pub fn frame(
                                     }
                                 })}
                         </Card>
-                    }
-                        .into_any()
+                    })
                 }
             }}
+            {list}
         </div>
     }
 }

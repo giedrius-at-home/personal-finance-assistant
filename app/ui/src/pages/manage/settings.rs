@@ -9,17 +9,20 @@ use leptos::html::Input as InputElement;
 use leptos::prelude::*;
 use serde::Serialize;
 
-use super::ui::{DETAILS, FIELDSET, Ops, PREVIEW, SUMMARY, frame, load_workspace, local_date};
+use super::ui::{
+    DETAILS, FIELDSET, Ops, PREVIEW, SUMMARY, frame, load_workspace, local_date, with_workspace,
+    workspace_loaded,
+};
 use crate::api::{NoArgs, load};
 use crate::ds::patterns::{
     ACTIONS, CHECK_SLOT, DD, DD_NUM, Disclosure, HINT, MUTED, OPTION_SPACED, SECRET_FORM,
-    SECTION_STACK, SETTINGS_GRID, STATUS_LIST, STATUS_NOTE, SUBSECTION, SUBSTACK, TITLE,
-    TITLE_BLOCK,
+    SETTINGS_GRID, STATUS_LIST, STATUS_NOTE, SUBSECTION, SUBSTACK, TITLE, TITLE_BLOCK,
 };
 use crate::ds::{
     Button, CONTROL, Card, CardTitle, Checkbox, Eyebrow, Field, Heading, Help, Input, Select, Size,
     TABLE, TABLE_CONTAINER, TCELL, TH, TROW, Variant, cn,
 };
+use crate::layout::{Initial, PageView, PanelDef};
 use crate::{format, state};
 
 fn label(key: &str) -> &str {
@@ -214,19 +217,104 @@ pub fn Settings() -> impl IntoView {
             draft.fill(&ws.settings);
         }
     });
-    view! {
-        {frame(ops, workspace, retry, move |ws| {
-            view! { <SettingsCard ws=ws ops=ops draft=draft preview=preview rollback=rollback /> }.into_any()
-        })}
-        <div class=SECTION_STACK>
-            <super::email::EmailCard />
-            <super::ai::AiSuggestions />
-            {move || workspace.data.get().and_then(Result::ok).map(|ws| view! { <LocalData ws=ws /> })}
-            <ForecastModel />
-            <Updates />
-        </div>
-    }
+    provide_context(Page {
+        ops,
+        draft,
+        preview,
+        rollback,
+    });
+    frame(
+        ops,
+        workspace,
+        retry,
+        view! { <PageView tab="manage" tab_name="Manage" page=PAGE /> },
+    )
 }
+
+/// The Settings screen's state, for its preferences panel.
+#[derive(Clone, Copy)]
+struct Page {
+    ops: Ops,
+    draft: Draft,
+    preview: RwSignal<Option<SettingsPreview>>,
+    rollback: RwSignal<Option<i64>>,
+}
+
+const PAGE: &str = "manage.settings";
+
+pub const PANELS: &[PanelDef] = &[
+    PanelDef {
+        id: "manage.settings.preferences",
+        title: "Finance preferences",
+        page: PAGE,
+        movable: false,
+        initial: Initial::Open,
+        half: false,
+        render: || {
+            let p = expect_context::<Page>();
+            with_workspace(move |ws| {
+                view! { <SettingsCard ws=ws ops=p.ops draft=p.draft preview=p.preview rollback=p.rollback /> }
+            })
+        },
+        summary: None,
+        shown: Some(workspace_loaded),
+    },
+    PanelDef {
+        id: "manage.settings.email",
+        title: "Daily spending email",
+        page: PAGE,
+        movable: false,
+        initial: Initial::Folded,
+        half: false,
+        render: || super::email::EmailCard().into_any(),
+        summary: None,
+        shown: None,
+    },
+    PanelDef {
+        id: "manage.settings.ai",
+        title: "AI suggestions",
+        page: PAGE,
+        movable: false,
+        initial: Initial::Folded,
+        half: false,
+        render: || super::ai::AiSuggestions().into_any(),
+        summary: None,
+        shown: None,
+    },
+    PanelDef {
+        id: "manage.settings.data",
+        title: "Local data",
+        page: PAGE,
+        movable: false,
+        initial: Initial::Folded,
+        half: false,
+        render: || with_workspace(|ws| view! { <LocalData ws=ws /> }),
+        summary: None,
+        shown: Some(workspace_loaded),
+    },
+    PanelDef {
+        id: "manage.settings.forecast",
+        title: "Forecast model",
+        page: PAGE,
+        movable: false,
+        initial: Initial::Folded,
+        half: false,
+        render: || ForecastModel().into_any(),
+        summary: None,
+        shown: None,
+    },
+    PanelDef {
+        id: "manage.settings.updates",
+        title: "Updates",
+        page: PAGE,
+        movable: false,
+        initial: Initial::Folded,
+        half: false,
+        render: || Updates().into_any(),
+        summary: None,
+        shown: None,
+    },
+];
 
 #[component]
 fn SettingsCard(

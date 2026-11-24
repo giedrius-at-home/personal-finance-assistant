@@ -21,7 +21,7 @@ use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
 use super::ui::{ERROR, FEEDBACK, FILE_INPUT, Messages, Ops, local_date};
-use crate::api::{NoArgs, invoke, load};
+use crate::api::{Loaded, NoArgs, invoke, load};
 use crate::ds::patterns::{
     DD, DETAILS_LIST, Disclosure, FACT_ROW, FILE_FORM, HINT, LIST_STACK, MUTED, ROW_TITLE,
     SECTION_STACK, SUBLINE, TOOLBAR,
@@ -31,6 +31,7 @@ use crate::ds::{
     Input, Select, Size, TABLE, TABLE_CONTAINER, TCELL, TCELL_NUM, TH, TH_NUM, TROW, Tone, Variant,
     cn, money,
 };
+use crate::layout::{Initial, PageView, PanelDef};
 use crate::pages::closure::bank_sync::SyncArgs;
 use crate::{format, state};
 
@@ -246,6 +247,16 @@ pub fn Banks() -> impl IntoView {
         );
     };
 
+    provide_context(Page {
+        ops,
+        status,
+        accounts,
+        working,
+        busy,
+        sync: Callback::new(sync),
+        sync_all: Callback::new(sync_all),
+        reconcile: Callback::new(reconcile),
+    });
     view! {
         <div class=SECTION_STACK>
             <Messages ops=ops />
@@ -253,73 +264,147 @@ pub fn Banks() -> impl IntoView {
                 Some(Err(e)) => Some(view! { <p role="alert" class=ERROR>{e}</p> }),
                 _ => None,
             }}
-            <Card>
-                <CardHeader>
-                    <div>
-                        <Eyebrow level=Heading::P>"THIS MAC"</Eyebrow>
-                        <CardTitle level=Heading::H2 class="mt-1">"Bank connections"</CardTitle>
-                    </div>
-                    <div class="flex items-center gap-2.5">
-                        <Badge tone=Tone::Outline>
-                            {move || match report() {
-                                None => "Loading",
-                                Some(r) if r.credentials && r.banks.iter().any(|b| b.connected) => "Connected",
-                                Some(_) => "Not set up",
-                            }}
-                        </Badge>
-                        <Button size=Size::Sm disabled=busy on_click=Callback::new(sync_all)>
-                            "Sync all banks"
-                        </Button>
-                    </div>
-                </CardHeader>
-                {move || {
-                    running().map(|bank| {
-                        view! { <p role="status" class=FEEDBACK>{format!("{}: Importing transactions", bank_name(&bank))}</p> }
-                    })
-                }}
-                {move || {
-                    report().filter(|r| !r.credentials).map(|_| {
+            <PageView tab="manage" tab_name="Manage" page=PAGE />
+        </div>
+    }
+}
+
+/// The Banks screen's state and actions, for its panels.
+#[derive(Clone, Copy)]
+struct Page {
+    ops: Ops,
+    status: Loaded<BankSyncReport>,
+    accounts: Loaded<BanksReport>,
+    working: RwSignal<Option<String>>,
+    busy: Signal<bool>,
+    sync: Callback<String>,
+    sync_all: Callback<leptos::ev::MouseEvent>,
+    reconcile: Callback<(String, i64)>,
+}
+
+const PAGE: &str = "manage.banks";
+
+pub const PANELS: &[PanelDef] = &[
+    PanelDef {
+        id: "manage.banks.connections",
+        title: "Bank connections",
+        page: PAGE,
+        movable: false,
+        initial: Initial::Open,
+        half: false,
+        render: || connections().into_any(),
+        summary: None,
+        shown: None,
+    },
+    PanelDef {
+        id: "manage.banks.consent",
+        title: "Connect or renew",
+        page: PAGE,
+        movable: false,
+        initial: Initial::Folded,
+        half: false,
+        render: || {
+            let p = expect_context::<Page>();
+            view! { <ConsentCard ops=p.ops busy=p.busy report=p.status.data /> }.into_any()
+        },
+        summary: None,
+        shown: None,
+    },
+    PanelDef {
+        id: "manage.banks.key",
+        title: "Application key",
+        page: PAGE,
+        movable: false,
+        initial: Initial::Folded,
+        half: false,
+        render: || {
+            let p = expect_context::<Page>();
+            view! { <KeyCard ops=p.ops busy=p.busy report=p.status.data /> }.into_any()
+        },
+        summary: None,
+        shown: None,
+    },
+];
+
+/// Every bank with its accounts, and "Sync all banks".
+fn connections() -> impl IntoView {
+    let Page {
+        status,
+        accounts,
+        working,
+        busy,
+        sync,
+        sync_all,
+        reconcile,
+        ..
+    } = expect_context::<Page>();
+    let report = move || status.data.get().and_then(Result::ok);
+    let running = move || working.get().or_else(|| report().and_then(|r| r.running));
+    view! {
+        <Card>
+            <CardHeader>
+                <div>
+                    <Eyebrow level=Heading::P>"THIS MAC"</Eyebrow>
+                    <CardTitle level=Heading::H2 class="mt-1">"Bank connections"</CardTitle>
+                </div>
+                <div class="flex items-center gap-2.5">
+                    <Badge tone=Tone::Outline>
+                        {move || match report() {
+                            None => "Loading",
+                            Some(r) if r.credentials && r.banks.iter().any(|b| b.connected) => "Connected",
+                            Some(_) => "Not set up",
+                        }}
+                    </Badge>
+                    <Button size=Size::Sm disabled=busy on_click=sync_all>
+                        "Sync all banks"
+                    </Button>
+                </div>
+            </CardHeader>
+            {move || {
+                running().map(|bank| {
+                    view! { <p role="status" class=FEEDBACK>{format!("{}: Importing transactions", bank_name(&bank))}</p> }
+                })
+            }}
+            {move || {
+                report().filter(|r| !r.credentials).map(|_| {
+                    view! {
+                        <p role="status" class=FEEDBACK>
+                            "Add the Enable Banking application key below to start syncing. Each bank then syncs once a day while Finance is open."
+                        </p>
+                    }
+                })
+            }}
+            {move || {
+                let current = report();
+                let ledger = accounts.data.get().and_then(Result::ok).map(|r| r.accounts).unwrap_or_default();
+                let active = running();
+                BANKS
+                    .iter()
+                    .map(|(id, name)| {
+                        let bank = current.as_ref().and_then(|r| r.banks.iter().find(|b| b.id == *id).cloned());
+                        let own: Vec<BankAccount> = ledger.iter().filter(|a| a.bank.as_deref() == Some(*name)).cloned().collect();
                         view! {
-                            <p role="status" class=FEEDBACK>
-                                "Add the Enable Banking application key below to start syncing. Each bank then syncs once a day while Finance is open."
-                            </p>
+                            <BankBox
+                                id=(*id).to_owned()
+                                name=(*name).to_owned()
+                                bank=bank
+                                loaded=current.is_some()
+                                working=active.as_deref() == Some(*id)
+                                accounts=own
+                                disabled=busy
+                                on_sync=sync
+                                on_reconcile=reconcile
+                            />
                         }
                     })
-                }}
-                {move || {
-                    let current = report();
-                    let ledger = accounts.data.get().and_then(Result::ok).map(|r| r.accounts).unwrap_or_default();
-                    let active = running();
-                    BANKS
-                        .iter()
-                        .map(|(id, name)| {
-                            let bank = current.as_ref().and_then(|r| r.banks.iter().find(|b| b.id == *id).cloned());
-                            let own: Vec<BankAccount> = ledger.iter().filter(|a| a.bank.as_deref() == Some(*name)).cloned().collect();
-                            view! {
-                                <BankBox
-                                    id=(*id).to_owned()
-                                    name=(*name).to_owned()
-                                    bank=bank
-                                    loaded=current.is_some()
-                                    working=active.as_deref() == Some(*id)
-                                    accounts=own
-                                    disabled=busy
-                                    on_sync=Callback::new(sync)
-                                    on_reconcile=Callback::new(reconcile)
-                                />
-                            }
-                        })
-                        .collect_view()
-                }}
-                {move || {
-                    status.data.get().is_some().then(|| {
-                        view! { <p class="mt-4 text-xs text-fg-muted">{format!("Updated {}", now_label())}</p> }
-                    })
-                }}
-            </Card>
-            <ConsentCard ops=ops busy=busy report=status.data />
-            <KeyCard ops=ops busy=busy report=status.data />
-        </div>
+                    .collect_view()
+            }}
+            {move || {
+                status.data.get().is_some().then(|| {
+                    view! { <p class="mt-4 text-xs text-fg-muted">{format!("Updated {}", now_label())}</p> }
+                })
+            }}
+        </Card>
     }
 }
 

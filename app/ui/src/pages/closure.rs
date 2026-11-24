@@ -40,6 +40,7 @@ use crate::ds::patterns::{CHIPS, MUTED, PAGE_TITLE, STACK};
 use crate::ds::{
     Button, Card, CardTone, EmptyState, Eyebrow, Icon, Lucide, Size, StepState, Variant, step_class,
 };
+use crate::layout::{Initial, PageView, PanelDef};
 use crate::{AppState, ManageSection, state};
 
 const STEP_NAMES: [&str; 4] = ["Sync", "Review", "Split", "Transfers"];
@@ -701,7 +702,7 @@ fn ChangedAfterClose(view: ClosureView) -> impl IntoView {
     }
 }
 
-/// The wizard: month picker, steps, then the Accounts panel.
+/// The wizard's state; its panels: the wizard, the money plan, the accounts.
 #[component]
 pub fn MonthClosure() -> impl IntoView {
     let app = state();
@@ -720,7 +721,6 @@ pub fn MonthClosure() -> impl IntoView {
     let Wizard {
         month,
         view,
-        unclassified,
         error,
         notice,
         busy,
@@ -773,6 +773,91 @@ pub fn MonthClosure() -> impl IntoView {
             .get()
             .unwrap_or_else(|| status.get().map_or(0, default_step))
     });
+
+    provide_context(Steps { status, step });
+    view! { <PageView tab="manage" tab_name="Manage" page=PAGE /> }
+}
+
+/// The wizard's status and open step, for its panel.
+#[derive(Clone, Copy)]
+struct Steps {
+    status: Memo<Option<ClosureStatus>>,
+    step: Memo<usize>,
+}
+
+const PAGE: &str = "manage.close";
+
+pub const PANELS: &[PanelDef] = &[
+    PanelDef {
+        id: "manage.close.wizard",
+        title: "Close the month",
+        page: PAGE,
+        movable: false,
+        initial: Initial::Open,
+        half: false,
+        render: || wizard_panel().into_any(),
+        summary: None,
+        shown: None,
+    },
+    PanelDef {
+        id: "manage.close.plan",
+        title: "Where the money goes",
+        page: PAGE,
+        movable: false,
+        initial: Initial::Open,
+        half: false,
+        render: || {
+            let view = expect_context::<Wizard>().view;
+            (move || {
+                let v = view.get()?;
+                let names = steps::account_names(&v);
+                v.plan
+                    .map(|plan| view! { <MoneyPlanPanel plan=plan names=names /> })
+            })
+            .into_any()
+        },
+        summary: None,
+        shown: Some(|| {
+            use_context::<Wizard>().is_some_and(|w| {
+                w.view
+                    .with(|v| v.as_ref().is_some_and(|v| v.plan.is_some()))
+            })
+        }),
+    },
+    PanelDef {
+        id: "manage.close.accounts",
+        title: "Accounts",
+        page: PAGE,
+        movable: false,
+        initial: Initial::Folded,
+        half: false,
+        render: || {
+            let view = expect_context::<Wizard>().view;
+            (move || {
+                let v = view.get()?;
+                Some(view! { <AccountsPanel accounts=v.accounts goals=v.goals /> })
+            })
+            .into_any()
+        },
+        summary: None,
+        shown: Some(|| use_context::<Wizard>().is_some_and(|w| w.view.with(Option::is_some))),
+    },
+];
+
+/// The month picker and stepper, then the open step's card.
+fn wizard_panel() -> impl IntoView {
+    let wizard = expect_context::<Wizard>();
+    let Steps { status, step } = expect_context::<Steps>();
+    let Wizard {
+        app,
+        month,
+        view,
+        unclassified,
+        error,
+        notice,
+        busy,
+        ..
+    } = wizard;
 
     let month_id = field_id();
     let month_options: Vec<(String, String, bool)> = recent_months()
@@ -827,19 +912,6 @@ pub fn MonthClosure() -> impl IntoView {
         let unclassified = unclassified.get();
         Some(step_view(wizard, v, step, report.as_ref(), unclassified))
     };
-    let panels = move || {
-        let v = view.get()?;
-        let names = steps::account_names(&v);
-        let plan = v
-            .plan
-            .clone()
-            .map(|plan| view! { <MoneyPlanPanel plan=plan names=names /> });
-        Some(view! {
-            {plan}
-            <AccountsPanel accounts=v.accounts goals=v.goals />
-        })
-    };
-
     view! {
         <section class="grid min-w-0 gap-4" aria-label="Close month">
             <Card class=STACK>
@@ -876,7 +948,6 @@ pub fn MonthClosure() -> impl IntoView {
                 })}
             </Card>
             {body}
-            {panels}
         </section>
     }
 }

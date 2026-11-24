@@ -10,6 +10,18 @@ mod ui;
 
 use leptos::prelude::*;
 
+use crate::layout::PanelDef;
+
+/// Every Manage section's panels, in section order.
+pub fn panels() -> impl Iterator<Item = &'static PanelDef> {
+    banks::PANELS
+        .iter()
+        .chain(crate::pages::closure::PANELS)
+        .chain(import::PANELS)
+        .chain(status::PANELS)
+        .chain(settings::PANELS)
+}
+
 #[component]
 pub fn Banks() -> impl IntoView {
     banks::Banks()
