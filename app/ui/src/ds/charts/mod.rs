@@ -135,6 +135,7 @@ mod donut;
 mod heatmap;
 mod line;
 mod progress;
+mod ranked;
 
 pub use bar::BarChart;
 pub use donut::{Donut, Slice};
@@ -142,6 +143,8 @@ pub use donut::{Donut, Slice};
 pub use heatmap::{Heatmap, heat_level};
 pub use line::LineChart;
 pub use progress::{BarTone, BudgetBar, ProgressBar};
+#[allow(unused_imports, reason = "plots use these from v0.3 Task 6")]
+pub use ranked::{Ranked, ranked_width};
 
 #[component]
 fn Legend(
