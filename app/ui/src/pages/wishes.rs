@@ -21,6 +21,13 @@ use serde::Serialize;
 use serde::de::IgnoredAny;
 
 use crate::api::{NoArgs, invoke, load};
+use crate::ds::patterns::{
+    BADGE_TIGHT, BOARD_TITLE, CARD_NAME, CHECK_LABEL_START, CHIPS, DIVIDED, Disclosure, EVENT_FORM,
+    FACT_ROW, FEEDBACK_LINE, FIGURE, FILTER_ROW, HINT, INLINE_TOOLS, LIST_STACK, METER,
+    METER_SCALE, MUTED, NAME_ROW, NESTED, PAIR, PANEL_TITLE, PANEL_TITLE_HELP, SELECT_CHEVRON,
+    SELECT_WRAP, SKELETON_CARD, SKELETON_SHORT, STACK, STACK_MD, STACK_XS, STRONG_SM, SUB_ROW,
+    TREE_HEAD, TREE_NAME,
+};
 use crate::ds::{
     BOARD, BOARD_CARD, Badge, BoardColumn, Button, CONTROL, Card, CardTone, Checkbox, Eyebrow,
     Facts, FactsRow, Field, Help, Icon, Lucide, Popup, Size, Skeleton, Stat, Tone, Variant, cn,
@@ -34,7 +41,7 @@ pub(crate) const AMOUNT_PATTERN: &str = "[0-9]+([.,][0-9]{1,2})?";
 
 /// Drops a control that sits beside fields by its label's height
 /// (`text-sm` line plus the field's gap), so it lines up with their boxes.
-const LABEL_OFFSET: &str = "sm:mt-[26px]";
+const LABEL_OFFSET: &str = "sm:mt-6.5";
 
 /// Reads an amount box; a comma counts as the decimal point.
 pub(crate) fn parse_amount(value: &str) -> Result<Decimal, rust_decimal::Error> {
@@ -880,7 +887,7 @@ pub(crate) fn feedback(ui: Ui, target: String) -> impl IntoView {
         ui.messages.with(|m| {
             m.get(&target).filter(|(text, _)| !text.is_empty()).map(|(text, error)| {
                 let class = cn([
-                    "mt-2 break-words text-sm",
+                    FEEDBACK_LINE,
                     if *error { "text-negative-fg" } else { "text-positive-fg" },
                 ]);
                 view! { <p role=if *error { "alert" } else { "status" } class=class>{text.clone()}</p> }
@@ -902,7 +909,7 @@ fn select(
         })
         .collect_view();
     view! {
-        <div class="relative w-full">
+        <div class=SELECT_WRAP>
             <select
                 id=id
                 class=cn([CONTROL, "appearance-none pr-9"])
@@ -911,7 +918,7 @@ fn select(
             >
                 {options}
             </select>
-            <span aria-hidden="true" class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-fg-muted">
+            <span aria-hidden="true" class=SELECT_CHEVRON>
                 <Lucide icon=Icon::ChevronDown size=16 />
             </span>
         </div>
@@ -935,9 +942,9 @@ pub fn Wishes() -> impl IntoView {
         });
         view_data.data.with(|data| match data {
             None => view! {
-                <div class="grid gap-4">
-                    <Skeleton class="h-32 rounded-xl" />
-                    <Skeleton class="h-56 rounded-xl" />
+                <div class=STACK>
+                    <Skeleton class=SKELETON_SHORT />
+                    <Skeleton class=SKELETON_CARD />
                 </div>
             }
             .into_any(),
@@ -1105,17 +1112,17 @@ fn page(ui: Ui, view: &WishesView, ctx: &Context) -> impl IntoView + use<> {
         currency,
     );
     view! {
-        <div class="grid gap-4">
-            <section aria-label="Wishes board" class="grid gap-3">
+        <div class=STACK>
+            <section aria-label="Wishes board" class=STACK_MD>
                 <div>
                     <Eyebrow>"WISHES"</Eyebrow>
-                    <h2 class="mt-1 text-lg font-semibold">"From someday to bought"</h2>
+                    <h2 class=BOARD_TITLE>"From someday to bought"</h2>
                 </div>
                 {savings}
-                <p class="text-xs text-fg-muted">"Open a box for its details. Drag one to Bought to name the payment that bought it."</p>
+                <p class=HINT>"Open a box for its details. Drag one to Bought to name the payment that bought it."</p>
                 {feedback(ui, "dropped".into())}
                 <div class=BOARD>{board}</div>
-                {empty.then(|| view! { <p class="text-sm text-fg-muted">"No wishes yet."</p> })}
+                {empty.then(|| view! { <p class=MUTED>"No wishes yet."</p> })}
             </section>
             {picked}
             <PaymentPicker
@@ -1126,23 +1133,21 @@ fn page(ui: Ui, view: &WishesView, ctx: &Context) -> impl IntoView + use<> {
             />
             <Card>
                 <Eyebrow>"NEW WISH"</Eyebrow>
-                <h2 class="mt-2 text-lg font-semibold">"Add a wish"</h2>
+                <h2 class=PANEL_TITLE>"Add a wish"</h2>
                 {form}
             </Card>
             {(done_count > 0).then(|| view! {
                 <Card>
-                    <details class="text-sm">
-                        <summary class="cursor-pointer font-medium">{format!("Bought and dropped ({done_count})")}</summary>
+                    <Disclosure class="text-sm" summary_class="font-medium" summary=format!("Bought and dropped ({done_count})")>
                         <div class="mt-2">{done_rows}</div>
-                    </details>
+                    </Disclosure>
                 </Card>
             })}
             {has_months.then(|| view! {
                 <Card>
-                    <details>
-                        <summary class="cursor-pointer text-sm font-medium">"Month by month"</summary>
+                    <Disclosure summary_class="text-sm font-medium" summary="Month by month">
                         <div class="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{month_cards}</div>
-                    </details>
+                    </Disclosure>
                 </Card>
             })}
             {strip}
@@ -1251,11 +1256,11 @@ fn wish_box(ui: Ui, row: &WishRow, ctx: &Context) -> impl IntoView + use<> {
     let progress = (planned && wish.kind == WishKind::OneOff).then(|| {
         let label = format!("{} saved", amount(saved, &code));
         view! {
-            <span class="grid gap-1">
-                <span role="img" aria-label=label.clone() class="block h-1.5 overflow-hidden rounded-pill bg-soft">
+            <span class=STACK_XS>
+                <span role="img" aria-label=label.clone() class=METER>
                     <i class="block h-full rounded-pill bg-positive" style:width=format!("{percent}%")></i>
                 </span>
-                <span class="flex justify-between text-xs text-fg-muted">
+                <span class=METER_SCALE>
                     <span>{label}</span>
                     <span class="tabular-nums">{format!("{percent}%")}</span>
                 </span>
@@ -1268,22 +1273,22 @@ fn wish_box(ui: Ui, row: &WishRow, ctx: &Context) -> impl IntoView + use<> {
         .filter(|_| !planned)
         .map_or(wish.amount, |p| p.amount);
     let must = (planned && wish.must)
-        .then(|| view! { <Badge tone=Tone::Accent class="px-2 py-0">"Must"</Badge> });
+        .then(|| view! { <Badge tone=Tone::Accent class=BADGE_TIGHT>"Must"</Badge> });
     let parts = (!row.children.is_empty()).then(|| {
         let text = crate::pages::plural(row.children.len(), "part");
-        view! { <Badge tone=Tone::Outline class="px-2 py-0">{text}</Badge> }
+        view! { <Badge tone=Tone::Outline class=BADGE_TIGHT>{text}</Badge> }
     });
     let pick = id.clone();
     let movable = can_buy(row);
     let drag_id = id.clone();
     let body = view! {
-        <span class="flex items-baseline justify-between gap-3">
-            <strong class="min-w-0 truncate font-semibold">{wish.name.clone()}</strong>
-            <strong class="whitespace-nowrap tabular-nums">{amount(cost, &code)}</strong>
+        <span class=NAME_ROW>
+            <strong class=CARD_NAME>{wish.name.clone()}</strong>
+            <strong class=FIGURE>{amount(cost, &code)}</strong>
         </span>
         <span class="flex flex-wrap items-center gap-1.5">
             {must}
-            <Badge tone=tone class="px-2 py-0">{chip}</Badge>
+            <Badge tone=tone class=BADGE_TIGHT>{chip}</Badge>
             {parts}
         </span>
         {progress}
@@ -1544,11 +1549,11 @@ fn card_strip(
     view! {
         <Card>
             <Eyebrow>"CREDIT CARDS"</Eyebrow>
-            <h2 class="mt-2 text-lg font-semibold flex items-center gap-2">"What the wishes may lean on"<Help text="Charges fill the cards in this order." /></h2>
+            <h2 class=PANEL_TITLE_HELP>"What the wishes may lean on"<Help text="Charges fill the cards in this order." /></h2>
             {stale}
-            <form class="mt-4 grid gap-3" on:submit=submit>
+            <form class=LIST_STACK on:submit=submit>
                 <For each=move || rows.get() key=|r| r.key children=row_view />
-                <div class="flex flex-wrap gap-2">
+                <div class=CHIPS>
                     <Button variant=Variant::Secondary on_click=Callback::new(add)>"Add card"</Button>
                     <Button submit=true disabled=Signal::derive(move || ui.busy.get())>"Save cards"</Button>
                 </div>
@@ -1634,7 +1639,7 @@ fn fund_block(ui: Ui, view: &WishesView, shared: SettingsForms) -> impl IntoView
     view! {
         <Card>
             <Eyebrow>"EMERGENCY FUND"</Eyebrow>
-            <h2 class="mt-2 text-lg font-semibold flex items-center gap-2">"Months of bare living to hold"<Help text="A savings goal without a date: it takes what the wishes leave. Rent changes and new subscriptions planned as wishes move its target. The held amount is the savings pot beyond what is saved for wishes." /></h2>
+            <h2 class=PANEL_TITLE_HELP>"Months of bare living to hold"<Help text="A savings goal without a date: it takes what the wishes leave. Rent changes and new subscriptions planned as wishes move its target. The held amount is the savings pot beyond what is saved for wishes." /></h2>
             {summary}
             <form class="mt-4 grid items-start gap-3 sm:grid-cols-[8rem_1fr_auto]" on:submit=submit>
                 <Field label="Months" id="fund-months" hint="0 switches it off.">
@@ -1853,7 +1858,7 @@ fn add_form(
                 />
             </Field>
             {fields}
-            <label class="flex items-center gap-2.5 text-sm sm:col-start-1">
+            <label class=CHECK_LABEL_START>
                 <Checkbox
                     checked=Signal::derive(move || ui.must.get())
                     on_change=Callback::new(move |v| ui.must.set(v))
@@ -1886,7 +1891,7 @@ pub(crate) fn wish_row(
             <span role="status"><Badge tone=Tone::Warning>"Parts exceed the cap"</Badge></span>
         });
             view! {
-                <div class="flex flex-wrap items-end gap-x-6 gap-y-2">
+                <div class=FACT_ROW>
                     <FactsRow rows=vec![
                         ("Cap".to_owned(), amount(row.wish.amount, &code)),
                         ("Rest".to_owned(), amount(row.rest, &code)),
@@ -1920,7 +1925,7 @@ pub(crate) fn wish_row(
         .map(|child| {
             if child.wish.status == WishStatus::Planned {
                 view! {
-                    <div class="border-t border-line pl-4 sm:pl-6">
+                    <div class=NESTED>
                         {wish_body(ui, child, months, ctx, Some(parent_must), in_event)}
                     </div>
                 }
@@ -1931,13 +1936,13 @@ pub(crate) fn wish_row(
                         .into_any()
                 });
                 let body = ctx.with_value(|c| done_body(&child.wish, c, true, leave));
-                view! { <div class="border-t border-line pl-4 sm:pl-6">{body}</div> }.into_any()
+                view! { <div class=NESTED>{body}</div> }.into_any()
             }
         })
         .collect_view();
     let body = wish_body(ui, &row, months, ctx, None, false);
     view! {
-        <div class="border-t border-line first:border-t-0">
+        <div class=DIVIDED>
             {body}
             <div class="grid gap-1 pb-3">
                 {family}
@@ -2282,9 +2287,9 @@ fn wish_body(
     let event_starts_id = StoredValue::new(format!("event-starts-{}", wish.wish_id));
     let event_ends_id = StoredValue::new(format!("event-ends-{}", wish.wish_id));
     view! {
-        <div class="grid gap-2 py-3">
-            <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                <h3 class=cn(["flex items-center gap-2 font-semibold", if sub { "text-sm" } else { "text-base" }])>
+        <div class=SUB_ROW>
+            <div class=TREE_HEAD>
+                <h3 class=cn([TREE_NAME, if sub { "text-sm" } else { "text-base" }])>
                     {wish.name.clone()}
                     {(must || parent_must == Some(true)).then(|| view! { <Badge tone=Tone::Accent>"Must"</Badge> })}
                     <Badge tone=chip_tone>{chip}</Badge>
@@ -2292,11 +2297,11 @@ fn wish_body(
                 <FactsRow rows=detail />
             </div>
             <FactsRow rows=facts class=tone />
-            <div class="flex flex-wrap items-end gap-2">
+            <div class=FILTER_ROW>
                 {one_off.then(move || view! {
                 <form class="flex items-end gap-2" on:submit=save_saved>
-                    <div class="grid gap-1">
-                        <label for=saved_id.clone() class="text-xs text-fg-muted">
+                    <div class=STACK_XS>
+                        <label for=saved_id.clone() class=HINT>
                             "Saved so far"
                             {suggestion_hint.clone().map(|h| view! { <span class="text-accent">{format!(" ({h})")}</span> })}
                         </label>
@@ -2366,18 +2371,18 @@ fn wish_body(
                 {(sub && in_event).then(|| leave_button(ui, &id.get_value()))}
             </div>
             <Show when=joining>
-                <form class="grid items-end gap-2 sm:grid-cols-4" on:submit=move |ev: SubmitEvent| join.with_value(|f| f(ev))>
+                <form class=EVENT_FORM on:submit=move |ev: SubmitEvent| join.with_value(|f| f(ev))>
                     <Field label="Event" id=join_id.get_value()>
                         {select(join_id.get_value(), ui.join_event, event_options.get_value())}
                     </Field>
-                    <div class="flex gap-2">
+                    <div class=PAIR>
                         <Button submit=true size=Size::Sm disabled=Signal::derive(move || ui.busy.get())>"Add to event"</Button>
                         <Button size=Size::Sm variant=Variant::Ghost on_click=Callback::new(move |_| ui.joining.set(None))>"Cancel"</Button>
                     </div>
                 </form>
             </Show>
             <Show when=eventing>
-                <form class="grid items-end gap-2 sm:grid-cols-4" on:submit=move |ev: SubmitEvent| plan_event.with_value(|f| f(ev))>
+                <form class=EVENT_FORM on:submit=move |ev: SubmitEvent| plan_event.with_value(|f| f(ev))>
                     <Field label="First day" id=event_starts_id.get_value()>
                         <input
                             id=event_starts_id.get_value()
@@ -2398,14 +2403,14 @@ fn wish_body(
                             on:input=move |e| ui.event_ends.set(event_target_value(&e))
                         />
                     </Field>
-                    <div class="flex gap-2">
+                    <div class=PAIR>
                         <Button submit=true size=Size::Sm disabled=Signal::derive(move || ui.busy.get())>"Move to Events"</Button>
                         <Button size=Size::Sm variant=Variant::Ghost on_click=Callback::new(move |_| ui.eventing.set(None))>"Cancel"</Button>
                     </div>
                 </form>
             </Show>
             <Show when=buying>
-                <form class="grid items-end gap-2 sm:grid-cols-4" on:submit=buy_submit.clone()>
+                <form class=EVENT_FORM on:submit=buy_submit.clone()>
                     <Field label="Cost" id=buy_amount_id.get_value()>
                         <input
                             id=buy_amount_id.get_value()
@@ -2436,7 +2441,7 @@ fn wish_body(
                         {select(buy_source_id.get_value(), ui.buy_source, buy_sources.get_value())}
                     </Field>
                     {move || (split && ui.buy_source.get() == "card").then(|| card_fields(ui, cards, &buy_amount_id.get_value()))}
-                    <div class="flex gap-2">
+                    <div class=PAIR>
                         <Button submit=true size=Size::Sm disabled=Signal::derive(move || ui.busy.get())>"Mark bought"</Button>
                         <Button size=Size::Sm variant=Variant::Ghost on_click=Callback::new(move |_| ui.buying.set(None))>"Cancel"</Button>
                     </div>
@@ -2457,14 +2462,14 @@ fn wish_body(
                     >
                         {select(start_category_id.get_value(), ui.start_category, categories.get_value())}
                     </Field>
-                    <div class=cn(["flex gap-2", LABEL_OFFSET])>
+                    <div class=cn([PAIR, LABEL_OFFSET])>
                         <Button submit=true size=Size::Sm disabled=Signal::derive(move || ui.busy.get())>"Start"</Button>
                         <Button size=Size::Sm variant=Variant::Ghost on_click=Callback::new(move |_| ui.starting.set(None))>"Cancel"</Button>
                     </div>
                 </form>
             </Show>
             <Show when=move || starting() && !recurring>
-                <div class="flex flex-wrap items-center gap-2 text-sm">
+                <div class=INLINE_TOOLS>
                     <span>{start_text.clone()}</span>
                     <Button
                         size=Size::Sm
@@ -2477,7 +2482,7 @@ fn wish_body(
                 </div>
             </Show>
             <Show when=dropping>
-                <div class="flex flex-wrap items-center gap-2 text-sm">
+                <div class=INLINE_TOOLS>
                     <span>{drop_text.clone()}</span>
                     <Button size=Size::Sm variant=Variant::Danger on_click=Callback::new(confirm_drop)>"Drop wish"</Button>
                     <Button size=Size::Sm variant=Variant::Secondary on_click=Callback::new(move |_| ui.dropping.set(None))>"Keep"</Button>
@@ -2562,9 +2567,9 @@ fn start_confirm(
 fn done_body(wish: &Wish, ctx: &Context, sub: bool, action: Option<AnyView>) -> AnyView {
     let (tone, chip, facts) = done_facts(wish, ctx);
     view! {
-        <div class="grid gap-2 py-3">
-            <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                <h3 class=cn(["flex items-center gap-2 font-semibold", if sub { "text-sm" } else { "text-base" }])>
+        <div class=SUB_ROW>
+            <div class=TREE_HEAD>
+                <h3 class=cn([TREE_NAME, if sub { "text-sm" } else { "text-base" }])>
                     {wish.name.clone()}
                     <Badge tone=tone>{chip}</Badge>
                 </h3>
@@ -2583,7 +2588,7 @@ fn done_parts(row: &WishRow, ctx: &Context) -> impl IntoView + use<> {
         .iter()
         .map(|child| {
             view! {
-                <div class="border-t border-line pl-4 sm:pl-6">{done_body(&child.wish, ctx, true, None)}</div>
+                <div class=NESTED>{done_body(&child.wish, ctx, true, None)}</div>
             }
         })
         .collect_view()
@@ -2703,8 +2708,7 @@ fn done_entry(ui: Ui, row: &WishRow, ctx: StoredValue<Context>) -> impl IntoView
     let parts = ctx.with_value(|c| done_parts(row, c));
     if options.is_empty() {
         let body = ctx.with_value(|c| done_body(wish, c, false, None));
-        return view! { <div class="border-t border-line first:border-t-0">{body}{parts}</div> }
-            .into_any();
+        return view! { <div class=DIVIDED>{body}{parts}</div> }.into_any();
     }
     let options = StoredValue::new(options);
     let id = StoredValue::new(wish.wish_id.clone());
@@ -2732,15 +2736,15 @@ fn done_entry(ui: Ui, row: &WishRow, ctx: StoredValue<Context>) -> impl IntoView
     });
     let select_id = StoredValue::new(format!("join-event-{}", wish.wish_id));
     let action = view! {
-        <div class="flex flex-wrap items-end gap-2">
+        <div class=FILTER_ROW>
             <Button size=Size::Sm variant=Variant::Ghost on_click=Callback::new(open)>"Add to event"</Button>
         </div>
         <Show when=joining>
-            <form class="grid items-end gap-2 sm:grid-cols-4" on:submit=move |ev: SubmitEvent| join.with_value(|f| f(ev))>
+            <form class=EVENT_FORM on:submit=move |ev: SubmitEvent| join.with_value(|f| f(ev))>
                 <Field label="Event" id=select_id.get_value()>
                     {select(select_id.get_value(), ui.join_event, options.get_value())}
                 </Field>
-                <div class="flex gap-2">
+                <div class=PAIR>
                     <Button submit=true size=Size::Sm disabled=Signal::derive(move || ui.busy.get())>"Add to event"</Button>
                     <Button size=Size::Sm variant=Variant::Ghost on_click=Callback::new(move |_| ui.joining.set(None))>"Cancel"</Button>
                 </div>
@@ -2750,7 +2754,7 @@ fn done_entry(ui: Ui, row: &WishRow, ctx: StoredValue<Context>) -> impl IntoView
     }
     .into_any();
     let body = ctx.with_value(|c| done_body(wish, c, false, Some(action)));
-    view! { <div class="border-t border-line first:border-t-0">{body}{parts}</div> }.into_any()
+    view! { <div class=DIVIDED>{body}{parts}</div> }.into_any()
 }
 
 /// How a done wish ended, and its fields.
@@ -2800,7 +2804,7 @@ fn month_card(month: &WishMonth, code: &str) -> impl IntoView + use<> {
     });
     view! {
         <Card tone=CardTone::Muted class="grid gap-3 p-4 sm:p-5">
-            <h3 class="text-sm font-semibold">{title}</h3>
+            <h3 class=STRONG_SM>{title}</h3>
             <div class="grid grid-cols-2 gap-3">
                 <Stat label="Free before">{before}</Stat>
                 <Stat label="Free after">{after}</Stat>
