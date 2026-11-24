@@ -34,6 +34,10 @@ pub enum Choice {
     Merchant(String),
     Min(Option<Decimal>),
     Max(Option<Decimal>),
+    /// A currency code, or `None` for the main currency.
+    Currency(Option<String>),
+    Top(u8),
+    SplitTop(u8),
 }
 
 /// The most measures a plot shows.
@@ -269,6 +273,9 @@ pub fn with_choice(mut spec: PlotSpec, change: Choice) -> PlotSpec {
         Choice::Merchant(v) => spec.filters.merchant = v,
         Choice::Min(v) => spec.filters.min = v,
         Choice::Max(v) => spec.filters.max = v,
+        Choice::Currency(c) => spec.currency = c,
+        Choice::Top(n) => spec.top = n,
+        Choice::SplitTop(n) => spec.split_top = n,
     }
     repaired(spec)
 }
@@ -316,8 +323,8 @@ fn repaired(mut s: PlotSpec) -> PlotSpec {
     {
         s.chart = first;
     }
-    // Lines over bars only exist on a bar chart.
-    if s.chart != Chart::Bars {
+    // Lines over bars only exist on a bar chart with several measures.
+    if s.chart != Chart::Bars || s.measures.len() == 1 {
         for m in &mut s.measures {
             m.draw = Draw::Bars;
         }
@@ -351,12 +358,19 @@ pub fn turned_off(before: &PlotSpec, change: &Choice, after: &PlotSpec) -> Vec<&
     if !matches!(change, Choice::Split(_)) && before.split.is_some() && after.split.is_none() {
         off.push("the split");
     }
-    if !matches!(change, Choice::RemoveMeasure(_)) {
-        if after.measures.len() < before.measures.len() {
-            off.push("extra measures");
-        } else if !matches!(change, Choice::Draw(..)) && lines(after) < lines(before) {
-            off.push("lines over the bars");
+    if !matches!(change, Choice::RemoveMeasure(_)) && after.measures.len() < before.measures.len() {
+        off.push("extra measures");
+    }
+    // The measures that stayed: was one of their lines reset to bars?
+    let mut kept = before.clone();
+    match change {
+        Choice::RemoveMeasure(i) if *i < kept.measures.len() && kept.measures.len() > 1 => {
+            kept.measures.remove(*i);
         }
+        _ => kept.measures.truncate(after.measures.len()),
+    }
+    if !matches!(change, Choice::Draw(..)) && lines(after) < lines(&kept) {
+        off.push("lines over the bars");
     }
     off
 }
@@ -540,6 +554,13 @@ mod tests {
             Choice::Merchant("albert".into()),
             Choice::Min(Some(Decimal::ONE)),
             Choice::Max(Some(Decimal::TEN)),
+            Choice::Currency(Some("USD".into())),
+            Choice::Currency(None),
+            Choice::Top(5),
+            Choice::Top(0),
+            Choice::Top(30),
+            Choice::SplitTop(3),
+            Choice::SplitTop(9),
         ]);
         c
     }
@@ -880,6 +901,43 @@ mod tests {
         assert_eq!(
             focus_after_builder(&Closed::Deleted, "#opener", false),
             "[role=tab][aria-selected=true]"
+        );
+    }
+
+    #[test]
+    fn currency_and_how_many_are_set_and_kept_in_range() {
+        let usd = with_choice(base(), Choice::Currency(Some("USD".into())));
+        assert_eq!(usd.currency.as_deref(), Some("USD"));
+        assert_eq!(with_choice(usd, Choice::Currency(None)).currency, None);
+        assert_eq!(with_choice(base(), Choice::Top(15)).top, 15);
+        assert_eq!(with_choice(base(), Choice::SplitTop(4)).split_top, 4);
+    }
+
+    #[test]
+    fn a_single_measure_is_drawn_as_bars() {
+        let two = PlotSpec {
+            measures: vec![
+                MeasureSpec {
+                    measure: Measure::Spent,
+                    draw: Draw::Line,
+                },
+                m(Measure::Income),
+            ],
+            ..base()
+        };
+        // Either measure can go; the one left is drawn as bars.
+        let first_gone = with_choice(two.clone(), Choice::RemoveMeasure(0));
+        assert_eq!(first_gone.measures, vec![m(Measure::Income)]);
+        let c = Choice::RemoveMeasure(1);
+        let second_gone = with_choice(two.clone(), c.clone());
+        assert_eq!(second_gone.measures, vec![m(Measure::Spent)]);
+        assert_eq!(turned_off(&two, &c, &second_gone), ["lines over the bars"]);
+        // Measures cut and a line reset in one choice: both are named.
+        let c = Choice::Split(Some(Split::Group));
+        let split = with_choice(two.clone(), c.clone());
+        assert_eq!(
+            turned_off(&two, &c, &split),
+            ["extra measures", "lines over the bars"]
         );
     }
 }
