@@ -2,19 +2,23 @@
 //! draws out. The rows are the spending every other screen counts
 //! (`budget::spending_transactions`), so a plot agrees with them.
 
+mod buckets;
+mod insight;
+mod options;
+
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use finance_types::plot::{
-    Axis, Filters, Measure, MeasureSpec, Period, PeriodBasis, PlotData, PlotSeries, PlotSpec,
-    Split, Unit,
+    Axis, Compare, Draw, Filters, Measure, MeasureSpec, Period, PeriodBasis, PlotData, PlotSeries,
+    PlotSpec, Split, Unit, Value,
 };
 use finance_types::report::Currency;
-use jiff::Span;
 use jiff::civil::Date;
 use rust_decimal::Decimal;
 
+use buckets::point_key;
+
 use crate::model::{Kind, Tx};
-use crate::period::shift_month;
 use crate::text::casefold;
 use crate::trends::{cents, local_day, time_trends};
 use crate::writes::review::normalize_merchant;
@@ -35,10 +39,12 @@ const WEEKDAYS: [&str; 7] = [
     "Sunday",
 ];
 
-/// A counted transaction, with the day it counts on and its merchant key.
+/// A counted transaction, with the day and the month (budget or calendar)
+/// it counts in, and its merchant key.
 struct Row<'a> {
     t: &'a Tx,
     day: Date,
+    month: Date,
     merchant: String,
 }
 
@@ -98,10 +104,9 @@ struct Names<'a> {
 impl Names<'_> {
     fn key(&self, dim: Dim, r: &Row) -> String {
         match dim {
-            Dim::Time(axis) => bucket_start(axis, r.day).to_string(),
-            Dim::Weekday => r.day.weekday().to_monday_zero_offset().to_string(),
-            Dim::DayOfMonth => r.day.day().to_string(),
-            Dim::Year => r.day.year().to_string(),
+            Dim::Time(_) | Dim::Weekday | Dim::DayOfMonth | Dim::Year => {
+                point_key(dim, r.day, r.month)
+            }
             Dim::Category => r.t.category.as_deref().unwrap_or("Uncategorised").into(),
             Dim::Group => match r.t.category.as_deref() {
                 None => "Uncategorised".into(),
@@ -157,6 +162,8 @@ struct Column {
     label: String,
     title: String,
     keys: Vec<String>,
+    /// The folded rest of a named axis.
+    other: bool,
 }
 
 impl Column {
@@ -165,12 +172,51 @@ impl Column {
             title: label.clone(),
             label,
             keys,
+            other: false,
         }
     }
 }
 
+/// One series to fill: a measure over all rows, or over the rows whose split
+/// value is in `only`.
+struct Def {
+    m: MeasureSpec,
+    key: String,
+    label: String,
+    only: Option<(Dim, HashSet<String>)>,
+}
+
+impl Def {
+    fn whole(m: MeasureSpec) -> Self {
+        let (key, label) = measure_name(m.measure);
+        Self {
+            m,
+            key: key.into(),
+            label: label.into(),
+            only: None,
+        }
+    }
+}
+
+/// What every period of one plot shares: the spec, the lookups and the rows
+/// that pass the filters, of any date.
+struct Frame<'a> {
+    ctx: &'a Ctx<'a>,
+    spec: &'a PlotSpec,
+    names: Names<'a>,
+    rows: Vec<&'a Row<'a>>,
+    budget: bool,
+}
+
 pub fn plot_query(ctx: &Ctx<'_>, spec: &PlotSpec) -> Result<PlotData> {
     spec.validate().map_err(Error::Rejected)?;
+    if spec.period == Period::AllTime
+        && (spec.compare != Compare::None || spec.value == Value::Change)
+    {
+        return Err(Error::Rejected(
+            "All time has no period before it to compare with.".into(),
+        ));
+    }
     let snap = ctx.snap;
     let payments = plans::planned_payment_views(ctx);
     let spending = budget::spending_transactions(ctx, &payments);
@@ -188,19 +234,28 @@ pub fn plot_query(ctx: &Ctx<'_>, spec: &PlotSpec) -> Result<PlotData> {
             .next()
             .map_or_else(Currency::eur, |c| c.currency),
     };
+    let budget = spec.period_basis == PeriodBasis::Budget;
     let zone = ctx.now.time_zone();
     let counted: Vec<Row> = spending
         .iter()
         .filter(|t| t.currency == currency && t.kind != Kind::Transfer)
         .filter(|t| t.occurred_at.timestamp() <= ctx.now.timestamp())
-        .map(|t| Row {
-            t,
-            day: local_day(t, zone),
-            merchant: t
-                .counterparty_name
-                .as_deref()
-                .map(normalize_merchant)
-                .unwrap_or_default(),
+        .map(|t| {
+            let day = local_day(t, zone);
+            Row {
+                t,
+                day,
+                month: if budget {
+                    ctx.resolver.month_of(t)
+                } else {
+                    day.first_of_month()
+                },
+                merchant: t
+                    .counterparty_name
+                    .as_deref()
+                    .map(normalize_merchant)
+                    .unwrap_or_default(),
+            }
         })
         .collect();
     let names = Names {
@@ -214,70 +269,40 @@ pub fn plot_query(ctx: &Ctx<'_>, spec: &PlotSpec) -> Result<PlotData> {
         fixed: groups::non_variable_ids(&snap.transactions, &fixed_categories),
     };
     let merchant = casefold(&normalize_merchant(&spec.filters.merchant));
-    let filtered: Vec<&Row> = counted
+    let rows = counted
         .iter()
         .filter(|r| names.passes(&spec.filters, &merchant, r))
         .collect();
-    let today = ctx.today();
-    let (from, to) = period_days(&spec.period, today, &filtered)?;
-    let rows: Vec<&Row> = filtered
-        .into_iter()
-        .filter(|r| from <= r.day && r.day <= to)
-        .collect();
-
-    let first = spec.measures[0].measure;
-    let axis = Dim::from(spec.by);
-    let mut left_out = 0;
-    let mut starts = Vec::new();
-    let columns: Vec<Column> = match spec.by {
-        Axis::Weekday => WEEKDAYS
-            .iter()
-            .enumerate()
-            .map(|(i, w)| Column {
-                label: w[..3].into(),
-                title: (*w).into(),
-                keys: vec![i.to_string()],
-            })
-            .collect(),
-        Axis::DayOfMonth => (1..=31)
-            .map(|d| Column {
-                label: d.to_string(),
-                title: format!("Day {d}"),
-                keys: vec![d.to_string()],
-            })
-            .collect(),
-        _ if spec.time_axis() => {
-            starts = buckets(spec.by, from, to)?;
-            starts
-                .iter()
-                .map(|&d| bucket_column(spec.by, d, d.year() != to.year()))
-                .collect()
-        }
-        _ => {
-            let mut kept = ranked(&names, axis, &rows, first);
-            let rest = kept.split_off(kept.len().min(usize::from(spec.top)));
-            left_out += rest.len();
-            let mut columns: Vec<Column> = kept
-                .into_iter()
-                .map(|k| Column::named(names.label(axis, &k), vec![k]))
-                .collect();
-            if !rest.is_empty() {
-                columns.push(Column::named(OTHER.into(), rest));
-            }
-            columns
-        }
+    let frame = Frame {
+        ctx,
+        spec,
+        names,
+        rows,
+        budget,
     };
-    let index: HashMap<&str, usize> = columns
-        .iter()
-        .enumerate()
-        .flat_map(|(i, c)| c.keys.iter().map(move |k| (k.as_str(), i)))
-        .collect();
-    let mut cells: Vec<Vec<&Row>> = vec![Vec::new(); columns.len()];
-    for r in &rows {
-        if let Some(&i) = index.get(names.key(axis, r).as_str()) {
-            cells[i].push(r);
-        }
+
+    let window = frame.window(0)?;
+    let rows = frame.rows_in(&window);
+    let (defs, split_left_out) = frame.defs(&rows);
+    let ranking = if !spec.named_axis() {
+        Vec::new()
+    } else if spec.value == Value::Change {
+        options::change_ranking(&frame, &window, &rows)?
+    } else {
+        ranked(
+            &frame.names,
+            Dim::from(spec.by),
+            &rows,
+            spec.measures[0].measure,
+        )
+    };
+    let (columns, starts, axis_left_out) = frame.columns(&window, ranking)?;
+    let finished = frame.finished(&starts, columns.len());
+    let mut values = frame.values(&window, &rows, &columns, &defs);
+    if spec.value == Value::Change {
+        options::change(&frame, &columns, &defs, &mut values)?;
     }
+    let reference = options::reference(&frame, columns.len())?;
     let unit = |m: Measure| {
         if m == Measure::Count {
             Unit::Count
@@ -285,79 +310,75 @@ pub fn plot_query(ctx: &Ctx<'_>, spec: &PlotSpec) -> Result<PlotData> {
             Unit::Money
         }
     };
-    // `keys`: the split values a series holds (all rows when `None`).
-    let series_of =
-        |m: &MeasureSpec, key: String, label: String, keys: Option<(Dim, HashSet<String>)>| {
-            PlotSeries {
-                key,
-                label,
-                draw: m.draw,
-                values: cells
-                    .iter()
-                    .map(|cell| {
-                        let txs: Vec<&Tx> = cell
-                            .iter()
-                            .filter(|r| {
-                                keys.as_ref()
-                                    .is_none_or(|(dim, set)| set.contains(&names.key(*dim, r)))
-                            })
-                            .map(|r| r.t)
-                            .collect();
-                        measure(m.measure, &txs)
-                    })
-                    .collect(),
-                reference: false,
-                unit: unit(m.measure),
-            }
-        };
-    let series = if counted.is_empty() {
-        Vec::new()
-    } else if let Some(split) = spec.split {
-        let dim = Dim::from(split);
-        let (kept, rest) = split_keys(split, ranked(&names, dim, &rows, first), spec.split_top);
-        left_out += rest.len();
-        let mut series: Vec<PlotSeries> = kept
-            .into_iter()
-            .map(|k| {
-                let label = names.label(dim, &k);
-                series_of(
-                    &spec.measures[0],
-                    format!("{SPLIT_KEY}{k}"),
-                    label,
-                    Some((dim, HashSet::from([k]))),
-                )
-            })
-            .collect();
-        if !rest.is_empty() {
-            series.push(series_of(
-                &spec.measures[0],
-                OTHER_KEY.into(),
-                OTHER.into(),
-                Some((dim, rest.into_iter().collect())),
-            ));
-        }
-        series
+    let first_unit = unit(spec.measures[0].measure);
+    let insight = if counted.is_empty() {
+        None
     } else {
-        spec.measures
-            .iter()
-            .map(|m| {
-                let (key, label) = measure_name(m.measure);
-                series_of(m, key.into(), label.into(), None)
+        insight::insight(
+            spec,
+            &columns,
+            &totals(&values, spec.split.is_some()),
+            &finished,
+            reference.as_ref().map(|r| r.2.as_slice()),
+            first_unit,
+            &currency,
+        )
+    };
+    let mut series: Vec<PlotSeries> = if counted.is_empty() {
+        Vec::new()
+    } else {
+        defs.into_iter()
+            .zip(values)
+            .map(|(def, values)| PlotSeries {
+                key: def.key,
+                label: def.label,
+                draw: def.m.draw,
+                values,
+                reference: false,
+                unit: unit(def.m.measure),
             })
             .collect()
     };
-    let partial_last = starts.last().is_some_and(|&start| {
-        start <= today && today <= to && next_bucket(spec.by, start).is_none_or(|n| today < n)
-    });
-    // Task 3 adds here, on this plain result: budget months (`period_basis`),
-    // the running total, compare, the average line, `Value::Change`,
-    // `Measure::AveragePerDay` (`measure` gives `None` for it now) and the insight.
+    if !series.is_empty() {
+        let reference_series = |key: &str, label: &str, values| PlotSeries {
+            key: key.into(),
+            label: label.into(),
+            draw: Draw::Line,
+            values,
+            reference: true,
+            unit: first_unit,
+        };
+        if spec.cumulative {
+            for s in &mut series {
+                options::running(&mut s.values);
+            }
+        }
+        if let Some((key, label, mut values)) = reference {
+            if spec.cumulative {
+                options::running(&mut values);
+            }
+            series.push(reference_series(key, label, values));
+        }
+        if spec.average_line {
+            let shown: Vec<Vec<Option<Decimal>>> = series
+                .iter()
+                .filter(|s| !s.reference)
+                .map(|s| s.values.clone())
+                .collect();
+            let average = options::average(&totals(&shown, spec.split.is_some()), &finished);
+            series.push(reference_series(
+                "average",
+                "Average",
+                vec![average; columns.len()],
+            ));
+        }
+    }
     Ok(PlotData {
+        partial_last: starts.last() == Some(&frame.today_key()) && frame.today() <= window.to,
         categories: columns.iter().map(|c| c.label.clone()).collect(),
         titles: columns.into_iter().map(|c| c.title).collect(),
         series,
-        partial_last,
-        insight: None,
+        insight,
         currency,
         unit: if spec.measures.iter().all(|m| m.measure == Measure::Count) {
             Unit::Count
@@ -365,12 +386,65 @@ pub fn plot_query(ctx: &Ctx<'_>, spec: &PlotSpec) -> Result<PlotData> {
             Unit::Money
         },
         subtitle: subtitle(spec),
-        left_out,
+        left_out: axis_left_out + split_left_out,
     })
 }
 
-/// One measure over a bucket's rows; `None` where it has no value.
-fn measure(m: Measure, txs: &[&Tx]) -> Option<Decimal> {
+impl Frame<'_> {
+    fn today(&self) -> Date {
+        self.ctx.today()
+    }
+
+    /// The series to fill: one per measure, or one per kept split value plus
+    /// "Other"; and how many split values "Other" holds.
+    fn defs(&self, rows: &[&Row]) -> (Vec<Def>, usize) {
+        let spec = self.spec;
+        let Some(split) = spec.split else {
+            return (spec.measures.iter().cloned().map(Def::whole).collect(), 0);
+        };
+        let m = &spec.measures[0];
+        let dim = Dim::from(split);
+        let (kept, rest) = split_keys(
+            split,
+            ranked(&self.names, dim, rows, m.measure),
+            spec.split_top,
+        );
+        let left_out = rest.len();
+        let mut defs: Vec<Def> = kept
+            .into_iter()
+            .map(|k| Def {
+                m: m.clone(),
+                key: format!("{SPLIT_KEY}{k}"),
+                label: self.names.label(dim, &k),
+                only: Some((dim, HashSet::from([k]))),
+            })
+            .collect();
+        if !rest.is_empty() {
+            defs.push(Def {
+                m: m.clone(),
+                key: OTHER_KEY.into(),
+                label: OTHER.into(),
+                only: Some((dim, rest.into_iter().collect())),
+            });
+        }
+        (defs, left_out)
+    }
+}
+
+/// Per column, the sum of the series (split) or the first series.
+fn totals(values: &[Vec<Option<Decimal>>], split: bool) -> Vec<Option<Decimal>> {
+    if !split {
+        return values.first().cloned().unwrap_or_default();
+    }
+    let n = values.first().map_or(0, Vec::len);
+    (0..n)
+        .map(|i| values.iter().filter_map(|v| v[i]).reduce(|a, b| a + b))
+        .collect()
+}
+
+/// One measure over a bucket's rows that spans `days` days; `None` where it
+/// has no value.
+fn measure(m: Measure, txs: &[&Tx], days: i64) -> Option<Decimal> {
     let spending: Vec<&Tx> = txs
         .iter()
         .copied()
@@ -395,7 +469,7 @@ fn measure(m: Measure, txs: &[&Tx]) -> Option<Decimal> {
         Measure::Count => Some(Decimal::from(count)),
         Measure::Average => (count > 0).then(|| cents(spent / Decimal::from(count))),
         Measure::Largest => outflows().max(),
-        Measure::AveragePerDay => None,
+        Measure::AveragePerDay => (days > 0).then(|| cents(spent / Decimal::from(days))),
     }
 }
 
@@ -445,10 +519,16 @@ fn ranked(names: &Names, dim: Dim, rows: &[&Row], m: Measure) -> Vec<String> {
     for r in rows {
         by_key.entry(names.key(dim, r)).or_default().push(r.t);
     }
+    // Per day ranks as the spending does: every key shares the same days.
+    let m = if m == Measure::AveragePerDay {
+        Measure::Spent
+    } else {
+        m
+    };
     let mut ranked: Vec<(String, Option<Decimal>)> = by_key
         .into_iter()
         .map(|(k, txs)| {
-            let value = measure(m, &txs);
+            let value = measure(m, &txs, 0);
             (k, value)
         })
         .collect();
@@ -478,103 +558,6 @@ fn spellings(rows: &[Row]) -> HashMap<String, String> {
             Some((key.to_owned(), best.0.to_owned()))
         })
         .collect()
-}
-
-/// The first and last day of `period`, both included (calendar months).
-fn period_days(period: &Period, today: Date, rows: &[&Row]) -> Result<(Date, Date)> {
-    let month = today.first_of_month();
-    let months = |n: i32| (shift_month(month, 1 - n), today);
-    Ok(match period {
-        Period::ThisMonth => (month, today),
-        Period::LastMonth => {
-            let start = shift_month(month, -1);
-            (start, start.last_of_month())
-        }
-        Period::Last3Months => months(3),
-        Period::Last6Months => months(6),
-        Period::Last12Months => months(12),
-        Period::ThisYear => (today.first_of_year(), today),
-        Period::AllTime => (rows.iter().map(|r| r.day).min().unwrap_or(today), today),
-        Period::Between { from, to } => {
-            let day = |s: &str| {
-                s.parse::<Date>().map_err(|_| {
-                    Error::Rejected("Dates must be real days written YYYY-MM-DD.".into())
-                })
-            };
-            (day(from)?, day(to)?)
-        }
-    })
-}
-
-fn bucket_start(axis: Axis, day: Date) -> Date {
-    match axis {
-        Axis::Week => day
-            .checked_sub(Span::new().days(day.weekday().to_monday_zero_offset()))
-            .unwrap_or(day),
-        Axis::Month => day.first_of_month(),
-        Axis::Quarter => Date::new(day.year(), (day.month() - 1) / 3 * 3 + 1, 1).unwrap_or(day),
-        Axis::Year => day.first_of_year(),
-        _ => day,
-    }
-}
-
-/// The start of the bucket after the one starting at `start`; `None` past the calendar's end.
-fn next_bucket(axis: Axis, start: Date) -> Option<Date> {
-    let next = match axis {
-        Axis::Week => start.checked_add(Span::new().days(7)).ok()?,
-        Axis::Month => shift_month(start, 1),
-        Axis::Quarter => shift_month(start, 3),
-        Axis::Year => shift_month(start, 12),
-        _ => start.checked_add(Span::new().days(1)).ok()?,
-    };
-    (next > start).then_some(next)
-}
-
-/// Every bucket from `from` through `to`, refused past the limit for its unit.
-fn buckets(axis: Axis, from: Date, to: Date) -> Result<Vec<Date>> {
-    let (limit, unit) = match axis {
-        Axis::Day => (366, "days"),
-        Axis::Week => (260, "weeks"),
-        Axis::Month => (240, "months"),
-        _ => (usize::MAX, ""),
-    };
-    let mut starts = Vec::new();
-    let mut at = Some(bucket_start(axis, from));
-    while let Some(start) = at.filter(|&s| s <= to) {
-        if starts.len() == limit {
-            return Err(Error::Rejected(format!(
-                "A plot can show at most {limit} {unit}."
-            )));
-        }
-        starts.push(start);
-        at = next_bucket(axis, start);
-    }
-    Ok(starts)
-}
-
-/// A time bucket's short label and long title; `years` when the period spans more than one.
-fn bucket_column(axis: Axis, d: Date, years: bool) -> Column {
-    let (label, title) = match axis {
-        Axis::Day => (
-            if years { "%-d %b %Y" } else { "%-d %b" },
-            "%A %-d %B %Y".to_owned(),
-        ),
-        Axis::Week => (
-            if years { "%-d %b %Y" } else { "%-d %b" },
-            "Week of %-d %B %Y".to_owned(),
-        ),
-        Axis::Month => (if years { "%b %Y" } else { "%b" }, "%B %Y".to_owned()),
-        Axis::Quarter => {
-            let q = format!("Q{} %Y", (d.month() - 1) / 3 + 1);
-            return Column::named(d.strftime(&q).to_string(), vec![d.to_string()]);
-        }
-        _ => ("%Y", "%Y".to_owned()),
-    };
-    Column {
-        label: d.strftime(label).to_string(),
-        title: d.strftime(&title).to_string(),
-        keys: vec![d.to_string()],
-    }
 }
 
 fn subtitle(spec: &PlotSpec) -> String {

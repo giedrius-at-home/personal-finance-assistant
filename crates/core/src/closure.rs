@@ -548,7 +548,7 @@ pub fn wish_caps(wishes: &[Wish], previous: &[AllocationLine]) -> WishCaps {
 
 /// `€12.00`: the amount at the currency's minor unit, `USD 12.00` for a
 /// currency without a sign here.
-fn short_money(value: Decimal, currency: &Currency) -> String {
+pub(crate) fn short_money(value: Decimal, currency: &Currency) -> String {
     let mut value = value.round_dp(u32::from(currency.minor_unit));
     value.rescale(u32::from(currency.minor_unit));
     let text = value.abs().to_string();
