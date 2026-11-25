@@ -244,11 +244,14 @@ pub fn MoneyPlanFields(
             .predicted_bills
             .iter()
             .map(|b| {
-                let label = format!("{} · {}", b.category, crate::format::day_month(&b.due_on));
+                let due = crate::format::day_month(&b.due_on);
                 let amount = money(b.amount, &unit);
                 view! {
                     <div class="flex justify-between gap-4 text-sm">
-                        <span class="text-fg-muted">{label}</span>
+                        <span class="flex flex-wrap gap-x-2 text-fg-muted">
+                            <span>{b.category.clone()}</span>
+                            <span class="tabular-nums">{due}</span>
+                        </span>
                         <span class="tabular-nums">{"≈ "}{amount}</span>
                     </div>
                 }

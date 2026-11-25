@@ -157,7 +157,7 @@ fn options(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
         .collect()
 }
 
-/// "Elena (es, female)", "My voice · your voice".
+/// "Elena (es, female)", "My voice (your voice)".
 fn voice_label(v: &VoiceOption) -> String {
     let mut details: Vec<String> = v.languages.clone();
     if let Some(g) = &v.gender {
@@ -168,7 +168,7 @@ fn voice_label(v: &VoiceOption) -> String {
     } else {
         format!(" ({})", details.join(", "))
     };
-    let mine = if v.custom { " · your voice" } else { "" };
+    let mine = if v.custom { " (your voice)" } else { "" };
     format!("{}{details}{mine}", v.name)
 }
 
@@ -345,7 +345,7 @@ pub fn BriefCard() -> impl IntoView {
                         disabled=Signal::derive(move || busy.get())
                     />
                 </Field>
-                <Field label="Expressiveness" id="brief-expressive" hint="1.0 calm · 1.4 lively · 2.0 very lively">
+                <Field label="Expressiveness" id="brief-expressive" hint="1.0 is calm, 1.4 lively and 2.0 very lively.">
                     <Input id="brief-expressive" value=draft.expressiveness kind="range" min="1.0" max="2.0" step="0.1" />
                     <span class=HINT>{expressive_label}</span>
                 </Field>
@@ -384,11 +384,8 @@ pub fn BriefCard() -> impl IntoView {
                 } else {
                     format!("Voice: {}", p.brief.voice_id)
                 };
-                let fixed = if p.brief.source == "fixed" {
-                    " · fixed words: Mistral was not available"
-                } else {
-                    ""
-                };
+                let fixed = (p.brief.source == "fixed")
+                    .then_some("Fixed words: Mistral was not available.");
                 view! {
                     <div class="mt-4 grid gap-2 rounded-lg border border-border p-3">
                         <p class="text-sm font-semibold">{p.brief.title.clone()}</p>
@@ -396,18 +393,18 @@ pub fn BriefCard() -> impl IntoView {
                             <audio class="w-full" controls=true autoplay=true src=src></audio>
                         })}
                         <p class=MUTED>{p.brief.script.clone()}</p>
-                        <p class=HINT>{format!("{voice}{fixed}")}</p>
+                        <p class=cn([HINT, "flex flex-wrap gap-x-3"])>
+                            <span>{voice}</span>
+                            {fixed.map(|f| view! { <span>{f}</span> })}
+                        </p>
                     </div>
                 }
             })}
             {move || latest.get().map(|b| view! {
-                <p class=STATUS_NOTE>
-                    {format!(
-                        "Last brief: {} · {}{}",
-                        b.date,
-                        b.title,
-                        if b.source == "fixed" { " (fixed words: Mistral was not available)" } else { "" }
-                    )}
+                <p class=cn([STATUS_NOTE, "flex flex-wrap gap-x-3"])>
+                    <span>{format!("Last brief: {}", b.date)}</span>
+                    <span>{b.title.clone()}</span>
+                    {(b.source == "fixed").then(|| view! { <span>"Fixed words: Mistral was not available."</span> })}
                 </p>
             })}
             {move || {

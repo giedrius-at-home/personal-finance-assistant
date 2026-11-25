@@ -570,20 +570,22 @@ pub fn TransactionSearch() -> impl IntoView {
                                             .counterparty
                                             .is_some()
                                             .then(|| row.description.clone())
-                                            .flatten()
-                                            .map(|d| format!(" · {d}"))
-                                            .unwrap_or_default();
-                                        let meta = format!(
-                                            "{} · {}{detail}",
-                                            row.occurred_on,
-                                            row.account_name.clone().unwrap_or_else(|| "—".into())
-                                        );
+                                            .flatten();
+                                        // Date, account and (under a counterparty) the
+                                        // description, each its own part.
+                                        let meta = [
+                                            Some(row.occurred_on.clone()),
+                                            Some(row.account_name.clone().unwrap_or_else(|| "—".into())),
+                                            detail,
+                                        ];
                                         view! {
                                             <li class="grid gap-2 border-t border-line py-3">
                                                 <div class="flex justify-between gap-3">
                                                     <span class=WRAP_TEXT>
                                                         <strong class="font-semibold">{title(&row)}</strong>
-                                                        <small class=SMALL>{meta}</small>
+                                                        <small class=cn([SMALL, "flex flex-wrap gap-x-3"])>
+                                                            {meta.into_iter().flatten().map(|m| view! { <span>{m}</span> }).collect_view()}
+                                                        </small>
                                                     </span>
                                                     <span class=cn([TRAILING, if row.direction == SearchDirection::In { "text-positive-fg" } else { "" }])>
                                                         {sign(row.direction)}

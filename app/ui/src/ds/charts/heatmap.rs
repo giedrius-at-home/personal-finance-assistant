@@ -61,7 +61,9 @@ pub fn Heatmap(
                         ),
                         None => "relative aspect-square rounded-[4px] border border-dashed border-line".to_owned(),
                     };
-                    let title = format!("{row} · {}", columns[c]);
+                    // The row names the tooltip; the column labels its value.
+                    let title = row.clone();
+                    let column = columns[c].clone();
                     let text = value.map_or_else(|| "No data".to_owned(), |v| format(v));
                     let at = (c as f64 + 0.5) / n as f64 * 100.0;
                     view! {
@@ -72,7 +74,7 @@ pub fn Heatmap(
                                         view! {
                                             <Tooltip
                                                 title=title.clone()
-                                                rows=vec![(String::new(), text.clone(), "var(--ds-chart-1)".to_owned())]
+                                                rows=vec![(column.clone(), text.clone(), "var(--ds-chart-1)".to_owned())]
                                                 at=at
                                             />
                                         }

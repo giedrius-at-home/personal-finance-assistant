@@ -138,7 +138,7 @@ fn ImportCard(
     options.extend(
         ws.accounts
             .iter()
-            .map(|a| (a.id.clone(), format!("{} · {}", a.name, a.currency))),
+            .map(|a| (a.id.clone(), format!("{} ({})", a.name, a.currency))),
     );
     let submit = move |e: leptos::ev::SubmitEvent| {
         e.prevent_default();
@@ -245,7 +245,7 @@ fn ImportCard(
                             </Button>
                         </fieldset>
                     </form>
-                    <Help text="CSV or text · maximum 5 MB · processed on this Mac" />
+                    <Help text="CSV or text, up to 5 MB, processed on this Mac" />
                     {move || csv.get().map(|p| view! { <PreviewView p=p ops=ops skip=skip csv=csv confirm=Callback::new(confirm) /> })}
                 }
                     .into_any()

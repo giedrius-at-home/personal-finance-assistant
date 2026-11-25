@@ -108,6 +108,8 @@ fn main() -> Result<()> {
         model_dir,
         pusher: pusher(),
     }));
+    // Notifications are signed by the owner's persona (Gisel or Rafael).
+    finance_core::rafael::set_persona(app.service.persona_name());
     install_model(app);
     register_alerts(app);
     schedule(app);
@@ -666,9 +668,10 @@ fn push_test(app: &App) -> Result<String, String> {
     if devices.is_empty() {
         return Err("Turn on notifications on a phone first.".into());
     }
+    let (title, body) = finance_core::rafael::test_message();
     let message = PushMessage {
-        title: "Finance".into(),
-        body: "Notifications work on this device.".into(),
+        title,
+        body,
         url: "/".into(),
         tag: "test".into(),
         urgent: true,

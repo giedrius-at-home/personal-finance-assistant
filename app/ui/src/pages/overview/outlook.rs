@@ -86,7 +86,7 @@ pub fn summary(report: &Dashboard) -> Option<String> {
             )
         })
         .collect();
-    (!parts.is_empty()).then(|| parts.join(" · "))
+    (!parts.is_empty()).then(|| parts.join(" and "))
 }
 
 #[component]

@@ -562,7 +562,7 @@ fn ClosedSummary(view: ClosureView) -> impl IntoView {
     let has_delta = !delta.is_empty();
     let delta_view = view.clone();
     view! {
-        <StepCard title="4. Transfers · closed" description=Some(description)>
+        <StepCard title="4. Transfers closed" description=Some(description)>
             {(pending > 0).then(|| view! {
                 <p class=ERROR_LINE>
                     {format!(
@@ -645,7 +645,10 @@ fn ChangedAfterClose(view: ClosureView) -> impl IntoView {
             };
             view! {
                 <li class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-2.5 text-sm">
-                    <span>{format!("{}{}", account.name, if reviewed { "" } else { " · no longer reviewed" })}</span>
+                    <span class="flex flex-wrap gap-x-3">
+                        <span>{account.name.clone()}</span>
+                        {(!reviewed).then(|| view! { <span class="text-fg-muted">"No longer reviewed"</span> })}
+                    </span>
                     <strong class="tabular-nums">{text}</strong>
                 </li>
             }

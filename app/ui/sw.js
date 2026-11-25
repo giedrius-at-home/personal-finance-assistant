@@ -17,7 +17,8 @@ self.addEventListener('push', (event) => {
       tag: data.tag || undefined,
       renotify: !!data.tag,
       icon: '/icons/icon-192.png',
-      badge: '/icons/icon-192.png',
+      // Android shows the badge in the status bar: white on transparent.
+      badge: '/icons/badge-96.png',
       data: { url: data.url || '/' },
     }),
   );

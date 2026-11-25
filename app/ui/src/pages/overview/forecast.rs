@@ -120,7 +120,10 @@ pub fn DailyForecastPanel(report: Dashboard, currency_code: String) -> impl Into
                     .map(|flow| {
                         view! {
                             <li class="flex justify-between gap-3 border-b border-line py-2 text-sm last:border-b-0">
-                                <span>{format!("{} · {}", format::day_month(&flow.day), flow.name)}</span>
+                                <span class="flex flex-wrap gap-x-2">
+                                    <span class="tabular-nums text-fg-muted">{format::day_month(&flow.day)}</span>
+                                    <span>{flow.name.clone()}</span>
+                                </span>
                                 <strong class="font-semibold">
                                     {if flow.direction == Direction::Inflow { "+" } else { "" }}
                                     {amount(flow.amount, "")}
@@ -156,12 +159,12 @@ pub fn DailyForecastPanel(report: Dashboard, currency_code: String) -> impl Into
         ),
     ];
     if let Some(h) = &heaviest {
-        evidence.insert(
-            0,
-            (
-                "Heaviest habit day".into(),
-                format!("{} · {}", h.weekday, m(h.average)),
-            ),
+        evidence.splice(
+            0..0,
+            [
+                ("Heaviest habit day".into(), h.weekday.clone()),
+                ("Average on that day".into(), m(h.average)),
+            ],
         );
     }
     let next_week = amount(next_week(&forecast), "");

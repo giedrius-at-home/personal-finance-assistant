@@ -11,7 +11,7 @@ use wasm_bindgen_futures::JsFuture;
 
 use crate::api::{NoArgs, load};
 use crate::ds::patterns::{HINT, MUTED, STATUS_NOTE};
-use crate::ds::{Card, CardTitle, Eyebrow, Heading};
+use crate::ds::{Card, CardTitle, Eyebrow, Heading, cn};
 
 #[wasm_bindgen(inline_js = "
 // The MP3 as a blob URL: Safari's player wants byte ranges, which the
@@ -97,7 +97,10 @@ pub fn OverviewBrief() -> impl IntoView {
             .then(|| view! { <p class=format!("mt-3 {HINT}")>"No audio today; here is what was said."</p> });
         view! {
             <p class="mt-2 text-lg font-semibold">{b.title.clone()}</p>
-            <p class=HINT>{format!("{} · {}", b.facts.weekday, b.date)}</p>
+            <p class=cn([HINT, "flex gap-x-3"])>
+                <span>{b.facts.weekday.clone()}</span>
+                <span>{b.date.clone()}</span>
+            </p>
             {move || {
                 let who = who.clone();
                 src.get().map(|url| view! {

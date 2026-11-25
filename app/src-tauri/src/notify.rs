@@ -26,12 +26,18 @@ struct Desktop(AppHandle);
 
 impl Notifier for Desktop {
     fn send(&self, message: &Notification) -> Outcome {
+        // In Rafael's voice, as on the phone and in the email.
+        let today = jiff::Timestamp::now()
+            .to_zoned(jiff::tz::TimeZone::UTC)
+            .date();
+        let (title, body) =
+            finance_core::rafael::alert(message, finance_core::rafael::seed(&message.name, today));
         match self
             .0
             .notification()
             .builder()
-            .title(&message.title)
-            .body(&message.body)
+            .title(&title)
+            .body(&body)
             .show()
         {
             Ok(()) => Outcome::Delivered,

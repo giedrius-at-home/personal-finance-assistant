@@ -108,14 +108,19 @@ where
     }
 }
 
-/// The email an alert becomes: the notification's title as the subject,
-/// its line as the body.
+/// The email an alert becomes, in Rafael's voice (as the daily email):
+/// his title as the subject, the facts and his line as the body.
 pub fn alert_email(n: &Notification) -> Message {
+    let today = jiff::Timestamp::now()
+        .to_zoned(jiff::tz::TimeZone::UTC)
+        .date();
+    let (subject, body) =
+        finance_core::rafael::alert(n, finance_core::rafael::seed(&n.name, today));
     Message {
-        subject: n.title.clone(),
+        subject,
         body: format!(
-            "{}\n\nOpen Finance to see the plan and what to do now.\n",
-            n.body
+            "{body}\n\nOpen your plan: {}\n",
+            finance_core::spending_email::PLAN_LINK
         ),
         html_body: None,
     }

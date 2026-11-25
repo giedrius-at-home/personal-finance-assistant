@@ -448,8 +448,10 @@ pub struct PlotData {
     /// The unit of the first series.
     #[serde(default)]
     pub unit: Unit,
+    /// What the numbers cover, one fact per part: the period, the month
+    /// basis, the spending included. Shown as separate items, never joined.
     #[serde(default)]
-    pub subtitle: String,
+    pub subtitle: Vec<String>,
     /// Items not shown (past `top`, or folded into "Other").
     #[serde(default)]
     pub left_out: usize,

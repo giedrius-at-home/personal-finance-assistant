@@ -668,7 +668,7 @@ struct BillOption {
 }
 
 /// The bills a change can be judged on (the view lists them, with their
-/// schedule), labelled `Gym · €30 per month`.
+/// schedule), labelled `Gym, €30 per month`.
 fn changeable_bills(
     bills: &[BillOption],
     changeable: &[ChangeableBill],
@@ -679,7 +679,7 @@ fn changeable_bills(
         .filter_map(|b| {
             let every = changeable.iter().find(|c| c.bill_id == b.id)?.every;
             let label = format!(
-                "{} · {} per {}",
+                "{}, {} per {}",
                 b.name,
                 amount(b.amount, code),
                 period(every)
@@ -1454,7 +1454,7 @@ fn wish_box(ui: Ui, row: &WishRow, ctx: &Context) -> impl IntoView + use<> {
     let must = (planned && wish.must)
         .then(|| view! { <Badge tone=Tone::Accent class=BADGE_TIGHT>"Must"</Badge> });
     let hold = cooling_off(wish).map(|hours| {
-        view! { <Badge tone=Tone::Warning class=BADGE_TIGHT>{format!("Cooling off · {hours} h")}</Badge> }
+        view! { <Badge tone=Tone::Warning class=BADGE_TIGHT>{format!("Cooling off for {hours} h")}</Badge> }
     });
     let parts = (!row.children.is_empty()).then(|| {
         let text = crate::pages::plural(row.children.len(), "part");
@@ -2478,7 +2478,7 @@ fn wish_body(
                 <h3 class=cn([TREE_NAME, if sub { "text-sm" } else { "text-base" }])>
                     {wish.name.clone()}
                     {(must || parent_must == Some(true)).then(|| view! { <Badge tone=Tone::Accent>"Must"</Badge> })}
-                    {cooling.map(|hours| view! { <Badge tone=Tone::Warning>{format!("Cooling off · {hours} h left")}</Badge> })}
+                    {cooling.map(|hours| view! { <Badge tone=Tone::Warning>{format!("{hours} h of cooling off left")}</Badge> })}
                     <Badge tone=chip_tone>{chip}</Badge>
                 </h3>
                 <FactsRow rows=detail />
@@ -3821,7 +3821,7 @@ mod tests {
         }];
         let options = changeable_bills(&bills, &changeable, "EUR");
         assert_eq!(options.len(), 1);
-        assert_eq!(options[0].1, "Therapy · €80 per 2 weeks");
+        assert_eq!(options[0].1, "Therapy, €80 per 2 weeks");
     }
 
     #[test]

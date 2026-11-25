@@ -588,12 +588,10 @@ fn SettingsCard(
                             let id = r.revision_id;
                             view! {
                                 <div class="flex flex-wrap items-center justify-between gap-4 border-b border-line py-4 text-sm last:border-b-0">
-                                    <span>
-                                        {format!(
-                                            "#{id} · {}{}",
-                                            local_date(Some(&r.applied_at)),
-                                            if r.rolled_back_at.is_some() { " · Rolled back" } else { "" },
-                                        )}
+                                    <span class="flex flex-wrap gap-x-3">
+                                        <span class="tabular-nums">{format!("#{id}")}</span>
+                                        <span>{local_date(Some(&r.applied_at))}</span>
+                                        {r.rolled_back_at.is_some().then(|| view! { <span class="text-fg-muted">"Rolled back"</span> })}
                                     </span>
                                     {r
                                         .active
@@ -728,6 +726,7 @@ fn ForecastModel() -> impl IntoView {
         });
     };
     let body = move |s: ForecastModelStatus| {
+        let mut last_run = None;
         let line = if let Some(received) = s.downloading {
             let share = received.saturating_mul(100) / s.download_bytes.max(1);
             format!(
@@ -742,10 +741,8 @@ fn ForecastModel() -> impl IntoView {
                 Some("huggingface") => "Found in the Hugging Face cache",
                 _ => "Downloaded to this Mac",
             };
-            match s.last_run_seconds {
-                Some(seconds) => format!("{place} · last run took {seconds:.1} s"),
-                None => place.to_owned(),
-            }
+            last_run = s.last_run_seconds.map(|seconds| format!("{seconds:.1} s"));
+            place.to_owned()
         } else {
             "Not on this Mac: forecasts use the simple baselines.".to_owned()
         };
@@ -761,6 +758,12 @@ fn ForecastModel() -> impl IntoView {
                     <dt class=HINT>"Status"</dt>
                     <dd class=DD_NUM>{line}</dd>
                 </div>
+                {last_run.map(|t| view! {
+                    <div>
+                        <dt class=HINT>"Last run took"</dt>
+                        <dd class=DD_NUM>{t}</dd>
+                    </div>
+                })}
             </dl>
             {s.error.map(|e| {
                 view! { <p class=cn([SUBSECTION, if failed { "text-negative-fg" } else { "" }])>{format!("Last attempt failed: {e}")}</p> }
@@ -837,6 +840,9 @@ fn Updates() -> impl IntoView {
     };
     let busy = ops.busy;
     let body = move |u: UpdateStatus| {
+        let checked = (u.available.is_none() && u.error.is_none() && !u.installing && !u.checking)
+            .then(|| u.last_checked.clone())
+            .flatten();
         let status_line = if u.installing {
             "Installing… the app restarts when done.".to_owned()
         } else if u.checking {
@@ -845,8 +851,8 @@ fn Updates() -> impl IntoView {
             format!("Last check failed: {e}")
         } else if u.available.is_some() {
             "An update is ready.".to_owned()
-        } else if let Some(t) = &u.last_checked {
-            format!("Up to date · checked {t}")
+        } else if u.last_checked.is_some() {
+            "Up to date".to_owned()
         } else {
             "Not checked yet.".to_owned()
         };
@@ -862,6 +868,12 @@ fn Updates() -> impl IntoView {
                     <dt class=HINT>"Status"</dt>
                     <dd class=cn([DD, if failed { "text-negative-fg" } else { "" }])>{status_line}</dd>
                 </div>
+                {checked.map(|t| view! {
+                    <div>
+                        <dt class=HINT>"Last checked"</dt>
+                        <dd class=DD_NUM>{t}</dd>
+                    </div>
+                })}
             </dl>
             {u
                 .available
@@ -872,7 +884,7 @@ fn Updates() -> impl IntoView {
                             <div class=TITLE_BLOCK>
                                 <strong class="font-semibold">
                                     {format!("Version {} is available", a.version)}
-                                    {a.date.map(|d| view! { <span class="font-normal text-fg-muted">{format!(" · {}", format::date(&d))}</span> })}
+                                    {a.date.map(|d| view! { <span class="ml-2 font-normal text-fg-muted">{format::date(&d)}</span> })}
                                 </strong>
                                 {a.notes.filter(|n| !n.trim().is_empty()).map(|n| view! { <p class="whitespace-pre-line text-sm text-fg-muted">{n}</p> })}
                             </div>

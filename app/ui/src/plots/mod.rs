@@ -23,7 +23,7 @@ use crate::ds::charts::{
 use crate::ds::patterns::{
     ERROR_LINE, MUTED, PLOT_CAPTION, PLOT_FOOT, PLOT_INSIGHT, SKELETON_CARD,
 };
-use crate::ds::{EmptyState, Skeleton, money};
+use crate::ds::{EmptyState, Skeleton, cn, money};
 use crate::pages::{f, plural};
 
 /// The query's key for the series that folds the rest together.
@@ -144,8 +144,9 @@ pub fn positive_items(data: &PlotData, keep: Option<usize>) -> Items {
 }
 
 /// The query's subtitle, plus what the chart leaves out: items in "Other",
-/// and (donut, ranked) items at zero or below or with no value.
-pub fn subtitle_for(spec: &PlotSpec, data: &PlotData) -> String {
+/// and (donut, ranked) items at zero or below or with no value. One fact per
+/// part, shown as separate items.
+pub fn subtitle_for(spec: &PlotSpec, data: &PlotData) -> Vec<String> {
     let items = match spec.chart {
         Chart::Donut => positive_items(data, Some(DONUT_NAMED)),
         Chart::Ranked if spec.value != Value::Change => positive_items(data, None),
@@ -154,7 +155,7 @@ pub fn subtitle_for(spec: &PlotSpec, data: &PlotData) -> String {
             ..Items::default()
         },
     };
-    let mut parts = vec![data.subtitle.clone()];
+    let mut parts = data.subtitle.clone();
     parts.retain(|p| !p.is_empty());
     if items.in_other > 0 {
         parts.push(format!("{} more in Other", items.in_other));
@@ -171,7 +172,7 @@ pub fn subtitle_for(spec: &PlotSpec, data: &PlotData) -> String {
             plural(items.missing, "item")
         ));
     }
-    parts.join(" · ")
+    parts
 }
 
 /// The totals row of the numbers table: a sum per series that adds up
@@ -499,7 +500,8 @@ pub fn PlotView(
                     .as_ref()
                     .map(|i| view! { <p class=PLOT_INSIGHT>{i.text.clone()}</p> });
                 let data = d.clone();
-                let fallback = subtitle.clone();
+                // A label is one string: the parts read as a list.
+                let fallback = subtitle.join(", ");
                 // Without a title the period and filters name the chart; a new
                 // title changes the label only, not the drawing.
                 let label = Signal::derive(move || {
@@ -530,7 +532,12 @@ pub fn PlotView(
                         {body}
                         <div class=PLOT_FOOT>
                             <div class=PLOT_CAPTION>
-                                <p class=MUTED>{subtitle}</p>
+                                <ul class=cn([MUTED, "flex flex-wrap gap-x-4 gap-y-0.5"])>
+                                    {subtitle
+                                        .into_iter()
+                                        .map(|part| view! { <li>{part}</li> })
+                                        .collect_view()}
+                                </ul>
                                 {insight}
                             </div>
                             {switch}
@@ -582,7 +589,7 @@ mod tests {
                 minor_unit: 2,
             },
             unit: Unit::Money,
-            subtitle: String::new(),
+            subtitle: Vec::new(),
             left_out: 0,
         }
     }
@@ -698,7 +705,10 @@ mod tests {
         };
         assert_eq!(
             subtitle_for(&ranked, &data),
-            "2 items at zero or below not shown · 1 item with no value not shown"
+            [
+                "2 items at zero or below not shown",
+                "1 item with no value not shown"
+            ]
         );
     }
 
@@ -725,13 +735,13 @@ mod tests {
             chart: Chart::Donut,
             ..spec(&[Measure::Spent], None)
         };
-        assert_eq!(subtitle_for(&donut, &data), "17 more in Other");
+        assert_eq!(subtitle_for(&donut, &data), ["17 more in Other"]);
         let bars = spec(&[Measure::Spent], None);
-        assert_eq!(subtitle_for(&bars, &data), "12 more in Other");
-        data.subtitle = "Last 6 months".into();
+        assert_eq!(subtitle_for(&bars, &data), ["12 more in Other"]);
+        data.subtitle = vec!["Last 6 months".into()];
         assert_eq!(
             subtitle_for(&bars, &data),
-            "Last 6 months · 12 more in Other"
+            ["Last 6 months", "12 more in Other"]
         );
     }
 

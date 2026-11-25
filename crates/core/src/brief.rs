@@ -677,6 +677,7 @@ impl Service {
     ) -> std::result::Result<BriefSettings, String> {
         let settings = validate(settings).map_err(|e| e.to_string())?;
         self.with_connection(|c| save_settings(c, &settings))?;
+        crate::rafael::set_persona(settings.persona.name());
         Ok(settings)
     }
 

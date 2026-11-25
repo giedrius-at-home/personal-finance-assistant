@@ -590,7 +590,10 @@ pub fn SplitEditor(
             view! {
                 <fieldset class="min-w-0 rounded-lg border border-border bg-card-muted p-4 sm:p-5">
                     <legend class="float-left mb-3 w-full text-sm">
-                        <strong>{legend.0}</strong>" · "<span class="tabular-nums">{legend.1}</span>
+                        <span class="flex flex-wrap items-baseline gap-x-3">
+                            <strong>{legend.0}</strong>
+                            <span class="tabular-nums">{legend.1}</span>
+                        </span>
                     </legend>
                     <div class="clear-both grid gap-4">
                         {legend.2.map(|note| view! { <small class=SMALL>{note}</small> })}

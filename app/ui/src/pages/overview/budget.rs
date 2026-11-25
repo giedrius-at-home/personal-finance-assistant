@@ -533,7 +533,7 @@ fn panel(report: &Dashboard, selection: &str, s: PanelState) -> AnyView {
         .map(|b| {
             (
                 key(b),
-                format!("{} · {}", month_label(&b.plan.month), b.plan.currency.code),
+                format!("{} in {}", month_label(&b.plan.month), b.plan.currency.code),
             )
         })
         .collect();
@@ -930,12 +930,12 @@ fn budget_row(budget: &MonthlyBudget, row: &BudgetRow, kind: Kind, s: PanelState
                     .categories
                     .iter()
                     .map(|c| {
-                        let detail = format!(
-                            "{} transaction{}{}",
+                        let count = format!(
+                            "{} transaction{}",
                             c.count,
                             if c.count == 1 { "" } else { "s" },
-                            if c.spent < Decimal::ZERO { " · Refund" } else { "" },
                         );
+                        let refund = (c.spent < Decimal::ZERO).then_some("Refund");
                         view! {
                             <li class=LEDGER_ROW>
                                 <span class="min-w-0 max-w-md flex-1">
@@ -944,7 +944,10 @@ fn budget_row(budget: &MonthlyBudget, row: &BudgetRow, kind: Kind, s: PanelState
                                         value=f(c.spent).max(0.0)
                                         max=category_total
                                     />
-                                    <small class=SUBLINE>{detail}</small>
+                                    <small class=cn([SUBLINE, "flex flex-wrap gap-x-2"])>
+                                        <span>{count}</span>
+                                        {refund.map(|r| view! { <span>{r}</span> })}
+                                    </small>
                                 </span>
                                 <strong class="whitespace-nowrap text-right font-medium tabular-nums">{m(c.spent)}</strong>
                             </li>
@@ -996,21 +999,22 @@ fn budget_row(budget: &MonthlyBudget, row: &BudgetRow, kind: Kind, s: PanelState
             .into_iter()
             .map(|p| {
                 // A linked Tikkie shows on its purchase: what it cost the owner.
-                let note = match (&p.paid_back, &p.repays) {
-                    (Some(back), _) => format!(
-                        "{} · {} paid back, your share {}",
-                        p.occurred_on,
-                        m(*back),
-                        m(p.amount - *back)
-                    ),
-                    (None, Some(origin)) => format!("{} · money back for {origin}", p.occurred_on),
-                    (None, None) => p.occurred_on.clone(),
-                };
+                let mut note = vec![p.occurred_on.clone()];
+                match (&p.paid_back, &p.repays) {
+                    (Some(back), _) => {
+                        note.push(format!("{} paid back", m(*back)));
+                        note.push(format!("Your share {}", m(p.amount - *back)));
+                    }
+                    (None, Some(origin)) => note.push(format!("Money back for {origin}")),
+                    (None, None) => {}
+                }
                 view! {
                     <li class=LEDGER_ROW>
                         <span>
                             {p.description.clone()}
-                            <small class=SUBLINE>{note}</small>
+                            <small class=cn([SUBLINE, "flex flex-wrap gap-x-2"])>
+                                {note.into_iter().map(|n| view! { <span>{n}</span> }).collect_view()}
+                            </small>
                         </span>
                         <strong class=AMOUNT_STRONG>{m(p.amount)}</strong>
                     </li>
@@ -1094,14 +1098,14 @@ fn budget_row(budget: &MonthlyBudget, row: &BudgetRow, kind: Kind, s: PanelState
 }
 
 const CHOICE: &str = "flex items-start gap-2 rounded-md border border-border p-2 text-xs has-[button:disabled]:opacity-45";
-const CHOICE_HINT: &str = "mt-1 block text-eyebrow text-fg-muted";
+const CHOICE_HINT: &str = "mt-1 flex flex-wrap gap-x-2 text-eyebrow text-fg-muted";
 
 /// One checkbox choice of the editor; `other` names the group that already has it.
 fn choice(
     pick: Pick,
     value: String,
     label: String,
-    hint: Option<String>,
+    hint: Vec<String>,
     other: Option<String>,
     with_title: bool,
     s: PanelState,
@@ -1130,18 +1134,19 @@ fn choice(
         .as_ref()
         .filter(|_| with_title)
         .map(|o| format!("Already in {o}"));
-    let small = match (hint, &other) {
-        (Some(h), Some(o)) => Some(format!("{h} · In {o}")),
-        (Some(h), None) => Some(h),
-        (None, Some(o)) => Some(format!("In {o}")),
-        (None, None) => None,
-    };
+    // Each fact its own item: the hint's parts, then where it already is.
+    let mut small = hint;
+    small.extend(other.as_ref().map(|o| format!("In {o}")));
     view! {
         <label class=CHOICE title=title>
             <span class="mt-0.5 flex">
                 <Checkbox checked=checked on_change=toggle disabled=Signal::derive(move || disabled || s.busy.get()) />
             </span>
-            <span>{label}{small.map(|t| view! { <small class=CHOICE_HINT>{t}</small> })}</span>
+            <span>{label}{(!small.is_empty()).then(|| view! {
+                <small class=CHOICE_HINT>
+                    {small.into_iter().map(|t| view! { <span>{t}</span> }).collect_view()}
+                </small>
+            })}</span>
         </label>
     }
 }
@@ -1188,14 +1193,14 @@ fn editor_form(
                     .into_iter()
                     .map(|name| {
                         let other = editor.assigned(Pick::SourceGroups, &name);
-                        choice(Pick::SourceGroups, name.clone(), name, None, other, true, s)
+                        choice(Pick::SourceGroups, name.clone(), name, Vec::new(), other, true, s)
                     })
                     .collect_view();
                 let category_choices = categories
                     .into_iter()
                     .map(|name| {
                         let other = editor.assigned(Pick::Categories, &name);
-                        choice(Pick::Categories, name.clone(), name, None, other, false, s)
+                        choice(Pick::Categories, name.clone(), name, Vec::new(), other, false, s)
                     })
                     .collect_view();
                 let purchase_choices = if purchases.is_empty() {
@@ -1207,8 +1212,8 @@ fn editor_form(
                                 .into_iter()
                                 .map(|p| {
                                     let other = editor.assigned(Pick::Purchases, &p.id);
-                                    let hint = format!("{} · {}", p.occurred_on, money(p.amount, &unit));
-                                    choice(Pick::Purchases, p.id.clone(), p.description.clone(), Some(hint), other, false, s)
+                                    let hint = vec![p.occurred_on.clone(), money(p.amount, &unit)];
+                                    choice(Pick::Purchases, p.id.clone(), p.description.clone(), hint, other, false, s)
                                 })
                                 .collect_view()}
                         </div>
