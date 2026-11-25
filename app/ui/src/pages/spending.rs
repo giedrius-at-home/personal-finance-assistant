@@ -178,7 +178,7 @@ fn SpendingAnalysis(trend: CurrencyTrends, variable_only: bool) -> impl IntoView
                                 let value = row.average_purchase_day.map_or("—".to_owned(), |v| money(v, &unit));
                                 view! {
                                     <ProgressBar
-                                        label=format!("{} · {value}", &row.label[..row.label.len().min(3)])
+                                        label=format!("{}: {value}", &row.label[..row.label.len().min(3)])
                                         value=f(row.average_purchase_day.unwrap_or_default())
                                         max=peak
                                     />
@@ -219,7 +219,7 @@ fn monthly() -> AnyView {
             .map(|row| {
                 let unit = row.currency.clone();
                 let period = period.clone();
-                let eyebrow = format!("Monthly spending · {}", unit.code);
+                let eyebrow = format!("Monthly spending in {}", unit.code);
                 let facts = vec![
                     ("Period, partial month".to_owned(), period),
                     ("Refunds".to_owned(), money(row.refunds, &unit)),
@@ -255,14 +255,14 @@ fn monthly() -> AnyView {
                                                 .stores
                                                 .into_iter()
                                                 .map(|store| {
-                                                    let text = format!(
-                                                        "{} · {} records",
-                                                        store.category.unwrap_or_else(|| "Uncategorised".into()),
-                                                        store.transaction_count,
-                                                    );
+                                                    let category = store.category.unwrap_or_else(|| "Uncategorised".into());
+                                                    let records = format!("{} records", store.transaction_count);
                                                     view! {
                                                         <p class="mt-3 flex justify-between gap-3 text-xs text-fg-muted">
-                                                            <span>{text}</span>
+                                                            <span class="flex flex-wrap gap-x-2">
+                                                                <span>{category}</span>
+                                                                <span class="tabular-nums">{records}</span>
+                                                            </span>
                                                             <Money value=store.spending unit=unit.clone() neutral=true class=EMPHASIS />
                                                         </p>
                                                     }

@@ -182,23 +182,30 @@ pub fn AiSuggestions() -> impl IntoView {
 
     let ollama_line = move || {
         status.data.get().and_then(Result::ok).map(|s| {
-            let (text, tone) = if !s.ollama_detected {
-                ("Ollama is not answering at this address.".to_owned(), "text-fg-muted")
+            let (text, detail, tone) = if !s.ollama_detected {
+                ("Ollama is not answering at this address.", None, "text-fg-muted")
             } else if !s.model_available {
                 (
-                    format!(
-                        "Ollama detected · {} is not available on this Ollama. Choose an installed model or pull it with ollama pull.",
+                    "Ollama detected",
+                    Some(format!(
+                        "{} is not available on this Ollama. Choose an installed model or pull it with ollama pull.",
                         s.settings.ollama_model
-                    ),
+                    )),
                     "text-warning-fg",
                 )
             } else {
                 (
-                    format!("Ollama detected · {} models installed", s.ollama_models.len()),
+                    "Ollama detected",
+                    Some(format!("{} models installed", s.ollama_models.len())),
                     "text-positive-fg",
                 )
             };
-            view! { <p class=cn(["text-xs", tone]) role="status">{text}</p> }
+            view! {
+                <p class=cn(["flex flex-wrap gap-x-3 text-xs", tone]) role="status">
+                    <span>{text}</span>
+                    {detail.map(|d| view! { <span>{d}</span> })}
+                </p>
+            }
         })
     };
     let models = Memo::new(move |_| {

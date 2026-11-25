@@ -183,7 +183,7 @@ fn plot_values(
 fn month_label(month: &MonthSpending) -> String {
     let name = format::month_short_year(&month.start);
     if month.partial_month {
-        format!("{name} · so far")
+        format!("{name} so far")
     } else {
         name
     }
@@ -283,7 +283,7 @@ pub fn CategoryTrends(
         <Card class=STACK>
             <CardHeader class="mb-0">
                 <div>
-                    <Eyebrow level=Heading::P>{format!("CATEGORY TRENDS · {code}")}</Eyebrow>
+                    <Eyebrow level=Heading::P>{format!("CATEGORY TRENDS IN {code}")}</Eyebrow>
                     <CardTitle level=Heading::H2>"Compare categories"</CardTitle>
                 </div>
                 <Badge tone=Tone::Outline>{format!("Choose up to {}", COLORS.len())}</Badge>
@@ -338,9 +338,9 @@ pub fn CategoryTrends(
                             })
                             items=Metric::ALL.iter().map(|x| (x.id().to_owned(), x.label().to_owned())).collect()
                         />
-                        <p class=MUTED>
+                        <p class=cn([MUTED, "flex flex-wrap gap-x-2"])>
                             <strong class=EMPHASIS>{m.label()}</strong>
-                            {format!(" · {}", m.note(&code))}
+                            <span>{m.note(&code)}</span>
                         </p>
                     </div>
                     <div>
@@ -366,7 +366,7 @@ pub fn CategoryTrends(
                                     >
                                         <strong class="truncate">{name(&row)}</strong>
                                         <div class=META_ROW>
-                                            <span>{if partial { "Monthly spend · projected" } else { "Monthly spend" }}</span>
+                                            <span>{if partial { "Projected monthly spend" } else { "Monthly spend" }}</span>
                                             <b class=META_VALUE><Money value=mo.projected unit=u.clone() neutral=true /></b>
                                         </div>
                                         <div class=META_ROW>

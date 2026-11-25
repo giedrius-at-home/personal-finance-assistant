@@ -153,16 +153,9 @@ pub fn LegStatus(
                     let key = c.transaction_ids.join(",");
                     let k1 = key.clone();
                     let k2 = key.clone();
-                    let text = format!(
-                        "{} · {}",
-                        c.booked_on,
-                        money(c.amount, &unit)
-                    );
-                    let description = c
-                        .description
-                        .as_deref()
-                        .map(|d| format!(" · {d}"))
-                        .unwrap_or_default();
+                    let booked_on = c.booked_on.clone();
+                    let amount = money(c.amount, &unit);
+                    let description = c.description.clone();
                     view! {
                         <li>
                             <label class="flex cursor-pointer items-start gap-2">
@@ -178,7 +171,11 @@ pub fn LegStatus(
                                         }))
                                     />
                                 </span>
-                                <span class="min-w-0"><span class="tabular-nums">{text}</span>{description}</span>
+                                <span class="flex min-w-0 flex-wrap gap-x-3">
+                                    <span class="tabular-nums">{booked_on}</span>
+                                    <span class="tabular-nums">{amount}</span>
+                                    {description.map(|d| view! { <span class="min-w-0">{d}</span> })}
+                                </span>
                             </label>
                         </li>
                     }

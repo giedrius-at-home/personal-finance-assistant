@@ -18,11 +18,11 @@ use crate::ds::patterns::{
     SELECT_WRAP, STACK,
 };
 use crate::ds::{
-    Badge, Button, CONTROL, Card, CardHeader, CardTitle, CardTone, Eyebrow, Field, Heading, Icon,
-    Input, Lucide, Money, Select, Size, Tone, Variant, cn, money,
+    Badge, Button, CONTROL, Card, CardHeader, CardTitle, CardTone, Eyebrow, FactsRow, Field,
+    Heading, Icon, Input, Lucide, Money, Select, Size, Tone, Variant, cn, money,
 };
 use crate::layout::{Initial, LayoutState, PageView, PanelDef};
-use crate::pages::{plural, report_is, with_report};
+use crate::pages::{report_is, with_report};
 use crate::{SpendingSection, Tab, state};
 
 /// The built-in groups, in the order the owner sees them; custom groups follow.
@@ -129,9 +129,9 @@ fn SpendingOrganization(report: Dashboard) -> impl IntoView {
             view! {
                 <div class="grid grid-cols-2 divide-y divide-line border-y border-line sm:grid-cols-4 sm:divide-y-0">
                     {metric(
-                        format!("Net spending · {}", unit.code),
+                        "Net spending".into(),
                         view! { <Money value=row.spending unit=unit.clone() neutral=true /> }.into_any(),
-                        None,
+                        Some(unit.code.to_string()),
                     )}
                     {metric("Grouped".into(), organized.to_string().into_any(), Some(format!("{active} active groups")))}
                     {metric("Needs group".into(), needs_group.to_string().into_any(), None)}
@@ -180,7 +180,7 @@ fn SpendingOrganization(report: Dashboard) -> impl IntoView {
     }
 }
 
-/// "Bulk payments · Purchases paid together later".
+/// "Bulk payments": purchases paid together later.
 #[component]
 fn BulkPayments(payments: Vec<BulkPaymentSummary>) -> impl IntoView {
     let app = state();
@@ -196,16 +196,18 @@ fn BulkPayments(payments: Vec<BulkPaymentSummary>) -> impl IntoView {
             .into_iter()
             .map(|payment| {
                 let unit: Currency = payment.currency.clone();
-                let components = format!(
-                    "{} · {}",
-                    plural(payment.component_count as usize, "component"),
-                    money(payment.component_total, &unit)
-                );
-                let settlements = format!(
-                    "{} · {}",
-                    plural(payment.settlement_count as usize, "settlement"),
-                    money(payment.settlement_total, &unit)
-                );
+                let facts = vec![
+                    ("Components".to_owned(), payment.component_count.to_string()),
+                    (
+                        "Component total".to_owned(),
+                        money(payment.component_total, &unit),
+                    ),
+                    (
+                        "Settlements".to_owned(),
+                        payment.settlement_count.to_string(),
+                    ),
+                    ("Settled".to_owned(), money(payment.settlement_total, &unit)),
+                ];
                 let outstanding = payment.outstanding_amount;
                 let state = if outstanding.is_zero() {
                     "Balanced".to_owned()
@@ -217,8 +219,7 @@ fn BulkPayments(payments: Vec<BulkPaymentSummary>) -> impl IntoView {
                 view! {
                     <Card tone=CardTone::Muted class="grid gap-1.5 p-4 sm:p-4">
                         <strong class="font-semibold">{payment.name}</strong>
-                        <span class=MUTED>{components}</span>
-                        <span class=MUTED>{settlements}</span>
+                        <FactsRow rows=facts />
                         <span class="text-sm font-medium text-accent">{state}</span>
                     </Card>
                 }

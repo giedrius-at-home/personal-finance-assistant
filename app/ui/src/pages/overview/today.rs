@@ -8,7 +8,7 @@ use rust_decimal::Decimal;
 
 use crate::api::{NoArgs, load};
 use crate::ds::patterns::{HINT, MUTED, STATUS_NOTE};
-use crate::ds::{Card, CardTitle, Eyebrow, Heading, money};
+use crate::ds::{Card, CardTitle, Eyebrow, Heading, cn, money};
 
 #[component]
 pub fn OverviewToday() -> impl IntoView {
@@ -50,8 +50,7 @@ pub fn OverviewToday() -> impl IntoView {
                             money(g.allowance, &t.currency)
                         )
                     })
-                    .collect::<Vec<_>>()
-                    .join(" · ");
+                    .collect::<Vec<_>>();
                 view! {
                     <p class=MUTED>
                         {format!(
@@ -60,7 +59,9 @@ pub fn OverviewToday() -> impl IntoView {
                             money(t.allowance, &t.currency)
                         )}
                     </p>
-                    <p class=HINT>{groups}</p>
+                    <ul class=HINT>
+                        {groups.into_iter().map(|g| view! { <li>{g}</li> }).collect_view()}
+                    </ul>
                 }
             })
             .collect_view();
@@ -73,12 +74,12 @@ pub fn OverviewToday() -> impl IntoView {
                             .avoidable
                             .iter()
                             .map(|p| {
-                                let when = p.time.clone().map(|t| format!(" · {t}")).unwrap_or_default();
                                 view! {
                                     <li class="flex items-start justify-between gap-3 border-b border-border pb-2">
                                         <span>
                                             {p.merchant.clone()}
-                                            <span class=HINT>{format!(" {}{when}", p.group)}</span>
+                                            <span class=HINT>{format!(" {}", p.group)}</span>
+                                            {p.time.clone().map(|t| view! { <span class=cn([HINT, "ml-2 tabular-nums"])>{t}</span> })}
                                             <span class="block text-xs text-fg-muted">
                                                 {format!("Instead: {}", p.instead)}
                                             </span>

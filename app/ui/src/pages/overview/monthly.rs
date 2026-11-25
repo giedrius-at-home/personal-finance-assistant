@@ -65,7 +65,8 @@ pub fn OwnerMonthlyOverview() -> impl IntoView {
     })
 }
 
-/// "Spendable €X" for each currency, as the panel's headlines show it.
+/// "Spendable €X" for each currency, as the panel's headlines show it, in
+/// words: "Spendable €X and $Y".
 pub fn spendable_summary(report: &Dashboard) -> Option<String> {
     let parts: Vec<String> = report
         .monthly_allocation
@@ -74,7 +75,7 @@ pub fn spendable_summary(report: &Dashboard) -> Option<String> {
         .iter()
         .map(spendable)
         .collect();
-    (!parts.is_empty()).then(|| format!("Spendable {}", parts.join(" · ")))
+    (!parts.is_empty()).then(|| format!("Spendable {}", parts.join(" and ")))
 }
 
 /// The spendable headline: never negative; the breakdown still shows the gap.
@@ -212,7 +213,7 @@ fn BankBalanceBreakdown(allocation: CurrencyAllocation) -> impl IntoView {
                 <button
                     type="button"
                     class=cn([button_class(Variant::Plain, Size::Inline).as_str(), "text-left focus-visible:outline-offset-4"])
-                    aria-label=format!("Spendable {headline} · Show bank balance breakdown")
+                    aria-label=format!("Spendable {headline}. Show bank balance breakdown")
                     aria-expanded=move || open.get().to_string()
                     aria-describedby=move || open.get().then(|| id.clone())
                     on:focus=move |_| open.set(true)
@@ -232,7 +233,7 @@ fn BankBalanceBreakdown(allocation: CurrencyAllocation) -> impl IntoView {
                             class="absolute left-0 top-full z-30 mt-2 max-h-[75vh] w-[min(570px,calc(100vw-7.5rem))] overflow-auto rounded-lg border border-border bg-card-strong p-3 text-left text-xs font-normal tracking-normal text-fg shadow-pop"
                         >
                             <strong class=ITEM_TITLE>"Bank balance breakdown"</strong>
-                            <small class="mb-3 mt-0.5 block text-fg-muted">"Recorded balances · reservations shown separately"</small>
+                            <small class="mb-3 mt-0.5 block text-fg-muted">"Recorded balances, with reservations shown separately"</small>
                             {if banks.is_empty() {
                                 view! { <p class="text-fg-muted">"Account breakdown unavailable. Refresh the report."</p> }.into_any()
                             } else {
@@ -616,11 +617,8 @@ fn CurrencyOverview(
     };
 
     let section_label = format!("{} monthly plan", unit.code);
-    let this_month = format!("SPENDABLE · {}", month_name(&a.current_month));
-    let funds = format!(
-        "{} · FROM SALARY",
-        month_name(&a.funded_month).to_uppercase()
-    );
+    let this_month = format!("SPENDABLE IN {}", month_name(&a.current_month));
+    let funds = format!("{} FROM SALARY", month_name(&a.funded_month).to_uppercase());
     let bank_facts = vec![
         ("Bank".to_owned(), money(a.bank_balance, &unit)),
         ("Savings".to_owned(), deduct(a.protected_savings, &unit)),
@@ -750,7 +748,7 @@ fn CurrencyHeading(
                         <thead>
                             <tr>
                                 <th class=cn([TH, "text-left w-[45%] sm:w-[34%] md:w-[18%]"])>"Group"</th>
-                                <th class=cn([TH, "text-left hidden w-[42%] md:table-cell"])>"Spent · forecast · limit"</th>
+                                <th class=cn([TH, "text-left hidden w-[42%] md:table-cell"])>"Spent, forecast and limit"</th>
                                 <th class=cn([TH, "text-left w-[55%] sm:w-[33%] md:w-[20%]"])>"Month end"</th>
                                 <th class=cn([TH, "text-left hidden w-[33%] sm:table-cell md:w-[20%]"])>"Action"</th>
                             </tr>

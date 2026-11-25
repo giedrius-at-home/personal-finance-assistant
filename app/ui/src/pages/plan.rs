@@ -355,18 +355,16 @@ fn salary(report: &Dashboard) -> impl IntoView + use<> {
                 let amounts = payday
                     .received_amounts
                     .iter()
-                    .enumerate()
-                    .map(|(i, a)| {
+                    .map(|a| {
                         view! {
                             <span>
-                                {(i > 0).then_some(" · ")}
                                 <Money value=a.amount unit=a.currency.clone() />
                             </span>
                         }
                     })
                     .collect_view();
                 view! {
-                    <strong class="mt-1 block text-2xl font-semibold">{amounts}</strong>
+                    <strong class="mt-1 flex flex-wrap gap-x-4 text-2xl font-semibold">{amounts}</strong>
                     <Facts class="mt-2" rows=vec![("On".to_owned(), format::day_month(day))] />
                 }
                 .into_any()
@@ -715,7 +713,7 @@ impl Shared {
                     .filter(|p| p.amount > Decimal::ZERO)
                     .map(|p| {
                         let amount = crate::ds::money(p.amount, &b.plan.currency);
-                        (p.id.clone(), format!("{} · {amount}", p.description))
+                        (p.id.clone(), format!("{}, {amount}", p.description))
                     })
             })
             .collect();
@@ -1858,16 +1856,19 @@ fn matching(
 ) -> impl IntoView {
     let row = bill.get_value();
     let count = row.category_match_categories.len();
-    let summary = format!(
-        "Automatic matching · {}",
-        if !row.category_match_configured {
-            "bill-name fallback".to_owned()
-        } else if count == 0 {
-            "off".to_owned()
-        } else {
-            format!("{count} categor{}", if count == 1 { "y" } else { "ies" })
-        }
-    );
+    let state = if !row.category_match_configured {
+        "bill-name fallback".to_owned()
+    } else if count == 0 {
+        "off".to_owned()
+    } else {
+        format!("{count} categor{}", if count == 1 { "y" } else { "ies" })
+    };
+    let summary = view! {
+        <span class="inline-flex flex-wrap items-baseline gap-x-2">
+            <span>"Automatic matching"</span>
+            <span class="font-normal text-fg-muted">{state}</span>
+        </span>
+    };
     let (categories, owners) =
         shared.with_value(|s| (s.subscription_categories.clone(), s.owners.clone()));
     let saved_here: Vec<String> = row
@@ -2063,8 +2064,8 @@ fn candidates(ui: Ui, bill: StoredValue<SubscriptionRow>, stale: bool) -> impl I
                     view! {
                         <Card tone=CardTone::Muted class="grid items-center gap-4 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:p-4">
                             <div class="min-w-0">
-                                <b>
-                                    {format!("{} · ", candidate.occurred_on)}
+                                <b class="flex flex-wrap gap-x-3">
+                                    <span>{candidate.occurred_on.clone()}</span>
                                     <Money value=candidate.amount unit=unit neutral=true />
                                 </b>
                                 <p class="my-1 break-words text-sm">{candidate.description.clone()}</p>

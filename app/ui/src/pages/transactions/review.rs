@@ -765,8 +765,8 @@ pub fn OwnerReview() -> impl IntoView {
                         on:click=move |_| active_id.set(click_id.clone())
                     >
                         <span class=QUEUE_TITLE>{name}</span>
-                        <span class=HINT>
-                            {format!("{when} · ")}
+                        <span class=cn([HINT, "flex flex-wrap gap-x-3"])>
+                            <span>{when}</span>
                             {match amount {
                                 Some((value, unit)) => view! { <Money value=value unit=unit neutral=true /> }.into_any(),
                                 None => "Amount unavailable".into_any(),
@@ -822,8 +822,8 @@ pub fn OwnerReview() -> impl IntoView {
                         on:click=move |_| active_id.set(click_id.clone())
                     >
                         <span class=QUEUE_TITLE>{queue_name(&item)}</span>
-                        <span class=HINT>
-                            {format!("{when} · ")}
+                        <span class=cn([HINT, "flex flex-wrap gap-x-3"])>
+                            <span>{when}</span>
                             {match amount {
                                 Some((value, unit)) => view! { <Money value=value unit=unit neutral=true /> }.into_any(),
                                 None => "Amount unavailable".into_any(),
@@ -854,7 +854,10 @@ pub fn OwnerReview() -> impl IntoView {
     let nav = move |index: usize, len: usize, label: String, history: bool| {
         view! {
             <div class=FOCUS_NAV>
-                <span>{format!("{} of {len} · {label}", index + 1)}</span>
+                <span class="flex flex-wrap gap-x-3">
+                    <span>{format!("{} of {len}", index + 1)}</span>
+                    <span>{label}</span>
+                </span>
                 <div class=BUTTON_GROUP>
                     <button
                         type="button"
@@ -1270,9 +1273,9 @@ fn BatchReview(items: Vec<ReviewItem>, categories: Memo<Vec<String>>) -> impl In
                             <label class="grid items-center gap-2 border-b border-line py-2.5 sm:grid-cols-[minmax(0,1fr)_minmax(150px,210px)] sm:gap-3.5">
                                 <span class="grid min-w-0 gap-0.5">
                                     <strong class="truncate text-sm font-semibold">{queue_name(&item)}</strong>
-                                    <small class=HINT>
-                                        {when}
-                                        {amount.map(|(value, unit)| view! { " · " <Money value=value unit=unit neutral=true /> })}
+                                    <small class=cn([HINT, "flex flex-wrap gap-x-3"])>
+                                        <span>{when}</span>
+                                        {amount.map(|(value, unit)| view! { <Money value=value unit=unit neutral=true /> })}
                                     </small>
                                 </span>
                                 <Choice
@@ -1371,22 +1374,22 @@ fn ReviewRow(
     if let (true, Some(c)) = (jev, model_confidence) {
         method_line.push(("Model confidence".to_owned(), percent(c).to_string()));
     }
+    // Each possible detail as its own field: the location, then each tag.
     let possible = {
-        let parts: Vec<String> = item
+        let rows: Vec<(String, String)> = item
             .extras
             .merchant_location
             .iter()
-            .map(|l| l.value.clone())
-            .chain(
-                item.extras
-                    .tags
-                    .iter()
-                    .map(|t| format!("{} / {}", t.parent, t.label)),
-            )
-            .filter(|p| !p.is_empty())
+            .map(|l| ("Possible location".to_owned(), l.value.clone()))
+            .chain(item.extras.tags.iter().map(|t| {
+                (
+                    "Possible tag".to_owned(),
+                    format!("{} / {}", t.parent, t.label),
+                )
+            }))
+            .filter(|(_, v)| !v.is_empty())
             .collect();
-        (!item.extras.tags.is_empty() || item.extras.merchant_location.is_some())
-            .then(|| vec![("Possible details".to_owned(), parts.join(" · "))])
+        (!rows.is_empty()).then_some(rows)
     };
     let item = StoredValue::new(item);
 
@@ -1607,7 +1610,8 @@ fn ReviewRow(
                                         <span class="grid size-6 flex-none place-items-center rounded-pill bg-accent-soft text-xs font-bold text-accent">
                                             {index + 1}
                                         </span>
-                                        {format!("{} · {}", option.category, percent(option.probability))}
+                                        <span class="min-w-0 flex-1">{option.category.clone()}</span>
+                                        <span class="text-xs tabular-nums opacity-80">{percent(option.probability)}</span>
                                     </button>
                                 }
                             })

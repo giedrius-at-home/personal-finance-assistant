@@ -595,7 +595,7 @@ fn spellings(rows: &[Row]) -> HashMap<String, String> {
 }
 
 /// `capped`: All time cut to its most recent buckets ("last 366 days").
-fn subtitle(spec: &PlotSpec, capped: Option<&str>) -> String {
+fn subtitle(spec: &PlotSpec, capped: Option<&str>) -> Vec<String> {
     let period = match &spec.period {
         Period::ThisMonth => "This month".to_owned(),
         Period::LastMonth => "Last month".to_owned(),
@@ -618,7 +618,7 @@ fn subtitle(spec: &PlotSpec, capped: Option<&str>) -> String {
     } else {
         "all spending"
     };
-    format!("{period} · {basis} · {scope}")
+    vec![period, basis.to_owned(), scope.to_owned()]
 }
 
 #[cfg(test)]

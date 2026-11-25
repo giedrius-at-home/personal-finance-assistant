@@ -636,8 +636,9 @@ const BASES: &str = "AAAAAACEEEEIIIINOOOOOUUUUYaaaaaaceeeeiiiinooooouuuuyyAaAaAa
 const MULTI: [(char, &str); 18] = [
     ('Ĳ', "IJ"),
     ('ĳ', "ij"),
-    ('Ŀ', "L·"),
-    ('ŀ', "l·"),
+    // Unicode decomposes Ŀ/ŀ to L/l plus a middle dot; the dot is dropped.
+    ('Ŀ', "L"),
+    ('ŀ', "l"),
     ('ŉ', "ʼn"),
     ('Ǆ', "DZ"),
     ('ǅ', "Dz"),

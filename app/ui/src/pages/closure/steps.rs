@@ -53,7 +53,8 @@ pub fn UnclassifiedAccounts(data: Unclassified, goals: Vec<(String, String)>) ->
             let confirm_name = name.clone();
             view! {
                 <div class=CALLOUT>
-                    <p><strong>{format!("New account: {name}")}</strong>" · how should closing treat it?"</p>
+                    <p><strong>{format!("New account: {name}")}</strong></p>
+                    <p>"How should closing treat it?"</p>
                     <div class=ACTIONS>
                         <div class="w-full sm:w-48">
                             <Choice
@@ -221,15 +222,8 @@ pub fn ReviewStep(
         .into_iter()
         .map(|account| {
             let unit = account.currency.clone();
-            let title = format!(
-                "{}{}",
-                account.name,
-                if account.role == AccountRoleKind::Unclassified {
-                    " · not classified"
-                } else {
-                    ""
-                }
-            );
+            let title = account.name.clone();
+            let unclassified = account.role == AccountRoleKind::Unclassified;
             let skipped = account.skipped_foreign;
             let adjusted = balances
                 .iter()
@@ -256,7 +250,10 @@ pub fn ReviewStep(
                 .collect_view();
             view! {
                 <article class=cn([card_class(Default::default()), "grid min-w-0 gap-3 p-3 sm:p-5"])>
-                    <h3 class=cn([STEP_TITLE, "text-base"])>{title}</h3>
+                    <h3 class=cn([STEP_TITLE, "text-base"])>
+                        {title}
+                        {unclassified.then(|| view! { <span class="ml-2 font-normal text-fg-muted">"Not classified"</span> })}
+                    </h3>
                     {(skipped > 0).then(|| view! {
                         <p class=ERROR_LINE role="note">
                             {format!(

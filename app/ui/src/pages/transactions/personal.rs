@@ -14,8 +14,8 @@ use serde::Serialize;
 use super::{Choice, TextInput, clean_error, options, report_categories};
 use crate::api::invoke;
 use crate::ds::patterns::{
-    Disclosure, ERROR_LINE, FILTER_ROW, FORM_FIELD_NARROW, FORM_FIELD_WIDE, MUTED, SECTION_GRID,
-    SECTION_HEADING, SPLIT_ROW, SUBLINE, TRAILING, WRAP_TEXT,
+    Disclosure, ERROR_LINE, FILTER_ROW, FORM_FIELD_NARROW, FORM_FIELD_WIDE, HINT, MUTED,
+    SECTION_GRID, SECTION_HEADING, SPLIT_ROW, SUBLINE, TRAILING, WRAP_TEXT,
 };
 use crate::ds::{
     CardTone, Eyebrow, FactsRow, Field, Heading, Help, Money, Size, Variant, button_class,
@@ -65,10 +65,10 @@ fn pick_label(pick: &Pick) -> String {
         "" => "Choice cleared".into(),
         "ignore" => "Marked as not shared spending".into(),
         "return" if !pick.link.is_empty() => {
-            format!("Marked as money back for one purchase · {}", pick.category)
+            format!("Marked as money back for one purchase in {}", pick.category)
         }
         role => format!(
-            "Marked as {} · {}",
+            "Marked as {} for {}",
             if role == "return" {
                 "money back"
             } else {
@@ -79,7 +79,7 @@ fn pick_label(pick: &Pick) -> String {
     }
 }
 
-/// `Fuji dinner · 14 Nov · €30.90`, for the purchase picker.
+/// `Fuji dinner on 14 Nov for €30.90`, for the purchase picker.
 fn link_label(link: &PersonalLink) -> String {
     let day = link
         .occurred_on
@@ -89,23 +89,27 @@ fn link_label(link: &PersonalLink) -> String {
         .map(|(d, m)| format!("{d} {}", format::month_short(m)))
         .unwrap_or_else(|| link.occurred_on.clone());
     format!(
-        "{} · {day} · {}",
+        "{} on {day} for {}",
         link.description,
         format::money_dp(link.amount.amount, &link.amount.currency.code, 2)
     )
 }
 
-/// What the purchase cost the owner once money back is taken off.
-fn own_share(link: &PersonalLink) -> String {
-    format!(
-        "{} paid back · your share {}",
-        format::money_dp(link.paid_back, &link.amount.currency.code, 2),
-        format::money_dp(
-            link.amount.amount - link.paid_back,
-            &link.amount.currency.code,
-            2
-        )
-    )
+/// What the purchase cost the owner once money back is taken off, as
+/// labelled fields: the purchase, what was paid back, the owner's share.
+fn own_share(link: &PersonalLink) -> Vec<(String, String)> {
+    let code = &link.amount.currency.code;
+    vec![
+        ("Pays back".to_owned(), link.description.clone()),
+        (
+            "Paid back".to_owned(),
+            format::money_dp(link.paid_back, code, 2),
+        ),
+        (
+            "Your share".to_owned(),
+            format::money_dp(link.amount.amount - link.paid_back, code, 2),
+        ),
+    ]
 }
 
 /// `2026-09-01` → `1 September 2026`.
@@ -280,12 +284,13 @@ pub fn PersonalSpending() -> impl IntoView {
     view! {
         <section class=cn([card_class(CardTone::Default), SECTION_GRID]) aria-label="Personal payments">
             <div>
-                <Eyebrow level=Heading::P>
+                <div class="flex flex-wrap items-baseline gap-x-2">
+                    <Eyebrow level=Heading::P>"YOUR CHOICE"</Eyebrow>
                     {move || {
                         let s = since_text();
-                        if s.is_empty() { "YOUR CHOICE".to_owned() } else { format!("YOUR CHOICE · SINCE {}", s.to_uppercase()) }
+                        (!s.is_empty()).then(|| view! { <span class=HINT>{format!("Since {s}")}</span> })
                     }}
-                </Eyebrow>
+                </div>
                 <h2 class=SECTION_HEADING>"Shared spending & money back"</h2>
             </div>
             <Help text="Money back reduces the category you choose. Link it to the purchase it pays back (a Tikkie for one dinner) and it reduces that purchase instead. Money sent adds to the category. No AI decisions; nothing is assigned automatically." />
@@ -516,7 +521,7 @@ fn PersonalPayment(
             r.linked.as_ref().map_or("", |l| l.description.as_str())
         ),
         role => format!(
-            "{} · {}",
+            "{} for {}",
             if role == "return" {
                 "Money back"
             } else {
@@ -543,8 +548,9 @@ fn PersonalPayment(
             summary=view! {
                 <span class=WRAP_TEXT>
                     <strong class="font-semibold">{r.description.clone()}</strong>
-                    <small class=SUBLINE>
-                        {format!("{} · {}", r.occurred_on, if incoming { "Received" } else { "Sent" })}
+                    <small class=cn([SUBLINE, "flex flex-wrap gap-x-3"])>
+                        <span>{r.occurred_on.clone()}</span>
+                        <span>{if incoming { "Received" } else { "Sent" }}</span>
                     </small>
                 </span>
                 <span class=TRAILING>
@@ -561,9 +567,9 @@ fn PersonalPayment(
                         value=role
                         options=vec![
                             (String::new(), "Choose…".to_owned(), false),
-                            ("return".to_owned(), "Money back to me · subtract spending".to_owned(), !incoming),
-                            ("payment".to_owned(), "I paid someone · add spending".to_owned(), incoming),
-                            ("ignore".to_owned(), "Not a shared expense · keep bank treatment".to_owned(), false),
+                            ("return".to_owned(), "Money back to me, subtracts from spending".to_owned(), !incoming),
+                            ("payment".to_owned(), "I paid someone, adds to spending".to_owned(), incoming),
+                            ("ignore".to_owned(), "Not a shared expense, keeps the bank treatment".to_owned(), false),
                         ]
                         on_change=Callback::new(move |v| role.set(v))
                     />
@@ -574,7 +580,7 @@ fn PersonalPayment(
                             id=format!("{}-link", id.get_value())
                             value=link
                             options=Signal::derive(move || {
-                                let mut list = options([("", "No one purchase · just the category")]);
+                                let mut list = options([("", "No one purchase, just the category")]);
                                 list.extend(purchases.with_value(|p| {
                                     p.iter()
                                         .map(|c| (c.transaction_id.clone(), link_label(c), false))
@@ -639,7 +645,7 @@ fn PersonalPayment(
                     </button>
                 })}
             </fieldset>
-            {r.linked.clone().map(|l| view! { <p class=MUTED>{format!("{}: {}", l.description, own_share(&l))}</p> })}
+            {r.linked.clone().map(|l| view! { <FactsRow rows=own_share(&l) class="text-fg-muted" /> })}
             <Help text="Applies to this transaction across spending, budgets and forecasts. Your bank amount stays unchanged." />
             {move || {
                 let e = error.get();
