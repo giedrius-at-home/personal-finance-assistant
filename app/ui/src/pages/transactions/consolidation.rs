@@ -84,11 +84,24 @@ pub fn CategoryConsolidation(catalog: CategoryCatalog) -> impl IntoView {
             busy.set(false);
         });
     };
-    let summary = format!(
-        "Category library · {} names · {} similar pairs",
-        catalog.entries.len(),
-        catalog.similar.len()
-    );
+    let overlap_count = catalog.overlaps.len()
+        + catalog.group_conflicts.len()
+        + catalog.subscription_overlaps.len();
+    let summary = if overlap_count > 0 {
+        format!(
+            "Category library · {} names · {} similar pairs · {overlap_count} overlaps",
+            catalog.entries.len(),
+            catalog.similar.len()
+        )
+    } else {
+        format!(
+            "Category library · {} names · {} similar pairs",
+            catalog.entries.len(),
+            catalog.similar.len()
+        )
+    };
+    let conflicts = catalog.group_conflicts.clone();
+    let subscriptions = catalog.subscription_overlaps.clone();
     let choices = {
         let mut list = options([("", "Choose category")]);
         list.extend(
@@ -103,9 +116,30 @@ pub fn CategoryConsolidation(catalog: CategoryCatalog) -> impl IntoView {
         <Disclosure kind=DisclosureKind::Panel summary=summary>
             <div class="mt-3 grid gap-4">
                 <Help text="Checked whenever reports refresh. Review meaning before merging similar names. Extra tags stay attached to their transactions." />
-                {catalog
-                    .similar
+                {conflicts
                     .into_iter()
+                    .map(|c| view! {
+                        <p class="border-t border-line pt-3 text-sm break-words">
+                            <strong class="font-semibold">{format!("“{}” is in two groups", c.name)}</strong>
+                            <br />
+                            <small class=HINT>{c.note}</small>
+                        </p>
+                    })
+                    .collect_view()}
+                {subscriptions
+                    .into_iter()
+                    .map(|o| view! {
+                        <p class="border-t border-line pt-3 text-sm break-words">
+                            <strong class="font-semibold">{format!("{} {} subscriptions", o.names.len(), o.kind)}</strong>
+                            <br />
+                            <small class=HINT>{format!("{}: check you still use each one, or that one has not replaced another.", o.names.join(", "))}</small>
+                        </p>
+                    })
+                    .collect_view()}
+                {catalog
+                    .overlaps
+                    .into_iter()
+                    .chain(catalog.similar)
                     .map(|pair| {
                         let (s, t) = (pair.source.clone(), pair.target.clone());
                         view! {

@@ -605,6 +605,7 @@ mod tests {
             daily_spending: daily,
             expected: Vec::new(),
             to_events: Vec::new(),
+            week: None,
         }
     }
 

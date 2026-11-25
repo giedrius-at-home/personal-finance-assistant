@@ -654,6 +654,7 @@ fn load_transactions(conn: &Connection, accounts: &[Account], zone: &TimeZone) -
                     .and_then(|a| a.iban.as_deref()),
             ),
             transfer_evidence,
+            repays: None,
         });
     }
     Ok(out)

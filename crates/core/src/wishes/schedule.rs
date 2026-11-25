@@ -804,6 +804,7 @@ mod tests {
             source: WishSource::Card,
             cards: Vec::new(),
             transaction_id: None,
+            skip_hold: false,
         });
         let ws = [wish("trip", None, "3000", "2026-12-31", false), sub];
         let (items, fams) = plan_items(&ws, cur, &HashMap::new());

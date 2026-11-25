@@ -369,6 +369,26 @@ pub struct PersonalTransaction {
     pub role: String,
     pub assigned_category: String,
     pub revision: u32,
+    /// The purchase a "return" was linked to.
+    #[serde(default)]
+    pub linked: Option<PersonalLink>,
+    /// Purchases money coming in may pay back, best first (at most three).
+    #[serde(default)]
+    pub link_candidates: Vec<PersonalLink>,
+}
+
+/// A purchase a money-back can be linked to.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PersonalLink {
+    /// The ledger id.
+    pub transaction_id: String,
+    pub description: String,
+    pub occurred_on: String,
+    /// Always positive.
+    pub amount: UnitMoney,
+    pub category: Option<String>,
+    /// Money back already linked to it, this one included when linked.
+    pub paid_back: Decimal,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -392,6 +412,10 @@ pub struct PersonalChoice {
     /// The bank amount the owner saw (positive).
     pub expected_amount: String,
     pub expected_currency: String,
+    /// For a "return": the ledger id of the purchase it pays back; empty
+    /// for none. A linked return counts in that purchase's category.
+    #[serde(default)]
+    pub link: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

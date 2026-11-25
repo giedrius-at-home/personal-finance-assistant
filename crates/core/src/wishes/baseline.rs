@@ -286,6 +286,7 @@ pub(crate) mod tests {
             next_planned_funds: Decimal::ZERO,
             current_planned_wiggle_room: Decimal::ZERO,
             savings_balance: Decimal::ZERO,
+            current_extra_income: Decimal::ZERO,
         }
     }
 

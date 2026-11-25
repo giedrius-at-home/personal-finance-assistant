@@ -404,6 +404,7 @@ mod tests {
                 elapsed_days: 10,
                 expected: Vec::new(),
                 to_events: Vec::new(),
+                week: None,
             },
             budgeted,
             group: (!budgeted).then(|| name.to_owned()),

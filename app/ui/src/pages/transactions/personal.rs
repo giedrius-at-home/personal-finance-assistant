@@ -5,7 +5,7 @@
 use std::time::Duration;
 
 use finance_types::report::review::{
-    PersonalChoice, PersonalSaved, PersonalTransaction, PersonalTransactions,
+    PersonalChoice, PersonalLink, PersonalSaved, PersonalTransaction, PersonalTransactions,
 };
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -31,6 +31,8 @@ const EVERYDAY: [&str; 2] = ["Groceries", "Eating out"];
 struct Pick {
     role: String,
     category: String,
+    /// The ledger id of the purchase a return pays back; empty for none.
+    link: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -62,6 +64,9 @@ fn pick_label(pick: &Pick) -> String {
     match pick.role.as_str() {
         "" => "Choice cleared".into(),
         "ignore" => "Marked as not shared spending".into(),
+        "return" if !pick.link.is_empty() => {
+            format!("Marked as money back for one purchase · {}", pick.category)
+        }
         role => format!(
             "Marked as {} · {}",
             if role == "return" {
@@ -72,6 +77,35 @@ fn pick_label(pick: &Pick) -> String {
             pick.category
         ),
     }
+}
+
+/// `Fuji dinner · 14 Nov · €30.90`, for the purchase picker.
+fn link_label(link: &PersonalLink) -> String {
+    let day = link
+        .occurred_on
+        .get(8..10)
+        .and_then(|d| d.parse::<u32>().ok())
+        .zip(link.occurred_on.get(..7))
+        .map(|(d, m)| format!("{d} {}", format::month_short(m)))
+        .unwrap_or_else(|| link.occurred_on.clone());
+    format!(
+        "{} · {day} · {}",
+        link.description,
+        format::money_dp(link.amount.amount, &link.amount.currency.code, 2)
+    )
+}
+
+/// What the purchase cost the owner once money back is taken off.
+fn own_share(link: &PersonalLink) -> String {
+    format!(
+        "{} paid back · your share {}",
+        format::money_dp(link.paid_back, &link.amount.currency.code, 2),
+        format::money_dp(
+            link.amount.amount - link.paid_back,
+            &link.amount.currency.code,
+            2
+        )
+    )
 }
 
 /// `2026-09-01` → `1 September 2026`.
@@ -102,6 +136,11 @@ async fn save_pick(row: &PersonalTransaction, revision: u32, pick: &Pick) -> Res
         },
         expected_amount: row.amount.amount.to_string(),
         expected_currency: row.amount.currency.code.clone(),
+        link: if pick.role == "return" {
+            pick.link.clone()
+        } else {
+            String::new()
+        },
     };
     invoke::<PersonalSaved>("save_personal_choice", &ChoiceArgs { choice })
         .await
@@ -249,7 +288,7 @@ pub fn PersonalSpending() -> impl IntoView {
                 </Eyebrow>
                 <h2 class=SECTION_HEADING>"Shared spending & money back"</h2>
             </div>
-            <Help text="Money back reduces the category you choose. Money sent adds to it. No purchase link needed; no AI decisions. Bank memo cues only; nothing is assigned automatically." />
+            <Help text="Money back reduces the category you choose. Link it to the purchase it pays back (a Tikkie for one dinner) and it reduces that purchase instead. Money sent adds to the category. No AI decisions; nothing is assigned automatically." />
             <form
                 class=FILTER_ROW
                 on:submit=move |e| {
@@ -393,6 +432,22 @@ fn PersonalPayment(
 ) -> impl IntoView {
     let role = RwSignal::new(row.role.clone());
     let category = RwSignal::new(row.assigned_category.clone());
+    let saved_link = row
+        .linked
+        .as_ref()
+        .map(|l| l.transaction_id.clone())
+        .unwrap_or_default();
+    let link = RwSignal::new(saved_link.clone());
+    let saved_link = StoredValue::new(saved_link);
+    // The linked purchase first, then the other suggestions.
+    let mut purchases: Vec<PersonalLink> = row.linked.iter().cloned().collect();
+    purchases.extend(
+        row.link_candidates
+            .iter()
+            .filter(|c| c.transaction_id != saved_link.get_value())
+            .cloned(),
+    );
+    let purchases = StoredValue::new(purchases);
     let other = RwSignal::new(
         !row.assigned_category.is_empty() && !EVERYDAY.contains(&row.assigned_category.as_str()),
     );
@@ -409,6 +464,7 @@ fn PersonalPayment(
             Pick {
                 role: String::new(),
                 category: String::new(),
+                link: String::new(),
             }
         } else {
             let r = role.get_untracked();
@@ -417,6 +473,11 @@ fn PersonalPayment(
                     String::new()
                 } else {
                     category.get_untracked()
+                },
+                link: if r == "return" {
+                    link.get_untracked()
+                } else {
+                    String::new()
                 },
                 role: r,
             }
@@ -428,6 +489,11 @@ fn PersonalPayment(
                     previous: Pick {
                         role: row.role.clone(),
                         category: row.assigned_category.clone(),
+                        link: row
+                            .linked
+                            .as_ref()
+                            .map(|l| l.transaction_id.clone())
+                            .unwrap_or_default(),
                     },
                     row,
                     next,
@@ -445,6 +511,10 @@ fn PersonalPayment(
     let status = match r.role.as_str() {
         "ignore" => "Not shared spending".to_owned(),
         "" => "Choose how to count this".to_owned(),
+        "return" if r.linked.is_some() => format!(
+            "Money back for {}",
+            r.linked.as_ref().map_or("", |l| l.description.as_str())
+        ),
         role => format!(
             "{} · {}",
             if role == "return" {
@@ -460,7 +530,9 @@ fn PersonalPayment(
         let (saved_role, saved_category) =
             row.with_value(|r| (r.role.clone(), r.assigned_category.clone()));
         let current = role.get();
-        current == saved_role && (current == "ignore" || category.get() == saved_category)
+        current == saved_role
+            && (current == "ignore" || category.get() == saved_category)
+            && (current != "return" || link.get() == saved_link.get_value())
     };
     let id = StoredValue::new(format!("personal-{}", r.transaction_id));
     let category_id = StoredValue::new(format!("{}-category", id.get_value()));
@@ -496,6 +568,34 @@ fn PersonalPayment(
                         on_change=Callback::new(move |v| role.set(v))
                     />
                 </Field>
+                <Show when=move || role.get() == "return" && purchases.with_value(|p| !p.is_empty())>
+                    <Field label="Pays back" id=format!("{}-link", id.get_value()) class=FORM_FIELD_WIDE>
+                        <Choice
+                            id=format!("{}-link", id.get_value())
+                            value=link
+                            options=Signal::derive(move || {
+                                let mut list = options([("", "No one purchase · just the category")]);
+                                list.extend(purchases.with_value(|p| {
+                                    p.iter()
+                                        .map(|c| (c.transaction_id.clone(), link_label(c), false))
+                                        .collect::<Vec<_>>()
+                                }));
+                                list
+                            })
+                            on_change=Callback::new(move |v: String| {
+                                // The purchase's category is where it counts.
+                                let picked = purchases.with_value(|p| {
+                                    p.iter().find(|c| c.transaction_id == v).and_then(|c| c.category.clone())
+                                });
+                                if let Some(c) = picked {
+                                    other.set(!EVERYDAY.contains(&c.as_str()));
+                                    category.set(c);
+                                }
+                                link.set(v);
+                            })
+                        />
+                    </Field>
+                </Show>
                 <Field label="For" id=format!("{}-for", id.get_value()) class=FORM_FIELD_NARROW>
                     <Choice
                         id=format!("{}-for", id.get_value())
@@ -539,6 +639,7 @@ fn PersonalPayment(
                     </button>
                 })}
             </fieldset>
+            {r.linked.clone().map(|l| view! { <p class=MUTED>{format!("{}: {}", l.description, own_share(&l))}</p> })}
             <Help text="Applies to this transaction across spending, budgets and forecasts. Your bank amount stays unchanged." />
             {move || {
                 let e = error.get();

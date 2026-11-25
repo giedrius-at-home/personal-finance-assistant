@@ -109,6 +109,8 @@ pub struct Candidate {
     pub fingerprint: String,
     /// Whole microseconds, as Python's `datetime` held it.
     pub evaluated_at: Timestamp,
+    /// What to show instead of the dispatcher's generic message.
+    pub message: Option<Notification>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -129,6 +131,9 @@ impl Notification {
     /// The dispatcher's message: severity in the title, the subject and its
     /// first reason in the body (at most 96 and 512 characters).
     pub fn for_candidate(c: &Candidate) -> Self {
+        if let Some(message) = &c.message {
+            return message.clone();
+        }
         let title = format!(
             "Personal finance: {}",
             c.severity.as_str().replace('_', " ")
@@ -244,6 +249,7 @@ fn candidate(
         input_hash,
         fingerprint,
         evaluated_at: micros(evaluated_at),
+        message: None,
     }
 }
 
@@ -370,6 +376,94 @@ pub fn budget_candidate(
         evaluated_at,
         &evidence,
     )
+}
+
+/// Share of a budget line's plan that raises a heads-up.
+pub const BUDGET_LINE_HEADS_UP: Decimal = Decimal::from_parts(8, 0, 0, false, 1);
+
+/// One candidate per plan line of the running month's budgets: a heads-up
+/// once [`BUDGET_LINE_HEADS_UP`] of the plan is spent, critical once it is
+/// all spent. The evidence holds only the line, month and severity, so a
+/// line notifies once per level per month, whatever is spent after.
+pub fn budget_line_candidates(
+    budgets: &[finance_types::report::budget::MonthlyBudget],
+    current_month: &str,
+    evaluated_at: Timestamp,
+    policy: &AlertPolicy,
+) -> Vec<Candidate> {
+    let mut out = Vec::new();
+    for budget in budgets.iter().filter(|b| b.plan.month == current_month) {
+        let code = &budget.plan.currency.code;
+        for row in budget.groups.iter().filter(|r| r.planned > Decimal::ZERO) {
+            let ratio = row.spent / row.planned;
+            let severity = if ratio >= Decimal::ONE {
+                AlertSeverity::Critical
+            } else if ratio >= BUDGET_LINE_HEADS_UP {
+                AlertSeverity::HeadsUp
+            } else {
+                AlertSeverity::None
+            };
+            let percent = (ratio * Decimal::ONE_HUNDRED).round();
+            let money = |v: Decimal| match code.as_str() {
+                "EUR" => format!("€{:.2}", v),
+                "GBP" => format!("£{:.2}", v),
+                "USD" => format!("${:.2}", v),
+                _ => format!("{:.2} {code}", v),
+            };
+            let left = row.planned - row.spent;
+            let week = row.week.as_ref().map_or(String::new(), |w| {
+                if w.left >= Decimal::ZERO {
+                    format!(" {} left this week.", money(w.left))
+                } else {
+                    format!(" {} over this week.", money(-w.left))
+                }
+            });
+            let reason = match severity {
+                AlertSeverity::Critical => format!(
+                    "{}: {} of {} spent, {} over plan.{week}",
+                    row.name,
+                    money(row.spent),
+                    money(row.planned),
+                    money(-left)
+                ),
+                AlertSeverity::None => format!("{}: within plan", row.name),
+                _ => format!(
+                    "{}: {percent}% of the plan used, {} left this month.{week}",
+                    row.name,
+                    money(left)
+                ),
+            };
+            let subject = format!("line:{}:{code}:{}", budget.plan.month, row.id);
+            let evidence = json!({
+                "line": row.id,
+                "month": budget.plan.month,
+                "currency": code,
+                "severity": severity.as_str(),
+                "policy_version": policy.version,
+            });
+            let mut c = candidate(
+                SubjectKind::Budget,
+                &subject,
+                severity,
+                vec![reason.clone()],
+                policy,
+                evaluated_at,
+                &evidence,
+            );
+            c.message = Some(Notification {
+                title: match severity {
+                    AlertSeverity::Critical => format!("{} is over budget", row.name),
+                    _ => format!("{} at {percent}% of budget", row.name),
+                }
+                .chars()
+                .take(96)
+                .collect(),
+                body: reason.chars().take(512).collect(),
+            });
+            out.push(c);
+        }
+    }
+    out
 }
 
 fn parse_time(text: &str) -> Result<Timestamp> {
@@ -568,8 +662,16 @@ impl Service {
     ) -> std::result::Result<Vec<Decision>, String> {
         let (goals, settings) = self.read_snapshot(|s| (s.goals.clone(), s.settings.clone()))?;
         let goals: Vec<SavingsGoal> = goals.into_iter().map(|g| g.goal).collect();
-        let found = candidates(&goals, &[], &settings, now).map_err(|e| e.to_string())?;
+        let mut found = candidates(&goals, &[], &settings, now).map_err(|e| e.to_string())?;
         let policy = AlertPolicy::from_settings(&settings);
+        // The running month's budget lines (80% and over); a dashboard that
+        // cannot be built leaves the goal alerts to go out alone.
+        if let Ok(dashboard) = self.dashboard() {
+            let budgets = &dashboard.monthly_budgets;
+            if let Some(month) = budgets.iter().map(|b| b.plan.month.clone()).min() {
+                found.extend(budget_line_candidates(budgets, &month, now, &policy));
+            }
+        }
         let notifier: &dyn Notifier = if settings.notifications_enabled {
             notifier
         } else {

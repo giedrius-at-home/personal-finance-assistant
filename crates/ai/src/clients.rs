@@ -467,6 +467,7 @@ mod tests {
             source_country: None,
             destination_country: None,
             transfer_evidence: None,
+            repays: None,
         };
         let vocabulary = History {
             categories: vec!["Groceries".into(), "Dining".into(), "Transport".into()],
