@@ -1,19 +1,47 @@
 #!/usr/bin/env bash
 # Installed root-owned at /usr/local/sbin/finance-deploy by setup.sh; the
 # only thing the `dev` user may run as root (sudoers). Takes no arguments,
-# so it cannot be pointed anywhere else: it installs the build in dev's
-# checkout and restarts the service.
+# so it cannot be pointed anywhere else: it installs the build staged in
+# /home/dev/deploy (finance-server and ui/, put there by deploy-here.sh or
+# the CI deploy job) and restarts the service. If the new build does not
+# stay up, it puts the previous one back.
 set -euo pipefail
 
-src=/home/dev/finance
-[ -x "$src/target/release/finance-server" ] && [ -f "$src/app/ui/dist/index.html" ] || {
+src=/home/dev/deploy
+dst=/opt/finance
+[ -x "$src/finance-server" ] && [ -f "$src/ui/index.html" ] || {
   echo "no build in $src: run app/server/deploy/deploy-here.sh" >&2; exit 1; }
 
-install -o root -g root -m 0755 "$src/target/release/finance-server" /opt/finance/finance-server
-rm -rf /opt/finance/ui.new
-cp -r "$src/app/ui/dist" /opt/finance/ui.new
-chown -R root:root /opt/finance/ui.new
-rm -rf /opt/finance/ui && mv /opt/finance/ui.new /opt/finance/ui
+# Copy in first, swap after, so a half-copied build is never live.
+install -o root -g root -m 0755 "$src/finance-server" "$dst/finance-server.new"
+rm -rf "$dst/ui.new"
+cp -r "$src/ui" "$dst/ui.new"
+chown -R root:root "$dst/ui.new"
+
+swap_in() {  # $1: suffix of the build to make live (new or prev)
+  mv -f "$dst/finance-server.$1" "$dst/finance-server"
+  rm -rf "$dst/ui" && mv "$dst/ui.$1" "$dst/ui"
+}
+
+rm -rf "$dst/ui.prev"
+cp -p "$dst/finance-server" "$dst/finance-server.prev"
+cp -rp "$dst/ui" "$dst/ui.prev"
+swap_in new
 systemctl restart finance-server
-sleep 2
-systemctl is-active finance-server
+
+# Restart=always hides a crash loop from one check: it must be active and
+# not have restarted since.
+sleep 5
+if [ "$(systemctl is-active finance-server)" = active ] &&
+   [ "$(systemctl show -p NRestarts --value finance-server)" = 0 ]; then
+  echo "finance-server is up"
+  exit 0
+fi
+
+echo "new build did not stay up; restoring the previous one" >&2
+journalctl -u finance-server -n 30 --no-pager >&2 || true
+swap_in prev
+systemctl restart finance-server
+sleep 3
+systemctl is-active finance-server >&2 || true
+exit 1

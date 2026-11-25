@@ -95,9 +95,15 @@ The `dev` user (no sudo) holds the checkout (`~/finance`), the Rust
 toolchain, Trunk and `cargo-deny`, and runs the repository's GitHub Actions
 runner (`~/actions-runner`, labels `self-hosted, Linux, ARM64`), so CI uses
 no Actions minutes. `dev` cannot read `/var/lib/finance`. Its one root
-command is `/usr/local/sbin/finance-deploy`, which installs the build in
-`~/finance` and restarts the service; `app/server/deploy/deploy-here.sh`
-builds and then calls it. Deployed code still runs with the ledger, so the
+command is `/usr/local/sbin/finance-deploy`, which installs the build staged
+in `~/deploy` (`stage.sh` puts it there), restarts the service and puts the
+previous build back if the new one does not stay up.
+
+Every push to `main` that passes `check` and `supply-chain` is deployed by
+the CI `deploy` job (built in the runner's workspace, never for pull
+requests). `app/server/deploy/deploy-here.sh` does the same by hand from
+`~/finance`. After changing `finance-deploy`, reinstall it as root:
+`sudo install -o root -g root -m 0755 app/server/deploy/finance-deploy /usr/local/sbin/`. Deployed code still runs with the ledger, so the
 separation guards against accidents, not against what gets merged.
 
 ## The phone: Cloudflare Access instead of the token
