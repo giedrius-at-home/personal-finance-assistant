@@ -106,6 +106,39 @@ fn budget_rows(rows: &[BudgetRow]) -> Vec<GroupAllocation> {
         .collect()
 }
 
+/// Income other than salary booked this budget month into accounts that are
+/// not savings: money from elsewhere, not the salary, that this month's
+/// spending room already holds. Paid salary plans and salary-category
+/// income are left out; money back (refunds) is spending, not income.
+pub fn extra_income(
+    transactions: &[crate::model::Tx],
+    payments: &[PlannedPaymentView],
+    savings_account_ids: &HashSet<String>,
+    month_of: impl Fn(&crate::model::Tx) -> Date,
+    current_month: Date,
+) -> HashMap<Currency, Decimal> {
+    let salary_ids: HashSet<&str> = payments
+        .iter()
+        .filter(|p| p.status == PlanStatus::Paid && is_salary(p))
+        .filter_map(|p| p.transaction_id.as_deref())
+        .collect();
+    let mut out: HashMap<Currency, Decimal> = HashMap::new();
+    for t in transactions {
+        if t.kind != crate::model::Kind::Inflow
+            || salary_ids.contains(t.transaction_id.as_str())
+            || savings_account_ids.contains(&t.account_id)
+            || t.category
+                .as_deref()
+                .is_some_and(|c| casefold(c.trim()).contains("salary"))
+            || month_of(t) != current_month
+        {
+            continue;
+        }
+        add(&mut out, &t.currency, t.amount);
+    }
+    out
+}
+
 /// Keep a newly received salary outside the current month's envelopes.
 pub fn monthly_allocation(inputs: &AllocationInputs) -> MonthlyAllocation {
     let through_date = inputs.through_date;
@@ -367,12 +400,61 @@ pub fn monthly_allocation(inputs: &AllocationInputs) -> MonthlyAllocation {
                 next_planned_funds: next_funds,
                 current_planned_wiggle_room: current_wiggle + get(&current_income, c),
                 savings_balance: get(&savings_totals, c),
+                current_extra_income: Decimal::ZERO,
             }
         })
         .collect();
     MonthlyAllocation {
         through_date: through_date.to_string(),
         currencies,
+    }
+}
+
+#[cfg(test)]
+mod extra_income_tests {
+    use super::*;
+    use crate::model::Kind;
+
+    #[test]
+    fn only_non_salary_income_into_spending_accounts_counts() {
+        let base = crate::budget::tests::tx("gift", "1100");
+        let income =
+            |id: &str, amount: &str, category: Option<&str>, account: &str| crate::model::Tx {
+                transaction_id: id.into(),
+                kind: Kind::Inflow,
+                amount: amount.parse().unwrap(),
+                category: category.map(Into::into),
+                account_id: account.into(),
+                ..base.clone()
+            };
+        let rows = vec![
+            income("gift", "1100", Some("Gifts"), "daily"),
+            income("pay", "3000", None, "daily"),
+            income("wage", "50", Some("Salary"), "daily"),
+            income("saved", "70", None, "savings"),
+            crate::model::Tx {
+                kind: Kind::Refund,
+                ..income("tikkie", "15", None, "daily")
+            },
+        ];
+        let paid_salary: PlannedPaymentView = serde_json::from_value(serde_json::json!({
+            "plan_id": "recurring-salary", "name": "Salary", "match_category": "Salary",
+            "direction": "inflow", "amount": {"amount": "3000", "currency": {"code": "EUR", "minor_unit": 2}},
+            "due_on": "2026-09-25", "created_at": "2026-09-01T00:00:00Z", "reimbursement_for": null,
+            "pending": false, "account_id": null, "match_description": null, "status": "paid",
+            "paid_on": "2026-09-25", "transaction_id": "pay", "candidate_count": 0,
+            "candidates": [], "by_hand": false
+        }))
+        .unwrap();
+        let month = jiff::civil::date(2026, 9, 1);
+        let found = extra_income(
+            &rows,
+            &[paid_salary],
+            &HashSet::from(["savings".to_owned()]),
+            |t| t.effective_on().first_of_month(),
+            month,
+        );
+        assert_eq!(found.get(&Currency::eur()), Some(&Decimal::from(1100)));
     }
 }
 
@@ -614,6 +696,7 @@ mod tests {
             elapsed_days: 0,
             expected: Vec::new(),
             to_events: Vec::new(),
+            week: None,
         };
         let budget = |month: &str, reserved: i64| MonthlyBudget {
             plan: crate::budget::default_budget(month.parse().unwrap(), &Currency::eur()),
@@ -623,6 +706,8 @@ mod tests {
             extras: row(0, 0),
             purchases: Vec::new(),
             history_months: Vec::new(),
+            overruns: Vec::new(),
+            recurring_extras: None,
             reserved: d(reserved),
             planned: d(300),
             spent: d(300 - reserved),

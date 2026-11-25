@@ -68,6 +68,11 @@ pub struct CurrencyAllocation {
     /// Already set aside in savings-role accounts; never spendable funds.
     #[serde(default)]
     pub savings_balance: Decimal,
+    /// Income other than salary received this month into spending
+    /// accounts, inside `current_wiggle_room`: without it, the room is
+    /// `current_wiggle_room - current_extra_income`.
+    #[serde(default)]
+    pub current_extra_income: Decimal,
 }
 
 /// Where this and next month's money goes, per currency.

@@ -138,6 +138,17 @@ pub fn dashboard(
         savings_goal_ids: &savings_goals,
         period_start: Some(ctx.resolver.period_start_date(current_month)),
     });
+    let mut monthly_allocation = monthly_allocation;
+    let extra = allocation::extra_income(
+        &spending,
+        &payments,
+        &savings_accounts,
+        |t| ctx.resolver.month_of(t),
+        current_month,
+    );
+    for a in &mut monthly_allocation.currencies {
+        a.current_extra_income = extra.get(&a.currency).copied().unwrap_or_default();
+    }
 
     // Forecast horizons run from today, so they keep calendar months.
     let mut future_subscriptions = (0..4)
@@ -290,6 +301,18 @@ pub fn dashboard(
         events: Vec::new(),
         event_spends,
     };
+    // Names counted in two places, and bills for the same kind of thing.
+    let mut conflicts: Vec<finance_types::report::catalog::GroupConflict> = Vec::new();
+    for b in &dashboard.monthly_budgets {
+        for c in catalog::group_conflicts(&b.plan.groups, &snap.group_mappings) {
+            if !conflicts.iter().any(|o| o.note == c.note) {
+                conflicts.push(c);
+            }
+        }
+    }
+    dashboard.category_catalog.group_conflicts = conflicts;
+    dashboard.category_catalog.subscription_overlaps =
+        catalog::subscription_overlaps(&dashboard.subscriptions.rows);
     // The events still to come or running, judged like the Events screen.
     if !ctx.events.is_empty() {
         let settings = crate::wishes::store::load_wish_settings(store.connection())?;

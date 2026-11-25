@@ -282,6 +282,10 @@ pub struct OwnerDetails {
     pub personal_expense_role: String,
     #[serde(default)]
     pub personal_expense_category: String,
+    /// The ledger id of the purchase a "return" pays back (a Tikkie for one
+    /// dinner): the money back then counts where that purchase counts.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub personal_expense_link: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -505,6 +509,9 @@ pub struct WishPurchase {
     /// one: an event then counts the money here and not a second time.
     #[serde(default)]
     pub transaction_id: Option<String>,
+    /// Bought during the wish's cooling-off hold, on purpose. Not stored.
+    #[serde(default, skip_serializing)]
+    pub skip_hold: bool,
 }
 
 /// An amount charged to one credit card.

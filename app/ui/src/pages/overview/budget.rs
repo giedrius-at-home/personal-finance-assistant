@@ -218,6 +218,16 @@ impl PanelState {
         }));
     }
 
+    /// Open the editor on a new line with a name and amount filled in.
+    fn edit_new(&self, plan: &BudgetPlan, group: &BudgetGroup) {
+        self.edit(plan, Some(group));
+        self.editor.update(|e| {
+            if let Some(e) = e {
+                e.adding = true;
+            }
+        });
+    }
+
     fn close(&self) {
         self.editor.set(None);
         self.confirm_remove.set(false);
@@ -644,6 +654,94 @@ fn panel(report: &Dashboard, selection: &str, s: PanelState) -> AnyView {
         s,
     );
 
+    // Lines never met: suggest a plan recent spending can meet, in the editor.
+    let overruns = budget
+        .overruns
+        .iter()
+        .map(|o| {
+            let group = plan.groups.iter().find(|g| g.id == o.group_id).cloned();
+            let plan = plan.clone();
+            let suggested = o.suggested;
+            let text = format!(
+                "{} has gone over plan {} months in a row (since {}), averaging {} against {} planned.",
+                o.name,
+                o.months_over,
+                format::month_long(&o.since[..7.min(o.since.len())]),
+                m(o.average),
+                m(o.planned),
+            );
+            view! {
+                <div class="my-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card-muted p-3 text-sm" role="note">
+                    <span class="min-w-0 flex-1 break-words">
+                        {text}
+                        <small class="mt-1 block text-xs text-fg-muted">
+                            "A plan you can keep beats one that is always blown. Raise it, or cut back and keep it."
+                        </small>
+                    </span>
+                    {group.map(|g| view! {
+                        <button
+                            type="button"
+                            class=button_class(Variant::Secondary, Size::Sm)
+                            disabled=editing
+                            on:click=move |_| {
+                                let mut g = g.clone();
+                                g.amount = suggested;
+                                s.edit(&plan, Some(&g));
+                            }
+                        >
+                            {format!("Plan {}", m(suggested))}
+                        </button>
+                    })}
+                </div>
+            }
+        })
+        .collect_view();
+
+    // One-offs that keep coming are a monthly cost: suggest a line for them.
+    let recurring = budget.recurring_extras.clone().map(|r| {
+        let plan = plan.clone();
+        let monthly = r.monthly;
+        let months = r
+            .months
+            .iter()
+            .filter(|(_, v)| *v > Decimal::ZERO)
+            .map(|(month, v)| format!("{} {}", format::month_short(&month[..7.min(month.len())]), m(*v)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let text = format!(
+            "One-off payments came in {} of the last {} months ({months}). They are a regular cost: set aside {} a month for them.",
+            r.months_with_extras,
+            r.months.len(),
+            m(monthly),
+        );
+        view! {
+            <div class="my-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card-muted p-3 text-sm" role="note">
+                <span class="min-w-0 flex-1 break-words">{text}</span>
+                <button
+                    type="button"
+                    class=button_class(Variant::Secondary, Size::Sm)
+                    disabled=editing
+                    on:click=move |_| {
+                        let group = BudgetGroup {
+                            id: "one-offs".to_owned(),
+                            name: "One-off payments pot".to_owned(),
+                            amount: monthly,
+                            source_groups: Vec::new(),
+                            categories: Vec::new(),
+                            transaction_ids: Vec::new(),
+                            account_id: None,
+                            importance: None,
+                            floor: None,
+                        };
+                        s.edit_new(&plan, &group);
+                    }
+                >
+                    {format!("Add a {} pot", m(monthly))}
+                </button>
+            </div>
+        }
+    });
+
     view! {
         <section class="flat-section min-w-0 text-fg" aria-label="Monthly budget">
             <header class="flex flex-col items-start justify-between gap-5 pb-6 sm:flex-row sm:items-center">
@@ -679,6 +777,8 @@ fn panel(report: &Dashboard, selection: &str, s: PanelState) -> AnyView {
                 (!error.is_empty())
                     .then(|| view! { <p class="my-4 text-sm text-negative-fg" role="alert">{error}</p> })
             }}
+            {overruns}
+            {recurring}
             {editor_form}
             <div
                 class="hidden grid-cols-[minmax(0,1.8fr)_repeat(3,minmax(105px,1fr))] gap-4 border-b border-border px-3 py-4 text-xs text-fg-muted sm:grid [&>:not(:first-child)]:text-right"
@@ -895,11 +995,22 @@ fn budget_row(budget: &MonthlyBudget, row: &BudgetRow, kind: Kind, s: PanelState
         let rows = purchases
             .into_iter()
             .map(|p| {
+                // A linked Tikkie shows on its purchase: what it cost the owner.
+                let note = match (&p.paid_back, &p.repays) {
+                    (Some(back), _) => format!(
+                        "{} · {} paid back, your share {}",
+                        p.occurred_on,
+                        m(*back),
+                        m(p.amount - *back)
+                    ),
+                    (None, Some(origin)) => format!("{} · money back for {origin}", p.occurred_on),
+                    (None, None) => p.occurred_on.clone(),
+                };
                 view! {
                     <li class=LEDGER_ROW>
                         <span>
                             {p.description.clone()}
-                            <small class=SUBLINE>{p.occurred_on.clone()}</small>
+                            <small class=SUBLINE>{note}</small>
                         </span>
                         <strong class=AMOUNT_STRONG>{m(p.amount)}</strong>
                     </li>
@@ -911,6 +1022,22 @@ fn budget_row(budget: &MonthlyBudget, row: &BudgetRow, kind: Kind, s: PanelState
                 <ul class=PLAIN_LIST>{rows}</ul>
             </Disclosure>
         }
+    });
+    // A week is easier to act on than a month already blown by the 10th.
+    let week = row.week.as_ref().map(|w| {
+        let (text, class) = if w.left < Decimal::ZERO {
+            (format!("{} over this week", m(-w.left)), "text-over-fg")
+        } else {
+            (format!("{} left this week", m(w.left)), "text-fg-muted")
+        };
+        let title = format!(
+            "This week's share: {} of what was left on {}, spread over the rest of the month{}. Spent {} so far.",
+            m(w.limit),
+            format::date(&w.starts),
+            if w.follows_pattern { " by when you usually spend (weekdays, part of the month)" } else { " evenly" },
+            m(w.spent)
+        );
+        view! { <small class=cn(["mt-1 block text-xs font-normal", class]) title=title>{text}</small> }
     });
     let history = budget
         .history_months
@@ -943,7 +1070,10 @@ fn budget_row(budget: &MonthlyBudget, row: &BudgetRow, kind: Kind, s: PanelState
                 </span>
                 <span data-label=if estimate { "Expected" } else { "Planned" } class=cn([cell, if estimate { "text-fg-muted" } else { "" }])>{planned}</span>
                 <span data-label="Spent" class=cell>{m(row.spent)}</span>
-                <span data-label="Remaining" class=cn([cell, if estimate { "text-fg-muted" } else { "font-semibold" }, if over { "text-over-fg" } else { "" }])>{remaining}</span>
+                <span data-label="Remaining" class=cn([cell, if estimate { "text-fg-muted" } else { "font-semibold" }, if over { "text-over-fg" } else { "" }])>
+                    {remaining}
+                    {week}
+                </span>
             }
         >
             <div class="px-3 pb-5 pt-1.5 sm:pl-9.5">

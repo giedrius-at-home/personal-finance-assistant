@@ -528,6 +528,42 @@ fn card_charges(
 /// Buy a planned wish (on or before today). A card purchase raises the card
 /// usage of its budget month, rolling an older recorded month forward, and
 /// `cuts` trim the running budget month (the month the view calls month 0).
+/// How long a new one-off wish is held before it may be bought.
+pub const HOLD_HOURS: i64 = 48;
+
+/// Refuses buying `wish_id` during its cooling-off hold: a planned one-off,
+/// not a must-have or an event, added less than [`HOLD_HOURS`] ago, unless
+/// the owner said they bought it anyway (`skip_hold`).
+pub fn check_hold(w: &Writer<'_>, wish_id: &str, purchase: &WishPurchase) -> Result<()> {
+    if purchase.skip_hold {
+        return Ok(());
+    }
+    let wishes = load_wishes(&w.tx)?;
+    let wish = find(&wishes, wish_id)?;
+    if wish.status != WishStatus::Planned
+        || wish.must
+        || wish.event.is_some()
+        || wish.kind != WishKind::OneOff
+    {
+        return Ok(());
+    }
+    let Ok(added) = wish.created_at.parse::<jiff::Timestamp>() else {
+        return Ok(());
+    };
+    let left = w
+        .now
+        .timestamp()
+        .duration_until(added + jiff::SignedDuration::from_hours(HOLD_HOURS));
+    if left.is_positive() {
+        let hours = (left.as_secs() + 3_599) / 3_600;
+        return Err(invalid(format!(
+            "“{}” is cooling off for {hours} more hours. Buy it after that, or choose “Bought anyway”.",
+            wish.name
+        )));
+    }
+    Ok(())
+}
+
 pub fn mark_bought(
     w: &Writer<'_>,
     snap: &Snapshot,
@@ -1480,6 +1516,50 @@ mod tests {
         assert_eq!((wishes.len(), dropped), (3, 2));
     }
 
+    #[test]
+    fn a_new_wish_cannot_be_bought_during_its_hold_unless_on_purpose() {
+        let mut db = db();
+        let wish = db
+            .write(|w, s| save_wish(w, s, draft("Ice cream machine")))
+            .unwrap();
+        let buy = purchase(95, "2026-09-01", WishSource::Card);
+        let err = db
+            .write(|w, _| check_hold(w, &wish.wish_id, &buy))
+            .expect_err("held");
+        assert!(
+            err.to_string().contains("cooling off for 48 more hours"),
+            "{err}"
+        );
+        let anyway = WishPurchase {
+            skip_hold: true,
+            ..buy.clone()
+        };
+        db.write(|w, _| check_hold(w, &wish.wish_id, &anyway))
+            .unwrap();
+        // A must-have is never held, and the hold ends after 48 hours.
+        let must = db
+            .write(|w, s| {
+                save_wish(
+                    w,
+                    s,
+                    WishDraft {
+                        must: true,
+                        ..draft("Boiler")
+                    },
+                )
+            })
+            .unwrap();
+        db.write(|w, _| check_hold(w, &must.wish_id, &buy)).unwrap();
+        db.store
+            .connection()
+            .execute(
+                "UPDATE wishes SET payload_json = json_set(payload_json, '$.created_at', '2020-01-01T00:00:00.000000Z')",
+                [],
+            )
+            .unwrap();
+        db.write(|w, _| check_hold(w, &wish.wish_id, &buy)).unwrap();
+    }
+
     fn purchase(amount: i64, on: &str, source: WishSource) -> WishPurchase {
         WishPurchase {
             amount: Decimal::from(amount),
@@ -1487,6 +1567,7 @@ mod tests {
             source,
             cards: Vec::new(),
             transaction_id: None,
+            skip_hold: false,
         }
     }
 

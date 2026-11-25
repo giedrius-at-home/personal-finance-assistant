@@ -14,8 +14,8 @@ use std::sync::LazyLock;
 use finance_types::gateway::{DailyReviewEntry, GroupMapping, OwnerDetails, SavedDetails};
 use finance_types::report::review::{
     Audited, CategoryChange, CategorySaved, Consolidation, ConsolidationApplied,
-    ConsolidationPreview, DetailsSave, PersonalChoice, PersonalSaved, PersonalTransaction,
-    PersonalTransactions,
+    ConsolidationPreview, DetailsSave, PersonalChoice, PersonalLink, PersonalSaved,
+    PersonalTransaction, PersonalTransactions,
 };
 use regex::Regex;
 use rusqlite::{OptionalExtension, params};
@@ -24,7 +24,7 @@ use sha2::{Digest, Sha256};
 
 use super::{Writer, invalid};
 use crate::model::{Kind, Tx};
-use crate::personal::PERSONAL_REVIEW_START;
+use crate::personal::{PERSONAL_REVIEW_START, link_candidates, paid_back};
 use crate::text::{casefold, is_country};
 use crate::{Error, Result, Snapshot};
 
@@ -451,6 +451,27 @@ pub fn personal_transactions(snap: &Snapshot, query: &str) -> Result<PersonalTra
         return Err(invalid("Search is too long."));
     }
     let query = casefold(query.trim());
+    let spending = &snap.transactions;
+    let repaid = paid_back(spending);
+    let by_id: HashMap<&str, &Tx> = spending
+        .iter()
+        .map(|t| (t.transaction_id.as_str(), t))
+        .collect();
+    let link_view = |t: &Tx| PersonalLink {
+        transaction_id: t.ledger_id.to_string(),
+        description: t
+            .description
+            .clone()
+            .filter(|d| !d.is_empty())
+            .unwrap_or_else(|| "Bank transaction".into()),
+        occurred_on: t.booked_on().to_string(),
+        amount: t.money(),
+        category: t.category.clone(),
+        paid_back: repaid
+            .get(t.transaction_id.as_str())
+            .copied()
+            .unwrap_or_default(),
+    };
     let mut sorted: Vec<&Tx> = snap.raw_transactions.iter().collect();
     sorted.sort_by_key(|t| std::cmp::Reverse(t.occurred_at.timestamp()));
     let mut rows = Vec::new();
@@ -467,7 +488,24 @@ pub fn personal_transactions(snap: &Snapshot, query: &str) -> Result<PersonalTra
         } else if role.is_empty() && !personal_candidate(t.description.as_deref()) {
             continue;
         }
+        let incoming = matches!(t.kind, Kind::Inflow | Kind::Refund);
+        // The money-back as budgets see it, with its link applied.
+        let counted = by_id.get(t.transaction_id.as_str()).copied();
+        let linked = counted
+            .and_then(|c| c.repays.as_deref())
+            .and_then(|origin| by_id.get(origin))
+            .map(|o| link_view(o));
+        let candidates = if incoming && role != "ignore" && role != "payment" {
+            link_candidates(counted.unwrap_or(t), spending, &repaid, 3)
+                .into_iter()
+                .map(link_view)
+                .collect()
+        } else {
+            Vec::new()
+        };
         rows.push(PersonalTransaction {
+            linked,
+            link_candidates: candidates,
             transaction_id: t.ledger_id.to_string(),
             description: t
                 .description
@@ -476,7 +514,7 @@ pub fn personal_transactions(snap: &Snapshot, query: &str) -> Result<PersonalTra
                 .unwrap_or_else(|| "Bank transaction".into()),
             occurred_on: t.booked_on().to_string(),
             amount: t.money(),
-            incoming: matches!(t.kind, Kind::Inflow | Kind::Refund),
+            incoming,
             category: t.category.clone(),
             role: role.to_owned(),
             assigned_category: saved
@@ -497,6 +535,7 @@ pub fn personal_transactions(snap: &Snapshot, query: &str) -> Result<PersonalTra
 }
 
 const PERSONAL_CHANGED: &str = "This transaction changed. Refresh before saving.";
+const PERSONAL_LINK_INVALID: &str = "Link a purchase in the same currency, at most 60 days earlier, that this money back fits into.";
 const PERSONAL_INVALID: &str =
     "Could not save this choice. Check the money direction and category.";
 
@@ -548,8 +587,38 @@ pub fn save_personal_choice(
     if amount != t.amount || choice.expected_currency != t.currency.code {
         return Err(invalid(PERSONAL_CHANGED));
     }
+    let link = choice.link.trim();
+    if !link.is_empty() {
+        let purchase = snap
+            .transactions
+            .iter()
+            .find(|p| p.ledger_id.to_string() == link);
+        let others: Decimal = snap
+            .transactions
+            .iter()
+            .filter(|o| o.kind == Kind::Refund && o.transaction_id != t.transaction_id)
+            .filter(|o| purchase.is_some_and(|p| o.repays.as_deref() == Some(&p.transaction_id)))
+            .map(|o| o.amount)
+            .sum();
+        let fits = purchase.is_some_and(|p| {
+            role == "return"
+                && p.amount - others >= t.amount
+                && p.kind == Kind::Outflow
+                && p.currency == t.currency
+                && (-2..=crate::personal::LINK_LOOKBACK_DAYS)
+                    .contains(&crate::outlook::days_between(p.booked_on(), t.booked_on()))
+        });
+        if !fits {
+            return Err(invalid(PERSONAL_LINK_INVALID));
+        }
+    }
     let key = t.source_key();
     let mut values = load_details(w, &key)?.values;
+    values.personal_expense_link = if role == "return" {
+        link.to_owned()
+    } else {
+        String::new()
+    };
     values.personal_expense_role = if role == "clear" {
         String::new()
     } else {

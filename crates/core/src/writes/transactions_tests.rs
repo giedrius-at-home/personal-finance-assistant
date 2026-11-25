@@ -119,6 +119,7 @@ fn choice(role: &str, category: &str, revision: u32) -> PersonalChoice {
         category: category.into(),
         expected_amount: "30.00".into(),
         expected_currency: "EUR".into(),
+        link: String::new(),
     }
 }
 
@@ -162,6 +163,15 @@ fn personal_choice_validates_direction_amount_and_revision() {
         db.write(|w, s| save_personal_choice(w, s, choice("return", " ", 1)))
             .is_err()
     );
+    // A purchase smaller than the money back, or one that does not exist.
+    for link in ["10", "99"] {
+        let mut linked = choice("return", "Groceries", 1);
+        linked.link = link.into();
+        let err = db
+            .write(|w, s| save_personal_choice(w, s, linked))
+            .expect_err("bad link");
+        assert_eq!(err.to_string(), PERSONAL_LINK_INVALID);
+    }
     let cleared = db
         .write(|w, s| save_personal_choice(w, s, choice("clear", "Groceries", 1)))
         .expect("cleared");

@@ -75,6 +75,18 @@ fn strip(report: &Dashboard) -> Option<AnyView> {
     } else {
         (Tone::Positive, "Covered", Vec::new())
     };
+    // Money from elsewhere can hide a month the salary alone does not pay for.
+    let mut spend_facts = spend_facts;
+    if a.current_extra_income > zero {
+        let alone = a.current_wiggle_room - a.current_extra_income;
+        let value = if alone < zero {
+            format!("\u{2212}{}", m(-alone))
+        } else {
+            m(alone)
+        };
+        spend_facts.push(("Extra income in it".to_owned(), m(a.current_extra_income)));
+        spend_facts.push(("Salary alone".to_owned(), value));
+    }
     let spend_value = m(a.current_wiggle_room.max(zero));
     let spendable = view! {
         <Metric label="Spendable now" chip=(spend_tone, spend_word.to_owned()) facts=spend_facts>

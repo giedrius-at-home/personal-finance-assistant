@@ -1290,6 +1290,7 @@ mod tests {
             source,
             cards: Vec::new(),
             transaction_id: None,
+            skip_hold: false,
         }
     }
 

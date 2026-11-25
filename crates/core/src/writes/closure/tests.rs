@@ -969,6 +969,7 @@ fn a_bought_wish_is_skipped_but_its_line_stays() {
             },
             cards: Vec::new(),
             transaction_id: None,
+            skip_hold: false,
         };
         db.write(|w, snap| crate::writes::wishes::mark_bought(w, snap, &id, purchase, &[]))
             .unwrap();
