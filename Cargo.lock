@@ -1420,6 +1420,7 @@ name = "finance-ai"
 version = "0.3.0"
 dependencies = [
  "finance-core",
+ "finance-mistral",
  "finance-secrets",
  "finance-types",
  "jiff",
@@ -1515,12 +1516,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "finance-mistral"
+version = "0.3.0"
+dependencies = [
+ "base64 0.23.1",
+ "finance-core",
+ "finance-secrets",
+ "reqwest",
+ "serde_json",
+]
+
+[[package]]
 name = "finance-notify"
 version = "0.3.0"
 dependencies = [
  "aws-lc-rs",
  "base64 0.23.1",
  "finance-core",
+ "finance-mistral",
  "finance-secrets",
  "finance-types",
  "jiff",

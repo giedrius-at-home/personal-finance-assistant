@@ -28,6 +28,8 @@ pub enum Item {
     SmtpPassword,
     /// The TypeSafe API key for Jev category suggestions.
     TypeSafeApiKey,
+    /// The Mistral AI key: category suggestions, Gisel's words and voice.
+    MistralApiKey,
     /// The token the Finance server asks of the app and the phone.
     ServerToken,
     /// The server's Web Push (VAPID) signing key, PKCS#8 in base64url; made
@@ -66,6 +68,7 @@ impl Item {
             Self::BankConsent(Bank::Swedbank) => "bank-consent-swedbank",
             Self::SmtpPassword => "smtp-password",
             Self::TypeSafeApiKey => "typesafe-api-key",
+            Self::MistralApiKey => "mistral-api-key",
             Self::ServerToken => "server-token",
             Self::VapidKey => "web-push-vapid-key",
         }

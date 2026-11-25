@@ -454,15 +454,15 @@ pub fn render(risk: &Risk, intro: &str, sample: bool, digest: bool) -> String {
     };
     format!(
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" \
-         content=\"width=device-width,initial-scale=1\"><title>The Rafael Report</title></head>\
+         content=\"width=device-width,initial-scale=1\"><title>The Gisel Report</title></head>\
          <body style=\"margin:0;background:{SOFT};color:{FG};font-family:Arial,Helvetica,sans-serif\">\
          <div style=\"display:none;max-height:0;overflow:hidden\">Your spending, your plan, and a quick move for future you.</div>\
          <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr><td align=\"center\" style=\"padding:24px 8px\">\
          <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"max-width:640px;background:{CARD};border:1px solid {BORDER};border-radius:16px;overflow:hidden\">\
-         <tr><td style=\"padding:20px 28px;border-bottom:1px solid {BORDER};color:{FG_MUTED};font-size:11px;letter-spacing:2px\">GIEDRIUS / FINANCE <span style=\"float:right\">RAFAEL</span></td></tr>\
+         <tr><td style=\"padding:20px 28px;border-bottom:1px solid {BORDER};color:{FG_MUTED};font-size:11px;letter-spacing:2px\">GIEDRIUS / FINANCE <span style=\"float:right\">GISEL</span></td></tr>\
          <tr><td style=\"padding:32px 28px;background:{CONTRAST};color:{CARD}\">\
          <div style=\"font-size:10px;letter-spacing:2px;color:{FG_ON_CONTRAST}\">{edition}</div>\
-         <h1 style=\"font-size:42px;line-height:1.05;letter-spacing:-1.5px;margin:16px 0\">The Rafael<br>Report.</h1>\
+         <h1 style=\"font-size:42px;line-height:1.05;letter-spacing:-1.5px;margin:16px 0\">The Gisel<br>Report.</h1>\
          <p style=\"font-size:18px;line-height:1.5;margin:0;color:{FG_ON_CONTRAST}\">Your money. Front-page energy. 👀</p></td></tr>\
          <tr><td style=\"padding:24px 28px;font-size:16px;line-height:1.7\">{}</td></tr>{}\
          <tr><td style=\"padding:28px\"><div style=\"font-size:10px;letter-spacing:2px;color:{FG_MUTED}\">YOUR NEXT MOVE</div>\
@@ -471,7 +471,7 @@ pub fn render(risk: &Risk, intro: &str, sample: bool, digest: bool) -> String {
          If a friend paid you back, assign it to the right category so the numbers tell the full story.</p>\
          <a href=\"{}\" style=\"display:inline-block;\
          padding:14px 22px;background:{CONTRAST};color:{FG_ON_CONTRAST};text-decoration:none;border-radius:8px;font-weight:bold;font-size:14px\">Open my dashboard ↗</a>\
-         <p style=\"font-size:14px;margin-top:25px\">You have got this.<br><b>— Rafael</b></p></td></tr>\
+         <p style=\"font-size:14px;margin-top:25px\">You have got this.<br><b>— Gisel</b></p></td></tr>\
          <tr><td style=\"padding:18px 28px;background:{PAGE};font-size:11px;color:{FG_MUTED};line-height:1.6\">\
          Built from your recorded spending and entered plans. Refunds reduce net spending; movements between your own accounts are excluded. \
          Expected income is counted once. A small reset today can make room for what matters tomorrow.</td></tr>\

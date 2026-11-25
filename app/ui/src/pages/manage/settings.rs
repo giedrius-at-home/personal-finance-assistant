@@ -282,6 +282,17 @@ pub const PANELS: &[PanelDef] = &[
         shown: None,
     },
     PanelDef {
+        id: "manage.settings.brief",
+        title: "Daily voice brief",
+        page: PAGE,
+        movable: false,
+        initial: Initial::Folded,
+        half: false,
+        render: || super::brief::BriefCard().into_any(),
+        summary: None,
+        shown: None,
+    },
+    PanelDef {
         id: "manage.settings.avoidable",
         title: "Avoidable spending",
         page: PAGE,
@@ -305,7 +316,7 @@ pub const PANELS: &[PanelDef] = &[
     },
     PanelDef {
         id: "manage.settings.ai",
-        title: "AI suggestions",
+        title: "AI (Mistral)",
         page: PAGE,
         movable: false,
         initial: Initial::Folded,

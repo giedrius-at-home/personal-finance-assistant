@@ -3,7 +3,7 @@
 //! `scheduling.py` and `persistence/sqlite.py`).
 //!
 //! Everything here is computation and database state. Writing the opening
-//! lines (Ollama) and sending (SMTP) are the [`Writer`] and [`Sender`] the
+//! lines (Mistral) and sending (SMTP) are the [`Writer`] and [`Sender`] the
 //! app passes in; the `finance-notify` crate implements them.
 
 pub mod html;
@@ -110,7 +110,7 @@ impl Copy {
     /// What Python sent when the model failed.
     pub fn fallback() -> Self {
         Self {
-            subject: "Rafael: your spending picked up 👀".into(),
+            subject: "Gisel: your spending picked up 👀".into(),
             body: "Quick budget check: a slower few days could help protect your savings goal."
                 .into(),
         }
@@ -427,7 +427,7 @@ pub fn forecast_summary(forecasts: &[DailySpendingForecast], sign_off: bool) -> 
         lines.push(format!("Model: {}.", f.model));
     }
     if sign_off {
-        lines.push(format!("— Rafael\nOpen your plan: {PLAN_LINK}"));
+        lines.push(format!("— Gisel\nOpen your plan: {PLAN_LINK}"));
     }
     lines.join("\n")
 }
@@ -494,16 +494,39 @@ pub fn factual_summary(risk: &Risk) -> String {
     if !risk.forecasts.is_empty() {
         lines.push(forecast_summary(&risk.forecasts, false));
     }
-    lines.push(format!("— Rafael\nOpen your plan: {PLAN_LINK}"));
+    lines.push(format!("— Gisel\nOpen your plan: {PLAN_LINK}"));
     lines.join("\n")
 }
 
-/// The persona prompt Python gave Qwen.
-pub const WRITER_SYSTEM: &str = "You are Rafael, a kind Gen Z budget coach. Return JSON with subject \
-and body only. Body: two short sentences, under sixty words. Suggest one budget check. No numbers, \
-amounts, products, names of merchants, or invented purchases. Exact figures are added by code. \
-Example: {\"subject\":\"Rafael: quick budget check 👀\",\"body\":\"Dude, your savings goal deserves \
-some love. Check your remaining budget before the next optional purchase.\"}";
+/// The persona for the email's opening lines (Python's Qwen prompt, in
+/// the laid-back Spanish voice); "Gisel" is the default name, see
+/// [`writer_system`].
+pub const WRITER_SYSTEM: &str = "You are Gisel, a woman from Spain who coaches the owner on their \
+budget: nonchalant, straight to the point, no drama, with one natural Spanish word such as vale, \
+venga, ojo or tranqui. Return JSON with subject and body only. Body: two short sentences, under \
+sixty words. Suggest one budget check. No numbers, amounts, products, names of merchants, or \
+invented purchases. Exact figures are added by code. Example: {\"subject\":\"Gisel: ojo with the \
+budget 👀\",\"body\":\"Vale, your savings goal needs a little love. Check what is left before \
+the next optional purchase.\"}";
+
+/// [`WRITER_SYSTEM`] for the persona called `name`.
+pub fn writer_system(name: &str) -> String {
+    WRITER_SYSTEM.replace("Gisel", name)
+}
+
+/// The email signed by the persona called `name` (the fixed copy and the
+/// templates say "Gisel").
+pub fn personalise(mut message: Message, name: &str) -> Message {
+    if name == "Gisel" {
+        return message;
+    }
+    let upper = name.to_uppercase();
+    let swap = |t: &str| t.replace("Gisel", name).replace("GISEL", &upper);
+    message.subject = swap(&message.subject);
+    message.body = swap(&message.body);
+    message.html_body = message.html_body.as_deref().map(swap);
+    message
+}
 
 /// The model sees only qualitative signals; code adds every figure.
 pub fn writer_prompt(risk: &Risk) -> String {
@@ -574,7 +597,7 @@ pub fn digest_message(forecasts: &[DailySpendingForecast], sample: bool) -> Mess
         ..Risk::default()
     };
     Message {
-        subject: "Rafael: your spending forecast 🔮".into(),
+        subject: "Gisel: your spending forecast 🔮".into(),
         body: chars(
             &format!("{DIGEST_INTRO}\n\n{}", forecast_summary(forecasts, true)),
             1800,
@@ -742,6 +765,8 @@ pub struct Smtp {
     pub username: String,
     pub from: String,
     pub to: String,
+    /// The sender's display name: the persona.
+    pub name: String,
 }
 
 impl Smtp {
@@ -757,6 +782,7 @@ impl Smtp {
                 s.sender.clone()
             },
             to: s.recipient.clone(),
+            name: "Gisel".into(),
         }
     }
 }
@@ -810,7 +836,7 @@ pub fn compose(
 ) -> Option<Message> {
     match (plan, risk) {
         (Plan::Alert { .. }, Some(risk)) => {
-            let copy = if settings.ollama {
+            let copy = if settings.ai_writer {
                 writer.write(risk).unwrap_or_else(|_| Copy::fallback())
             } else {
                 Copy::fallback()
@@ -868,6 +894,14 @@ fn with_day(
 }
 
 impl Service {
+    /// The persona's name (Manage → Settings → Daily voice brief), which
+    /// also signs the emails.
+    pub fn persona_name(&self) -> &'static str {
+        self.brief_settings()
+            .map(|s| s.persona.name())
+            .unwrap_or("Gisel")
+    }
+
     pub fn email_settings(&self) -> std::result::Result<EmailSettings, String> {
         self.read_store(load_settings)
     }
@@ -1016,6 +1050,7 @@ impl Service {
         ) else {
             return Ok(RunOutcome::Quiet);
         };
+        let message = personalise(message, self.persona_name());
         sender.send(&message)?;
         self.with_connection(|c| match plan {
             Plan::Alert { severity } => save_receipt(c, ReceiptKind::Alert, now, Some(severity)),
@@ -1067,6 +1102,7 @@ impl Service {
             writer,
             true,
         )
+        .map(|m| personalise(m, self.persona_name()))
         .ok_or_else(|| "Nothing to send yet.".to_owned())
     }
 }

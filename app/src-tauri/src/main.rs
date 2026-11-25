@@ -660,6 +660,8 @@ fn main() {
             ai::save_ai_settings,
             ai::set_typesafe_key,
             ai::forget_typesafe_key,
+            ai::set_mistral_key,
+            ai::forget_mistral_key,
             ai::suggest_categories,
             ai::suggest_spending_group,
             ai::research_merchant,

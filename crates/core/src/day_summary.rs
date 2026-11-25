@@ -162,7 +162,7 @@ pub fn save_tick(conn: &Connection, group: &str, avoidable: Option<bool>) -> Res
     Ok(())
 }
 
-fn is_avoidable(ticks: &HashMap<String, bool>, group: &str) -> bool {
+pub(crate) fn is_avoidable(ticks: &HashMap<String, bool>, group: &str) -> bool {
     ticks
         .get(group)
         .copied()

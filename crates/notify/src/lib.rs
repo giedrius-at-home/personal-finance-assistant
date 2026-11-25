@@ -1,39 +1,36 @@
 //! Delivery by email: the alert notifier the server registers (goal and
 //! budget alerts reach the phone as email), the SMTP sender (Python
-//! `SmtpSpendingEmailSender`) and the local Qwen writer (Python
-//! `QwenSpendingMessageWriter` over `OllamaClient`). The content and every
-//! decision come from `finance_core::spending_email`; this crate only talks
-//! to the mail server and to Ollama. Both block, so callers run them on
-//! their own thread, never on the async runtime.
+//! `SmtpSpendingEmailSender`) and Gisel's writer on Mistral (Python
+//! `QwenSpendingMessageWriter`). The content and every decision come from
+//! `finance_core::spending_email`; this crate only talks to the mail server
+//! and to Mistral. Both block, so callers run them on their own thread,
+//! never on the async runtime.
 
 pub mod push;
 
-use std::io::Read;
 use std::time::Duration;
 
 use finance_core::alerts::{Notification, Notifier, Outcome};
+use finance_core::brief::{BriefWriter, Speaker, parse_brief, system_prompt};
 use finance_core::spending_email::{
-    Copy, Message, Risk, Sender, Smtp, WRITER_SYSTEM, Writer, parse_writer_reply, writer_prompt,
+    Copy, Message, Risk, Sender, Smtp, Writer, parse_writer_reply, writer_prompt, writer_system,
 };
+use finance_mistral::Mistral;
 use finance_secrets::Secret;
-use finance_types::notify::{EmailSettings, SmtpSecurity};
+use finance_types::notify::{BriefFacts, BriefSettings, EmailSettings, SmtpSecurity};
 use lettre::message::{Mailbox, MultiPart, SinglePart, header::ContentType};
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{SmtpTransport, Transport};
-use serde_json::{Value, json};
 
-/// The Ollama the Python service used, on this Mac.
-pub const OLLAMA_URL: &str = "http://127.0.0.1:11434";
-pub const OLLAMA_MODEL: &str = "qwen3:8b";
-/// Python `MAX_OLLAMA_RESPONSE_BYTES`.
-const MAX_RESPONSE_BYTES: u64 = 64 * 1024;
-/// Python's status codes worth one more try.
-const RETRYABLE: [u16; 4] = [429, 502, 503, 504];
-
-/// The email as the mail server receives it: from "Rafael", plain text with
+/// The email as the mail server receives it: from the persona, plain text with
 /// an HTML alternative when there is one.
 pub fn email(message: &Message, smtp: &Smtp) -> Result<lettre::Message, String> {
-    let from: Mailbox = format!("Rafael <{}>", smtp.from)
+    let name: String = smtp
+        .name
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == ' ')
+        .collect();
+    let from: Mailbox = format!("{} <{}>", name.trim(), smtp.from)
         .parse()
         .map_err(|_| "The sender is not an email address.".to_owned())?;
     let to: Mailbox = smtp
@@ -207,101 +204,79 @@ impl Notifier for Fanout {
     }
 }
 
-/// Python `QwenSpendingMessageWriter`: the persona prompt, qualitative
-/// signals only, JSON out, temperature 0, two attempts, 90 second read.
+/// Python `QwenSpendingMessageWriter` on Mistral: the persona prompt,
+/// qualitative signals only, JSON out, temperature 0. Without a key (or
+/// when Mistral fails) the email keeps its fixed lines.
 #[derive(Debug)]
-pub struct Ollama {
-    base_url: String,
-    model: String,
-    client: reqwest::blocking::Client,
+pub struct MistralWriter {
+    pub client: Option<Mistral>,
+    pub model: String,
+    /// The persona's name ("Gisel", "Rafael").
+    pub name: String,
 }
 
-impl Ollama {
-    pub fn local() -> Result<Self, String> {
-        Self::new(OLLAMA_URL, OLLAMA_MODEL)
+impl Writer for MistralWriter {
+    fn write(&self, risk: &Risk) -> Result<Copy, String> {
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| "No Mistral key.".to_owned())?;
+        let reply = client
+            .chat_json(
+                &self.model,
+                Some(&writer_system(&self.name)),
+                &writer_prompt(risk),
+                0.0,
+            )
+            .map_err(|e| finance_mistral::message(&e))?;
+        parse_writer_reply(&reply)
     }
+}
 
-    /// Only a loopback address, as Python's `normalize_ollama_base_url`
-    /// allowed.
-    pub fn new(base_url: &str, model: &str) -> Result<Self, String> {
-        let url = reqwest::Url::parse(base_url).map_err(|_| "Invalid Ollama URL.".to_owned())?;
-        let local = matches!(
-            url.host_str(),
-            Some("127.0.0.1" | "localhost" | "[::1]" | "::1")
-        );
-        if !local || !url.username().is_empty() || url.password().is_some() {
-            return Err("Ollama must run on this Mac.".into());
-        }
-        let client = reqwest::blocking::Client::builder()
-            .connect_timeout(Duration::from_secs(2))
-            .timeout(Duration::from_secs(90))
-            .redirect(reqwest::redirect::Policy::none())
-            .no_proxy()
-            .build()
-            .map_err(|e| e.to_string())?;
-        Ok(Self {
-            base_url: base_url.trim_end_matches('/').to_owned(),
-            model: model.trim().to_owned(),
-            client,
-        })
+/// The daily brief on Mistral: the script from the facts (two tries,
+/// every number checked against them) and Voxtral's voice.
+#[derive(Debug)]
+pub struct MistralBrief {
+    pub client: Option<Mistral>,
+    pub model: String,
+}
+
+impl MistralBrief {
+    fn client(&self) -> Result<&Mistral, String> {
+        self.client
+            .as_ref()
+            .ok_or_else(|| "No Mistral key.".to_owned())
     }
+}
 
-    /// The request body Python's `OllamaClient.generate` posted.
-    pub fn payload(&self, prompt: &str) -> Value {
-        json!({
-            "model": self.model,
-            "prompt": prompt,
-            "stream": false,
-            "format": "json",
-            "options": {"temperature": 0},
-            "think": false,
-            "system": WRITER_SYSTEM,
-        })
-    }
-
-    fn generate(&self, prompt: &str) -> Result<String, String> {
-        let unavailable = || "The local model is not available.".to_owned();
-        let url = format!("{}/api/generate", self.base_url);
-        let mut last = unavailable();
+impl BriefWriter for MistralBrief {
+    fn write(
+        &self,
+        facts: &BriefFacts,
+        settings: &BriefSettings,
+    ) -> Result<(String, String), String> {
+        let client = self.client()?;
+        let prompt = serde_json::to_string(facts).map_err(|e| e.to_string())?;
+        let system = system_prompt(settings);
+        let mut last = String::new();
         for _ in 0..2 {
-            let response = match self.client.post(&url).json(&self.payload(prompt)).send() {
-                Ok(r) => r,
-                Err(_) => {
-                    last = unavailable();
-                    continue;
-                }
-            };
-            let status = response.status().as_u16();
-            if RETRYABLE.contains(&status) {
-                last = unavailable();
-                continue;
+            let reply = client
+                .chat_json(&self.model, Some(&system), &prompt, 0.7)
+                .map_err(|e| finance_mistral::message(&e))?;
+            match parse_brief(&reply, facts, settings.length) {
+                Ok(brief) => return Ok(brief),
+                Err(e) => last = e,
             }
-            if status != 200 {
-                return Err("The local model refused the request.".into());
-            }
-            let mut body = Vec::new();
-            response
-                .take(MAX_RESPONSE_BYTES + 1)
-                .read_to_end(&mut body)
-                .map_err(|_| unavailable())?;
-            if body.len() as u64 > MAX_RESPONSE_BYTES {
-                return Err("The local model answered too much.".into());
-            }
-            let document: Value =
-                serde_json::from_slice(&body).map_err(|_| "Unreadable model answer.".to_owned())?;
-            return document
-                .get("response")
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-                .ok_or_else(|| "Unreadable model answer.".to_owned());
         }
         Err(last)
     }
 }
 
-impl Writer for Ollama {
-    fn write(&self, risk: &Risk) -> Result<Copy, String> {
-        parse_writer_reply(&self.generate(&writer_prompt(risk))?)
+impl Speaker for MistralBrief {
+    fn speak(&self, script: &str, voice: &str, expressiveness: f64) -> Result<Vec<u8>, String> {
+        self.client()?
+            .speech(script, Some(voice), Some(expressiveness))
+            .map_err(|e| finance_mistral::message(&e))
     }
 }
 

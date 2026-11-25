@@ -1,4 +1,5 @@
-//! Blocking HTTP clients for the backends `finance_core::ai` defines.
+//! Blocking HTTP clients for TypeSafe and public research (Mistral is
+//! `finance-mistral`).
 //! Every call runs on a plain thread, never on the app's async runtime.
 //! Errors never carry prompts, responses or credentials.
 
@@ -7,17 +8,14 @@ use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::time::Duration;
 
 use finance_core::ai::research::{self, Fetch, Fetched, Provider};
-use finance_core::ai::retrieval::{check_embedding_inputs, parse_embeddings};
 use finance_core::ai::typesafe::{self, ChoiceRequest, ChoiceResult};
-use finance_core::ai::{BackendError, Choose, Embed, Generate, settings};
+use finance_core::ai::{BackendError, Choose};
 use finance_secrets::Secret;
 use reqwest::blocking::{Client, Response};
 use reqwest::redirect::Policy;
-use serde_json::{Value, json};
+use serde_json::Value;
 
 const RETRYABLE: [u16; 4] = [429, 502, 503, 504];
-const MAX_GENERATE_BYTES: usize = 64 * 1024;
-const MAX_EMBED_BYTES: usize = 4 * 1024 * 1024;
 
 /// Read at most `max` bytes; `None` when the body is larger.
 fn read_limited(response: Response, max: usize) -> Option<Vec<u8>> {
@@ -73,123 +71,6 @@ fn post_json(
     match serde_json::from_slice(&body) {
         Ok(value @ Value::Object(_)) => Ok(value),
         _ => Err(BackendError::Protocol),
-    }
-}
-
-/// A local Ollama model (`integrations/ollama.py`): loopback only, no
-/// redirects, no proxies.
-#[derive(Debug)]
-pub struct Ollama {
-    base: String,
-    model: String,
-    http: Client,
-    attempts: u32,
-}
-
-impl Ollama {
-    /// `read_timeout` is 120 s for suggestions and 45 s for group suggestions.
-    pub fn new(
-        base_url: &str,
-        model: &str,
-        read_timeout: Duration,
-        attempts: u32,
-    ) -> Result<Self, BackendError> {
-        let base = settings::ollama_base_url(base_url).ok_or(BackendError::Invalid(
-            "ollama base_url must use a local loopback host",
-        ))?;
-        let model = model.trim();
-        if model.is_empty() || model.chars().count() > 128 {
-            return Err(BackendError::Invalid(
-                "model must be a non-empty bounded identifier",
-            ));
-        }
-        let http = Client::builder()
-            .connect_timeout(Duration::from_secs(2))
-            .timeout(read_timeout)
-            .redirect(Policy::none())
-            .no_proxy()
-            .build()
-            .map_err(|_| BackendError::Unavailable)?;
-        Ok(Self {
-            base,
-            model: model.to_owned(),
-            http,
-            attempts: attempts.clamp(1, 5),
-        })
-    }
-
-    /// The installed models, or `None` when Ollama does not answer.
-    pub fn installed(base_url: &str) -> Option<Vec<String>> {
-        let base = settings::ollama_base_url(base_url)?;
-        let http = Client::builder()
-            .connect_timeout(Duration::from_millis(800))
-            .timeout(Duration::from_secs(2))
-            .redirect(Policy::none())
-            .no_proxy()
-            .build()
-            .ok()?;
-        let response = http.get(format!("{base}api/tags")).send().ok()?;
-        if !response.status().is_success() {
-            return None;
-        }
-        let body: Value = serde_json::from_slice(&read_limited(response, 1024 * 1024)?).ok()?;
-        Some(
-            body.get("models")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .filter_map(|m| m.get("name").and_then(Value::as_str))
-                .map(str::to_owned)
-                .collect(),
-        )
-    }
-}
-
-impl Generate for Ollama {
-    fn generate(&self, prompt: &str, system: Option<&str>) -> Result<String, BackendError> {
-        let mut payload = json!({
-            "model": self.model,
-            "prompt": prompt,
-            "stream": false,
-            "format": "json",
-            "options": {"temperature": 0},
-            "think": false,
-        });
-        if let Some(system) = system {
-            payload["system"] = Value::String(system.to_owned());
-        }
-        let body = serde_json::to_vec(&payload).map_err(|_| BackendError::Protocol)?;
-        let document = post_json(
-            &self.http,
-            &format!("{}api/generate", self.base),
-            None,
-            body,
-            self.attempts,
-            MAX_GENERATE_BYTES,
-        )?;
-        document
-            .get("response")
-            .and_then(Value::as_str)
-            .map(str::to_owned)
-            .ok_or(BackendError::Protocol)
-    }
-}
-
-impl Embed for Ollama {
-    fn embed(&self, inputs: &[String]) -> Result<Vec<Vec<f64>>, BackendError> {
-        check_embedding_inputs(inputs)?;
-        let body =
-            serde_json::to_vec(&json!({"model": self.model, "input": inputs, "truncate": false}))
-                .map_err(|_| BackendError::Protocol)?;
-        let document = post_json(
-            &self.http,
-            &format!("{}api/embed", self.base),
-            None,
-            body,
-            self.attempts,
-            MAX_EMBED_BYTES,
-        )?;
-        parse_embeddings(&document, inputs.len())
     }
 }
 
@@ -410,106 +291,9 @@ mod tests {
     }
 
     #[test]
-    fn rejects_bad_keys_and_remote_ollama() {
+    fn rejects_bad_keys() {
         assert!(!valid_key("has space"));
         assert!(!valid_key(""));
         assert!(valid_key("ts_live_abc123"));
-        assert!(
-            Ollama::new(
-                "http://example.com:11434",
-                "qwen3:8b",
-                Duration::from_secs(1),
-                1
-            )
-            .is_err()
-        );
-        assert!(Ollama::new("http://127.0.0.1:11434", " ", Duration::from_secs(1), 1).is_err());
-    }
-
-    /// Needs a local Ollama with `qwen3:8b` (or `OLLAMA_URL` / `OLLAMA_MODEL`):
-    /// `cargo test -p finance-ai -- --ignored`. Runs the whole proposal path (prompt, generation, validation, check).
-    #[test]
-    #[ignore = "calls the local Ollama"]
-    fn live_qwen_proposes_and_checks_a_category() {
-        use finance_core::ai::categorise::{Qwen, Stamp, propose};
-        use finance_core::ai::check::{self, MerchantIndex};
-        use finance_core::ai::history::History;
-        use finance_core::model::{Kind, Tx};
-        use finance_types::report::review::CategorisationMethod;
-
-        let url = std::env::var("OLLAMA_URL").unwrap_or_else(|_| "http://127.0.0.1:11434".into());
-        let model = std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| "qwen3:8b".into());
-        assert!(
-            Ollama::installed(&url).is_some_and(|m| m.contains(&model)),
-            "{model} is not installed"
-        );
-        let ollama = Ollama::new(&url, &model, Duration::from_secs(120), 1).unwrap();
-        let tx = Tx {
-            transaction_id: "firefly:1".into(),
-            ledger_id: 1,
-            account_id: "firefly:2".into(),
-            counterparty_account_id: None,
-            kind: Kind::Outflow,
-            amount: "4.20".parse().unwrap(),
-            currency: finance_types::report::Currency {
-                code: "EUR".into(),
-                minor_unit: 2,
-            },
-            occurred_at: "2026-10-27T09:00:00+01:00[Europe/Amsterdam]"
-                .parse()
-                .unwrap(),
-            purchased_on: None,
-            description: Some("BEA, Betaalpas Albert Heijn 1234,PAS123 Amsterdam".into()),
-            counterparty_name: None,
-            group_id: None,
-            category: None,
-            subscription_id: None,
-            source_country: None,
-            destination_country: None,
-            transfer_evidence: None,
-            repays: None,
-        };
-        let vocabulary = History {
-            categories: vec!["Groceries".into(), "Dining".into(), "Transport".into()],
-            rules: Default::default(),
-            examples: Vec::new(),
-            retrieval: Vec::new(),
-            version: "v".into(),
-        };
-        let checker = check::Ollama { backend: &ollama };
-        let stamp = Stamp {
-            model_version: &model,
-            prompt_version: "live",
-            baseline: true,
-            now: "2026-10-27T09:00:00.000000Z",
-        };
-        let p = propose(
-            &stamp,
-            &vocabulary,
-            &Qwen { backend: &ollama },
-            Some(&checker),
-            &MerchantIndex::default(),
-            &tx,
-            &[],
-        )
-        .unwrap();
-        // A model may answer outside the pinned schema (qwen3:14b sometimes
-        // adds keys); that must abstain, exactly as the Python service did.
-        match p.method {
-            CategorisationMethod::Model => {
-                assert_eq!(p.proposed_category.as_deref(), Some("Groceries"));
-                assert!(p.confidence.is_some());
-                assert_ne!(
-                    p.sanity_check.status,
-                    finance_types::report::review::CheckStatus::Unchecked
-                );
-            }
-            _ => assert!(
-                ["schema_violation", "malformed_output"].contains(&p.reasons[0].as_str()),
-                "{:?}",
-                p.reasons
-            ),
-        }
-        assert_eq!(p.model_version.as_deref(), Some(model.as_str()));
     }
 }

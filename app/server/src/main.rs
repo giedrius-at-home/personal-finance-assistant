@@ -20,6 +20,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
+use base64::Engine;
 use finance_ai::Assistant;
 use finance_bank::{Credentials, Syncer};
 use finance_core::daily::SeriesForecaster;
@@ -27,14 +28,17 @@ use finance_core::forecast_model::ForecastModel;
 use finance_core::service::Service;
 use finance_core::spending_email::{Message, Sender, Smtp};
 use finance_notify::push::{self, Http, PushAlerts, PushMessage, Pusher, Vapid};
-use finance_notify::{EmailAlerts, Fanout, Mailer, Ollama};
+use finance_notify::{EmailAlerts, Fanout, Mailer, MistralBrief, MistralWriter};
 use finance_secrets::{Item, Secret};
 use finance_server::access::{self, Access};
 use finance_server::auth;
 use finance_server::commands::{self, arg, ok};
 use finance_server::http::{self, Request, respond, respond_with};
 use finance_timesfm::{FILES, NAME, TimesFm};
-use finance_types::notify::{DaySummary, EmailSettings, PushStatus, PushSubscription};
+use finance_types::notify::{
+    Brief, BriefPreview, BriefSettings, BriefStatus, DaySummary, EmailSettings, PushStatus,
+    PushSubscription, VoiceOption,
+};
 use serde_json::Value;
 
 /// Bank sync checks for due banks this often; each bank syncs once a day.
@@ -43,6 +47,10 @@ const BANK_EVERY: Duration = Duration::from_secs(15 * 60);
 const EMAIL_EVERY: Duration = Duration::from_secs(15 * 60);
 /// A suggestion pass every minute, or sooner after a sync wrote transactions.
 const AI_EVERY: Duration = Duration::from_secs(60);
+/// Mistral writing an email line or the brief's script.
+const WRITE_TIMEOUT: Duration = Duration::from_secs(60);
+/// Voxtral speaking a brief of a minute or so.
+const SPEAK_TIMEOUT: Duration = Duration::from_secs(120);
 /// Let the server settle before the first background run.
 const FIRST: Duration = Duration::from_secs(60);
 /// A wrong login waits this long, to slow guessing (the token is 256 bits).
@@ -173,6 +181,22 @@ fn handle(stream: &mut TcpStream, app: &App) -> Result<()> {
                 &[("Location", "/login")],
                 b"",
             )
+        };
+    }
+    if request.method == "GET"
+        && let Some(date) = route
+            .strip_prefix("/brief/audio/")
+            .and_then(|r| r.strip_suffix(".mp3"))
+    {
+        return match app.service.brief_audio(date) {
+            Ok(Some(audio)) => respond_with(
+                stream,
+                "200 OK",
+                "audio/mpeg",
+                &[("Cache-Control", "private, max-age=86400")],
+                &audio,
+            ),
+            _ => respond(stream, "404 Not Found", "text/plain", b"no audio"),
         };
     }
     if request.method == "POST"
@@ -328,7 +352,7 @@ fn run(app: &App, cmd: &str, args: Value) -> Result<Value, String> {
         "forget_smtp_password" => finance_secrets::delete(Item::SmtpPassword)
             .map_err(|e| e.to_string())
             .map(|()| Value::Null),
-        "send_test_email" => ok(send_test_email(service)),
+        "send_test_email" => ok(send_test_email(app)),
         "push_status" => ok(push_status(app)),
         "push_subscribe" => arg::<PushSubscription>(args, "subscription").and_then(|s| {
             app.pusher
@@ -343,6 +367,15 @@ fn run(app: &App, cmd: &str, args: Value) -> Result<Value, String> {
             ok(push_status(app))
         }),
         "push_test" => ok(push_test(app)),
+        "brief_status" => ok(brief_status(app, true)),
+        "save_brief_settings" => arg::<BriefSettings>(args, "settings").and_then(|s| {
+            service.save_brief_settings(s)?;
+            ok(brief_status(app, false))
+        }),
+        "brief_now" => ok(brief_now(app)),
+        "brief_preview" => {
+            arg::<BriefSettings>(args, "settings").and_then(|s| ok(brief_preview(app, &s)))
+        }
         "forecast_model_status" => {
             let available = finance_timesfm::is_complete(&app.model_dir);
             let run = service.forecast_model_status().unwrap_or_default();
@@ -373,16 +406,16 @@ fn run(app: &App, cmd: &str, args: Value) -> Result<Value, String> {
 }
 
 /// The app's "Send test": today's email, marked as a test, sent now.
-fn send_test_email(service: &Service) -> Result<String, String> {
+fn send_test_email(app: &App) -> Result<String, String> {
+    let service = &app.service;
     let settings = service.email_settings()?;
     let settings = finance_core::spending_email::validate(EmailSettings {
         enabled: true,
         ..settings
     })
     .map_err(|e| e.to_string())?;
-    let ollama = Ollama::local()?;
-    let message = service.spending_email_test(jiff::Timestamp::now(), &settings, &ollama)?;
-    StoredMailer(Smtp::from_settings(&settings)).send(&message)?;
+    let message = service.spending_email_test(jiff::Timestamp::now(), &settings, &writer(app))?;
+    StoredMailer(smtp(app, &settings)).send(&message)?;
     Ok(format!("Test email sent to {}.", settings.recipient))
 }
 
@@ -421,8 +454,12 @@ fn register_alerts(app: &'static App) {
     let mut channels: Vec<Box<dyn finance_core::alerts::Notifier + Send + Sync>> =
         vec![Box::new(EmailAlerts::new(
             move || app.service.email_settings(),
-            |smtp: &Smtp, message: &Message| {
-                let sent = StoredMailer(smtp.clone()).send(message);
+            move |account: &Smtp, message: &Message| {
+                let sent = StoredMailer(Smtp {
+                    name: app.service.persona_name().into(),
+                    ..account.clone()
+                })
+                .send(message);
                 if let Err(e) = &sent {
                     eprintln!("alert email failed: {e}");
                 }
@@ -468,7 +505,7 @@ fn deliver_summary(app: &App, summary: &DaySummary, now: jiff::Timestamp) -> boo
             "\n\nOpen your plan: {}\n",
             finance_core::spending_email::PLAN_LINK
         ));
-        StoredMailer(Smtp::from_settings(&settings)).send(&Message {
+        StoredMailer(smtp(app, &settings)).send(&Message {
             subject: title,
             body: text,
             html_body: None,
@@ -480,6 +517,131 @@ fn deliver_summary(app: &App, summary: &DaySummary, now: jiff::Timestamp) -> boo
         Err(e) => eprintln!("day summary email failed: {e}"),
     }
     sent
+}
+
+/// The persona's email lines on Mistral; without a key the fixed lines
+/// stand in.
+fn writer(app: &App) -> MistralWriter {
+    MistralWriter {
+        client: app.assistant.mistral(WRITE_TIMEOUT).ok(),
+        model: chat_model(app),
+        name: app.service.persona_name().into(),
+    }
+}
+
+/// The SMTP account, sending as the persona.
+fn smtp(app: &App, settings: &EmailSettings) -> Smtp {
+    Smtp {
+        name: app.service.persona_name().into(),
+        ..Smtp::from_settings(settings)
+    }
+}
+
+fn chat_model(app: &App) -> String {
+    app.service
+        .ai_settings()
+        .map(|s| s.mistral_model)
+        .unwrap_or_else(|_| finance_types::ai::DEFAULT_MISTRAL_MODEL.into())
+}
+
+/// The brief's writer and voice (one client; speech gets the longer wait).
+fn brief_maker(app: &App) -> MistralBrief {
+    MistralBrief {
+        client: app.assistant.mistral(SPEAK_TIMEOUT).ok(),
+        model: chat_model(app),
+    }
+}
+
+/// Mistral's voices (the owner's own first); empty without a key.
+fn voices(app: &App) -> Vec<VoiceOption> {
+    app.assistant
+        .mistral(Duration::from_secs(10))
+        .ok()
+        .and_then(|m| m.attempts(1).voices().ok())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|v| VoiceOption {
+            id: v.id,
+            slug: v.slug,
+            name: v.name,
+            languages: v.languages,
+            gender: v.gender,
+            custom: v.custom,
+        })
+        .collect()
+}
+
+/// The brief to every phone: tapping it opens Overview, where it plays.
+fn deliver_brief(app: &App, brief: &Brief, now: jiff::Timestamp) -> bool {
+    let Some(pusher) = &app.pusher else {
+        return false;
+    };
+    let devices = app.service.push_subscriptions().unwrap_or_default();
+    let mut body: String = brief.script.chars().take(160).collect();
+    if brief.script.chars().count() > 160 {
+        body.push('…');
+    }
+    let who = if brief.persona.is_empty() {
+        app.service.persona_name().to_owned()
+    } else {
+        brief.persona.clone()
+    };
+    let message = PushMessage {
+        title: format!("{who}: {}", brief.title),
+        body: if brief.has_audio {
+            format!("▶ Tap to hear {who}. {body}")
+        } else {
+            body
+        },
+        url: "/?brief=play".into(),
+        tag: "brief".into(),
+        urgent: false,
+    };
+    pusher.push_all(&devices, &message, now.as_second(), &|s| {
+        forget_gone(app, s)
+    }) == finance_core::alerts::Outcome::Delivered
+}
+
+/// The settings card and player; `voices` also asks Mistral for its
+/// preset voices.
+fn brief_status(app: &App, voices: bool) -> Result<BriefStatus, String> {
+    let voices = if voices {
+        self::voices(app)
+    } else {
+        Vec::new()
+    };
+    Ok(BriefStatus {
+        settings: app.service.brief_settings()?,
+        latest: app.service.latest_brief()?,
+        voices,
+    })
+}
+
+/// "Make today's brief now": written, spoken and pushed, outside the
+/// schedule.
+fn brief_now(app: &App) -> Result<BriefStatus, String> {
+    let maker = brief_maker(app);
+    let now = jiff::Timestamp::now();
+    app.service
+        .make_brief(now, &maker, &maker, &|| voices(app), &|b| {
+            deliver_brief(app, b, now)
+        })?;
+    brief_status(app, false)
+}
+
+/// "Preview" in the settings card: today's brief from the form as it
+/// stands (unsaved), with its audio inline; nothing is saved or sent.
+fn brief_preview(app: &App, settings: &BriefSettings) -> Result<BriefPreview, String> {
+    let maker = brief_maker(app);
+    let (brief, audio) =
+        app.service
+            .preview_brief(jiff::Timestamp::now(), settings, &maker, &maker, &|| {
+                voices(app)
+            })?;
+    Ok(BriefPreview {
+        brief,
+        audio: audio.map(|a| base64::engine::general_purpose::STANDARD.encode(a)),
+    })
 }
 
 fn push_status(app: &App) -> Result<PushStatus, String> {
@@ -578,10 +740,9 @@ fn schedule(app: &'static App) {
         std::thread::sleep(FIRST);
         loop {
             let outcome = app.service.email_settings().and_then(|settings| {
-                let ollama = Ollama::local()?;
-                let mailer = StoredMailer(Smtp::from_settings(&settings));
+                let mailer = StoredMailer(smtp(app, &settings));
                 app.service
-                    .run_spending_email(jiff::Timestamp::now(), &ollama, &mailer)
+                    .run_spending_email(jiff::Timestamp::now(), &writer(app), &mailer)
             });
             if let Err(e) = outcome {
                 eprintln!("spending email failed: {e}");
@@ -594,6 +755,16 @@ fn schedule(app: &'static App) {
                 Ok(true) => eprintln!("day summary sent"),
                 Ok(false) => {}
                 Err(e) => eprintln!("day summary failed: {e}"),
+            }
+            let maker = brief_maker(app);
+            match app
+                .service
+                .run_brief(now, &maker, &maker, &|| voices(app), &|b| {
+                    deliver_brief(app, b, now)
+                }) {
+                Ok(true) => eprintln!("brief made"),
+                Ok(false) => {}
+                Err(e) => eprintln!("brief failed: {e}"),
             }
             std::thread::sleep(EMAIL_EVERY);
         }

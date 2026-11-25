@@ -89,6 +89,8 @@
     "allow-save-ai-settings",
     "allow-set-typesafe-key",
     "allow-forget-typesafe-key",
+    "allow-set-mistral-key",
+    "allow-forget-mistral-key",
     "allow-suggest-categories",
     "allow-suggest-spending-group",
     "allow-research-merchant",

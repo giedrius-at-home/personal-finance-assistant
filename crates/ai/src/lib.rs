@@ -1,5 +1,6 @@
-//! The app side of AI suggestions: HTTP clients for local Ollama, TypeSafe
-//! and public research ([`clients`]), the TypeSafe key in the secret store, and
+//! The app side of AI suggestions: Mistral (`finance-mistral`), HTTP
+//! clients for TypeSafe and public research ([`clients`]), the Mistral and
+//! TypeSafe keys in the secret store, and
 //! [`Assistant`], which runs one suggestion pass at a time for the
 //! scheduler, the bank sync and the owner's "Suggest categories". The
 //! prompts, parsing and storage are `finance_core::ai`.
@@ -20,19 +21,13 @@ use finance_types::ai::{
 };
 use jiff::Timestamp;
 
-use clients::{Ollama, TypeSafe, Web};
+use clients::{TypeSafe, Web};
+use finance_mistral::{Chat, Mistral};
 
-/// Generation can take a while on a laptop; Python allowed 120 s.
-const GENERATE_TIMEOUT: Duration = Duration::from_secs(120);
+/// A chat or embedding call; Mistral usually answers in seconds.
+const GENERATE_TIMEOUT: Duration = Duration::from_secs(60);
 /// `suggest_spending_group` used 45 s and a single attempt.
 const GROUP_TIMEOUT: Duration = Duration::from_secs(45);
-
-/// `model` is among Ollama's `api/tags` names (`qwen3` means `qwen3:latest`).
-pub fn installed(models: &[String], model: &str) -> bool {
-    models
-        .iter()
-        .any(|m| m == model || (!model.contains(':') && *m == format!("{model}:latest")))
-}
 
 /// Runs one AI pass at a time and remembers the last one.
 #[derive(Debug)]
@@ -40,8 +35,8 @@ pub struct Assistant {
     runner: Mutex<Runner>,
     last_run: Mutex<Option<AiRun>>,
     group: Mutex<()>,
-    /// Whether the TypeSafe key may be read from the secret store (not in the
-    /// development server).
+    /// Whether the Mistral and TypeSafe keys may be read from the secret
+    /// store (not in the development server).
     keychain: bool,
     wake: (Mutex<bool>, Condvar),
 }
@@ -61,6 +56,8 @@ fn message(error: &BackendError) -> String {
         BackendError::Invalid(reason) => (*reason).to_owned(),
     }
 }
+
+const ADD_MISTRAL_KEY: &str = "Add the Mistral API key in Settings → AI.";
 
 impl Assistant {
     pub fn new(keychain: bool) -> Self {
@@ -99,19 +96,48 @@ impl Assistant {
         finance_secrets::delete(Item::TypeSafeApiKey).map_err(|e| e.to_string())
     }
 
+    fn mistral_key(&self) -> Option<Secret> {
+        if !self.keychain {
+            return None;
+        }
+        finance_secrets::get(Item::MistralApiKey).ok().flatten()
+    }
+
+    /// Store the owner's Mistral key; it is never returned to the UI.
+    pub fn set_mistral_key(&self, key: &str) -> Result<(), String> {
+        if !self.keychain {
+            return Err("Mistral keys are stored by the app only.".into());
+        }
+        let key = Secret::new(key.trim().to_owned());
+        if !finance_mistral::valid_key(key.expose()) {
+            return Err("The Mistral API key is not valid.".into());
+        }
+        finance_secrets::set(Item::MistralApiKey, &key).map_err(|e| e.to_string())?;
+        self.wake();
+        Ok(())
+    }
+
+    pub fn forget_mistral_key(&self) -> Result<(), String> {
+        if !self.keychain {
+            return Ok(());
+        }
+        finance_secrets::delete(Item::MistralApiKey).map_err(|e| e.to_string())
+    }
+
+    /// A Mistral client with the stored key: also what writes Gisel's
+    /// emails and her daily brief.
+    pub fn mistral(&self, timeout: Duration) -> Result<Mistral, String> {
+        let key = self
+            .mistral_key()
+            .ok_or_else(|| ADD_MISTRAL_KEY.to_owned())?;
+        Mistral::new(key, timeout).map_err(|e| finance_mistral::message(&e))
+    }
+
     /// The settings card.
     pub fn status(&self, service: &Service) -> Result<AiStatus, String> {
         let settings = service.ai_settings()?;
-        let models = Ollama::installed(&settings.ollama_url);
         Ok(AiStatus {
-            ollama_detected: models.is_some(),
-            model_available: models
-                .as_deref()
-                .is_some_and(|m| installed(m, &settings.ollama_model)),
-            embedding_available: settings
-                .embedding()
-                .is_none_or(|e| models.as_deref().is_some_and(|m| installed(m, e))),
-            ollama_models: models.unwrap_or_default(),
+            mistral_key_set: self.mistral_key().is_some(),
             typesafe_key_set: self.key().is_some(),
             running: self.runner.try_lock().is_err(),
             last_run: self.last_run.lock().ok().and_then(|r| r.clone()),
@@ -190,35 +216,25 @@ impl Assistant {
     ) -> Result<(), String> {
         if settings.classifier != Classifier::Off {
             service.daily_review_pass(false)?;
-            let embed = settings
-                .embedding()
-                .map(|model| Ollama::new(&settings.ollama_url, model, GENERATE_TIMEOUT, 3))
-                .transpose()
-                .map_err(|e| message(&e))?;
+            // Embeddings come from Mistral whichever model classifies.
+            let mistral = if settings.classifier == Classifier::Mistral || settings.embeddings {
+                Some(self.mistral(GENERATE_TIMEOUT)?)
+            } else {
+                None
+            };
+            let embed = mistral.as_ref().filter(|_| settings.embeddings);
             match settings.classifier {
-                Classifier::Ollama => {
-                    let Some(models) = Ollama::installed(&settings.ollama_url) else {
-                        return Err("Ollama is not running.".into());
+                Classifier::Mistral => {
+                    let chat = Chat {
+                        client: mistral.as_ref().ok_or(ADD_MISTRAL_KEY)?,
+                        model: &settings.mistral_model,
                     };
-                    if !installed(&models, &settings.ollama_model) {
-                        return Err(format!(
-                            "{} is not available on this Ollama.",
-                            settings.ollama_model
-                        ));
-                    }
-                    let ollama = Ollama::new(
-                        &settings.ollama_url,
-                        &settings.ollama_model,
-                        GENERATE_TIMEOUT,
-                        3,
-                    )
-                    .map_err(|e| message(&e))?;
                     run.suggested = runner.run(
                         service,
                         Backends {
                             settings,
-                            generate: Some(&ollama),
-                            embed: embed.as_ref().map(|e| e as _),
+                            generate: Some(&chat),
+                            embed: embed.map(|e| e as _),
                             choose: None,
                         },
                     )?;
@@ -234,7 +250,7 @@ impl Assistant {
                         Backends {
                             settings,
                             generate: None,
-                            embed: embed.as_ref().map(|e| e as _),
+                            embed: embed.map(|e| e as _),
                             choose: Some(&typesafe),
                         },
                     )?;
@@ -312,22 +328,23 @@ impl Assistant {
                     .suggest(&input)
                     .map_err(unavailable)
             }
-            Classifier::Ollama => {
-                let ollama = Ollama::new(
-                    &settings.ollama_url,
-                    &settings.ollama_model,
-                    GROUP_TIMEOUT,
-                    1,
-                )
-                .map_err(unavailable)?;
-                groups::Ollama { backend: &ollama }
+            Classifier::Mistral => {
+                let client = self
+                    .mistral(GROUP_TIMEOUT)
+                    .map_err(|_| ADD_MISTRAL_KEY.to_owned())?
+                    .attempts(1);
+                let chat = Chat {
+                    client: &client,
+                    model: &settings.mistral_model,
+                };
+                groups::Model { backend: &chat }
                     .suggest(&input)
                     .map_err(unavailable)
             }
         }
     }
 
-    /// `POST /review/{id}/research`: only the public name leaves the Mac.
+    /// `POST /review/{id}/research`: only the public name is looked up.
     pub fn research_merchant(
         &self,
         service: &Service,

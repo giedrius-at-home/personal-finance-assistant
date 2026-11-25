@@ -43,12 +43,12 @@ pub enum BackendError {
     Invalid(&'static str),
 }
 
-/// A local text model (Ollama `api/generate` with JSON output).
+/// A text model answering JSON (Mistral chat).
 pub trait Generate {
     fn generate(&self, prompt: &str, system: Option<&str>) -> Result<String, BackendError>;
 }
 
-/// A local embedding model (Ollama `api/embed`).
+/// An embedding model (`mistral-embed`).
 pub trait Embed {
     /// One vector per input, all of the same length.
     fn embed(&self, inputs: &[String]) -> Result<Vec<Vec<f64>>, BackendError>;

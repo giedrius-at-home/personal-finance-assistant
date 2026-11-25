@@ -79,6 +79,8 @@ const COMMANDS: &[&str] = &[
     "save_ai_settings",
     "set_typesafe_key",
     "forget_typesafe_key",
+    "set_mistral_key",
+    "forget_mistral_key",
     "suggest_categories",
     "suggest_spending_group",
     "research_merchant",

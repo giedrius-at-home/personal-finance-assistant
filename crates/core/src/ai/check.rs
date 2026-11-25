@@ -93,17 +93,17 @@ pub trait Checker {
 }
 
 /// The local model as second reviewer (`check_category`).
-pub struct Ollama<'a> {
+pub struct Model<'a> {
     pub backend: &'a dyn Generate,
 }
 
-impl std::fmt::Debug for Ollama<'_> {
+impl std::fmt::Debug for Model<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("Ollama")
+        f.write_str("Model")
     }
 }
 
-impl Ollama<'_> {
+impl Model<'_> {
     /// The user prompt.
     pub fn prompt(
         tx: &Tx,
@@ -197,7 +197,7 @@ impl Ollama<'_> {
     }
 }
 
-impl Checker for Ollama<'_> {
+impl Checker for Model<'_> {
     fn check(&self, tx: &Tx, proposal: &CategoryProposal, index: &MerchantIndex) -> CategoryCheck {
         let merchant = normalize_merchant(tx.description.as_deref().unwrap_or(""));
         if merchant.is_empty() {
@@ -432,7 +432,7 @@ mod tests {
                 answer: Ok(r#"{"verdict":"review","reason":"x","evidence":[]}"#.into()),
                 seen: RefCell::new(Vec::new()),
             };
-            let check = Ollama { backend: &backend }.check(&cafe(), &proposal(method), &index);
+            let check = Model { backend: &backend }.check(&cafe(), &proposal(method), &index);
             assert_eq!(check.status, CheckStatus::Review);
             let seen = backend.seen.borrow();
             assert_eq!(seen[0].0, prompt);
@@ -448,7 +448,7 @@ mod tests {
                 answer: Ok(answer.into()),
                 seen: RefCell::new(Vec::new()),
             };
-            Ollama { backend: &backend }.check(&cafe(), &proposal(method), &index)
+            Model { backend: &backend }.check(&cafe(), &proposal(method), &index)
         };
         let ok = run(
             r#"{"verdict":"supported","reason":"Cafe","evidence":["Café  Noir"]}"#,
@@ -495,7 +495,7 @@ mod tests {
             answer: Err(BackendError::Unavailable),
             seen: RefCell::new(Vec::new()),
         };
-        let check = Ollama { backend: &backend }.check(
+        let check = Model { backend: &backend }.check(
             &cafe(),
             &proposal(CategorisationMethod::Model),
             &MerchantIndex::build(&history),
@@ -503,10 +503,10 @@ mod tests {
         assert_eq!(check.status, CheckStatus::Review);
         let mut close = proposal(CategorisationMethod::Model);
         close.runner_up_confidence = Some(Decimal::from_str("0.8").unwrap());
-        let check = Ollama { backend: &backend }.check(&cafe(), &close, &MerchantIndex::default());
+        let check = Model { backend: &backend }.check(&cafe(), &close, &MerchantIndex::default());
         assert_eq!(check.status, CheckStatus::Review);
         assert!(backend.seen.borrow().is_empty());
-        let check = Ollama { backend: &backend }.check(
+        let check = Model { backend: &backend }.check(
             &cafe(),
             &proposal(CategorisationMethod::Model),
             &MerchantIndex::default(),

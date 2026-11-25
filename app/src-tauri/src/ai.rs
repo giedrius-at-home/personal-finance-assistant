@@ -54,6 +54,18 @@ pub async fn forget_typesafe_key(app: AppHandle) -> Result<(), String> {
     off_runtime(app, |_, a| a.forget_typesafe_key()).await
 }
 
+/// Store the Mistral API key. It goes straight to the secret store and is
+/// never returned to the UI.
+#[tauri::command]
+pub async fn set_mistral_key(app: AppHandle, key: String) -> Result<(), String> {
+    off_runtime(app, move |_, a| a.set_mistral_key(&key)).await
+}
+
+#[tauri::command]
+pub async fn forget_mistral_key(app: AppHandle) -> Result<(), String> {
+    off_runtime(app, |_, a| a.forget_mistral_key()).await
+}
+
 /// The owner's "Suggest categories" (`POST /review/suggest`).
 #[tauri::command]
 pub async fn suggest_categories(app: AppHandle) -> Result<SuggestionPass, String> {
