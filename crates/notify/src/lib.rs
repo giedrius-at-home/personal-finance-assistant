@@ -1,4 +1,5 @@
-//! Delivery for the daily spending email: the SMTP sender (Python
+//! Delivery by email: the alert notifier the server registers (goal and
+//! budget alerts reach the phone as email), the SMTP sender (Python
 //! `SmtpSpendingEmailSender`) and the local Qwen writer (Python
 //! `QwenSpendingMessageWriter` over `OllamaClient`). The content and every
 //! decision come from `finance_core::spending_email`; this crate only talks
@@ -8,11 +9,12 @@
 use std::io::Read;
 use std::time::Duration;
 
+use finance_core::alerts::{Notification, Notifier, Outcome};
 use finance_core::spending_email::{
     Copy, Message, Risk, Sender, Smtp, WRITER_SYSTEM, Writer, parse_writer_reply, writer_prompt,
 };
 use finance_secrets::Secret;
-use finance_types::notify::SmtpSecurity;
+use finance_types::notify::{EmailSettings, SmtpSecurity};
 use lettre::message::{Mailbox, MultiPart, SinglePart, header::ContentType};
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{SmtpTransport, Transport};
@@ -104,6 +106,75 @@ where
             .send(&email)
             .map(|_| ())
             .map_err(|e| format!("Sending failed: {e}"))
+    }
+}
+
+/// The email an alert becomes: the notification's title as the subject,
+/// its line as the body.
+pub fn alert_email(n: &Notification) -> Message {
+    Message {
+        subject: n.title.clone(),
+        body: format!(
+            "{}\n\nOpen Finance to see the plan and what to do now.\n",
+            n.body
+        ),
+        html_body: None,
+    }
+}
+
+/// Goal and budget alerts by email, for the server, where there is no
+/// desktop to show them; the phone shows the email as it arrives. The email
+/// settings are read at every alert, so turning "Email alerts" on or off
+/// takes effect at once, and `send` gets the mail server to use with the
+/// email (the server reads the SMTP password from its secret store there).
+///
+/// Outcomes as the alert record keeps them: `disabled` while the owner has
+/// the setting off, `unavailable` when the settings cannot be read or have no
+/// recipient, `failed` when sending did not work, `delivered` when the mail
+/// server took it.
+pub struct EmailAlerts<L, S> {
+    settings: L,
+    send: S,
+}
+
+impl<L, S> EmailAlerts<L, S>
+where
+    L: Fn() -> Result<EmailSettings, String>,
+    S: Fn(&Smtp, &Message) -> Result<(), String>,
+{
+    pub fn new(settings: L, send: S) -> Self {
+        Self { settings, send }
+    }
+}
+
+impl<L, S> std::fmt::Debug for EmailAlerts<L, S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("EmailAlerts")
+    }
+}
+
+impl<L, S> Notifier for EmailAlerts<L, S>
+where
+    L: Fn() -> Result<EmailSettings, String>,
+    S: Fn(&Smtp, &Message) -> Result<(), String>,
+{
+    fn send(&self, message: &Notification) -> Outcome {
+        let Ok(settings) = (self.settings)() else {
+            return Outcome::Unavailable;
+        };
+        if !settings.alerts {
+            return Outcome::Disabled;
+        }
+        let Ok(settings) = finance_core::spending_email::validate(settings) else {
+            return Outcome::Unavailable;
+        };
+        if settings.recipient.is_empty() {
+            return Outcome::Unavailable;
+        }
+        match (self.send)(&Smtp::from_settings(&settings), &alert_email(message)) {
+            Ok(()) => Outcome::Delivered,
+            Err(_) => Outcome::Failed,
+        }
     }
 }
 

@@ -266,6 +266,12 @@ fn settings_are_checked_like_the_environment() {
     s.sender = String::new();
     s.hour = 24;
     assert!(validate(s).is_err());
+    // Alert emails alone need a complete mail setup too.
+    let alerts_only = EmailSettings {
+        alerts: true,
+        ..EmailSettings::default()
+    };
+    assert!(validate(alerts_only).is_err());
     assert!(!is_email("a@b"));
     assert!(!is_email("a b@c.d"));
     assert!(is_email("a@b.c"));
