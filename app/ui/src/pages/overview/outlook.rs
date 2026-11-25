@@ -414,11 +414,8 @@ impl ScoreReason {
                 vec![("Unplanned, last three days".to_owned(), m(signal.unplanned))]
             }
             ReasonKind::Month => vec![
-                (
-                    "Every".to_owned(),
-                    format!("{} unplanned", m(Decimal::from(50))),
-                ),
-                ("Costs".to_owned(), "5 points".to_owned()),
+                ("Every unplanned".to_owned(), m(Decimal::from(50))),
+                ("Costs points".to_owned(), "5".to_owned()),
             ],
             ReasonKind::Other => Vec::new(),
         }

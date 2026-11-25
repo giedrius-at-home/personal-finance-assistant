@@ -45,6 +45,8 @@ pub struct Nudge {
     /// At most two numbers to steer by, shown under the action.
     pub key: Vec<(String, String)>,
     pub value: String,
+    /// What the value is, as its own field before it: "Left", "Over limit".
+    pub what: String,
     /// The value is an overrun.
     pub bad: bool,
     pub chip: Option<(Tone, String)>,
@@ -183,13 +185,11 @@ pub fn event_nudge(event: &EventRow, unit: &Currency) -> Nudge {
         label: event.row.wish.name.clone(),
         action: action.to_owned(),
         key,
-        value: if over {
-            format!("{} over", m(-event.left))
-        } else {
-            format!("{} left", m(event.left))
-        },
+        value: m(event.left.abs()),
+        what: if over { "Over" } else { "Left" }.to_owned(),
         bad: over,
-        chip: Some((chip.0, chip.1.to_owned())),
+        // "Over" is already the value's own label.
+        chip: (!over).then(|| (chip.0, chip.1.to_owned())),
         facts,
         weight: event.left.abs(),
     }
@@ -213,12 +213,13 @@ fn merge_stops(rest: Vec<Nudge>) -> Vec<Nudge> {
         .map(|n| (n.label.clone(), n.value.clone()))
         .collect();
     rest.push(Nudge {
-        label: format!("Over budget in {} groups", stops.len()),
+        label: "Over budget".to_owned(),
         action: STOP.to_owned(),
         key: lines.iter().take(2).cloned().collect(),
         value: format!("{} groups", stops.len()),
+        what: String::new(),
         bad: true,
-        chip: Some((Tone::Negative, "Over".to_owned())),
+        chip: None,
         facts: lines.into_iter().skip(2).collect(),
         weight: stops.iter().map(|n| n.weight).sum(),
     });
@@ -287,21 +288,23 @@ pub fn nudges(report: &Dashboard) -> Vec<Nudge> {
             } else {
                 "Usual month"
             };
-            let (value, bad, chip, action) = match (&rest, over) {
+            let (value, what, bad, chip, action) = match (&rest, over) {
                 (Some(_), Some(over)) => (
-                    format!("{} over", m(over)),
+                    m(over),
+                    format!("Over {}", cap_label.to_lowercase()),
                     true,
-                    (Tone::Negative, format!("Over {}", cap_label.to_lowercase())),
+                    None,
                     STOP,
                 ),
                 (Some(rest), None) => (
-                    format!("{} left", m(rest.left)),
+                    m(rest.left),
+                    "Left".to_owned(),
                     false,
-                    if heading.is_some() {
+                    Some(if heading.is_some() {
                         (Tone::Warning, "Heading over".to_owned())
                     } else {
                         (Tone::Warning, "More visits".to_owned())
-                    },
+                    }),
                     if heading.is_some() {
                         "Slow down"
                     } else {
@@ -310,8 +313,9 @@ pub fn nudges(report: &Dashboard) -> Vec<Nudge> {
                 ),
                 (None, _) => (
                     m(h.spent),
+                    "Spent".to_owned(),
                     false,
-                    (Tone::Warning, "More visits".to_owned()),
+                    Some((Tone::Warning, "More visits".to_owned())),
                     "Fewer visits this week",
                 ),
             };
@@ -406,8 +410,9 @@ pub fn nudges(report: &Dashboard) -> Vec<Nudge> {
                 action: action.to_owned(),
                 key,
                 value,
+                what,
                 bad,
-                chip: Some(chip),
+                chip,
                 facts,
                 weight,
             });
@@ -418,6 +423,7 @@ pub fn nudges(report: &Dashboard) -> Vec<Nudge> {
                 action: "Sort it".to_owned(),
                 key: Vec::new(),
                 value: m(adjustments.unsorted),
+                what: String::new(),
                 bad: false,
                 chip: None,
                 facts: Vec::new(),
@@ -434,8 +440,9 @@ pub fn nudges(report: &Dashboard) -> Vec<Nudge> {
                 action: "Slow down".to_owned(),
                 key: vec![("Three days before".to_owned(), m(s.previous_spending))],
                 value: m(s.spending),
+                what: "Spent".to_owned(),
                 bad: false,
-                chip: Some((Tone::Warning, "Faster".to_owned())),
+                chip: None,
                 facts: vec![("Of it unplanned".to_owned(), m(s.unplanned))],
                 weight: (s.spending - s.previous_spending).max(s.unplanned),
             });
@@ -484,6 +491,7 @@ pub fn move_nudge(plan: &MoneyPlan) -> Option<Nudge> {
         action: "Move money".to_owned(),
         key: facts.iter().take(2).cloned().collect(),
         value: money(total, &plan.currency),
+        what: String::new(),
         bad: false,
         chip: None,
         facts: facts.into_iter().skip(2).collect(),
@@ -549,11 +557,13 @@ fn tile(n: Nudge) -> impl IntoView {
             </Disclosure>
         }
     });
+    let what = (!n.what.is_empty()).then_some(n.what);
     view! {
         <li class="grid min-w-0 content-start gap-2 rounded-lg border border-border bg-card-strong p-4">
             <span class="truncate text-eyebrow font-bold uppercase tracking-eyebrow text-fg-muted">{n.label}</span>
             <strong class="text-lg font-semibold leading-tight tracking-tight">{n.action}</strong>
             <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                {what.map(|what| view! { <span class="text-sm text-fg-muted">{what}</span> })}
                 <span class=cn([HEADLINE_FIGURE, if n.bad { "text-over-fg" } else { "" }])>{n.value}</span>
                 {n.chip.map(|(tone, text)| view! { <Badge tone=tone>{text}</Badge> })}
             </div>
@@ -572,7 +582,7 @@ mod tests {
         let stop = |label: &str, weight: u32| Nudge {
             label: label.into(),
             action: STOP.into(),
-            value: format!("€{weight} over"),
+            value: format!("€{weight}"),
             weight: Decimal::from(weight),
             ..Nudge::default()
         };
@@ -589,9 +599,10 @@ mod tests {
         ]);
         assert_eq!(out.len(), 2);
         let merged = &out[1];
-        assert_eq!(merged.label, "Over budget in 3 groups");
-        assert_eq!(merged.key[0], ("Food".to_owned(), "€200 over".to_owned()));
-        assert_eq!(merged.facts, [("Gifts".to_owned(), "€10 over".to_owned())]);
+        assert_eq!(merged.label, "Over budget");
+        assert_eq!(merged.value, "3 groups");
+        assert_eq!(merged.key[0], ("Food".to_owned(), "€200".to_owned()));
+        assert_eq!(merged.facts, [("Gifts".to_owned(), "€10".to_owned())]);
         assert_eq!(merged.weight, Decimal::from(260));
         // One group alone keeps its own tile.
         assert_eq!(merge_stops(vec![stop("Fun", 50)])[0].label, "Fun");

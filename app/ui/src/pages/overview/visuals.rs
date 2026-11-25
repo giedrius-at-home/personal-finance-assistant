@@ -138,15 +138,26 @@ pub fn verdict(budget: &MonthlyBudget, days: usize) -> Verdict {
     }
 }
 
-/// `€5.00 over` the plan, `€5.00 under` it: words, since a bare sign reads
-/// as good in one place and bad in another.
-pub fn signed(value: Decimal, unit: &finance_types::report::Currency) -> String {
-    if value > Decimal::ZERO {
-        format!("{} over", money(value, unit))
-    } else if value < Decimal::ZERO {
-        format!("{} under", money(-value, unit))
-    } else {
+/// A distance from the plan as a field: which side it is on (for the
+/// field's label: "Over at month end") and the bare amount as its value.
+/// The side is a word in the label, since a bare sign reads as good in one
+/// place and bad in another.
+pub fn gap(value: Decimal, unit: &finance_types::report::Currency) -> (std::cmp::Ordering, String) {
+    let side = value.cmp(&Decimal::ZERO);
+    let text = if side.is_eq() {
         "On plan".to_owned()
+    } else {
+        money(value.abs(), unit)
+    };
+    (side, text)
+}
+
+/// The label of the month-end distance from the plan.
+pub fn month_end_label(side: std::cmp::Ordering) -> &'static str {
+    match side {
+        std::cmp::Ordering::Greater => "Over at month end",
+        std::cmp::Ordering::Less => "Under at month end",
+        std::cmp::Ordering::Equal => "Month end vs plan",
     }
 }
 
@@ -174,9 +185,9 @@ fn on_track(budget: &MonthlyBudget, days: usize) -> AnyView {
         } else {
             "text-positive-fg"
         };
-        let text = signed(a, &unit);
+        let (side, text) = gap(a, &unit);
         view! {
-            <Metric label="Month end vs plan" size="text-3xl">
+            <Metric label=month_end_label(side) size="text-3xl">
                 <span class=class>{text}</span>
             </Metric>
         }
@@ -213,6 +224,15 @@ fn on_track(budget: &MonthlyBudget, days: usize) -> AnyView {
             } else {
                 format!("{} {word}", m(left))
             };
+            // On screen the bare amount, red and negative when over; the
+            // words stay for a screen reader.
+            let shown = if over > Decimal::ZERO {
+                format!("\u{2212}{}", m(over))
+            } else if left.is_zero() {
+                status.clone()
+            } else {
+                m(left)
+            };
             let label = format!(
                 "{}: {} spent of {} planned, {status}",
                 row.name,
@@ -226,7 +246,7 @@ fn on_track(budget: &MonthlyBudget, days: usize) -> AnyView {
                         <span class=cn([
                             FIGURE,
                             if over > Decimal::ZERO { "font-medium text-over-fg" } else { "text-fg-muted" },
-                        ])>{status}</span>
+                        ])>{shown}</span>
                     </div>
                     <div role="img" aria-label=label class="flex h-2 overflow-hidden rounded-pill bg-soft">
                         <i class="block h-full" style:width=format!("{within:.2}%") style:background=row_color(budget, &row.id)></i>
@@ -503,9 +523,14 @@ pub fn BudgetVisuals(
             };
             let gap = projected.filter(|_| elapsed > 0).map(|p| {
                 let class = if over { "text-over-fg" } else { "text-positive-fg" };
-                let text = signed(p - planned, &unit);
+                let (side, text) = gap(p - planned, &unit);
+                let label = match side {
+                    std::cmp::Ordering::Greater => "Over budget",
+                    std::cmp::Ordering::Less => "Under budget",
+                    std::cmp::Ordering::Equal => "vs budget",
+                };
                 view! {
-                    <Stat label="vs budget">
+                    <Stat label=label>
                         <span class=class>{text}</span>
                     </Stat>
                 }

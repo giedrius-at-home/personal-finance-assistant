@@ -140,8 +140,10 @@ pub fn PanelFrame(
                         .get()
                         .then(move || {
                             view! {
-                                <CardTitle level=Heading::Span class="min-w-0 truncate">{move || title.get()}</CardTitle>
-                                <span class="ml-auto truncate text-sm text-fg-muted">{move || summary.get()}</span>
+                                <span class="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-center sm:gap-3">
+                                    <CardTitle level=Heading::Span class="min-w-0 truncate">{move || title.get()}</CardTitle>
+                                    <span class="truncate text-sm text-fg-muted sm:ml-auto">{move || summary.get()}</span>
+                                </span>
                             }
                         })
                 }}

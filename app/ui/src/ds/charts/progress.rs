@@ -21,17 +21,13 @@ pub fn BudgetBar(
     let forecast_pct = forecast.map_or(spent_pct, |f| clamp_percent(f, scale));
     let limit_pct = clamp_percent(limit, scale);
     let remaining = limit - spent;
-    let text = format!(
-        "{}{}",
-        if over {
-            format!("{} over limit", format(-remaining))
-        } else {
-            format!("{} left", format(remaining))
-        },
-        forecast
-            .map(|f| format!(" · forecast {}", format(f)))
-            .unwrap_or_default()
-    );
+    // Each number is its own field: a label, then the bare amount.
+    let rest = if over {
+        ("Over limit", format(-remaining))
+    } else {
+        ("Left", format(remaining))
+    };
+    let forecast_text = forecast.map(|f| format(f));
     view! {
         <div class=cn(["grid gap-1.5", class.as_str()])>
             <div class="flex items-baseline justify-between gap-3 text-sm">
@@ -57,7 +53,10 @@ pub fn BudgetBar(
                 </div>
                 <div aria-hidden="true" class="absolute inset-y-0 w-0.5 -translate-x-1/2 rounded-pill bg-chart-limit" style:left=pct(limit_pct)></div>
             </div>
-            <p class=if over { "text-xs tabular-nums font-medium text-over-fg" } else { "text-xs tabular-nums text-fg-muted" }>{text}</p>
+            <p class="flex items-baseline justify-between gap-3 text-xs tabular-nums text-fg-muted">
+                <span>{rest.0}" "<span class=if over { "font-medium text-over-fg" } else { "font-medium text-fg" }>{rest.1}</span></span>
+                {forecast_text.map(|f| view! { <span>"Forecast "<span class="font-medium text-fg">{f}</span></span> })}
+            </p>
         </div>
     }
 }

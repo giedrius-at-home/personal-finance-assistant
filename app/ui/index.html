@@ -2,10 +2,16 @@
 <html lang="en" data-accent="finance">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- viewport-fit=cover: the installed app draws under a phone's notch; the
+         page keeps its own content clear of it (safe-area insets in main.rs). -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Finance</title>
     <!-- Lets a phone's browser install the server's UI as an app. -->
-    <meta name="theme-color" content="#f4f3ef" />
+    <meta name="theme-color" content="#f4f3ef" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#1e1f1c" media="(prefers-color-scheme: dark)" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials" />
     <link rel="apple-touch-icon" href="icons/icon-192.png" />
     <link data-trunk rel="copy-file" href="manifest.webmanifest" />

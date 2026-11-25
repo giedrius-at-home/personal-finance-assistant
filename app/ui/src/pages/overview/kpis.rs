@@ -11,7 +11,7 @@ use crate::format;
 use crate::pages::with_report;
 
 use super::outlook::score_reasons;
-use super::visuals::{signed, verdict};
+use super::visuals::{gap as plan_gap, month_end_label, verdict};
 
 #[component]
 pub fn OverviewKpis() -> impl IntoView {
@@ -96,9 +96,9 @@ fn strip(report: &Dashboard) -> Option<AnyView> {
             } else {
                 "text-positive-fg"
             };
-            let text = signed(ahead, &unit);
+            let (side, text) = plan_gap(ahead, &unit);
             view! {
-                <Metric label="Month end vs plan">
+                <Metric label=month_end_label(side)>
                     <span class=class>{text}</span>
                 </Metric>
             }

@@ -413,7 +413,7 @@ pub fn week() -> AnyView {
     })
 }
 
-/// "≈ €X expected" over the next seven days, as the week panel shows it.
+/// "≈ €X" expected over the next seven days, as the week panel shows it.
 pub fn week_summary(report: &Dashboard) -> Option<String> {
     let budget = selected(report, &picked_selection())?;
     if !is_current(report, budget) {
@@ -424,7 +424,7 @@ pub fn week_summary(report: &Dashboard) -> Option<String> {
         .iter()
         .find(|d| d.currency.code == budget.plan.currency.code)?;
     Some(format!(
-        "\u{2248} {} expected",
+        "\u{2248} {}",
         money(next_week(forecast), &forecast.currency)
     ))
 }
@@ -630,7 +630,7 @@ fn panel(report: &Dashboard, selection: &str, s: PanelState) -> AnyView {
                 <span data-label="Planned" class=cell>{m(budget.planned)}</span>
                 <span data-label="Spent" class=cell>{m(budget.spent)}</span>
                 <span data-label="Remaining" class=cn([cell, if net < Decimal::ZERO { "text-over-fg" } else { "" }])>
-                    {if net < Decimal::ZERO { format!("{} over", m(-net)) } else { m(net) }}
+                    {if net < Decimal::ZERO { format!("\u{2212}{}", m(-net)) } else { m(net) }}
                 </span>
             </div>
         }
@@ -742,16 +742,14 @@ fn budget_row(budget: &MonthlyBudget, row: &BudgetRow, kind: Kind, s: PanelState
     let subtitle = match kind {
         Kind::Fixed => "Bills & recurring payments".to_owned(),
         Kind::Extras if row.scheduled > Decimal::ZERO => {
-            format!("One-off payments · {} still due", m(row.scheduled))
+            format!("One-off payments, {} due", m(row.scheduled))
         }
-        Kind::Extras => "One-off payments · all paid".into(),
+        Kind::Extras => "One-off payments, all paid".into(),
         Kind::Event => "Event, this month's share".into(),
         Kind::Unplanned if !row.expected.is_empty() => "Estimate from past months".into(),
         Kind::Unplanned => "Not in any group".into(),
         Kind::Group => match &group {
-            Some(g) if g.source_groups.iter().any(|n| *n != row.name) => {
-                g.source_groups.join(" · ")
-            }
+            Some(g) if g.source_groups.iter().any(|n| *n != row.name) => g.source_groups.join(", "),
             _ => "Monthly allowance".into(),
         },
     };
@@ -772,7 +770,7 @@ fn budget_row(budget: &MonthlyBudget, row: &BudgetRow, kind: Kind, s: PanelState
     } else if estimate {
         format!("≈ {}", m(row.remaining))
     } else if over {
-        format!("{} over", m(row.remaining.abs()))
+        format!("\u{2212}{}", m(row.remaining.abs()))
     } else {
         m(row.remaining)
     };

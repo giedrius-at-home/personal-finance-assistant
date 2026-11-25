@@ -252,7 +252,7 @@ fn skipped_facts(by_month: &[(&WishMonth, Vec<&Verdict>)], code: &str) -> Vec<Fa
 fn one_off_facts(by_month: &[(&WishMonth, Vec<&Verdict>)], code: &str) -> Vec<Fact> {
     let short: Decimal = by_month.iter().map(|(_, v)| total(v, |v| v.short)).sum();
     if short > Decimal::ZERO {
-        return vec![fact("Short by", amount(short, code))];
+        return vec![fact("Short", amount(short, code))];
     }
     let cuts = first_cuts(by_month);
     let from_savings: Decimal = by_month
@@ -283,7 +283,7 @@ fn one_off_facts(by_month: &[(&WishMonth, Vec<&Verdict>)], code: &str) -> Vec<Fa
         if next_short > Decimal::ZERO {
             let mut facts = vec![
                 fact("On the cards", n),
-                fact(format!("{next} starts short by"), amount(next_short, code)),
+                fact(format!("{next} starts short"), amount(next_short, code)),
             ];
             facts.extend(cut_facts(&next_cuts, Some(&next), code));
             return facts;
@@ -353,7 +353,7 @@ fn repeating_facts(by_month: &[(&WishMonth, Vec<&Verdict>)], code: &str) -> Vec<
             facts.push(fact("Fits until", month_name(&shorts[j].0)));
         }
         facts.push(fact("Short from", month_name(month)));
-        facts.push(fact("Short by", amount(*n, code)));
+        facts.push(fact("Short", amount(*n, code)));
         return facts;
     }
     let freed = by_month.iter().find_map(|(m, v)| {
@@ -1402,7 +1402,7 @@ fn wish_box(ui: Ui, row: &WishRow, ctx: &Context) -> impl IntoView + use<> {
     let saved = row_saved(row);
     let percent = saved_percent(saved, wish.amount);
     let progress = (planned && wish.kind == WishKind::OneOff).then(|| {
-        let label = format!("{} saved", amount(saved, &code));
+        let label = format!("Saved {}", amount(saved, &code));
         view! {
             <span class=METER_BLOCK>
                 <span role="img" aria-label=label.clone() class=METER>
@@ -3374,7 +3374,7 @@ mod tests {
             facts(&[
                 ("Fits until", "November"),
                 ("Short from", "December"),
-                ("Short by", "€25")
+                ("Short", "€25")
             ])
         );
     }
@@ -3392,7 +3392,7 @@ mod tests {
         ];
         assert_eq!(
             verdict_facts(&repeating("w", Repeat::Weekly), &months),
-            facts(&[("Short from", "November"), ("Short by", "€15")])
+            facts(&[("Short from", "November"), ("Short", "€15")])
         );
     }
 
@@ -3438,7 +3438,7 @@ mod tests {
         let months = [month(Decimal::ZERO, Decimal::ZERO, vec![v])];
         assert_eq!(
             verdict_facts(&row("w"), &months),
-            facts(&[("Short by", "€50")])
+            facts(&[("Short", "€50")])
         );
     }
 
@@ -3464,7 +3464,7 @@ mod tests {
         )];
         assert_eq!(
             verdict_facts(&row("w"), &months),
-            facts(&[("Short by", "€50"), ("Saved first for Bike", "€300")])
+            facts(&[("Short", "€50"), ("Saved first for Bike", "€300")])
         );
     }
 
@@ -3535,7 +3535,7 @@ mod tests {
         )];
         assert_eq!(
             verdict_facts(&row("w"), &months),
-            facts(&[("Short by", "€50")])
+            facts(&[("Short", "€50")])
         );
     }
 
@@ -3552,7 +3552,7 @@ mod tests {
         )];
         assert_eq!(
             verdict_facts(&row("w"), &months),
-            facts(&[("Short by", "€50")])
+            facts(&[("Short", "€50")])
         );
     }
 
@@ -3645,10 +3645,7 @@ mod tests {
         let months = [month(Decimal::ZERO, Decimal::ZERO, vec![v])];
         assert_eq!(
             verdict_facts(&row("w"), &months),
-            facts(&[
-                ("On the cards", "€500"),
-                ("November starts short by", "€500")
-            ])
+            facts(&[("On the cards", "€500"), ("November starts short", "€500")])
         );
     }
 
@@ -3665,7 +3662,7 @@ mod tests {
             verdict_facts(&row("w"), &months),
             facts(&[
                 ("On the cards", "€500"),
-                ("November starts short by", "€380"),
+                ("November starts short", "€380"),
                 ("Going out down to, November", "€0")
             ])
         );
@@ -3706,7 +3703,7 @@ mod tests {
             facts(&[
                 ("Fits until", "November"),
                 ("Short from", "December"),
-                ("Short by", "€20")
+                ("Short", "€20")
             ])
         );
     }
@@ -3876,7 +3873,7 @@ mod tests {
             verdict_facts(&row("w"), &months),
             facts(&[
                 ("On the cards", "€566"),
-                ("November starts short by", "€30.48")
+                ("November starts short", "€30.48")
             ])
         );
     }
