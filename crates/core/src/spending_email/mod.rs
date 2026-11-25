@@ -677,7 +677,7 @@ pub fn validate(mut s: EmailSettings) -> Result<EmailSettings> {
     if s.smtp_port == 0 {
         return Err(invalid("The SMTP port must be between 1 and 65535."));
     }
-    let complete = s.enabled || !s.recipient.is_empty() || !s.username.is_empty();
+    let complete = s.enabled || s.alerts || !s.recipient.is_empty() || !s.username.is_empty();
     if !complete {
         return Ok(s);
     }

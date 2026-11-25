@@ -36,6 +36,9 @@ pub struct EmailSettings {
     /// Let the local Qwen model (Ollama) write the opening lines; off, or when
     /// the model fails, fixed copy is used.
     pub ollama: bool,
+    /// Email each new goal or budget alert (80% used, over plan) as it
+    /// happens: how the phone hears of them when the app runs as the server.
+    pub alerts: bool,
 }
 
 impl Default for EmailSettings {
@@ -51,6 +54,7 @@ impl Default for EmailSettings {
             hour: 20,
             daily_digest: true,
             ollama: true,
+            alerts: false,
         }
     }
 }

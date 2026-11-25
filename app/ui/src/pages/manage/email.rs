@@ -31,6 +31,7 @@ struct Draft {
     hour: RwSignal<String>,
     digest: RwSignal<bool>,
     ollama: RwSignal<bool>,
+    alerts: RwSignal<bool>,
 }
 
 impl Draft {
@@ -47,6 +48,7 @@ impl Draft {
             hour: s(),
             digest: RwSignal::new(true),
             ollama: RwSignal::new(true),
+            alerts: RwSignal::new(false),
         }
     }
 
@@ -67,6 +69,7 @@ impl Draft {
         self.hour.set(s.hour.to_string());
         self.digest.set(s.daily_digest);
         self.ollama.set(s.ollama);
+        self.alerts.set(s.alerts);
     }
 
     fn settings(self) -> Result<EmailSettings, String> {
@@ -101,6 +104,7 @@ impl Draft {
             hour,
             daily_digest: self.digest.get_untracked(),
             ollama: self.ollama.get_untracked(),
+            alerts: self.alerts.get_untracked(),
         })
     }
 }
@@ -217,6 +221,14 @@ pub fn EmailCard() -> impl IntoView {
                             "Send the daily spending email",
                             "Once a day after the hour below: a warning when spending runs ahead of the plan, otherwise the forecast digest.",
                             draft.enabled,
+                            busy,
+                        )}
+                    </div>
+                    <div class="mt-3">
+                        {check(
+                            "Email budget and goal alerts",
+                            "When a plan line reaches 80% or goes over, or a goal falls behind, an email goes out at once, so the phone hears of it. Sent by the server; the Mac app shows these as notifications instead.",
+                            draft.alerts,
                             busy,
                         )}
                     </div>

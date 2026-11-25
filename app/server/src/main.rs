@@ -25,7 +25,7 @@ use finance_core::daily::SeriesForecaster;
 use finance_core::forecast_model::ForecastModel;
 use finance_core::service::Service;
 use finance_core::spending_email::{Message, Sender, Smtp};
-use finance_notify::{Mailer, Ollama};
+use finance_notify::{EmailAlerts, Mailer, Ollama};
 use finance_secrets::{Item, Secret};
 use finance_server::access::{self, Access};
 use finance_server::auth;
@@ -95,6 +95,7 @@ fn main() -> Result<()> {
         model_dir,
     }));
     install_model(app);
+    register_alerts(app);
     schedule(app);
 
     let listener = TcpListener::bind(address)?;
@@ -365,6 +366,23 @@ fn send_test_email(service: &Service) -> Result<String, String> {
     Ok(format!("Test email sent to {}.", settings.recipient))
 }
 
+/// Alerts go out by email (Manage → Settings → Email alerts); the phone
+/// shows them as they arrive. Every evaluation (after a bank sync, after a
+/// refresh) records how delivery went.
+fn register_alerts(app: &'static App) {
+    app.service
+        .set_alert_notifier(std::sync::Arc::new(EmailAlerts::new(
+            move || app.service.email_settings(),
+            |smtp: &Smtp, message: &Message| {
+                let sent = StoredMailer(smtp.clone()).send(message);
+                if let Err(e) = &sent {
+                    eprintln!("alert email failed: {e}");
+                }
+                sent
+            },
+        )));
+}
+
 /// Give the service the forecast model when its weights are on the server.
 fn install_model(app: &'static App) {
     if !finance_timesfm::is_complete(&app.model_dir) {
@@ -410,7 +428,7 @@ fn schedule(app: &'static App) {
                 app.assistant.wake();
             }
             if !results.is_empty() {
-                // Alerts are recorded (no desktop here to show them).
+                // Due alerts go out by email when the owner turned that on.
                 let _ = app.service.evaluate_alerts_now();
             }
             std::thread::sleep(BANK_EVERY);

@@ -142,3 +142,95 @@ fn local_qwen_writes_valid_copy() {
     println!("{copy:?}");
     assert!(copy.is_ok());
 }
+
+fn alert() -> Notification {
+    Notification {
+        title: "Personal finance: warning".into(),
+        body: "Groceries: 80% of the plan is used".into(),
+    }
+}
+
+fn alert_settings(alerts: bool) -> EmailSettings {
+    EmailSettings {
+        alerts,
+        recipient: "you@example.com".into(),
+        username: "me@example.com".into(),
+        ..EmailSettings::default()
+    }
+}
+
+#[test]
+fn alerts_are_emailed_to_the_recipient_when_turned_on() {
+    let sent = std::sync::Mutex::new(Vec::new());
+    let notifier = EmailAlerts::new(
+        || Ok(alert_settings(true)),
+        |smtp: &Smtp, m: &Message| {
+            sent.lock().unwrap().push((smtp.clone(), m.clone()));
+            Ok(())
+        },
+    );
+    assert_eq!(notifier.send(&alert()), Outcome::Delivered);
+    let sent = sent.into_inner().unwrap();
+    assert_eq!(sent.len(), 1);
+    let (smtp, message) = &sent[0];
+    assert_eq!(smtp.to, "you@example.com");
+    assert_eq!(smtp.from, "me@example.com");
+    assert_eq!(smtp.host, "smtp.gmail.com");
+    assert_eq!(message.subject, "Personal finance: warning");
+    assert!(
+        message
+            .body
+            .starts_with("Groceries: 80% of the plan is used")
+    );
+    assert!(message.html_body.is_none());
+}
+
+#[test]
+fn the_alert_email_goes_through_the_mailer() {
+    let mailer = Mailer::new(smtp(), StubTransport::new_ok());
+    let notifier = EmailAlerts::new(
+        || Ok(alert_settings(true)),
+        |_: &Smtp, m: &Message| mailer.send(m),
+    );
+    assert_eq!(notifier.send(&alert()), Outcome::Delivered);
+    let sent = mailer.transport().messages();
+    assert_eq!(sent.len(), 1);
+    assert!(sent[0].1.contains("Subject: Personal finance: warning"));
+    assert!(sent[0].1.contains("Groceries: 80% of the plan is used"));
+}
+
+#[test]
+fn a_send_error_is_recorded_as_failed() {
+    let failing = Mailer::new(smtp(), StubTransport::new_error());
+    let notifier = EmailAlerts::new(
+        || Ok(alert_settings(true)),
+        |_: &Smtp, m: &Message| failing.send(m),
+    );
+    assert_eq!(notifier.send(&alert()), Outcome::Failed);
+    let no_password = EmailAlerts::new(
+        || Ok(alert_settings(true)),
+        |_: &Smtp, _: &Message| Err("Save the SMTP password first.".to_owned()),
+    );
+    assert_eq!(no_password.send(&alert()), Outcome::Failed);
+}
+
+#[test]
+fn nothing_is_sent_while_off_or_without_a_recipient() {
+    let never = |_: &Smtp, _: &Message| -> Result<(), String> {
+        panic!("nothing should be sent");
+    };
+    let off = EmailAlerts::new(|| Ok(alert_settings(false)), never);
+    assert_eq!(off.send(&alert()), Outcome::Disabled);
+    let unreadable = EmailAlerts::new(|| Err("no-data".to_owned()), never);
+    assert_eq!(unreadable.send(&alert()), Outcome::Unavailable);
+    let nobody = EmailAlerts::new(
+        || {
+            Ok(EmailSettings {
+                recipient: String::new(),
+                ..alert_settings(true)
+            })
+        },
+        never,
+    );
+    assert_eq!(nobody.send(&alert()), Outcome::Unavailable);
+}

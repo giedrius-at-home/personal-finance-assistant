@@ -154,8 +154,8 @@ pub fn run(
         "status" => ok(service.status()),
         "refresh" => {
             service.refresh();
-            // No desktop here: due alerts are recorded as `unavailable`
-            // (or `disabled`), never shown.
+            // Due alerts go through the registered notifier: email on the
+            // server, none on the devserver (recorded as `unavailable`).
             let _ = service.evaluate_alerts_now();
             Ok(Value::Null)
         }
