@@ -14,7 +14,8 @@ use std::sync::LazyLock;
 
 use finance_types::notify::{
     Brief, BriefBill, BriefFacts, BriefGroup, BriefHabit, BriefLeft, BriefLength, BriefSettings,
-    VoiceOption, mood_versions,
+    EMOTION_TAGS, EXPRESSIVENESS_RANGE, PACE_TAGS, SOUND_TAGS, VoiceOption, known_tag,
+    mood_versions, plain_script,
 };
 use finance_types::report::Currency;
 use finance_types::report::allocation::GroupAllocation;
@@ -60,9 +61,15 @@ vale, venga, hombre, tranqui, ojo, madre mía, pues nada, bueno, and \"ja ja\" f
 whole Spanish sentences. Mostly correct grammar, with a light Spanish flavour now and then (\"is \
 no good\"); never misspell words to fake an accent. Write for the ear: vary the sentence length, \
 let natural pauses come from commas and \"…\", ask a rhetorical question now and then, and use an \
-exclamation when something is really good or really bad. No stage directions or brackets. Match \
-your energy to the day: brighter when the habits improve, flatter and drier when something is over \
-its limit. You get today's facts as JSON. Return JSON with \"title\" (a push notification title, \
+exclamation when something is really good or really bad. Match your energy to the day: brighter \
+when the habits improve, flatter and drier when something is over its limit. Your voice is read \
+by a speech model that takes delivery tags in square brackets, which it acts on and never says \
+aloud: [emotion=X] sets the feeling from there on, X one of {emotions}; [pace=slow] or \
+[pace=fast] changes speed for a moment ({paces}); and the sounds {sounds}. Use these tags \
+and no other brackets: start with an emotion tag, change the emotion where the mood of the facts \
+changes (warm or playful for good news, resigned or tired for an overspend, a sigh before bad news, \
+a chuckle at something a bit silly), two to six tags in all, never two in a row of the same kind, \
+no stage directions in words. You get today's facts as JSON. Return JSON with \"title\" (a push notification title, \
 under 60 characters) and \"script\" (what you say out loud, {lo} to {hi} words, no lists, no \
 emoji, no markdown). The script: start with \"Hola, {name} here.\"; say what is left and per day; \
 mention the group closest to or over its limit and any bill due soon; say plainly whether the \
@@ -81,6 +88,16 @@ pub const MAX_STYLE: usize = 300;
 pub fn system_prompt(settings: &BriefSettings) -> String {
     let (lo, hi) = settings.length.words();
     let prompt = BRIEF_SYSTEM
+        .replace("{emotions}", &EMOTION_TAGS.join(", "))
+        .replace("{paces}", &PACE_TAGS.join(", "))
+        .replace(
+            "{sounds}",
+            &SOUND_TAGS
+                .iter()
+                .map(|t| format!("[{t}]"))
+                .collect::<Vec<_>>()
+                .join(", "),
+        )
         .replace("{name}", settings.persona.name())
         .replace("{lo}", &lo.to_string())
         .replace("{hi}", &hi.to_string());
@@ -104,7 +121,8 @@ pub trait BriefWriter {
 }
 
 /// Turns the script into audio (MP3) in `voice` (an id or slug), at
-/// `expressiveness` (1.0 calm to 2.0 very lively).
+/// `expressiveness` (1.0 calm to 5.0 most expressive). The script may
+/// carry Voxtral's delivery tags (`[emotion=warm]`, `[sigh]`).
 pub trait Speaker {
     fn speak(
         &self,
@@ -418,6 +436,12 @@ pub fn facts(
     facts
 }
 
+/// A delivery tag, as `[emotion=warm]`; group 1 is what is inside.
+static TAG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[([^\[\]]*)\]").expect("tag pattern"));
+
+/// More tags than this and the delivery turns into a performance.
+const MAX_TAGS: usize = 8;
+
 static NUMBER: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\d+(?:[.,]\d+)*").expect("number pattern"));
 
@@ -448,26 +472,33 @@ pub fn parse_brief(
     let invalid = |why: &str| format!("Mistral's brief was refused: {why}.");
     let reply: Reply = serde_json::from_str(text).map_err(|_| invalid("not the JSON asked for"))?;
     let (title, script) = (reply.title.trim(), reply.script.trim());
-    if !(1..=80).contains(&title.chars().count()) {
+    if !(1..=80).contains(&title.chars().count()) || title.contains('[') {
         return Err(invalid("title length"));
     }
-    let words = script.split_whitespace().count();
+    let tags: Vec<&str> = TAG
+        .captures_iter(script)
+        .map(|c| c.get(1).map_or("", |m| m.as_str()))
+        .collect();
+    if tags.len() > MAX_TAGS || !tags.iter().all(|t| known_tag(t)) {
+        return Err(invalid("delivery tags"));
+    }
+    let spoken = plain_script(script);
+    if spoken.contains(['[', ']']) {
+        return Err(invalid("formatting"));
+    }
+    let words = spoken.split_whitespace().count();
     let (lo, hi) = length.words();
     if !(lo * 2 / 3..=hi * 4 / 3).contains(&words) || script.chars().count() > hi * 10 {
         return Err(invalid("script length"));
     }
-    if script.contains("http")
-        || script.contains('*')
-        || script.contains('#')
-        || script.contains('[')
-    {
+    if spoken.contains("http") || spoken.contains('*') || spoken.contains('#') {
         return Err(invalid("formatting"));
     }
-    if script.to_lowercase().contains("life lesson") {
+    if spoken.to_lowercase().contains("life lesson") {
         return Err(invalid("a labelled life lesson"));
     }
     let allowed = allowed_numbers(facts);
-    for n in NUMBER.find_iter(&format!("{title} {script}")) {
+    for n in NUMBER.find_iter(&format!("{title} {spoken}")) {
         if !allowed.iter().any(|a| a == n.as_str()) {
             return Err(invalid("a number not in the facts"));
         }
@@ -477,7 +508,7 @@ pub fn parse_brief(
 
 /// What the persona says when Mistral is not available.
 pub fn fixed_brief(facts: &BriefFacts, name: &str) -> (String, String) {
-    let mut lines = vec![format!("Hola, {name} here.")];
+    let mut lines = vec![format!("[emotion=warm]Hola, {name} here.")];
     let title = match facts.left.first() {
         Some(l) => {
             lines.push(format!(
@@ -490,7 +521,7 @@ pub fn fixed_brief(facts: &BriefFacts, name: &str) -> (String, String) {
     };
     if let Some(g) = facts.over_limit.first() {
         lines.push(format!(
-            "Ojo, {} is over its limit. Leave it alone for now.",
+            "[sigh] Ojo, {} is over its limit. Leave it alone for now.",
             g.group
         ));
     } else if let Some(g) = facts.near_limit.first() {
@@ -561,9 +592,9 @@ pub fn validate(mut s: BriefSettings) -> Result<BriefSettings> {
     if s.hour > 23 {
         return Err(Error::Invalid("Choose an hour from 0 to 23.".into()));
     }
-    if !(10..=20).contains(&s.expressiveness) {
+    if !EXPRESSIVENESS_RANGE.contains(&s.expressiveness) {
         return Err(Error::Invalid(
-            "Expressiveness goes from 1.0 to 2.0.".into(),
+            "Expressiveness goes from 1.0 to 5.0.".into(),
         ));
     }
     s.style = s.style.trim().to_owned();

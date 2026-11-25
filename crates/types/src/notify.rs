@@ -224,8 +224,11 @@ impl BriefLength {
     }
 }
 
-/// Expressiveness the speech starts at: 1.4, in tenths.
-pub const DEFAULT_EXPRESSIVENESS: u8 = 14;
+/// Expressiveness the speech starts at: 2.0, in tenths.
+pub const DEFAULT_EXPRESSIVENESS: u8 = 20;
+
+/// The range Voxtral takes, in tenths: 1.0 (calm) to 5.0 (most expressive).
+pub const EXPRESSIVENESS_RANGE: std::ops::RangeInclusive<u8> = 10..=50;
 
 /// Manage → Settings → Daily voice brief. Every field has a default, so
 /// settings saved by older builds still load.
@@ -241,7 +244,7 @@ pub struct BriefSettings {
     pub persona: Persona,
     /// A Mistral voice id or slug; empty is the persona's own voice.
     pub voice_id: String,
-    /// How lively the voice is, in tenths: 10 (calm) to 20 (very lively).
+    /// How lively the voice is, in tenths: 10 (calm) to 50 (most expressive).
     pub expressiveness: u8,
     pub length: BriefLength,
     /// Switch to the voice's mood version that fits the day (Paul, Oliver
@@ -277,8 +280,85 @@ impl BriefSettings {
     }
 
     pub fn expressiveness(&self) -> f64 {
-        f64::from(self.expressiveness.clamp(10, 20)) / 10.0
+        let r = EXPRESSIVENESS_RANGE;
+        f64::from(self.expressiveness.clamp(*r.start(), *r.end())) / 10.0
     }
+}
+
+/// The emotions Voxtral TTS 3 takes inline, as `[emotion=warm]`.
+pub const EMOTION_TAGS: [&str; 34] = [
+    "amused",
+    "angry",
+    "anxious",
+    "apologetic",
+    "appreciative",
+    "assertive",
+    "bored",
+    "calm",
+    "confident",
+    "confused",
+    "critical",
+    "curious",
+    "determined",
+    "disappointed",
+    "disgusted",
+    "excited",
+    "frustrated",
+    "grateful",
+    "happy",
+    "hopeful",
+    "playful",
+    "proud",
+    "reflective",
+    "resigned",
+    "sad",
+    "sarcastic",
+    "skeptical",
+    "somber",
+    "surprised",
+    "tense",
+    "tired",
+    "urgent",
+    "warm",
+    "wistful",
+];
+
+/// The speeds Voxtral TTS 3 takes inline, as `[pace=slow]`.
+pub const PACE_TAGS: [&str; 5] = ["very-slow", "slow", "moderate", "fast", "very-fast"];
+
+/// The sounds a brief may make, as `[chuckle]`.
+pub const SOUND_TAGS: [&str; 7] = ["um", "uh", "laugh", "breath", "sigh", "chuckle", "gasp"];
+
+/// Whether `inner` (what is between the brackets) is a tag Voxtral knows.
+pub fn known_tag(inner: &str) -> bool {
+    match inner.split_once('=') {
+        Some(("emotion", v)) => EMOTION_TAGS.contains(&v),
+        Some(("pace", v)) => PACE_TAGS.contains(&v),
+        Some(_) => false,
+        None => SOUND_TAGS.contains(&inner),
+    }
+}
+
+/// The script as words to read: every `[...]` tag taken out and the spaces
+/// tidied.
+pub fn plain_script(script: &str) -> String {
+    let mut out = String::with_capacity(script.len());
+    let mut depth = 0usize;
+    for c in script.chars() {
+        match c {
+            '[' => {
+                depth += 1;
+                out.push(' ');
+            }
+            ']' if depth > 0 => depth -= 1,
+            c if depth == 0 => out.push(c),
+            _ => {}
+        }
+    }
+    let joined = out.split_whitespace().collect::<Vec<_>>().join(" ");
+    [" ,", " .", " …", " ?", " !"]
+        .iter()
+        .fold(joined, |t, p| t.replace(p, &p[1..]))
 }
 
 /// `"Paul - Happy"` → `("Paul", Some("happy"))`; `"gb_oliver_sad"` →

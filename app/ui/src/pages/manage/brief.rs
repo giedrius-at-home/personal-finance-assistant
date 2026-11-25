@@ -5,7 +5,8 @@
 //! is here, with "Preview" to hear the form as it stands before saving.
 
 use finance_types::notify::{
-    BriefLength, BriefPreview, BriefSettings, BriefStatus, Persona, VoiceOption, mood_versions,
+    BriefLength, BriefPreview, BriefSettings, BriefStatus, DEFAULT_EXPRESSIVENESS, Persona,
+    VoiceOption, mood_versions, plain_script,
 };
 use leptos::prelude::*;
 use serde::Serialize;
@@ -71,7 +72,7 @@ fn length_of(value: &str) -> BriefLength {
 /// "1.4" → 14 (tenths), when it is between 1.0 and 2.0.
 fn tenths(value: &str) -> Option<u8> {
     let e: f64 = value.trim().parse().ok()?;
-    (1.0..=2.0).contains(&e).then(|| (e * 10.0).round() as u8)
+    (1.0..=5.0).contains(&e).then(|| (e * 10.0).round() as u8)
 }
 
 impl Draft {
@@ -82,7 +83,7 @@ impl Draft {
             voice: RwSignal::new(true),
             persona: RwSignal::new("gisel".into()),
             voice_id: RwSignal::new(String::new()),
-            expressiveness: RwSignal::new("1.4".into()),
+            expressiveness: RwSignal::new("2.0".into()),
             length: RwSignal::new("normal".into()),
             match_mood: RwSignal::new(true),
             style: RwSignal::new(String::new()),
@@ -298,11 +299,12 @@ pub fn BriefCard() -> impl IntoView {
         });
     };
     let expressive_label = move || {
-        let e = tenths(&draft.expressiveness.get()).unwrap_or(14);
+        let e = tenths(&draft.expressiveness.get()).unwrap_or(DEFAULT_EXPRESSIVENESS);
         let word = match e {
             ..=12 => "calm",
-            13..=16 => "lively",
-            _ => "very lively",
+            13..=19 => "lively",
+            20..=34 => "very lively",
+            _ => "full drama",
         };
         format!("{}.{} ({word})", e / 10, e % 10)
     };
@@ -345,8 +347,8 @@ pub fn BriefCard() -> impl IntoView {
                         disabled=Signal::derive(move || busy.get())
                     />
                 </Field>
-                <Field label="Expressiveness" id="brief-expressive" hint="1.0 is calm, 1.4 lively and 2.0 very lively.">
-                    <Input id="brief-expressive" value=draft.expressiveness kind="range" min="1.0" max="2.0" step="0.1" />
+                <Field label="Expressiveness" id="brief-expressive" hint="1.0 is calm, 2.0 very lively and 5.0 the most feeling; past 3.0 the voice may drift.">
+                    <Input id="brief-expressive" value=draft.expressiveness kind="range" min="1.0" max="5.0" step="0.1" />
                     <span class=HINT>{expressive_label}</span>
                 </Field>
                 <Field label="Style note" id="brief-style" hint="Your own words on how they talk, up to 300 characters, no numbers. For example: more Spanish words, drier humour, shorter sentences.">
@@ -392,7 +394,7 @@ pub fn BriefCard() -> impl IntoView {
                         {audio.map(|src| view! {
                             <audio class="w-full" controls=true autoplay=true src=src></audio>
                         })}
-                        <p class=MUTED>{p.brief.script.clone()}</p>
+                        <p class=MUTED>{plain_script(&p.brief.script)}</p>
                         <p class=cn([HINT, "flex flex-wrap gap-x-3"])>
                             <span>{voice}</span>
                             {fixed.map(|f| view! { <span>{f}</span> })}
