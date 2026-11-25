@@ -172,6 +172,9 @@ fn alert() -> Notification {
     Notification {
         title: "Personal finance: warning".into(),
         body: "Groceries: 80% of the plan is used".into(),
+        severity: finance_types::report::reporting::AlertSeverity::HeadsUp,
+        kind: finance_core::alerts::SubjectKind::Budget,
+        name: "Groceries".into(),
     }
 }
 

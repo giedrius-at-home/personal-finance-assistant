@@ -32,6 +32,7 @@ pub mod plans;
 pub mod plot;
 pub mod push;
 pub mod pyfmt;
+pub mod rafael;
 pub mod reporting;
 pub mod review;
 pub mod service;

@@ -504,9 +504,10 @@ fn push_test(app: &App) -> Result<String, String> {
     if devices.is_empty() {
         return Err("Turn on notifications on a phone first.".into());
     }
+    let (title, body) = finance_core::rafael::test_message();
     let message = PushMessage {
-        title: "Finance".into(),
-        body: "Notifications work on this device.".into(),
+        title,
+        body,
         url: "/".into(),
         tag: "test".into(),
         urgent: true,

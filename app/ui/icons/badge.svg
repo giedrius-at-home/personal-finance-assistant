@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96">
+  <!-- The notification badge (Android status bar): white on transparent,
+       the coin's ring and G only. -->
+  <g fill="none" stroke="#FFFFFF" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="48" cy="48" r="40" stroke-width="7"/>
+    <path d="M61 36 A19 19 0 1 0 66 48 L51 48" stroke-width="9"/>
+  </g>
+</svg>
