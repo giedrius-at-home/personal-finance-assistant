@@ -4,6 +4,8 @@ mod ai;
 mod banks;
 mod email;
 mod import;
+mod nudges;
+mod push;
 mod settings;
 mod status;
 mod ui;

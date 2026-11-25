@@ -81,6 +81,15 @@ on the server (use the refresh button), and alerts are not shown.
 Open the server's `https://` address in Chrome, sign in with the token once,
 then menu → "Install app" (the UI ships a web app manifest and icons).
 
+Notifications: in the installed app, Manage → Settings → Phone notifications
+→ "Turn on for this device" (on iPhone, Share → Add to Home Screen first;
+iOS 16.4 or later). Budget and goal alerts then arrive as they happen, and on
+a day that went over, the overspend summary at the email hour. The server
+signs pushes with a VAPID key it makes on first start and keeps in the
+secret store as `web-push-vapid-key`; deleting that file makes every phone
+subscribe again. It sends only to Apple, Google, Mozilla and Microsoft push
+services, outbound over HTTPS.
+
 ## Backups
 
 The server holds the ledger; the Mac keeps copies. `app/server/deploy/pull-backup.sh ubuntu@<tailnet host>`

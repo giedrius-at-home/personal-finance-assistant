@@ -235,3 +235,25 @@ pub struct BankLinkConfirm {
     pub bank: String,
     pub choices: Vec<BankLinkChoice>,
 }
+
+/// When in the day the owner buys things, and the extra syncs it sets
+/// (Manage → Banks).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PurchaseTiming {
+    /// Purchases per local hour 0–23, in tenths (estimated ones are spread
+    /// over the hours they may have happened in).
+    pub hours: Vec<u32>,
+    /// Purchases per weekday, Monday first.
+    pub weekdays: Vec<u32>,
+    /// Card purchases whose memo gave the exact time.
+    pub exact: u32,
+    /// Purchases timed by when a sync first saw them.
+    pub estimated: u32,
+    /// The busiest hours (local), most first; the defaults until there is
+    /// enough history.
+    pub peaks: Vec<u8>,
+    /// Whether `peaks` come from the owner's own purchases.
+    pub learned: bool,
+    /// Today's extra syncs (local `HH:MM`).
+    pub slots: Vec<String>,
+}

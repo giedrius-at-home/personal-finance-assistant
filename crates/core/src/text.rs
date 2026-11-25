@@ -2,7 +2,7 @@
 
 use std::sync::LazyLock;
 
-use jiff::civil::Date;
+use jiff::civil::{Date, DateTime};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
@@ -118,6 +118,32 @@ pub fn card_purchase_date(description: Option<&str>, booked_on: Date) -> Option<
     (0..=CARD_BOOKING_LAG_DAYS).contains(&lag).then_some(parsed)
 }
 
+/// The local date and time a card was used, when the memo carries both
+/// (Swedbank `PIRKINYS … 2026.10.12 18:44 …`, ABN AMRO `… 11.10.26/13:05 …`).
+/// The date is [`card_purchase_date`]'s, with the same checks; the banks
+/// themselves report dates only, so this is the one exact time there is.
+pub fn card_purchase_time(description: Option<&str>, booked_on: Date) -> Option<DateTime> {
+    static SWEDBANK_TIME: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r"(?i)^PIRKINYS\s+\S+\s+(?:\d{4}\.\d{2}\.\d{2}|\d{2}\.\d{2}\.\d{2})\s+(\d{2}):(\d{2})(?:\s|$)",
+        )
+        .expect("valid regex")
+    });
+    static ABN_TIME: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?:^|\D)\d{2}\.\d{2}\.\d{2}/(\d{2}):(\d{2})(?:\D|$)").expect("valid regex")
+    });
+    let date = card_purchase_date(description, booked_on)?;
+    let description = description?;
+    let c = SWEDBANK_TIME
+        .captures(description)
+        .or_else(|| ABN_TIME.captures(description))?;
+    let hour: i8 = c.get(1)?.as_str().parse().ok()?;
+    let minute: i8 = c.get(2)?.as_str().parse().ok()?;
+    jiff::civil::Time::new(hour, minute, 0, 0)
+        .ok()
+        .map(|t| date.to_datetime(t))
+}
+
 fn safe_date(year: i16, month: i16, day: i16) -> Option<Date> {
     Date::new(year, i8::try_from(month).ok()?, i8::try_from(day).ok()?).ok()
 }
@@ -151,6 +177,25 @@ mod tests {
         );
         assert!(iban_country(Some("NL44ABNA0136006396")).is_none());
         assert!(iban_country(Some("not an iban")).is_none());
+    }
+
+    #[test]
+    fn card_times() {
+        let booked = date(2026, 10, 14);
+        let at = |text: &str| card_purchase_time(Some(text), booked).map(|t| t.to_string());
+        assert_eq!(
+            at("PIRKINYS 5168******1234 2026.10.12 18:44 4.50 EUR (123) CAFE").as_deref(),
+            Some("2026-10-12T18:44:00")
+        );
+        assert_eq!(
+            at("BEA, Betaalpas AH 1234,PAS123 NR:XYZ, 11.10.26/13:05 AMSTERDAM").as_deref(),
+            Some("2026-10-11T13:05:00")
+        );
+        // No time, an impossible time, or no trusted card date: nothing.
+        assert_eq!(at("PIRKINYS 5168******1234 2026.10.12 4.50 EUR CAFE"), None);
+        assert_eq!(at("BEA, Betaalpas X 11.10.26/25:05 AMSTERDAM"), None);
+        assert_eq!(at("BEA, Betaalpas X 01.09.26/13:05"), None);
+        assert_eq!(at("Albert Heijn 13:05"), None);
     }
 
     #[test]

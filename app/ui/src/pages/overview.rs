@@ -10,6 +10,7 @@ mod kpis;
 mod monthly;
 mod nudges;
 pub mod outlook;
+mod today;
 pub mod visuals;
 
 use leptos::prelude::*;
@@ -46,6 +47,17 @@ pub const PANELS: &[PanelDef] = &[
         half: false,
         render: || nudges::OverviewNudges().into_any(),
         summary: Some(nudges::summary),
+        shown: Some(|| report_is(|r| r.monthly_allocation.is_some())),
+    },
+    PanelDef {
+        id: "overview.today",
+        title: "What today cost",
+        page: PAGE,
+        movable: true,
+        initial: Initial::Open,
+        half: false,
+        render: || today::OverviewToday().into_any(),
+        summary: None,
         shown: Some(|| report_is(|r| r.monthly_allocation.is_some())),
     },
     PanelDef {

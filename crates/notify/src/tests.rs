@@ -234,3 +234,30 @@ fn nothing_is_sent_while_off_or_without_a_recipient() {
     );
     assert_eq!(nobody.send(&alert()), Outcome::Unavailable);
 }
+
+struct Fixed(Outcome);
+
+impl Notifier for Fixed {
+    fn send(&self, _: &Notification) -> Outcome {
+        self.0
+    }
+}
+
+#[test]
+fn fanout_keeps_the_best_outcome() {
+    let fan = |outcomes: &[Outcome]| {
+        Fanout(
+            outcomes
+                .iter()
+                .map(|o| Box::new(Fixed(*o)) as Box<dyn Notifier + Send + Sync>)
+                .collect(),
+        )
+        .send(&alert())
+    };
+    use Outcome::*;
+    assert_eq!(fan(&[Disabled, Delivered]), Delivered);
+    assert_eq!(fan(&[Failed, Unavailable]), Failed);
+    assert_eq!(fan(&[Disabled, Unavailable]), Unavailable);
+    assert_eq!(fan(&[Disabled, Disabled]), Disabled);
+    assert_eq!(fan(&[]), Unavailable);
+}

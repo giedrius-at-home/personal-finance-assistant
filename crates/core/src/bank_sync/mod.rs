@@ -633,6 +633,13 @@ impl Service {
         let written = self.write(|w, _| {
             let own = own_accounts(&w.tx)?;
             let imported = import(w, bank, connection, &downloads, window, &own)?;
+            // When each purchase was first seen, for the buying-hours
+            // pattern (the banks report dates only).
+            let since = previous
+                .last_success
+                .as_deref()
+                .and_then(|s| s.parse::<Timestamp>().ok());
+            crate::timing::record_sightings(&w.tx, bank, &downloads, since, now)?;
             w.record(
                 &format!("enable_banking:{bank}"),
                 &serde_json::json!({
