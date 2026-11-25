@@ -44,3 +44,38 @@ jobs:
         run: |
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           "$HOME/.cargo/bin/cargo" deny check advisories bans licenses sources
+
+  deploy:
+    # Every push to main that passes both jobs goes live on this server.
+    # Never for pull requests. Builds in the runner's workspace (not dev's
+    # ~/finance checkout, which may hold other work), stages the build in
+    # /home/dev/deploy and runs dev's one root command, finance-deploy,
+    # which installs it, restarts the service and rolls back if it does not
+    # stay up (app/server/README.md).
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [check, supply-chain]
+    runs-on: [self-hosted, linux, ARM64]
+    concurrency:
+      group: deploy
+      cancel-in-progress: false
+    env:
+      CARGO_TARGET_DIR: /home/dev/deploy-target
+      TRUNK: 0.22.1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Toolchain from rust-toolchain.toml
+        run: |
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          "$HOME/.cargo/bin/rustup" show
+      - name: Trunk
+        run: |
+          trunk --version 2>/dev/null | grep -q "$TRUNK" || {
+            echo "trunk $TRUNK is not installed for dev: run app/server/deploy/deploy-here.sh once" >&2; exit 1; }
+      - name: Build
+        run: |
+          cargo build --release --locked -p finance-server
+          (cd app/ui && trunk build --release)
+      - name: Deploy
+        run: |
+          app/server/deploy/stage.sh "$CARGO_TARGET_DIR/release/finance-server" app/ui/dist
+          sudo /usr/local/sbin/finance-deploy

@@ -23,6 +23,7 @@ fi
 
 cargo build --release --locked -p finance-server
 (cd app/ui && trunk build --release)
+app/server/deploy/stage.sh target/release/finance-server app/ui/dist
 
 sudo /usr/local/sbin/finance-deploy
 git log --oneline -1
