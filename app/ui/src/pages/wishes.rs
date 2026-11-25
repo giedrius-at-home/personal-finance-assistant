@@ -505,6 +505,36 @@ fn month_short(month: &WishMonth) -> Decimal {
     month.verdicts.iter().map(|v| v.short).sum()
 }
 
+/// The cooling-off hold on a new, unplanned purchase: a wish waits this
+/// long before it is bought, so a want can pass.
+pub(crate) const HOLD_HOURS: f64 = 48.0;
+
+/// Whole hours left of the hold for a wish added at `created_ms`, at
+/// `now_ms` (milliseconds); `None` once it is over.
+pub(crate) fn hold_hours_left(created_ms: f64, now_ms: f64) -> Option<u32> {
+    let left = created_ms + HOLD_HOURS * 3_600_000.0 - now_ms;
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "0 < hours <= 48"
+    )]
+    (created_ms.is_finite() && left > 0.0).then(|| (left / 3_600_000.0).ceil() as u32)
+}
+
+/// The hold on `wish` now: a planned one-off that is not a must-have or an
+/// event, added less than [`HOLD_HOURS`] ago.
+pub(crate) fn cooling_off(wish: &Wish) -> Option<u32> {
+    if wish.status != WishStatus::Planned
+        || wish.must
+        || wish.event.is_some()
+        || wish.kind != WishKind::OneOff
+    {
+        return None;
+    }
+    let created = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(&wish.created_at)).get_time();
+    hold_hours_left(created, js_sys::Date::now())
+}
+
 /// `YYYY-MM-DD` of today, local time.
 pub(crate) fn today() -> String {
     let now = js_sys::Date::new_0();
@@ -1097,6 +1127,7 @@ pub fn Wishes() -> impl IntoView {
             },
             cards: Vec::new(),
             transaction_id: Some(paid.transaction_id.clone()),
+            skip_hold: false,
         };
         ui.write(
             "dropped".into(),
@@ -1422,6 +1453,9 @@ fn wish_box(ui: Ui, row: &WishRow, ctx: &Context) -> impl IntoView + use<> {
         .map_or(wish.amount, |p| p.amount);
     let must = (planned && wish.must)
         .then(|| view! { <Badge tone=Tone::Accent class=BADGE_TIGHT>"Must"</Badge> });
+    let hold = cooling_off(wish).map(|hours| {
+        view! { <Badge tone=Tone::Warning class=BADGE_TIGHT>{format!("Cooling off · {hours} h")}</Badge> }
+    });
     let parts = (!row.children.is_empty()).then(|| {
         let text = crate::pages::plural(row.children.len(), "part");
         view! { <Badge tone=Tone::Outline class=BADGE_TIGHT>{text}</Badge> }
@@ -1436,6 +1470,7 @@ fn wish_box(ui: Ui, row: &WishRow, ctx: &Context) -> impl IntoView + use<> {
         </span>
         <span class="flex flex-wrap items-center gap-1.5">
             {must}
+            {hold}
             <Badge tone=tone class=BADGE_TIGHT>{chip}</Badge>
             {parts}
         </span>
@@ -2332,6 +2367,8 @@ fn wish_body(
             source,
             cards: charges,
             transaction_id: None,
+            // This form shows the hold and says "Bought anyway" during it.
+            skip_hold: true,
         };
         ui.write(
             buy_target.clone(),
@@ -2431,6 +2468,7 @@ fn wish_body(
             move || ui.joining.set(None),
         );
     });
+    let cooling = cooling_off(&wish);
     let join_id = StoredValue::new(format!("join-event-{}", wish.wish_id));
     let event_starts_id = StoredValue::new(format!("event-starts-{}", wish.wish_id));
     let event_ends_id = StoredValue::new(format!("event-ends-{}", wish.wish_id));
@@ -2440,6 +2478,7 @@ fn wish_body(
                 <h3 class=cn([TREE_NAME, if sub { "text-sm" } else { "text-base" }])>
                     {wish.name.clone()}
                     {(must || parent_must == Some(true)).then(|| view! { <Badge tone=Tone::Accent>"Must"</Badge> })}
+                    {cooling.map(|hours| view! { <Badge tone=Tone::Warning>{format!("Cooling off · {hours} h left")}</Badge> })}
                     <Badge tone=chip_tone>{chip}</Badge>
                 </h3>
                 <FactsRow rows=detail />
@@ -2558,6 +2597,11 @@ fn wish_body(
                 </form>
             </Show>
             <Show when=buying>
+                {cooling.map(|hours| view! {
+                    <p class=HINT role="note">
+                        {format!("Still in its 48-hour hold: {hours} h to go. Wanting it then too is a better reason to buy than wanting it now. Already bought? Record it anyway.")}
+                    </p>
+                })}
                 <form class=INLINE_FORM_ROW on:submit=buy_submit.clone()>
                     <Field label="Cost" id=buy_amount_id.get_value()>
                         <input
@@ -2590,7 +2634,9 @@ fn wish_body(
                     </Field>
                     {move || (split && ui.buy_source.get() == "card").then(|| card_fields(ui, cards, &buy_amount_id.get_value()))}
                     <div class=BUTTON_GROUP>
-                        <Button submit=true size=Size::Sm disabled=Signal::derive(move || ui.busy.get())>"Mark bought"</Button>
+                        <Button submit=true size=Size::Sm disabled=Signal::derive(move || ui.busy.get())>
+                            {if cooling.is_some() { "Bought anyway" } else { "Mark bought" }}
+                        </Button>
                         <Button size=Size::Sm variant=Variant::Ghost on_click=Callback::new(move |_| ui.buying.set(None))>"Cancel"</Button>
                     </div>
                 </form>
@@ -2969,6 +3015,18 @@ fn month_card(month: &WishMonth, code: &str) -> impl IntoView + use<> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_new_wish_waits_48_hours() {
+        let hour = 3_600_000.0;
+        let added = 1_000.0 * hour;
+        assert_eq!(super::hold_hours_left(added, added), Some(48));
+        assert_eq!(super::hold_hours_left(added, added + 17.5 * hour), Some(31));
+        assert_eq!(super::hold_hours_left(added, added + 47.9 * hour), Some(1));
+        assert_eq!(super::hold_hours_left(added, added + 48.0 * hour), None);
+        // An unreadable date never holds a purchase back.
+        assert_eq!(super::hold_hours_left(f64::NAN, added), None);
+    }
+
     use super::*;
 
     #[test]

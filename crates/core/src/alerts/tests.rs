@@ -233,3 +233,76 @@ fn disabled_outcome_retries_after_an_hour() {
         .collect();
     assert_eq!(outcomes, ["disabled", "disabled"]);
 }
+
+#[test]
+fn a_budget_line_alerts_once_at_eighty_percent_and_again_when_over() {
+    use crate::budget::{BudgetInputs, default_budget, monthly_budget};
+    use std::collections::HashSet;
+    let now = crate::budget::tests::now();
+    let plan = default_budget(jiff::civil::date(2026, 9, 1), &Currency::eur());
+    let mappings = vec![finance_types::gateway::GroupMapping {
+        category: "Jumbo".into(),
+        group: Some("Groceries".into()),
+        revision: 1,
+    }];
+    let fixed = HashSet::new();
+    let build = |spent: &[&str]| {
+        let rows: Vec<crate::model::Tx> = spent
+            .iter()
+            .enumerate()
+            .map(|(i, a)| crate::budget::tests::tx(&format!("t{i}"), a))
+            .collect();
+        vec![monthly_budget(
+            &plan,
+            &crate::budget::tests::empty_subscriptions(),
+            None,
+            &BudgetInputs {
+                transactions: &rows,
+                mappings: &mappings,
+                now: &now,
+                fixed_ids: &fixed,
+                payments: &[],
+                resolver: None,
+                current_month: None,
+                events: &[],
+            },
+        )]
+    };
+    let policy = AlertPolicy::from_settings(&settings());
+    let mut conn = database(&[]);
+    let recorder = Recorder {
+        deliver: true,
+        sent: RefCell::new(Vec::new()),
+    };
+    let at = |s: &str| s.parse::<Timestamp>().unwrap();
+    let mut run = |spent: &[&str], when: &str| {
+        let found = budget_line_candidates(&build(spent), "2026-09-01", at(when), &policy);
+        let groceries: Vec<Candidate> = found
+            .into_iter()
+            .filter(|c| c.subject_id.ends_with(":groceries"))
+            .collect();
+        dispatch(&mut conn, &groceries, &policy, &recorder).unwrap()[0].disposition
+    };
+    // Groceries plan €300: €200 is under 80%, €250 crosses it, €260 is the
+    // same level, €310 is over.
+    assert_eq!(run(&["200"], "2026-09-10T08:00:00Z"), Disposition::Inactive);
+    assert_eq!(run(&["250"], "2026-09-10T09:00:00Z"), Disposition::Dispatch);
+    assert_eq!(
+        run(&["260"], "2026-09-10T10:00:00Z"),
+        Disposition::Duplicate
+    );
+    assert_eq!(
+        run(&["310"], "2026-09-10T11:00:00Z"),
+        Disposition::Escalated
+    );
+    let sent = recorder.sent.borrow();
+    assert_eq!(sent.len(), 2);
+    assert_eq!(sent[0][0], "Groceries at 83% of budget");
+    assert!(
+        sent[0][1]
+            .as_str()
+            .unwrap()
+            .contains("€50.00 left this month")
+    );
+    assert_eq!(sent[1][0], "Groceries is over budget");
+}

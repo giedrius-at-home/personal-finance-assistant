@@ -75,6 +75,8 @@ pub struct Tx {
     pub destination_country: Option<CountryEvidence>,
     /// Why a transfer is known to be between own accounts.
     pub transfer_evidence: Option<&'static str>,
+    /// The purchase (`firefly:<id>`) an owner-linked money-back pays back.
+    pub repays: Option<String>,
 }
 
 impl Tx {

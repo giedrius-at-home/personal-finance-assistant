@@ -532,7 +532,10 @@ impl Service {
                 &purchase,
             ))
         })?;
-        self.write(|w, snap| crate::writes::wishes::mark_bought(w, snap, wish_id, purchase, &cuts))
+        self.write(|w, snap| {
+            crate::writes::wishes::check_hold(w, wish_id, &purchase)?;
+            crate::writes::wishes::mark_bought(w, snap, wish_id, purchase, &cuts)
+        })
     }
 
     /// Starts a recurring wish or bill change, recording the cuts month 0

@@ -280,6 +280,7 @@ mod tests {
             source_country: None,
             destination_country: None,
             transfer_evidence: None,
+            repays: None,
         }
     }
 

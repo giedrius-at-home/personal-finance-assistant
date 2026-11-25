@@ -672,6 +672,7 @@ pub(crate) mod tests {
                 source: WishSource::Card,
                 cards: Vec::new(),
                 transaction_id: Some("n1".into()),
+                skip_hold: false,
             }),
             ..wish("naturalis", Some("e"), "30")
         };

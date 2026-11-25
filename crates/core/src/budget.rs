@@ -206,7 +206,8 @@ impl<'a> Ownership<'a> {
         if self.events.is_empty() {
             return None;
         }
-        let id = t.transaction_id.as_str();
+        // Money back follows the purchase an event picked by hand.
+        let id = t.repays.as_deref().unwrap_or(&t.transaction_id);
         let day_to_day = !self.fixed_ids.contains(id)
             && !self.paid_ids.contains(id)
             && self
@@ -233,6 +234,7 @@ impl<'a> Ownership<'a> {
             .reimbursement_origins
             .get(t.transaction_id.as_str())
             .copied()
+            .or(t.repays.as_deref())
             .unwrap_or(&t.transaction_id);
         budget_owner(
             self.groups,
@@ -298,7 +300,23 @@ pub fn monthly_budget(
     let mut history: HashMap<String, Vec<Decimal>> = HashMap::new();
     let mut rows: HashMap<String, Vec<&Tx>> = HashMap::new();
     let mut purchases = Vec::new();
+    let paid_back = crate::personal::paid_back(inputs.transactions);
+    let descriptions: HashMap<&str, &str> = inputs
+        .transactions
+        .iter()
+        .filter(|t| paid_back.contains_key(t.transaction_id.as_str()))
+        .map(|t| {
+            let d = [t.description.as_deref(), t.category.as_deref()]
+                .into_iter()
+                .flatten()
+                .find(|s| !s.is_empty())
+                .unwrap_or("Purchase");
+            (t.transaction_id.as_str(), d)
+        })
+        .collect();
     let mut picked_ahead: HashMap<&str, Decimal> = HashMap::new();
+    // When in the week and the month each line usually spends.
+    let mut patterns: HashMap<&str, DaySums> = HashMap::new();
     let mut outside_days: HashMap<&str, Decimal> = HashMap::new();
     for t in inputs.transactions {
         if !counts(t, plan, now) {
@@ -322,6 +340,9 @@ pub fn monthly_budget(
         history
             .entry(key.to_owned())
             .or_insert_with(|| vec![Decimal::ZERO; history_months.len()])[index] += amount;
+        if tx_month < month {
+            patterns.entry(key).or_default().add(on, tx_month, amount);
+        }
         if tx_month != month {
             continue;
         }
@@ -346,6 +367,12 @@ pub fn monthly_budget(
                 amount,
                 occurred_on: on.to_string(),
                 budget_group_id: (key != "unplanned").then(|| key.to_owned()),
+                paid_back: paid_back.get(t.transaction_id.as_str()).copied(),
+                repays: t
+                    .repays
+                    .as_deref()
+                    .and_then(|origin| descriptions.get(origin))
+                    .map(|d| (*d).to_owned()),
             });
         }
     }
@@ -442,6 +469,7 @@ pub fn monthly_budget(
             elapsed_days,
             expected: Vec::new(),
             to_events: Vec::new(),
+            week: None,
         }
     };
 
@@ -510,6 +538,27 @@ pub fn monthly_budget(
             (pending_here - g.remaining.max(Decimal::ZERO)).max(Decimal::ZERO)
         })
         .sum::<Decimal>();
+    // After the events took their days' share.
+    if month == current_month {
+        let past: Vec<Date> = history_months
+            .iter()
+            .copied()
+            .filter(|m| *m < month)
+            .collect();
+        for g in &mut groups {
+            let profile = patterns
+                .get(g.id.as_str())
+                .map_or_else(DayProfile::even, |sums| sums.profile(&past));
+            g.week = week_limit(
+                g.planned,
+                &g.daily_spending,
+                start,
+                today,
+                month_end,
+                &profile,
+            );
+        }
+    }
     let extras = row(
         "extras",
         "Extra payments",
@@ -540,6 +589,8 @@ pub fn monthly_budget(
         extras,
         purchases,
         history_months: history_months.iter().map(Date::to_string).collect(),
+        overruns: Vec::new(),
+        recurring_extras: None,
         events: event_rows,
     }
 }
@@ -645,15 +696,262 @@ pub fn monthly_budgets(
         let inputs = &inputs;
         currencies.values().map(move |currency| {
             let plan = plan_for(&snap.budget_plans, month, currency);
-            monthly_budget(
+            let mut budget = monthly_budget(
                 &plan,
                 subscriptions,
                 Some(ctx.resolver.period_start_date(month)),
                 inputs,
-            )
+            );
+            budget.overruns = overruns(&budget, &snap.budget_plans, current_month);
+            if month == current_month {
+                budget.recurring_extras = recurring_extras(&budget);
+            }
+            budget
         })
     })
     .collect()
+}
+
+/// This week's share of a line: what was left on the week's first day,
+/// spread evenly over the days from then to `month_end`, against what the
+/// week has spent so far. `daily[i]` is the spending of `start + i` days.
+pub fn week_limit(
+    planned: Decimal,
+    daily: &[Decimal],
+    start: Date,
+    today: Date,
+    month_end: Date,
+    profile: &DayProfile,
+) -> Option<finance_types::report::budget::WeekLimit> {
+    if planned <= Decimal::ZERO || today < start || today > month_end {
+        return None;
+    }
+    let monday = today
+        .checked_sub(jiff::Span::new().days(i64::from(today.weekday().to_monday_zero_offset())))
+        .ok()?;
+    let sunday = monday.checked_add(jiff::Span::new().days(6)).ok()?;
+    let (first, last) = (monday.max(start), sunday.min(month_end));
+    let index = |d: Date| usize::try_from(days_between(start, d)).unwrap_or(0);
+    let sum =
+        |from: usize, to: usize| -> Decimal { daily.iter().take(to).skip(from).copied().sum() };
+    let before = sum(0, index(first));
+    let left_then = (planned - before).max(Decimal::ZERO);
+    let weights = |from: Date, to: Date| -> Decimal {
+        from.series(jiff::Span::new().days(1))
+            .take_while(|d| *d <= to)
+            .map(|d| profile.weight(d))
+            .sum()
+    };
+    let rest = weights(first, month_end);
+    let limit = if rest > Decimal::ZERO {
+        (left_then * weights(first, last) / rest).round_dp(2)
+    } else {
+        Decimal::ZERO
+    };
+    let spent = sum(index(first), index(today) + 1);
+    Some(finance_types::report::budget::WeekLimit {
+        starts: first.to_string(),
+        ends: last.to_string(),
+        limit,
+        spent,
+        left: limit - spent,
+        follows_pattern: profile.learned,
+    })
+}
+
+/// Which part of the month a day is in: days 1–7, 8–14, 15–21, 22–end.
+fn month_part(day: Date) -> usize {
+    usize::try_from((day.day() - 1) / 7).unwrap_or(0).min(3)
+}
+
+/// A line's past spending by weekday and by part of the month.
+#[derive(Clone, Debug, Default)]
+struct DaySums {
+    weekday: [Decimal; 7],
+    part: [Decimal; 4],
+    months: HashSet<Date>,
+}
+
+impl DaySums {
+    fn add(&mut self, on: Date, month: Date, amount: Decimal) {
+        self.weekday[usize::from(on.weekday().to_monday_zero_offset().unsigned_abs())] += amount;
+        self.part[month_part(on)] += amount;
+        if amount > Decimal::ZERO {
+            self.months.insert(month);
+        }
+    }
+
+    /// Per-day averages against the overall one, trusted more with more
+    /// months behind them: `past` are the finished months looked at.
+    fn profile(&self, past: &[Date]) -> DayProfile {
+        let (mut weekday_days, mut part_days) = ([0_i64; 7], [0_i64; 4]);
+        for month in past {
+            for day in month
+                .series(jiff::Span::new().days(1))
+                .take_while(|d| d.first_of_month() == *month)
+            {
+                weekday_days[usize::from(day.weekday().to_monday_zero_offset().unsigned_abs())] +=
+                    1;
+                part_days[month_part(day)] += 1;
+            }
+        }
+        let total: Decimal = self.part.iter().map(|v| (*v).max(Decimal::ZERO)).sum();
+        let days: i64 = part_days.iter().sum();
+        if total <= Decimal::ZERO || days == 0 || self.months.len() < 2 {
+            return DayProfile::even();
+        }
+        let average = total / Decimal::from(days);
+        // Two months of history count for half, four or more for 80%.
+        let trust =
+            (Decimal::from(self.months.len().min(4)) / Decimal::from(5)).min(Decimal::new(8, 1));
+        let factor = |sum: Decimal, count: i64| {
+            if count == 0 {
+                return Decimal::ONE;
+            }
+            let ratio = (sum.max(Decimal::ZERO) / Decimal::from(count) / average)
+                .clamp(Decimal::new(2, 1), Decimal::from(3));
+            Decimal::ONE + trust * (ratio - Decimal::ONE)
+        };
+        DayProfile {
+            weekday: std::array::from_fn(|i| factor(self.weekday[i], weekday_days[i])),
+            part: std::array::from_fn(|i| factor(self.part[i], part_days[i])),
+            learned: true,
+        }
+    }
+}
+
+/// How much of a line's spending a day usually takes, relative to an
+/// average day: its weekday's factor times its part of the month's.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DayProfile {
+    /// Monday first.
+    pub weekday: [Decimal; 7],
+    pub part: [Decimal; 4],
+    /// From past spending; `false` spreads evenly.
+    pub learned: bool,
+}
+
+impl DayProfile {
+    pub fn even() -> Self {
+        Self {
+            weekday: [Decimal::ONE; 7],
+            part: [Decimal::ONE; 4],
+            learned: false,
+        }
+    }
+
+    pub fn weight(&self, day: Date) -> Decimal {
+        self.weekday[usize::from(day.weekday().to_monday_zero_offset().unsigned_abs())]
+            * self.part[month_part(day)]
+    }
+}
+
+/// Finished months in a row over plan before a line counts as never met.
+pub const OVERRUN_MONTHS: usize = 3;
+
+/// Budget lines over their plan in each of the last [`OVERRUN_MONTHS`] or
+/// more finished months (before `current_month`), each month judged
+/// against the plan it ran on.
+pub fn overruns(
+    budget: &MonthlyBudget,
+    saved: &[BudgetPlan],
+    current_month: Date,
+) -> Vec<finance_types::report::budget::BudgetOverrun> {
+    let months: Vec<Date> = budget
+        .history_months
+        .iter()
+        .filter_map(|m| day_of(m))
+        .collect();
+    let currency = &budget.plan.currency;
+    let past_plans: Vec<(usize, BudgetPlan)> = months
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| **m < current_month)
+        .map(|(i, m)| (i, plan_for(saved, *m, currency)))
+        .collect();
+    let mut out = Vec::new();
+    for row in &budget.groups {
+        if row.planned <= Decimal::ZERO {
+            continue;
+        }
+        // Newest finished month first, while each was over its own plan.
+        let mut run: Vec<(Date, Decimal)> = Vec::new();
+        for (i, plan) in past_plans.iter().rev() {
+            let planned = plan
+                .groups
+                .iter()
+                .find(|g| g.id == row.id)
+                .map(|g| g.amount);
+            let spent = row.history.get(*i).copied().unwrap_or_default();
+            match planned {
+                Some(p) if p > Decimal::ZERO && spent > p => run.push((months[*i], spent)),
+                _ => break,
+            }
+        }
+        if run.len() < OVERRUN_MONTHS {
+            continue;
+        }
+        let total: Decimal = run.iter().map(|(_, s)| *s).sum();
+        let recent: Decimal = run.iter().take(OVERRUN_MONTHS).map(|(_, s)| *s).sum();
+        let ten = Decimal::TEN;
+        let suggested = (recent / Decimal::from(OVERRUN_MONTHS) / ten).ceil() * ten;
+        if suggested <= row.planned {
+            continue;
+        }
+        out.push(finance_types::report::budget::BudgetOverrun {
+            group_id: row.id.clone(),
+            name: row.name.clone(),
+            months_over: run.len(),
+            since: run.last().map(|(m, _)| m.to_string()).unwrap_or_default(),
+            planned: row.planned,
+            average: (total / Decimal::from(run.len())).round_dp(2),
+            suggested,
+        });
+    }
+    out
+}
+
+/// Months looked at for one-offs that keep coming: this one and the two before.
+pub const EXTRAS_WINDOW: usize = 3;
+/// The budget line the owner adds to set money aside for one-offs.
+pub const ONE_OFFS_GROUP: &str = "one-offs";
+/// One-off spending below this in a month is not worth a pot.
+pub const EXTRAS_NOTICEABLE: Decimal = Decimal::from_parts(100, 0, 0, false, 0);
+
+/// One-off payments in at least two of the last [`EXTRAS_WINDOW`] months
+/// (this one included): a monthly cost to set aside for, at their average
+/// over the window.
+pub fn recurring_extras(
+    budget: &MonthlyBudget,
+) -> Option<finance_types::report::budget::RecurringExtras> {
+    // The owner already sets money aside for them.
+    if budget.plan.groups.iter().any(|g| g.id == ONE_OFFS_GROUP) {
+        return None;
+    }
+    let history = &budget.extras.history;
+    let start = history.len().checked_sub(EXTRAS_WINDOW)?;
+    let months: Vec<(String, Decimal)> = budget
+        .history_months
+        .iter()
+        .skip(start)
+        .zip(&history[start..])
+        .map(|(m, s)| (m.clone(), *s))
+        .collect();
+    let noticed = months
+        .iter()
+        .filter(|(_, s)| *s >= EXTRAS_NOTICEABLE)
+        .count();
+    if noticed < 2 {
+        return None;
+    }
+    let total: Decimal = months.iter().map(|(_, s)| (*s).max(Decimal::ZERO)).sum();
+    let ten = Decimal::TEN;
+    let monthly = (total / Decimal::from(months.len()) / ten).ceil() * ten;
+    Some(finance_types::report::budget::RecurringExtras {
+        months,
+        months_with_extras: noticed,
+        monthly,
+    })
 }
 
 /// What every event has spent, read from the ledger: the payments picked
@@ -813,6 +1111,7 @@ pub(crate) mod tests {
             source_country: None,
             destination_country: None,
             transfer_evidence: None,
+            repays: None,
         }
     }
 
@@ -930,6 +1229,151 @@ pub(crate) mod tests {
             occurred_at: format!("{day}T12:00:00+00:00[UTC]").parse().unwrap(),
             ..t
         }
+    }
+
+    #[test]
+    fn a_line_over_plan_three_finished_months_running_gets_a_new_plan() {
+        let mut rows = Vec::new();
+        for (i, (day, amount)) in [
+            ("2026-05-15", "50"),
+            ("2026-06-15", "480"),
+            ("2026-07-15", "530"),
+            ("2026-08-15", "505"),
+            ("2026-09-05", "40"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            rows.push(on(
+                with_category(tx(&format!("r{i}"), amount), Some("Restaurant")),
+                day,
+            ));
+            rows.push(on(tx(&format!("g{i}"), "200"), day));
+        }
+        let budget = report(None, &rows, &[], &[]);
+        let found = overruns(&budget, &[], month());
+        assert_eq!(found.len(), 1, "{found:?}");
+        let o = &found[0];
+        assert_eq!((o.group_id.as_str(), o.months_over), ("food-out", 3));
+        assert_eq!(o.since, "2026-06-01");
+        assert_eq!(o.planned, Decimal::from(100));
+        assert_eq!(o.average, "505".parse::<Decimal>().unwrap());
+        assert_eq!(o.suggested, Decimal::from(510));
+        // Two months over is not yet a pattern.
+        let budget = report(None, &rows[2..], &[], &[]);
+        assert_eq!(overruns(&budget, &[], month()).len(), 1);
+        let budget = report(None, &rows[4..], &[], &[]);
+        assert!(overruns(&budget, &[], month()).is_empty());
+    }
+
+    #[test]
+    fn one_offs_two_months_running_suggest_a_monthly_pot() {
+        let mut budget = report(None, &[], &[], &[]);
+        budget.extras.history = ["0", "0", "0", "0", "1110", "856"]
+            .iter()
+            .map(|v| v.parse().unwrap())
+            .collect();
+        let found = recurring_extras(&budget).expect("recurring");
+        assert_eq!(found.months_with_extras, 2);
+        assert_eq!(found.months.len(), 3);
+        // (0 + 1110 + 856) / 3 = 655.33 → 660.
+        assert_eq!(found.monthly, Decimal::from(660));
+        budget.extras.history[4] = Decimal::from(40);
+        assert!(recurring_extras(&budget).is_none());
+        budget.extras.history[4] = Decimal::from(1110);
+        budget
+            .plan
+            .groups
+            .push(group(ONE_OFFS_GROUP, "One-offs", 660, &[]));
+        assert!(recurring_extras(&budget).is_none());
+    }
+
+    #[test]
+    fn a_week_gets_its_share_of_what_was_left_when_it_began() {
+        // November 2026: Monday the 23rd, 8 days left from it.
+        let start = date(2026, 11, 1);
+        let mut daily = vec![Decimal::ZERO; 25];
+        daily[4] = Decimal::from(120); // the 5th, before the week
+        daily[22] = Decimal::from(10); // Monday the 23rd
+        daily[24] = Decimal::from(7); // today, the 25th
+        let week = week_limit(
+            Decimal::from(200),
+            &daily,
+            start,
+            date(2026, 11, 25),
+            date(2026, 11, 30),
+            &DayProfile::even(),
+        )
+        .expect("week");
+        assert_eq!(
+            (week.starts.as_str(), week.ends.as_str()),
+            ("2026-11-23", "2026-11-29")
+        );
+        // 80 left over 8 days, 7 of them this week.
+        assert_eq!(week.limit, Decimal::from(70));
+        assert_eq!(week.spent, Decimal::from(17));
+        assert_eq!(week.left, Decimal::from(53));
+        // A week cut by the month's end: only its own days.
+        let week = week_limit(
+            Decimal::from(200),
+            &daily,
+            start,
+            date(2026, 11, 30),
+            date(2026, 11, 30),
+            &DayProfile::even(),
+        )
+        .expect("last week");
+        assert_eq!(week.starts, "2026-11-30");
+        assert!(
+            week_limit(
+                Decimal::ZERO,
+                &daily,
+                start,
+                date(2026, 11, 25),
+                date(2026, 11, 30),
+                &DayProfile::even()
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn a_weekend_line_gets_more_of_a_week_with_its_weekend_in_it() {
+        // Two past months spent only on Saturdays.
+        let mut sums = DaySums::default();
+        for (on, month) in [
+            (date(2026, 9, 5), date(2026, 9, 1)),
+            (date(2026, 9, 19), date(2026, 9, 1)),
+            (date(2026, 10, 10), date(2026, 10, 1)),
+            (date(2026, 10, 24), date(2026, 10, 1)),
+        ] {
+            sums.add(on, month, Decimal::from(40));
+        }
+        let profile = sums.profile(&[date(2026, 9, 1), date(2026, 10, 1)]);
+        assert!(profile.learned);
+        assert!(profile.weight(date(2026, 11, 28)) > profile.weight(date(2026, 11, 30)));
+        let daily = vec![Decimal::ZERO; 25];
+        let week = |profile: &DayProfile| {
+            week_limit(
+                Decimal::from(80),
+                &daily,
+                date(2026, 11, 1),
+                date(2026, 11, 23),
+                date(2026, 11, 30),
+                profile,
+            )
+            .expect("week")
+        };
+        // Evenly, 7 of the 8 days left; with the Saturday in it, nearly all.
+        assert_eq!(week(&DayProfile::even()).limit, Decimal::from(70));
+        let weighted = week(&profile);
+        assert!(weighted.follows_pattern);
+        assert!(weighted.limit > Decimal::from(70), "{weighted:?}");
+        assert!(weighted.limit < Decimal::from(80));
+        // One month of history is not a pattern yet.
+        let mut one = DaySums::default();
+        one.add(date(2026, 10, 10), date(2026, 10, 1), Decimal::from(40));
+        assert!(!one.profile(&[date(2026, 10, 1)]).learned);
     }
 
     /// Five days of September around the fixture's "today" (the 10th).

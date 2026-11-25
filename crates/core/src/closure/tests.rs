@@ -79,6 +79,7 @@ pub(crate) fn tx(id: &str, account: &str, kind: Kind, amount: &str, when: &str) 
         source_country: None,
         destination_country: None,
         transfer_evidence: None,
+        repays: None,
     }
 }
 
@@ -399,6 +400,7 @@ fn wish_lines_need_a_planned_one_off_wish_with_room() {
             source: WishSource::Card,
             cards: Vec::new(),
             transaction_id: None,
+            skip_hold: false,
         }),
         ..wish("bought", "50", "0", None)
     };
@@ -818,6 +820,7 @@ fn pending(id: &str, amount: &str) -> AllocationLine {
 fn paired(id: &str, amount: &str, when: &str) -> Tx {
     Tx {
         transfer_evidence: Some("paired_entries"),
+        repays: None,
         ..transfer(id, "abn", "savings", amount, when)
     }
 }
@@ -1206,6 +1209,7 @@ fn a_move_is_matched_by_a_bank_transfer() {
     }];
     let bank = [Tx {
         transfer_evidence: Some("paired_entries"),
+        repays: None,
         ..transfer("t", "abn", "revolut", "100", "2026-09-30T12:00:00Z")
     }];
     let refs: Vec<&Tx> = bank.iter().collect();

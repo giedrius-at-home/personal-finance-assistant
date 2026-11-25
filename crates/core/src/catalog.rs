@@ -130,7 +130,11 @@ pub fn category_catalog(transactions: &[Tx]) -> CategoryCatalog {
     // A stable sort by case-folded name over the count order.
     let mut entries = names.clone();
     entries.sort_by_key(|n| casefold(n));
+    let overlaps = meaning_overlaps(&names, &counts, &similar);
     CategoryCatalog {
+        overlaps,
+        group_conflicts: Vec::new(),
+        subscription_overlaps: Vec::new(),
         entries: entries
             .into_iter()
             .map(|n| CategoryEntry {
@@ -140,6 +144,250 @@ pub fn category_catalog(transactions: &[Tx]) -> CategoryCatalog {
             .collect(),
         similar,
     }
+}
+
+/// Kinds of spending that often get several names, and whether they are
+/// usually a subscription (where two names may mean paying twice).
+const FAMILIES: &[(&str, bool, &[&str])] = &[
+    (
+        "eating out",
+        false,
+        &[
+            "eating out",
+            "dining",
+            "dining out",
+            "restaurant",
+            "restaurants",
+            "food out",
+            "eat out",
+            "food & drinks out",
+        ],
+    ),
+    (
+        "coffee",
+        false,
+        &["coffee", "cafe", "café", "coffee shops", "coffee shop"],
+    ),
+    (
+        "groceries",
+        false,
+        &["groceries", "grocery", "supermarket", "supermarkets"],
+    ),
+    ("gifts", false, &["gift", "gifts", "presents", "present"]),
+    ("taxi", false, &["taxi", "taxis", "uber", "bolt"]),
+    (
+        "cinema",
+        true,
+        &[
+            "cinema",
+            "cinemas",
+            "movies",
+            "films",
+            "vue",
+            "pathé",
+            "pathe",
+            "kinepolis",
+            "cineville",
+            "filmhuis",
+        ],
+    ),
+    (
+        "video streaming",
+        true,
+        &[
+            "streaming",
+            "netflix",
+            "disney+",
+            "disney plus",
+            "hbo max",
+            "videoland",
+            "prime video",
+            "skyshowtime",
+        ],
+    ),
+    (
+        "music",
+        true,
+        &[
+            "music",
+            "spotify",
+            "apple music",
+            "deezer",
+            "tidal",
+            "youtube music",
+        ],
+    ),
+    (
+        "gym",
+        true,
+        &[
+            "gym",
+            "fitness",
+            "basic-fit",
+            "basic fit",
+            "sportcity",
+            "sportschool",
+        ],
+    ),
+    (
+        "cloud storage",
+        true,
+        &["icloud", "google one", "dropbox", "onedrive"],
+    ),
+];
+
+fn family_of(name: &str) -> Option<(&'static str, bool)> {
+    let key = category_key(name);
+    FAMILIES
+        .iter()
+        .find(|(_, _, names)| names.contains(&key.as_str()))
+        .map(|(kind, subscription, _)| (*kind, *subscription))
+}
+
+/// Categories of one family: each less-used one into the most-used one,
+/// unless the spelling pass already pairs it.
+fn meaning_overlaps(
+    names: &[&str],
+    counts: &HashMap<&str, u64>,
+    similar: &[CategoryPair],
+) -> Vec<CategoryPair> {
+    let paired: HashSet<&str> = similar.iter().map(|p| p.source.as_str()).collect();
+    let mut kept: HashMap<&str, &str> = HashMap::new();
+    let mut out = Vec::new();
+    // `names` is most-used first, so the first of each family is kept.
+    for name in names {
+        let Some((kind, subscription)) = family_of(name) else {
+            continue;
+        };
+        let Some(target) = kept.get(kind) else {
+            kept.insert(kind, name);
+            continue;
+        };
+        if paired.contains(name) {
+            continue;
+        }
+        out.push(CategoryPair {
+            source: (*name).to_owned(),
+            target: (*target).to_owned(),
+            count: counts[name],
+            reason: if subscription {
+                format!(
+                    "Both are {kind}: merge them, and check you are not paying for two {kind} subscriptions"
+                )
+            } else {
+                format!("Both mean {kind}: one name keeps one budget line and one trend")
+            },
+        });
+    }
+    out
+}
+
+/// Names claimed twice: a category or spending group in two budget lines
+/// (only the first counts it), or a category whose name is also a spending
+/// group it does not belong to.
+pub fn group_conflicts(
+    plan_groups: &[finance_types::gateway::BudgetGroup],
+    mappings: &[finance_types::gateway::GroupMapping],
+) -> Vec<finance_types::report::catalog::GroupConflict> {
+    use finance_types::report::catalog::GroupConflict;
+    let mut claims: BTreeMap<(String, &str), Vec<String>> = BTreeMap::new();
+    for g in plan_groups {
+        for c in &g.categories {
+            claims
+                .entry((category_key(c), "category"))
+                .or_default()
+                .push(g.name.clone());
+        }
+        for s in &g.source_groups {
+            claims
+                .entry((category_key(s), "group"))
+                .or_default()
+                .push(g.name.clone());
+        }
+    }
+    let display = |key: &str| {
+        plan_groups
+            .iter()
+            .flat_map(|g| g.categories.iter().chain(&g.source_groups))
+            .find(|n| category_key(n) == key)
+            .cloned()
+            .unwrap_or_else(|| key.to_owned())
+    };
+    let mut out: Vec<GroupConflict> = claims
+        .into_iter()
+        .filter_map(|((key, what), mut groups)| {
+            groups.dedup();
+            (groups.len() > 1).then(|| {
+                let name = display(&key);
+                GroupConflict {
+                    note: format!(
+                        "The {what} “{name}” is in {} budget lines; only “{}” counts it. Keep it in one.",
+                        groups.len(),
+                        groups[0]
+                    ),
+                    name,
+                    groups,
+                }
+            })
+        })
+        .collect();
+    let group_names: HashMap<String, &str> = mappings
+        .iter()
+        .filter_map(|m| m.group.as_deref())
+        .map(|g| (category_key(g), g))
+        .collect();
+    for m in mappings {
+        let (Some(own), Some(group)) = (group_names.get(&category_key(&m.category)), &m.group)
+        else {
+            continue;
+        };
+        if category_key(group) != category_key(own) {
+            out.push(GroupConflict {
+                name: m.category.clone(),
+                groups: vec![group.clone(), (*own).to_owned()],
+                note: format!(
+                    "“{}” is a category in {group} and also a spending group of its own. Move the category into “{own}”, or rename one of them.",
+                    m.category
+                ),
+            });
+        }
+    }
+    out
+}
+
+/// Bills of one subscription family (by a family name in the bill's name).
+pub fn subscription_overlaps(
+    bills: &[finance_types::report::subscriptions::SubscriptionRow],
+) -> Vec<finance_types::report::catalog::SubscriptionOverlap> {
+    let mut found: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+    for bill in bills {
+        let tokens: Vec<String> = casefold(&bill.name)
+            .split(|c: char| !(c.is_alphanumeric() || c == '+' || c == '-'))
+            .filter(|w| !w.is_empty())
+            .map(str::to_owned)
+            .collect();
+        let padded = format!(" {} ", tokens.join(" "));
+        let family = FAMILIES
+            .iter()
+            .filter(|(_, sub, _)| *sub)
+            .find(|(_, _, names)| names.iter().any(|n| padded.contains(&format!(" {n} "))));
+        if let Some((kind, _, _)) = family {
+            let list = found.entry(kind).or_default();
+            if !list.contains(&bill.name) {
+                list.push(bill.name.clone());
+            }
+        }
+    }
+    found
+        .into_iter()
+        .filter(|(_, names)| names.len() > 1)
+        .map(
+            |(kind, names)| finance_types::report::catalog::SubscriptionOverlap {
+                kind: kind.to_owned(),
+                names,
+            },
+        )
+        .collect()
 }
 
 /// Owner-named bulk payments: component purchases against settling payments,
@@ -230,5 +478,107 @@ mod tests {
         assert_eq!(catalog.similar[0].target, "Food");
         let names: Vec<_> = catalog.entries.iter().map(|e| e.name.as_str()).collect();
         assert_eq!(names, vec!["Food", "food", "Transport", "Transport fees"]);
+        assert!(catalog.overlaps.is_empty());
+    }
+
+    #[test]
+    fn same_meaning_names_merge_into_the_most_used() {
+        let base: Tx = crate::reporting::tests::tx(
+            "x",
+            Kind::Outflow,
+            "1",
+            "EUR",
+            "2026-09-02T14:00:00+02:00[Europe/Amsterdam]",
+        );
+        let rows: Vec<Tx> = [
+            "Eating out",
+            "Eating out",
+            "Eating out",
+            "Dining",
+            "Restaurant",
+            "Restaurant",
+            "Vue",
+            "Pathé",
+        ]
+        .iter()
+        .enumerate()
+        .map(|(i, c)| Tx {
+            transaction_id: i.to_string(),
+            category: Some((*c).into()),
+            ..base.clone()
+        })
+        .collect();
+        let catalog = category_catalog(&rows);
+        let pairs: Vec<(&str, &str)> = catalog
+            .overlaps
+            .iter()
+            .map(|p| (p.source.as_str(), p.target.as_str()))
+            .collect();
+        assert_eq!(
+            pairs,
+            vec![
+                ("Restaurant", "Eating out"),
+                ("Dining", "Eating out"),
+                ("Vue", "Pathé")
+            ]
+        );
+        assert!(catalog.overlaps[2].reason.contains("paying for two cinema"));
+    }
+
+    #[test]
+    fn a_name_in_two_budget_lines_is_a_conflict() {
+        use finance_types::gateway::{BudgetGroup, GroupMapping};
+        let line = |name: &str, categories: &[&str]| BudgetGroup {
+            id: name.to_lowercase(),
+            name: name.into(),
+            amount: Decimal::ONE,
+            source_groups: Vec::new(),
+            categories: categories.iter().map(|c| (*c).to_owned()).collect(),
+            transaction_ids: Vec::new(),
+            account_id: None,
+            importance: None,
+            floor: None,
+        };
+        let plan = [
+            line("Presents", &["Gifts"]),
+            line("Birthdays", &["gifts", "Cake"]),
+        ];
+        let mapping = |category: &str, group: &str| GroupMapping {
+            category: category.into(),
+            group: Some(group.into()),
+            revision: 1,
+        };
+        let found = group_conflicts(
+            &plan,
+            &[mapping("Gifts", "Shopping"), mapping("Flowers", "Gifts")],
+        );
+        assert_eq!(found.len(), 2);
+        assert_eq!(found[0].groups, vec!["Presents", "Birthdays"]);
+        assert!(found[0].note.contains("only “Presents” counts it"));
+        assert_eq!(found[1].groups, vec!["Shopping", "Gifts"]);
+    }
+
+    #[test]
+    fn two_cinema_bills_overlap() {
+        let row = |name: &str| {
+            finance_types::report::subscriptions::SubscriptionRow {
+            name: name.into(),
+            ..serde_json::from_value(serde_json::json!({
+                "bill_id": "1", "name": "", "currency": {"code": "EUR", "minor_unit": 2}, "amount_min": "1",
+                "amount_max": "1", "frequency": "monthly", "expected_dates": [],
+                "last_matched_on": null, "native_payment_count": 0, "category_payment_count": 0,
+                "recorded_spending": "0", "last_recorded_on": null, "category_name_match": false
+            }))
+            .unwrap()
+        }
+        };
+        let found = subscription_overlaps(&[
+            row("Pathé Unlimited"),
+            row("Vue cinema pass"),
+            row("Spotify"),
+        ]);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].kind, "cinema");
+        assert_eq!(found[0].names, vec!["Pathé Unlimited", "Vue cinema pass"]);
     }
 }
