@@ -634,7 +634,10 @@ fn habits_view(report: &Adjustments) -> Option<AnyView> {
     Some(
         view! {
             <section class="min-w-0" aria-label="Habits">
-                <Eyebrow>"HABITS · HOW OFTEN YOU GO"</Eyebrow>
+                <div class="flex flex-wrap items-baseline gap-x-2">
+                    <Eyebrow>"HABITS"</Eyebrow>
+                    <span class="text-xs text-fg-muted">"How often you go"</span>
+                </div>
                 <div class=TABLE_SCROLL>
                     <div class=WIDE_TABLE>
                         <div class=format!("{HABIT_GRID} pb-2 text-xs text-fg-muted")>
@@ -729,7 +732,10 @@ fn card(report: &Adjustments, dashboard: &Dashboard, state: CardState) -> Option
                     </div>
                     <div class="mt-8 grid gap-x-12 gap-y-8 2xl:grid-cols-2">
                         <section class="min-w-0 overflow-x-auto" aria-label="Groups against their typical month">
-                            <Eyebrow>"GROUPS · THIS MONTH AGAINST TYPICAL"</Eyebrow>
+                            <div class="flex flex-wrap items-baseline gap-x-2">
+                                <Eyebrow>"GROUPS"</Eyebrow>
+                                <span class="text-xs text-fg-muted">"This month against typical"</span>
+                            </div>
                             <div class="mt-2 min-w-[44rem]">
                                 <div class=format!("{LINE_GRID} pb-2 text-xs text-fg-muted")>
                                     <span></span>

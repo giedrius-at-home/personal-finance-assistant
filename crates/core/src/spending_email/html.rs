@@ -191,7 +191,8 @@ fn forecast_section(f: &DailySpendingForecast) -> String {
         .take(6)
         .map(|flow| {
             format!(
-                "<tr><td style=\"padding:7px 0;border-bottom:1px solid {LINE}\">{} · {}</td>\
+                "<tr><td style=\"padding:7px 12px 7px 0;border-bottom:1px solid {LINE};white-space:nowrap\">{}</td>\
+                 <td style=\"padding:7px 0;border-bottom:1px solid {LINE}\">{}</td>\
                  <td align=\"right\" style=\"padding:7px 0;border-bottom:1px solid {LINE}\">\
                  {}{}</td></tr>",
                 day(&flow.day, "%d %b"),
@@ -248,7 +249,7 @@ fn forecast_section(f: &DailySpendingForecast) -> String {
             code,
             CHART_1,
             Some(format!(
-                "Likely {}–{} · plus {} planned",
+                "Likely {}–{}<br>Plus {} planned",
                 money(f.next_week_lower, code),
                 money(f.next_week_upper, code),
                 money(f.next_week_planned, code)
@@ -261,7 +262,7 @@ fn forecast_section(f: &DailySpendingForecast) -> String {
             code,
             CHART_4,
             Some(format!(
-                "Likely {}–{} · {} still planned",
+                "Likely {}–{}<br>{} still planned",
                 money(f.month_end_lower, code),
                 money(f.month_end_upper, code),
                 money(f.month_remaining_planned, code)
@@ -283,8 +284,8 @@ fn day_section(day: &finance_types::notify::DaySummary) -> String {
         .map(|t| {
             let code = t.currency.code.as_str();
             format!(
-                "<p style=\"font-size:13px;line-height:1.7;margin:0 0 10px\">Spent today: <b>{}</b> \
-                 · the plan allows <b>{}</b> a day · <b>{} over</b></p>",
+                "<p style=\"font-size:13px;line-height:1.7;margin:0 0 10px\">Spent today: <b>{}</b><br>\
+                 The plan allows <b>{}</b> a day<br><b>{} over</b></p>",
                 money(t.spent, code),
                 money(t.allowance, code),
                 money(t.over_by, code)
@@ -382,7 +383,7 @@ pub fn render(risk: &Risk, intro: &str, sample: bool, digest: bool) -> String {
             "<tr><td style=\"padding:25px 28px;border-bottom:1px solid {BORDER}\">\
              <div style=\"font-size:10px;letter-spacing:2px;color:{FG_MUTED}\">THE SPENDING SPEED CHECK</div>\
              <h2 style=\"font-size:23px;margin:9px 0\">The receipts are in. {}</h2>\
-             <p style=\"font-size:12px;color:{FG_MUTED}\">{}–{} · compared with {}–{}</p>\
+             <p style=\"font-size:12px;color:{FG_MUTED}\">{}–{} compared with {}–{}</p>\
              <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\">{bars}</table>\
              <p style=\"font-size:13px;line-height:1.7;margin:18px 0 0\">Unplanned spending: <b>{}</b><br>\
              Planned allowance for the window: <b>{}</b></p></td></tr>\
@@ -446,7 +447,7 @@ pub fn render(risk: &Risk, intro: &str, sample: bool, digest: bool) -> String {
     }
     sections.extend(risk.forecasts.iter().take(3).map(forecast_section));
     let edition = if sample {
-        "PREVIEW EDITION · THIS IS A TEST"
+        "TEST PREVIEW EDITION"
     } else if digest {
         "YOUR DAILY FORECAST"
     } else {

@@ -87,18 +87,20 @@ pub fn CategoryConsolidation(catalog: CategoryCatalog) -> impl IntoView {
     let overlap_count = catalog.overlaps.len()
         + catalog.group_conflicts.len()
         + catalog.subscription_overlaps.len();
-    let summary = if overlap_count > 0 {
-        format!(
-            "Category library · {} names · {} similar pairs · {overlap_count} overlaps",
-            catalog.entries.len(),
-            catalog.similar.len()
-        )
-    } else {
-        format!(
-            "Category library · {} names · {} similar pairs",
-            catalog.entries.len(),
-            catalog.similar.len()
-        )
+    // The heading, then each count as its own muted part.
+    let mut counts = vec![
+        format!("{} names", catalog.entries.len()),
+        format!("{} similar pairs", catalog.similar.len()),
+    ];
+    if overlap_count > 0 {
+        counts.push(format!("{overlap_count} overlaps"));
+    }
+    let summary = view! {
+        "Category library"
+        {counts
+            .into_iter()
+            .map(|c| view! { <span class="ml-3 font-normal text-fg-muted">{c}</span> })
+            .collect_view()}
     };
     let conflicts = catalog.group_conflicts.clone();
     let subscriptions = catalog.subscription_overlaps.clone();
@@ -145,7 +147,8 @@ pub fn CategoryConsolidation(catalog: CategoryCatalog) -> impl IntoView {
                         view! {
                             <div class="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
                                 <span class="min-w-0 break-words text-sm">
-                                    {format!("{} → {} · {} transactions", pair.source, pair.target, pair.count)}
+                                    {format!("{} → {}", pair.source, pair.target)}
+                                    <span class="ml-3 text-fg-muted">{format!("{} transactions", pair.count)}</span>
                                     <br />
                                     <small class=HINT>{pair.reason}</small>
                                 </span>

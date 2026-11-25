@@ -253,9 +253,9 @@ pub fn TransactionDetails(
     let summary = {
         let s = saved.get_value();
         if !s.values.tags.is_empty() {
-            format!(" · {}", tags_text(&s.values.tags))
+            tags_text(&s.values.tags)
         } else if prefill_count > 0 {
-            format!(" · {prefill_count} ready")
+            format!("{prefill_count} ready")
         } else {
             String::new()
         }
@@ -269,7 +269,10 @@ pub fn TransactionDetails(
     view! {
         <Disclosure
             kind=DisclosureKind::Panel
-            summary=format!("Details & tags{summary}")
+            summary=view! {
+                "Details & tags"
+                {(!summary.is_empty()).then(|| view! { <span class="ml-3 font-normal text-fg-muted">{summary}</span> })}
+            }
             on:toggle=move |e| {
                 let open = e
                     .target()
@@ -333,7 +336,7 @@ pub fn TransactionDetails(
                         }
                     })
                     .collect_view()}
-                <Field label="Extra tags" id=format!("{}-tags", id.get_value()) hint="Comma separated · use “parent / tag” for hierarchy">
+                <Field label="Extra tags" id=format!("{}-tags", id.get_value()) hint="Separate tags with commas and use “parent / tag” for hierarchy">
                     <input
                         id=format!("{}-tags", id.get_value())
                         class=CONTROL

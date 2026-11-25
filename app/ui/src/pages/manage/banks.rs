@@ -442,12 +442,14 @@ fn BankBox(
     let headline = if working {
         "Importing transactions"
     } else if cooling {
-        "Rate limited · waiting to retry"
+        "Rate limited"
     } else {
         label
     };
     let note = if working {
         Some("Sync in progress.")
+    } else if cooling {
+        Some("Waiting to retry.")
     } else {
         attention.then_some(detail)
     };
@@ -630,9 +632,8 @@ fn AccountTable(name: String, accounts: Vec<BankAccount>) -> impl IntoView {
                 .account
                 .balances
                 .iter()
-                .map(|m| money(m.amount, &Currency::new(&m.currency)))
-                .collect::<Vec<_>>()
-                .join(" · ");
+                .map(|m| view! { <span class="block">{money(m.amount, &Currency::new(&m.currency))}</span> })
+                .collect::<Vec<_>>();
             let negative = a.account.balances.iter().any(|m| m.amount.is_sign_negative() && !m.amount.is_zero());
             view! {
                 <tr class=TROW>
@@ -647,7 +648,7 @@ fn AccountTable(name: String, accounts: Vec<BankAccount>) -> impl IntoView {
                         {a.account.last_activity.as_deref().map_or("—".into(), format::date)}
                     </td>
                     <td class=cn([TCELL_NUM, "whitespace-nowrap", if negative { "text-negative-fg" } else { "" }])>
-                        {if balance.is_empty() { "—".to_owned() } else { balance }}
+                        {if balance.is_empty() { "—".into_any() } else { balance.collect_view().into_any() }}
                     </td>
                 </tr>
             }
@@ -655,9 +656,8 @@ fn AccountTable(name: String, accounts: Vec<BankAccount>) -> impl IntoView {
         .collect::<Vec<_>>();
     let total = totals
         .iter()
-        .map(|(c, v)| money(*v, &Currency::new(c)))
-        .collect::<Vec<_>>()
-        .join(" · ");
+        .map(|(c, v)| view! { <span class="block font-normal text-fg-muted">{money(*v, &Currency::new(c))}</span> })
+        .collect_view();
     let table_label = format!("{name} accounts");
     Some(view! {
         <div class=TABLE_CONTAINER tabindex="0" role="region" aria-label=table_label>
@@ -667,7 +667,7 @@ fn AccountTable(name: String, accounts: Vec<BankAccount>) -> impl IntoView {
                         <th class=TH>"Account"</th>
                         <th class=TH>"IBAN"</th>
                         <th class=TH>"Last transaction"</th>
-                        <th class=TH_NUM>{format!("Balance · {total}")}</th>
+                        <th class=TH_NUM>"Balance"{total}</th>
                     </tr>
                 </thead>
                 <tbody>{rows}</tbody>
@@ -836,7 +836,7 @@ fn ConsentCard(
             let options: Vec<(String, String)> = std::iter::once((String::new(), "Don't import".to_owned()))
                 .chain(targets.iter().map(|t| {
                     let label = match &t.iban_tail {
-                        Some(tail) => format!("{} · •••• {tail}", t.name),
+                        Some(tail) => format!("{} •••• {tail}", t.name),
                         None => t.name.clone(),
                     };
                     (t.id.to_string(), label)
@@ -861,14 +861,14 @@ fn ConsentCard(
                     let detail = [a.iban_tail.as_ref().map(|t| format!("•••• {t}")), a.currency.clone()]
                         .into_iter()
                         .flatten()
-                        .collect::<Vec<_>>()
-                        .join(" · ");
+                        .map(|part| view! { <small class=SUBLINE>{part}</small> })
+                        .collect_view();
                     let options = options.clone();
                     view! {
                         <tr class=TROW>
                             <td class=TCELL>
                                 <strong class=ROW_TITLE>{a.name.clone()}</strong>
-                                <small class=SUBLINE>{detail}</small>
+                                {detail}
                             </td>
                             <td class=TCELL>
                                 <Select id=id value=target options=Signal::derive(move || options.clone()) label="Ledger account" />

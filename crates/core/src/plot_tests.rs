@@ -388,7 +388,7 @@ fn variable_only_equals_the_variable_time_trends() {
         .collect();
     assert_eq!(data.series[0].values, expected);
     assert_eq!(data.series[0].values[5], Some(dec("98")));
-    assert!(data.subtitle.contains("variable only"));
+    assert!(data.subtitle.iter().any(|p| p == "variable only"));
 }
 
 #[test]
@@ -507,8 +507,8 @@ fn a_day_axis_over_all_time_is_refused_past_the_limit() {
         Some(&"Tuesday 24 November 2026".to_owned())
     );
     assert!(
-        days.subtitle.starts_with("All time, last 366 days shown"),
-        "{}",
+        days.subtitle.first().map(String::as_str) == Some("All time, last 366 days shown"),
+        "{:?}",
         days.subtitle
     );
     assert_eq!(total(&days), dec("1050"), "the 2020 row is left out");
@@ -524,7 +524,7 @@ fn a_day_axis_over_all_time_is_refused_past_the_limit() {
     assert!(err.to_string().contains("366"), "{err}");
     // Within the limit nothing is cut.
     let fits = query(&snap(ledger()), &s);
-    assert!(fits.subtitle.starts_with("All time ·"), "{}", fits.subtitle);
+    assert_eq!(fits.subtitle.first().map(String::as_str), Some("All time"));
     let months = query(
         &snap(ledger()),
         &spec(Axis::Month, Period::AllTime, &[Measure::Spent]),
