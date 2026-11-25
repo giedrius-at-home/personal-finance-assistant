@@ -281,16 +281,18 @@ pub fn Metric(
     children: Children,
     #[prop(optional, into)] chip: Option<(Tone, String)>,
     #[prop(optional)] facts: Vec<(String, String)>,
-    /// The headline size (`text-2xl` unless given).
+    /// The headline size (`text-2xl`, `text-xl` on a phone, unless given).
     #[prop(optional, into)]
     size: Option<&'static str>,
     #[prop(optional, into)] class: String,
 ) -> impl IntoView {
+    // One signal per figure: a chip that only repeats the label says nothing.
+    let chip = chip.filter(|(_, text)| !text.eq_ignore_ascii_case(&label));
     view! {
         <div class=cn(["grid min-w-0 content-start gap-1.5", class.as_str()])>
             <span class="text-eyebrow font-bold uppercase tracking-eyebrow text-fg-muted">{label}</span>
             <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-                <strong class=cn(["font-semibold tabular-nums tracking-tight", size.unwrap_or("text-2xl")])>
+                <strong class=cn(["font-semibold tabular-nums tracking-tight", size.unwrap_or("text-xl sm:text-2xl")])>
                     {children()}
                 </strong>
                 {chip.map(|(tone, text)| view! { <Badge tone=tone>{text}</Badge> })}
@@ -414,7 +416,8 @@ pub fn BoardColumn(
 }
 
 /// Fields side by side across the page, a rule between neighbours.
-pub const METRIC_STRIP: &str = "metric-strip grid grid-cols-2 gap-x-6 gap-y-6 md:grid-cols-3";
+pub const METRIC_STRIP: &str =
+    "metric-strip grid grid-cols-2 gap-x-4 gap-y-6 sm:gap-x-6 md:grid-cols-3";
 
 #[component]
 pub fn EmptyState(

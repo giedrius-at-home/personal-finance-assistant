@@ -20,7 +20,7 @@ use crate::api::{Loaded, NoArgs, load};
 use crate::ds::arrange::{
     DropTarget, TAB_ALERT, TAB_EDITOR, css_escaped, drop_index, drop_move, focus_on,
 };
-use crate::ds::patterns::{ERROR_LINE, TAB_ROW, TAB_SCROLL};
+use crate::ds::patterns::{ERROR_LINE, PHONE_TAB_BAR, TAB_ROW, TAB_SCROLL};
 use crate::ds::{
     Button, Eyebrow, Heading, Icon, Lucide, SegmentedControl, Size, TABS_LIST, TABS_TRIGGER,
     TabChip, Variant, button_class, cn,
@@ -279,8 +279,9 @@ fn App() -> impl IntoView {
 
     view! {
         <div class="app-surface h-full overflow-y-auto font-sans text-fg">
-            <div class="fixed inset-x-0 top-0 z-40 h-10" data-tauri-drag-region=""></div>
-            <div class="w-full min-w-0 px-5 pb-12 pt-12 sm:px-8 sm:pt-14 xl:px-12">
+            // The window's drag strip: only in the app window, or it would take taps on a phone's tab bar.
+            <div class="fixed inset-x-0 top-0 z-40 hidden h-10 [.glass_&]:block" data-tauri-drag-region=""></div>
+            <div class="w-full min-w-0 px-4 pb-[calc(3rem+env(safe-area-inset-bottom))] pt-[calc(3rem+env(safe-area-inset-top))] sm:px-8 sm:pt-[calc(3.5rem+env(safe-area-inset-top))] xl:px-12">
                 <Header />
                 <Tabs tabs visible />
                 {move || (layout.editing().get() && layout.save_failed().get()).then(|| view! {
@@ -363,7 +364,11 @@ fn Tabs(tabs: Memo<Vec<TabView>>, visible: Memo<Vec<TabView>>) -> impl IntoView 
             .map(|(i, tab)| {
                 let id = StoredValue::new(tab.id);
                 let on = move || id.with_value(|id| app.shown_id() == *id);
-                let title = if i < 9 { format!("{} (⌘{})", tab.name, i + 1) } else { tab.name.clone() };
+                let title = if i < 9 {
+                    format!("{} (⌘{})", tab.name, i + 1)
+                } else {
+                    tab.name.clone()
+                };
                 view! {
                     <button
                         type="button"
@@ -371,8 +376,16 @@ fn Tabs(tabs: Memo<Vec<TabView>>, visible: Memo<Vec<TabView>>) -> impl IntoView 
                         aria-selected=move || on().to_string()
                         data-state=move || if on() { "active" } else { "inactive" }
                         title=title
-                        class=cn([TABS_TRIGGER, "min-w-0 grow justify-center truncate px-1.5 text-eyebrow sm:grow-0 sm:px-4 sm:text-xs"])
-                        on:click=move |_| id.with_value(|id| app.go_id(id))
+                        class=cn([TABS_TRIGGER, "shrink-0 justify-center px-3 sm:px-4"])
+                        on:click=move |e| {
+                            id.with_value(|id| app.go_id(id));
+                            // On a phone the bar scrolls: bring the chosen tab and its neighbours into view.
+                            let options = web_sys::ScrollIntoViewOptions::new();
+                            options.set_inline(web_sys::ScrollLogicalPosition::Center);
+                            options.set_block(web_sys::ScrollLogicalPosition::Nearest);
+                            event_target::<web_sys::Element>(&e)
+                                .scroll_into_view_with_scroll_into_view_options(&options);
+                        }
                     >
                         {tab.name}
                     </button>
@@ -389,7 +402,7 @@ fn Tabs(tabs: Memo<Vec<TabView>>, visible: Memo<Vec<TabView>>) -> impl IntoView 
                 <div
                     role="tablist"
                     aria-label="Finance sections"
-                    class=cn([TABS_LIST, "glass-bar flex w-full min-w-0 gap-0.5 sm:inline-flex sm:w-auto sm:gap-1"])
+                    class=cn([TABS_LIST, PHONE_TAB_BAR])
                 >
                     {bar}
                 </div>
@@ -398,13 +411,15 @@ fn Tabs(tabs: Memo<Vec<TabView>>, visible: Memo<Vec<TabView>>) -> impl IntoView 
         }}
         // Hidden while nothing could be saved: the layout is loading or its read failed.
         {move || layout.editable().then(|| view! {
-            <Button
-                variant=Variant::Secondary
-                size=Size::Sm
-                on_click=Callback::new(move |_| layout.set_editing(!editing.get_untracked()))
-            >
-                {move || if editing.get() { "Done" } else { "Edit layout" }}
-            </Button>
+            <div class=move || if editing.get() { "mb-3 mt-2 flex justify-end sm:m-0" } else { "mb-3 flex justify-end sm:m-0" }>
+                <Button
+                    variant=Variant::Secondary
+                    size=Size::Sm
+                    on_click=Callback::new(move |_| layout.set_editing(!editing.get_untracked()))
+                >
+                    {move || if editing.get() { "Done" } else { "Edit layout" }}
+                </Button>
+            </div>
         })}
         </div>
     }

@@ -434,10 +434,16 @@ pub fn Disclosure(
     }
 }
 
-/// The tab bar's row: the bar at the left, "Edit layout" at the right (below
-/// `sm`, on its own row under the full-width bar); it sticks under the
-/// window's drag strip. Only its children take clicks.
-pub const TAB_ROW: &str = "pointer-events-none sticky top-10 z-30 mb-4 flex flex-col items-end gap-2 sm:mb-6 sm:flex-row sm:items-center sm:justify-between sm:gap-3 [&>*]:pointer-events-auto";
+/// The tab bar's row: the bar at the left, "Edit layout" at the right; it
+/// sticks under the window's drag strip. Below `sm` the row is no box of its
+/// own: the bar sticks alone (`PHONE_TAB_BAR`) and "Edit layout" scrolls away
+/// under it, so it never covers the page. Only its children take clicks.
+pub const TAB_ROW: &str = "pointer-events-none contents sm:sticky sm:top-10 sm:z-30 sm:mb-6 sm:flex sm:items-center sm:justify-between sm:gap-3 [&>*]:pointer-events-auto";
+
+/// The tab bar itself. Below `sm` it is full width, sticks to the top (under
+/// the drag strip in the app window) and scrolls sideways, so every tab keeps
+/// its whole name; from `sm` it is the pill in `TAB_ROW`.
+pub const PHONE_TAB_BAR: &str = "glass-bar sticky top-[max(0.5rem,env(safe-area-inset-top))] z-30 mb-2 flex w-full min-w-0 gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [.glass_&]:top-10 sm:static sm:z-auto sm:mb-0 sm:inline-flex sm:w-auto sm:gap-1 sm:overflow-visible";
 
 /// A sortable table heading's button: the heading's look, an arrow when sorted.
 pub const SORT_BUTTON: &str = "inline-flex items-center gap-1 uppercase tracking-eyebrow hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";

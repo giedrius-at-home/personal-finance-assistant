@@ -418,8 +418,9 @@ fn forecast_row(
         .into_any()
     } else {
         view! {
-            <p class=NUM_HINT>
-                {format!("{} spent · forecast {}", money(forecast.spent, &unit), money(forecast.expected, &unit))}
+            <p class=cn([NUM_HINT, "flex items-baseline justify-between gap-3"])>
+                <span>{format!("Spent {}", money(forecast.spent, &unit))}</span>
+                <span>{format!("Forecast {}", money(forecast.expected, &unit))}</span>
             </p>
         }
         .into_any()
@@ -429,7 +430,7 @@ fn forecast_row(
             <strong class=cn([ITEM_TITLE, if over { "text-over-fg" } else { "" }])>
                 {if over { "Slow down" } else { "On track" }}
             </strong>
-            <small class=SMALL>{format!("{}/day left", money(daily_room, &unit))}</small>
+            <small class=SMALL>{format!("A day {}", money(daily_room, &unit))}</small>
         }
         .into_any()
     } else {
@@ -790,7 +791,7 @@ fn CurrencyHeading(
                     <i aria-hidden="true" class="h-2.5 w-0.5 rounded-pill bg-chart-limit"></i>
                     <b class="font-normal">"limit"</b>
                 </span>
-                <small class="ml-auto text-xs">{format!("{remaining} days left")}</small>
+                <small class="ml-auto text-xs">{format!("Days left {remaining}")}</small>
             </footer>
         </Card>
     }

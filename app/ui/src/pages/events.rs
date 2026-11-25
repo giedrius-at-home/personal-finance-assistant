@@ -438,18 +438,16 @@ fn event_box(ui: Ui, event: &EventRow, code: &str) -> impl IntoView + use<> {
         }
     });
     let over = overspent(event);
-    let chip = (over > Decimal::ZERO)
-        .then_some((Tone::Negative, "Over"))
-        .or_else(|| standing(event))
-        .or_else(|| {
-            Some(if event.row.short > Decimal::ZERO {
-                (Tone::Negative, "Short")
-            } else if event.row.tradeoffs {
-                (Tone::Warning, "With trade-offs")
-            } else {
-                (Tone::Positive, "Affordable")
-            })
-        });
+    // Overspent: the "Over plan" row says it, so no chip repeats it.
+    let chip = standing(event).or_else(|| {
+        Some(if event.row.short > Decimal::ZERO {
+            (Tone::Negative, "Short")
+        } else if event.row.tradeoffs {
+            (Tone::Warning, "With trade-offs")
+        } else {
+            (Tone::Positive, "Affordable")
+        })
+    });
     let mut facts = match event.phase {
         EventPhase::Upcoming => vec![("Extra to find".to_owned(), m(event.extra))],
         EventPhase::Running => {
@@ -461,6 +459,7 @@ fn event_box(ui: Ui, event: &EventRow, code: &str) -> impl IntoView + use<> {
         }
         EventPhase::Past => vec![("Spent".to_owned(), m(event.spent))],
     };
+    let chip = chip.filter(|_| over <= Decimal::ZERO);
     if over > Decimal::ZERO {
         facts.insert(0, ("Over plan".to_owned(), m(over)));
     }
@@ -508,14 +507,14 @@ fn event_box(ui: Ui, event: &EventRow, code: &str) -> impl IntoView + use<> {
                 <span class="whitespace-nowrap">{days}</span>
             </span>
             <span class=METER_BLOCK>
-                <span role="img" aria-label=format!("{used} used") class=METER>
+                <span role="img" aria-label=format!("Used {used}") class=METER>
                     <i
                         class=cn(["block h-full rounded-pill", if over > Decimal::ZERO { "bg-negative" } else { "bg-accent" }])
                         style:width=format!("{}%", percent.min(100))
                     ></i>
                 </span>
                 <span class=METER_SCALE>
-                    <span>{format!("{used} used")}</span>
+                    <span>{format!("Used {used}")}</span>
                     <span class=cn(["tabular-nums", if over > Decimal::ZERO { "font-semibold text-negative-fg" } else { "" }])>
                         {format!("{percent}%")}
                     </span>
