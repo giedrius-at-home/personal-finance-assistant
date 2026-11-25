@@ -61,14 +61,13 @@ fn main() -> anyhow::Result<()> {
         )?;
     }
     for (classifier, embedding) in [
-        (Classifier::TypeSafe, ""),
-        (Classifier::TypeSafe, "qwen3-embedding:0.6b"),
-        (Classifier::TypeSafe, "embeddinggemma"),
-        (Classifier::Ollama, ""),
+        (Classifier::TypeSafe, false),
+        (Classifier::TypeSafe, true),
+        (Classifier::Mistral, false),
     ] {
         let settings = AiSettings {
             classifier,
-            embedding_model: embedding.into(),
+            embeddings: embedding,
             ..AiSettings::default()
         };
         println!(
@@ -89,7 +88,7 @@ fn main() -> anyhow::Result<()> {
             .collect(),
         deferred: snap.deferred_sources.clone(),
     };
-    for classifier in [Classifier::TypeSafe, Classifier::Ollama] {
+    for classifier in [Classifier::TypeSafe, Classifier::Mistral] {
         let settings = AiSettings {
             classifier,
             ..AiSettings::default()

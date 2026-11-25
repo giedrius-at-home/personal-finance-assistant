@@ -8,6 +8,7 @@ pub mod alerts;
 pub mod allocation;
 pub mod bank_sync;
 pub mod bill_forecast;
+pub mod brief;
 pub mod budget;
 pub mod cash;
 pub mod catalog;

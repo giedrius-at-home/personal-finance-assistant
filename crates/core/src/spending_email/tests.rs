@@ -23,7 +23,7 @@ fn digest_content_matches_python() {
         golden["forecast_summary"]
     );
     let digest = digest_message(&risk.forecasts, false);
-    assert_eq!(digest.subject, "Rafael: your spending forecast 🔮");
+    assert_eq!(digest.subject, "Gisel: your spending forecast 🔮");
     assert!(digest.body.starts_with(&format!(
         "{DIGEST_INTRO}\n\nNext 7 days (EUR): habits EUR 368.17"
     )));
@@ -55,7 +55,7 @@ fn alert_uses_model_copy_then_every_figure() {
     let (_, risk) = golden();
     let settings = EmailSettings::default();
     let writer = FakeWriter(Ok(
-        r#"{"subject":"Rafael: easy does it","body":"Hey, slow down a little. Check your plan first."}"#,
+        r#"{"subject":"Gisel: easy does it","body":"Hey, slow down a little. Check your plan first."}"#,
     ));
     let message = compose(
         Plan::Alert {
@@ -68,7 +68,7 @@ fn alert_uses_model_copy_then_every_figure() {
         false,
     )
     .unwrap();
-    assert_eq!(message.subject, "Rafael: easy does it");
+    assert_eq!(message.subject, "Gisel: easy does it");
     assert!(message.body.starts_with(
         "Hey, slow down a little. Check your plan first.\n\n2026-10-09–2026-10-11: EUR 274.99"
     ));
@@ -99,7 +99,7 @@ fn alert_uses_model_copy_then_every_figure() {
     }
     // With the model off, the writer is never asked.
     let off = EmailSettings {
-        ollama: false,
+        ai_writer: false,
         ..EmailSettings::default()
     };
     let m = compose(
@@ -346,4 +346,20 @@ fn runner_keeps_its_slot_and_never_sends_when_off() {
     );
     assert!(status.settings.enabled);
     let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn rafael_signs_when_he_is_the_persona() {
+    let message = Message {
+        subject: "Gisel: your spending forecast".into(),
+        body: "— Gisel".into(),
+        html_body: Some("<td>GISEL</td> The Gisel Report".into()),
+    };
+    let same = personalise(message.clone(), "Gisel");
+    assert_eq!(same, message);
+    let his = personalise(message, "Rafael");
+    assert_eq!(his.subject, "Rafael: your spending forecast");
+    assert_eq!(his.body, "— Rafael");
+    assert_eq!(his.html_body.unwrap(), "<td>RAFAEL</td> The Rafael Report");
+    assert!(writer_system("Rafael").starts_with("You are Rafael, "));
 }

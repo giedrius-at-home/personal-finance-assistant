@@ -1,5 +1,7 @@
 //! Rafael, the voice of every message the app sends: the kind Gen Z budget
 //! coach who signs the daily email (`spending_email::WRITER_SYSTEM`). The
+//! owner may pick Gisel instead (Manage → Settings → Daily voice brief);
+//! [`set_persona`] makes every title and sign-off here carry that name. The
 //! facts stay the app's own (every figure comes from the alert or the
 //! summary); Rafael adds the title, one coaching line and the sign-off.
 //!
@@ -15,6 +17,35 @@ use rust_decimal::Decimal;
 use crate::alerts::{Notification, SubjectKind};
 
 pub const SIGN_OFF: &str = "— Rafael";
+
+/// The name every message here is signed with; "Rafael" until the app sets
+/// the owner's persona.
+static PERSONA: std::sync::RwLock<&'static str> = std::sync::RwLock::new("Rafael");
+
+/// Sign every message from here on as `name` ("Gisel" or "Rafael").
+pub fn set_persona(name: &'static str) {
+    if let Ok(mut p) = PERSONA.write() {
+        *p = name;
+    }
+}
+
+/// The name messages are signed with now.
+pub fn persona() -> &'static str {
+    PERSONA.read().map_or("Rafael", |p| *p)
+}
+
+/// `(title, body)` in the persona's name.
+fn signed(message: (String, String)) -> (String, String) {
+    signed_as(persona(), message)
+}
+
+fn signed_as(name: &str, (title, body): (String, String)) -> (String, String) {
+    if name == "Rafael" {
+        (title, body)
+    } else {
+        (title.replace("Rafael", name), body.replace("Rafael", name))
+    }
+}
 
 const HEADS_UP: [&str; 4] = [
     "Easy does it for the rest of the month, you've got this.",
@@ -101,6 +132,10 @@ fn emoji(severity: AlertSeverity) -> &'static str {
 
 /// An alert in Rafael's voice: `(title, body)`.
 pub fn alert(n: &Notification, seed: u64) -> (String, String) {
+    signed(alert_text(n, seed))
+}
+
+fn alert_text(n: &Notification, seed: u64) -> (String, String) {
     let generic = n.title.starts_with("Personal finance:");
     let title = match n.kind {
         SubjectKind::Goal => match n.severity {
@@ -137,6 +172,10 @@ fn money(amount: Decimal, currency: &Currency) -> String {
 
 /// The evening overspend summary in Rafael's voice: `(title, body)`.
 pub fn day_summary(s: &DaySummary, seed: u64) -> (String, String) {
+    signed(day_summary_text(s, seed))
+}
+
+fn day_summary_text(s: &DaySummary, seed: u64) -> (String, String) {
     let over: Vec<String> = s
         .totals
         .iter()
@@ -175,12 +214,12 @@ pub fn day_summary(s: &DaySummary, seed: u64) -> (String, String) {
 
 /// The "Send a test" push.
 pub fn test_message() -> (String, String) {
-    (
+    signed((
         "Rafael: you're all set 🙌".to_owned(),
         format!(
             "Notifications work on this device. I'll ping you when a budget line gets close, and in the evening if a day runs over. {SIGN_OFF}"
         ),
-    )
+    ))
 }
 
 #[cfg(test)]
@@ -188,6 +227,14 @@ mod tests {
     use finance_types::notify::{AvoidablePurchase, DayGroup, DayTotal};
 
     use super::*;
+
+    #[test]
+    fn messages_carry_the_chosen_persona() {
+        let (title, body) = signed_as("Gisel", test_message());
+        assert_eq!(title, "Gisel: you're all set 🙌");
+        assert!(body.ends_with("— Gisel"));
+        assert_eq!(signed_as("Rafael", test_message()), test_message());
+    }
 
     fn line(severity: AlertSeverity, title: &str, body: &str) -> Notification {
         Notification {

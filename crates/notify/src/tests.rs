@@ -1,8 +1,7 @@
-use std::io::{BufRead, BufReader, Write};
-use std::net::TcpListener;
-
 use finance_core::spending_email::{Copy, Risk};
 use lettre::transport::stub::StubTransport;
+
+use serde_json::Value;
 
 use super::*;
 
@@ -14,14 +13,15 @@ fn smtp() -> Smtp {
         username: "me@example.com".into(),
         from: "me@example.com".into(),
         to: "you@example.com".into(),
+        name: "Gisel".into(),
     }
 }
 
 #[test]
-fn sends_from_rafael_with_an_html_alternative() {
+fn sends_from_the_persona_with_an_html_alternative() {
     let mailer = Mailer::new(smtp(), StubTransport::new_ok());
     let message = Message {
-        subject: "Rafael: your spending forecast".into(),
+        subject: "Gisel: your spending forecast".into(),
         body: "Plain text".into(),
         html_body: Some("<p>Hi</p>".into()),
     };
@@ -34,9 +34,9 @@ fn sends_from_rafael_with_an_html_alternative() {
         Some("me@example.com")
     );
     assert_eq!(envelope.to()[0].to_string(), "you@example.com");
-    assert!(raw.contains("From: Rafael <me@example.com>"));
+    assert!(raw.contains("From: Gisel <me@example.com>"));
     assert!(raw.contains("To: you@example.com"));
-    assert!(raw.contains("Subject: Rafael: your spending forecast"));
+    assert!(raw.contains("Subject: Gisel: your spending forecast"));
     assert!(raw.contains("multipart/alternative"));
     assert!(raw.contains("Plain text"));
     assert!(raw.contains("<p>Hi</p>"));
@@ -58,89 +58,68 @@ fn transport_errors_and_bad_addresses_are_reported() {
     assert!(mailer.transport().messages().is_empty());
 }
 
-/// A fake Ollama: one canned answer on a loopback port. The handle returns
-/// the request body it received.
-fn fake_ollama(answer: &'static str) -> (String, std::thread::JoinHandle<String>) {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let url = format!("http://{}", listener.local_addr().unwrap());
-    let handle = std::thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
-        let mut reader = BufReader::new(stream.try_clone().unwrap());
-        let mut length = 0;
-        loop {
-            let mut line = String::new();
-            reader.read_line(&mut line).unwrap();
-            if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
-                length = v.trim().parse().unwrap();
-            }
-            if line == "\r\n" {
-                break;
-            }
-        }
-        let mut body = vec![0; length];
-        std::io::Read::read_exact(&mut reader, &mut body).unwrap();
-        let reply = json!({ "response": answer }).to_string();
-        write!(
-            stream,
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\
-             Connection: close\r\n\r\n{reply}",
-            reply.len()
-        )
-        .unwrap();
-        String::from_utf8(body).unwrap()
-    });
-    (url, handle)
+fn writer(url: &str) -> MistralWriter {
+    let client = Mistral::local(
+        Secret::new("k".into()),
+        url,
+        std::time::Duration::from_secs(5),
+    )
+    .unwrap()
+    .attempts(1);
+    MistralWriter {
+        client: Some(client),
+        model: "mistral-small-latest".into(),
+        name: "Rafael".into(),
+    }
 }
 
 #[test]
-fn ollama_gets_the_persona_and_signals_only() {
-    let (url, server) =
-        fake_ollama(r#"{"subject":"Rafael: check in","body":"Take a look at your plan today."}"#);
-    let writer = Ollama::new(&url, OLLAMA_MODEL).unwrap();
-    let copy = writer.write(&Risk::default()).unwrap();
+fn mistral_gets_the_persona_and_signals_only() {
+    let (url, server) = finance_mistral::fake::serve(vec![(
+        200,
+        finance_mistral::fake::chat(
+            r#"{"subject":"Gisel: check in","body":"Take a look at your plan today."}"#,
+        ),
+    )]);
+    let copy = writer(&url).write(&Risk::default()).unwrap();
     assert_eq!(
         copy,
         Copy {
-            subject: "Rafael: check in".into(),
+            subject: "Gisel: check in".into(),
             body: "Take a look at your plan today.".into()
         }
     );
-    let request: Value = serde_json::from_str(&server.join().unwrap()).unwrap();
-    assert_eq!(request["model"], "qwen3:8b");
-    assert_eq!(request["format"], "json");
-    assert_eq!(request["stream"], false);
-    assert_eq!(request["think"], false);
-    assert_eq!(request["system"], WRITER_SYSTEM);
-    assert_eq!(request["prompt"], writer_prompt(&Risk::default()));
+    let request: Value = serde_json::from_str(&server.join().unwrap()[0].body).unwrap();
+    assert_eq!(request["model"], "mistral-small-latest");
+    assert_eq!(request["temperature"], 0.0);
+    assert_eq!(
+        request["messages"][0]["content"],
+        finance_core::spending_email::writer_system("Rafael")
+    );
+    assert_eq!(
+        request["messages"][1]["content"],
+        writer_prompt(&Risk::default())
+    );
 }
 
 #[test]
-fn ollama_copy_with_figures_is_refused() {
-    let (url, server) = fake_ollama(r#"{"subject":"Spent 40","body":"Ouch."}"#);
-    let writer = Ollama::new(&url, OLLAMA_MODEL).unwrap();
-    assert!(writer.write(&Risk::default()).is_err());
+fn copy_with_figures_is_refused() {
+    let (url, server) = finance_mistral::fake::serve(vec![(
+        200,
+        finance_mistral::fake::chat(r#"{"subject":"Spent 40","body":"Ouch."}"#),
+    )]);
+    assert!(writer(&url).write(&Risk::default()).is_err());
     server.join().unwrap();
 }
 
 #[test]
-fn ollama_must_be_local() {
-    assert!(Ollama::new("http://example.com:11434", OLLAMA_MODEL).is_err());
-    assert!(Ollama::new("http://user:pw@127.0.0.1:11434", OLLAMA_MODEL).is_err());
-    assert!(Ollama::local().is_ok());
-}
-
-/// Needs Ollama with qwen3:8b on this Mac: `cargo test -p finance-notify -- --ignored`.
-#[test]
-#[ignore = "needs the local Ollama model"]
-fn local_qwen_writes_valid_copy() {
-    let golden: Value = serde_json::from_str(include_str!(
-        "../../core/src/spending_email/python_golden.json"
-    ))
-    .unwrap();
-    let risk: Risk = serde_json::from_value(golden["risk"].clone()).unwrap();
-    let copy = Ollama::local().unwrap().write(&risk);
-    println!("{copy:?}");
-    assert!(copy.is_ok());
+fn without_a_key_the_writer_fails_so_fixed_copy_stands_in() {
+    let writer = MistralWriter {
+        client: None,
+        model: "mistral-small-latest".into(),
+        name: "Gisel".into(),
+    };
+    assert!(writer.write(&Risk::default()).is_err());
 }
 
 fn alert() -> Notification {
@@ -266,4 +245,83 @@ fn fanout_keeps_the_best_outcome() {
     assert_eq!(fan(&[Disabled, Unavailable]), Unavailable);
     assert_eq!(fan(&[Disabled, Disabled]), Disabled);
     assert_eq!(fan(&[]), Unavailable);
+}
+
+#[test]
+fn the_brief_retries_once_when_a_number_is_invented_then_speaks() {
+    use finance_core::brief::{BriefWriter, Speaker};
+    use finance_types::notify::{BriefFacts, BriefLeft, BriefSettings, Persona};
+    let facts = BriefFacts {
+        left: vec![BriefLeft {
+            left: "€160".into(),
+            per_day: "€27".into(),
+            days_left: 6,
+        }],
+        ..BriefFacts::default()
+    };
+    let script = "Hola, Rafael here. You have €160 left for the next 6 days, about €27 a day. \
+        Nothing is near its limit and no bills are due, so this is a calm one. Your habits look \
+        steady, which is fine, but steady is not the same as better. Today, try one meal you \
+        cook yourself; the best budget is the one you actually look at. Venga.";
+    let bad = serde_json::json!({"title": "€999 left", "script": script}).to_string();
+    let good = serde_json::json!({"title": "€160 left", "script": script}).to_string();
+    let audio = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b"ID3");
+    let (url, server) = finance_mistral::fake::serve(vec![
+        (200, finance_mistral::fake::chat(&bad)),
+        (200, finance_mistral::fake::chat(&good)),
+        (200, serde_json::json!({ "audio_data": audio }).to_string()),
+    ]);
+    let brief = MistralBrief {
+        client: Some(
+            Mistral::local(
+                Secret::new("k".into()),
+                &url,
+                std::time::Duration::from_secs(5),
+            )
+            .unwrap()
+            .attempts(1),
+        ),
+        model: "mistral-small-latest".into(),
+    };
+    let settings = BriefSettings {
+        persona: Persona::Rafael,
+        style: "More jokes.".into(),
+        ..BriefSettings::default()
+    };
+    let (title, said) = brief.write(&facts, &settings).unwrap();
+    assert_eq!(title, "€160 left");
+    assert_eq!(brief.speak(&said, "v1", 1.4).unwrap(), b"ID3");
+    let seen = server.join().unwrap();
+    let prompt: Value = serde_json::from_str(&seen[0].body).unwrap();
+    let system = prompt["messages"][0]["content"].as_str().unwrap();
+    assert!(system.starts_with("You are Rafael, from Spain"));
+    assert!(system.contains("start with \"Hola, Rafael here.\""));
+    assert!(system.contains("70 to 140 words"));
+    assert!(system.ends_with("More jokes."));
+    let sent: BriefFacts =
+        serde_json::from_str(prompt["messages"][1]["content"].as_str().unwrap()).unwrap();
+    assert_eq!(sent, facts);
+    let speech: Value = serde_json::from_str(&seen[2].body).unwrap();
+    assert_eq!(speech["voice_id"], "v1");
+    assert_eq!(speech["expressiveness"], 1.4);
+}
+
+#[test]
+fn the_sender_is_the_persona() {
+    let smtp = Smtp {
+        name: "Rafael".into(),
+        ..smtp()
+    };
+    let mailer = Mailer::new(smtp, StubTransport::new_ok());
+    let message = Message {
+        subject: "Hi".into(),
+        body: "Body".into(),
+        html_body: None,
+    };
+    mailer.send(&message).unwrap();
+    assert!(
+        mailer.transport().messages()[0]
+            .1
+            .contains("From: Rafael <me@example.com>")
+    );
 }

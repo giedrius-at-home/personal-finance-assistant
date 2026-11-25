@@ -62,17 +62,17 @@ fn group_name(value: &Value) -> Option<String> {
 }
 
 /// The local model (`suggest_spending_group`).
-pub struct Ollama<'a> {
+pub struct Model<'a> {
     pub backend: &'a dyn Generate,
 }
 
-impl std::fmt::Debug for Ollama<'_> {
+impl std::fmt::Debug for Model<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("Ollama")
+        f.write_str("Model")
     }
 }
 
-impl Ollama<'_> {
+impl Model<'_> {
     pub fn prompt(input: &GroupInput) -> String {
         J::obj([
             ("category", J::str(&input.category)),
@@ -150,7 +150,7 @@ impl Ollama<'_> {
     }
 }
 
-impl GroupRanker for Ollama<'_> {
+impl GroupRanker for Model<'_> {
     fn suggest(&self, input: &GroupInput) -> Result<GroupSuggestion, BackendError> {
         let raw = self
             .backend
@@ -353,7 +353,7 @@ mod tests {
             ..GroupInput::default()
         };
         assert_eq!(
-            Ollama::prompt(&input),
+            Model::prompt(&input),
             include_str!("testdata/group_prompt.txt")
         );
         assert_eq!(OLLAMA_SYSTEM, include_str!("testdata/group_system.txt"));
@@ -362,17 +362,17 @@ mod tests {
     #[test]
     fn ollama_answers_must_name_an_allowed_group() {
         assert_eq!(
-            Ollama::parse(r#"{"group": " Eating out "}"#)
+            Model::parse(r#"{"group": " Eating out "}"#)
                 .unwrap()
                 .group
                 .as_deref(),
             Some("Eating out")
         );
-        assert_eq!(Ollama::parse(r#"{"group": null}"#).unwrap().group, None);
-        assert!(Ollama::parse(r#"{"group": "Pets"}"#).is_err());
-        assert!(Ollama::parse(r#"{"group": "Travel", "why": "x"}"#).is_err());
-        assert!(Ollama::parse(r#"{}"#).is_err());
-        assert!(Ollama::parse("nope").is_err());
+        assert_eq!(Model::parse(r#"{"group": null}"#).unwrap().group, None);
+        assert!(Model::parse(r#"{"group": "Pets"}"#).is_err());
+        assert!(Model::parse(r#"{"group": "Travel", "why": "x"}"#).is_err());
+        assert!(Model::parse(r#"{}"#).is_err());
+        assert!(Model::parse("nope").is_err());
     }
 
     #[test]

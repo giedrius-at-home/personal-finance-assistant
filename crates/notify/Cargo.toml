@@ -11,6 +11,7 @@ publish.workspace = true
 finance-core.workspace = true
 finance-secrets.workspace = true
 finance-types.workspace = true
+finance-mistral.workspace = true
 aws-lc-rs = "1.18.2"
 base64 = "0.23.1"
 jiff = "0.2.38"
@@ -20,3 +21,6 @@ serde_json.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+finance-mistral = { workspace = true, features = ["fake"] }

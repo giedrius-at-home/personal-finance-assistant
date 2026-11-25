@@ -1,15 +1,16 @@
 //! Alerts as macOS notifications, and the daily spending email: its
 //! settings commands, the "Send test" button and the scheduler thread.
-//! SMTP and Ollama block, so they run on their own threads, never on the
+//! SMTP and Mistral block, so they run on their own threads, never on the
 //! async runtime.
 
 use std::sync::Arc;
 use std::time::Duration;
 
+use finance_ai::Assistant;
 use finance_core::alerts::{Notification, Notifier, Outcome};
 use finance_core::service::Service;
 use finance_core::spending_email::{Message, Sender, Smtp};
-use finance_notify::{Mailer, Ollama};
+use finance_notify::{Mailer, MistralWriter};
 use finance_secrets::{Item, Secret};
 use finance_types::notify::{EmailSettings, EmailStatus};
 use tauri::{AppHandle, Manager, State};
@@ -130,8 +131,8 @@ pub async fn send_test_email(app: AppHandle) -> Result<String, String> {
             ..settings
         })
         .map_err(|e| e.to_string())?;
-        let ollama = Ollama::local()?;
-        let message = service.spending_email_test(jiff::Timestamp::now(), &settings, &ollama)?;
+        let message =
+            service.spending_email_test(jiff::Timestamp::now(), &settings, &writer(&app))?;
         StoredMailer(Smtp::from_settings(&settings)).send(&message)?;
         Ok(format!("Test email sent to {}.", settings.recipient))
     });
@@ -144,6 +145,22 @@ pub async fn send_test_email(app: AppHandle) -> Result<String, String> {
     )
 }
 
+/// The persona's email lines on Mistral; without a key the fixed lines stand in.
+fn writer(app: &AppHandle) -> MistralWriter {
+    MistralWriter {
+        client: app
+            .state::<Assistant>()
+            .mistral(Duration::from_secs(60))
+            .ok(),
+        model: app
+            .state::<Service>()
+            .ai_settings()
+            .map(|s| s.mistral_model)
+            .unwrap_or_else(|_| finance_types::ai::DEFAULT_MISTRAL_MODEL.into()),
+        name: app.state::<Service>().persona_name().into(),
+    }
+}
+
 /// Check the daily slot every 15 minutes for as long as the app runs. The
 /// service sends only when the owner turned the email on.
 pub fn schedule(app: AppHandle) {
@@ -152,9 +169,8 @@ pub fn schedule(app: AppHandle) {
         loop {
             let service = app.state::<Service>();
             let outcome = service.email_settings().and_then(|settings| {
-                let ollama = Ollama::local()?;
                 let mailer = StoredMailer(Smtp::from_settings(&settings));
-                service.run_spending_email(jiff::Timestamp::now(), &ollama, &mailer)
+                service.run_spending_email(jiff::Timestamp::now(), &writer(&app), &mailer)
             });
             if crate::tracing() {
                 match &outcome {

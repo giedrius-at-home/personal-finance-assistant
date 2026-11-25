@@ -19,8 +19,9 @@ Design: [docs/specs/2026-10-26-finance-assistant-rust-design.md](docs/specs/2026
 | `crates/secrets` | Secrets in owner-only files (`Finance/secrets/`, 0600), zeroizing in memory |
 | `crates/bank` | Enable Banking client (RS256 application token), consents in the secret store, one sync at a time |
 | `crates/timesfm` | TimesFM 3.0 inference (ndarray; Accelerate on macOS) for the forecasts |
-| `crates/ai` | Jev (TypeSafe) and Ollama clients for category suggestions, plus merchant research |
-| `crates/notify` | Daily spending email (SMTP) and its Ollama copy writer |
+| `crates/ai` | Category suggestions on Mistral or Jev (TypeSafe), plus merchant research |
+| `crates/mistral` | Mistral AI client (EU): chat, embeddings, Voxtral speech |
+| `crates/notify` | Daily spending email (SMTP), Web Push, and Gisel's Mistral writer and voice |
 | `crates/migrate` | One-off copy of the data from `laptopthree` |
 | `app/src-tauri` | The macOS app: window, glass, commands, updater |
 | `app/ui` | Leptos screens (compiled to WASM by Trunk; Tailwind 4 through Trunk) |
@@ -98,12 +99,19 @@ TimesFM's answers for the current data.
 
 All off until switched on in Manage → Settings:
 
-- **AI suggestions**: Jev (TypeSafe, key in the secret store) proposes categories
+- **AI suggestions**: Mistral (EU-hosted) or Jev (TypeSafe) proposes categories
   for new transactions after each sync; proposals at 0.90 or more are applied
-  automatically when that is on. Ollama is supported as an alternative.
+  automatically when that is on. Both keys live in the secret store
+  (`mistral-api-key`, `typesafe-api-key`); nothing runs a model locally.
 - **Notifications**: goal alerts as macOS notifications.
 - **Daily spending email** at 20:00 over SMTP (password in the secret store),
-  with a "Send test" button.
+  with a "Send test" button; Gisel's opening lines are written by Mistral.
+- **Gisel's daily voice brief**: at the chosen hour (08:00 by default) Mistral
+  writes a short script from the day's facts (what is left, groups near their
+  limit, bills this week, habits against the four weeks before, one thing to
+  change, a passing thought in her laid-back Spanish style), Voxtral speaks it, and the phone gets a push that
+  opens the player on Overview. Every number Gisel says is checked against
+  the facts; otherwise fixed words are used.
 
 ## Checks
 

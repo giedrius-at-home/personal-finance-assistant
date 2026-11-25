@@ -1,6 +1,7 @@
-//! Manage → Settings → "AI suggestions": which model proposes categories
-//! (off, the local Ollama or TypeSafe "Jev"), research and automatic
-//! approval. The TypeSafe key goes to the secret store and never comes back.
+//! Manage → Settings → "AI": the Mistral key (categories, Gisel's emails
+//! and his daily brief), which model proposes categories (off, Mistral or
+//! TypeSafe "Jev"), research and automatic approval. Keys go to the secret
+//! store and never come back.
 
 use finance_types::ai::{AiSettings, AiStatus, Classifier};
 use leptos::html::Input as InputElement;
@@ -29,7 +30,7 @@ struct KeyArgs {
 fn classifier_value(c: Classifier) -> &'static str {
     match c {
         Classifier::Off => "off",
-        Classifier::Ollama => "ollama",
+        Classifier::Mistral => "mistral",
         Classifier::TypeSafe => "typesafe",
     }
 }
@@ -38,9 +39,8 @@ fn classifier_value(c: Classifier) -> &'static str {
 #[derive(Clone, Copy)]
 struct Draft {
     classifier: RwSignal<String>,
-    url: RwSignal<String>,
     model: RwSignal<String>,
-    embedding: RwSignal<String>,
+    embeddings: RwSignal<bool>,
     typesafe_model: RwSignal<String>,
     research: RwSignal<bool>,
     auto_apply: RwSignal<bool>,
@@ -51,9 +51,8 @@ impl Draft {
     fn new() -> Self {
         Self {
             classifier: RwSignal::new("off".into()),
-            url: RwSignal::new(String::new()),
             model: RwSignal::new(String::new()),
-            embedding: RwSignal::new(String::new()),
+            embeddings: RwSignal::new(false),
             typesafe_model: RwSignal::new(String::new()),
             research: RwSignal::new(false),
             auto_apply: RwSignal::new(false),
@@ -63,9 +62,8 @@ impl Draft {
 
     fn fill(&mut self, s: &AiSettings) {
         self.classifier.set(classifier_value(s.classifier).into());
-        self.url.set(s.ollama_url.clone());
-        self.model.set(s.ollama_model.clone());
-        self.embedding.set(s.embedding_model.clone());
+        self.model.set(s.mistral_model.clone());
+        self.embeddings.set(s.embeddings);
         self.typesafe_model.set(s.typesafe_model.clone());
         self.research.set(s.research);
         self.auto_apply.set(s.auto_apply);
@@ -75,13 +73,12 @@ impl Draft {
     fn settings(&self) -> AiSettings {
         AiSettings {
             classifier: match self.classifier.get_untracked().as_str() {
-                "ollama" => Classifier::Ollama,
+                "mistral" => Classifier::Mistral,
                 "typesafe" => Classifier::TypeSafe,
                 _ => Classifier::Off,
             },
-            ollama_url: self.url.get_untracked(),
-            ollama_model: self.model.get_untracked(),
-            embedding_model: self.embedding.get_untracked(),
+            mistral_model: self.model.get_untracked(),
+            embeddings: self.embeddings.get_untracked(),
             typesafe_model: self.typesafe_model.get_untracked(),
             research: self.research.get_untracked(),
             auto_apply: self.auto_apply.get_untracked(),
@@ -95,19 +92,6 @@ fn options(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
         .iter()
         .map(|(v, l)| ((*v).to_owned(), (*l).to_owned()))
         .collect()
-}
-
-/// The installed models, with the current choice kept even when missing.
-fn model_options(models: &[String], current: &str, none: Option<&str>) -> Vec<(String, String)> {
-    let mut out: Vec<(String, String)> = none
-        .map(|label| (String::new(), label.to_owned()))
-        .into_iter()
-        .collect();
-    if !current.is_empty() && !models.iter().any(|m| m == current) {
-        out.push((current.to_owned(), format!("{current} (not installed)")));
-    }
-    out.extend(models.iter().map(|m| (m.clone(), m.clone())));
-    out
 }
 
 #[component]
@@ -168,8 +152,7 @@ pub fn AiSuggestions() -> impl IntoView {
         let key = el.value();
         el.set_value("");
         ops.run("set_typesafe_key", KeyArgs { key }, move |(): ()| {
-            ops.notice
-                .set("TypeSafe key saved privately on this Mac.".into());
+            ops.notice.set("TypeSafe key saved privately.".into());
             changed.update(|n| *n += 1);
         });
     };
@@ -178,52 +161,33 @@ pub fn AiSuggestions() -> impl IntoView {
             changed.update(|n| *n += 1);
         });
     };
-    let is = move |value: &'static str| move || d.classifier.get() == value;
-
-    let ollama_line = move || {
-        status.data.get().and_then(Result::ok).map(|s| {
-            let (text, detail, tone) = if !s.ollama_detected {
-                ("Ollama is not answering at this address.", None, "text-fg-muted")
-            } else if !s.model_available {
-                (
-                    "Ollama detected",
-                    Some(format!(
-                        "{} is not available on this Ollama. Choose an installed model or pull it with ollama pull.",
-                        s.settings.ollama_model
-                    )),
-                    "text-warning-fg",
-                )
-            } else {
-                (
-                    "Ollama detected",
-                    Some(format!("{} models installed", s.ollama_models.len())),
-                    "text-positive-fg",
-                )
-            };
-            view! {
-                <p class=cn(["flex flex-wrap gap-x-3 text-xs", tone]) role="status">
-                    <span>{text}</span>
-                    {detail.map(|d| view! { <span>{d}</span> })}
-                </p>
-            }
-        })
+    let mistral_input = NodeRef::<InputElement>::new();
+    let save_mistral = move |e: leptos::ev::SubmitEvent| {
+        e.prevent_default();
+        let Some(el) = mistral_input.get() else {
+            return;
+        };
+        let key = el.value();
+        el.set_value("");
+        ops.run("set_mistral_key", KeyArgs { key }, move |(): ()| {
+            ops.notice.set("Mistral key saved privately.".into());
+            changed.update(|n| *n += 1);
+        });
     };
-    let models = Memo::new(move |_| {
+    let forget_mistral = move |_| {
+        ops.run("forget_mistral_key", NoArgs {}, move |(): ()| {
+            changed.update(|n| *n += 1);
+        });
+    };
+    let mistral_set = move || {
         status
             .data
             .get()
             .and_then(Result::ok)
-            .map(|s| s.ollama_models)
-            .unwrap_or_default()
-    });
-    let model_choices = Signal::derive(move || model_options(&models.get(), &d.model.get(), None));
-    let embedding_choices = Signal::derive(move || {
-        model_options(
-            &models.get(),
-            &d.embedding.get(),
-            Some("None (text matches only)"),
-        )
-    });
+            .is_some_and(|s| s.mistral_key_set)
+    };
+    let is = move |value: &'static str| move || d.classifier.get() == value;
+
     let last_run = move || {
         status.data.get().and_then(Result::ok).map(|s| {
             let rows = if s.running {
@@ -259,44 +223,72 @@ pub fn AiSuggestions() -> impl IntoView {
     view! {
         <Card>
             <Eyebrow level=Heading::P>"CATEGORIES"</Eyebrow>
-            <CardTitle level=Heading::H2 class="mt-1">"AI suggestions"</CardTitle>
-            <Help text="Suggestions only fill the review inbox; nothing changes a category until you approve it, unless automatic approval is on." />
+            <CardTitle level=Heading::H2 class="mt-1">"AI"</CardTitle>
+            <Help text="Mistral AI (Paris, EU-hosted) suggests categories, writes Gisel's email lines and her daily brief, and speaks it. Suggestions only fill the review inbox; nothing changes a category until you approve it, unless automatic approval is on." />
+            {move || if mistral_set() {
+                view! {
+                    <div class="mb-5 flex flex-wrap items-center gap-2">
+                        <Help text="Mistral key is saved privately on the server." />
+                        <Button variant=Variant::Ghost size=Size::Sm disabled=Signal::derive(move || busy.get()) on_click=Callback::new(forget_mistral)>
+                            "Remove key"
+                        </Button>
+                    </div>
+                }.into_any()
+            } else {
+                view! {
+                    <form class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end" on:submit=save_mistral>
+                        <input
+                            node_ref=mistral_input
+                            class=cn([CONTROL, "sm:max-w-sm"])
+                            type="password"
+                            autocomplete="off"
+                            placeholder="Mistral API key"
+                            aria-label="Mistral API key"
+                        />
+                        <Button submit=true variant=Variant::Secondary disabled=Signal::derive(move || busy.get())>
+                            "Save Mistral key"
+                        </Button>
+                    </form>
+                }.into_any()
+            }}
             <div class=SETTINGS_GRID>
                 <Field label="Classifier" id="ai-classifier">
                     <Select
                         id="ai-classifier"
                         value=d.classifier
-                        options=Signal::derive(|| options(&[("off", "Off"), ("typesafe", "TypeSafe (Jev)"), ("ollama", "Ollama (on this Mac)")]))
+                        options=Signal::derive(|| options(&[("off", "Off"), ("typesafe", "TypeSafe (Jev)"), ("mistral", "Mistral")]))
                         disabled=Signal::derive(move || busy.get())
                     />
                 </Field>
-                <Show when=is("ollama")>
-                    <Field label="Ollama address" id="ai-url" hint="Only a local address is accepted.">
-                        <Input id="ai-url" value=d.url disabled=Signal::derive(move || busy.get()) />
-                    </Field>
-                    <Field label="Model" id="ai-model">
-                        <Select id="ai-model" value=d.model options=model_choices disabled=Signal::derive(move || busy.get()) />
-                    </Field>
-                </Show>
+                <Field label="Mistral model" id="ai-model" hint="mistral-small-latest is cheap and good at this; mistral-medium-latest is sharper.">
+                    <Input id="ai-model" value=d.model disabled=Signal::derive(move || busy.get()) />
+                </Field>
                 <Show when=is("typesafe")>
                     <Field label="TypeSafe model" id="ai-ts-model">
                         <Input id="ai-ts-model" value=d.typesafe_model disabled=Signal::derive(move || busy.get()) />
                     </Field>
                 </Show>
-                <Show when=move || d.classifier.get() != "off">
-                    <Field label="Embedding model" id="ai-embedding" hint="Finds similar past transactions for the prompt. Served by the Ollama address above.">
-                        <Select id="ai-embedding" value=d.embedding options=embedding_choices disabled=Signal::derive(move || busy.get()) />
-                    </Field>
-                </Show>
             </div>
-            <Show when=is("ollama")>
-                <div class="mb-5">{ollama_line}</div>
+            <Show when=move || d.classifier.get() != "off">
+                <label class="mb-3 flex items-start gap-2.5 text-sm leading-relaxed">
+                    <span class=CHECK_SLOT>
+                        <Checkbox
+                            checked=Signal::derive(move || d.embeddings.get())
+                            disabled=Signal::derive(move || busy.get())
+                            on_change=Callback::new(move |v| d.embeddings.set(v))
+                        />
+                    </span>
+                    <span>
+                        "Find similar past transactions"
+                        <span class=SMALL>"Uses mistral-embed to put your closest past transactions in the prompt. Off: text matches only."</span>
+                    </span>
+                </label>
             </Show>
             <Show when=is("typesafe")>
                 {move || if key_set() {
                     view! {
                         <div class="mb-5 flex flex-wrap items-center gap-2">
-                            <Help text="TypeSafe key is saved privately on this Mac." />
+                            <Help text="TypeSafe key is saved privately." />
                             <Button variant=Variant::Ghost size=Size::Sm disabled=Signal::derive(move || busy.get()) on_click=Callback::new(forget_key)>
                                 "Remove key"
                             </Button>
@@ -330,7 +322,7 @@ pub fn AiSuggestions() -> impl IntoView {
                 </span>
                 <span>
                     "Public merchant research"
-                    <span class=SMALL>"Looks up a public business name on Wikipedia when you ask, or for Jev group suggestions. Only the name leaves this Mac."</span>
+                    <span class=SMALL>"Looks up a public business name on Wikipedia when you ask, or for Jev group suggestions. Only the name is looked up."</span>
                 </span>
             </label>
             <label class=OPTION_SPACED>

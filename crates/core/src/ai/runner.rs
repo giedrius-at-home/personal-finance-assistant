@@ -35,9 +35,9 @@ const DAILY_PLACEHOLDER: &str = "daily-review-v1";
 #[derive(Clone, Copy)]
 pub struct Backends<'a> {
     pub settings: &'a AiSettings,
-    /// The Ollama classifier model (and second reviewer).
+    /// The Mistral chat model: classifier and second reviewer.
     pub generate: Option<&'a dyn Generate>,
-    /// The Ollama embedding model, when one is configured.
+    /// `mistral-embed`, when embeddings are on.
     pub embed: Option<&'a dyn Embed>,
     /// TypeSafe, when it is the classifier.
     pub choose: Option<&'a dyn Choose>,
@@ -338,15 +338,15 @@ impl Runner {
         let typesafe = settings.classifier == Classifier::TypeSafe;
         let qwen = backends.generate.map(|backend| Qwen { backend });
         let jev = backends.choose.map(|client| TypeSafe { client });
-        let ollama_check = backends.generate.map(|backend| check::Ollama { backend });
+        let model_check = backends.generate.map(|backend| check::Model { backend });
         let jev_check = backends.choose.map(|client| check::TypeSafe { client });
         let (categoriser, checker): (&dyn Categoriser, Option<&dyn Checker>) =
             match (settings.classifier, &qwen, &jev) {
                 (Classifier::TypeSafe, _, Some(jev)) => {
                     (jev, jev_check.as_ref().map(|c| c as &dyn Checker))
                 }
-                (Classifier::Ollama, Some(qwen), _) => {
-                    (qwen, ollama_check.as_ref().map(|c| c as &dyn Checker))
+                (Classifier::Mistral, Some(qwen), _) => {
+                    (qwen, model_check.as_ref().map(|c| c as &dyn Checker))
                 }
                 _ => return Ok(0),
             };
@@ -621,7 +621,7 @@ mod tests {
         db.proposal(&"a".repeat(64), 10, Some("Groceries"));
         let store = Fixture(RefCell::new(db), Cell::new(0));
         let settings = AiSettings {
-            classifier: Classifier::Ollama,
+            classifier: Classifier::Mistral,
             ..AiSettings::default()
         };
         let model = Qwen3(RefCell::new(Vec::new()));
@@ -647,7 +647,7 @@ mod tests {
             .unwrap();
         assert_eq!(p.status, ProposalStatus::Pending);
         assert_eq!(p.proposed_category.as_deref(), Some("Groceries"));
-        assert_eq!(p.model_version.as_deref(), Some("qwen3:8b"));
+        assert_eq!(p.model_version.as_deref(), Some("mistral-small-latest"));
         assert!(
             p.prompt_version
                 .as_deref()

@@ -2,6 +2,7 @@
 
 mod ai;
 mod banks;
+mod brief;
 mod email;
 mod import;
 mod nudges;

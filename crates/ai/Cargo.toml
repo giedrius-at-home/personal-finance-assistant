@@ -11,6 +11,7 @@ publish.workspace = true
 finance-core.workspace = true
 finance-secrets.workspace = true
 finance-types.workspace = true
+finance-mistral.workspace = true
 jiff = "0.2.38"
 reqwest = { version = "0.13.5", default-features = false, features = ["blocking", "json", "rustls"] }
 serde_json.workspace = true

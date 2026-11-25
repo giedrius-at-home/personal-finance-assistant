@@ -158,6 +158,7 @@ pub fn run(
     Some(match cmd {
         "dashboard" => ok(service.dashboard()),
         "day_summary" => ok(service.day_summary()),
+        "latest_brief" => ok(service.latest_brief()),
         "avoidable_groups" => ok(service.avoidable_groups()),
         "set_avoidable_group" => parse::<AvoidableArgs>(args)
             .and_then(|a| ok(service.set_avoidable_group(&a.group, a.avoidable))),
@@ -273,6 +274,10 @@ pub fn run(
             arg::<String>(args, "key").and_then(|k| ok(assistant.set_typesafe_key(&k)))
         }
         "forget_typesafe_key" => ok(assistant.forget_typesafe_key()),
+        "set_mistral_key" => {
+            arg::<String>(args, "key").and_then(|k| ok(assistant.set_mistral_key(&k)))
+        }
+        "forget_mistral_key" => ok(assistant.forget_mistral_key()),
         "suggest_categories" => ok(assistant.suggest_now(service)),
         "suggest_spending_group" => {
             arg::<String>(args, "category").and_then(|c| ok(assistant.suggest_group(service, &c)))

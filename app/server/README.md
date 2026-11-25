@@ -90,6 +90,13 @@ secret store as `web-push-vapid-key`; deleting that file makes every phone
 subscribe again. It sends only to Apple, Google, Mozilla and Microsoft push
 services, outbound over HTTPS.
 
+Gisel's daily brief: save the Mistral key in Manage → Settings → AI (it is
+stored as `mistral-api-key` in the secret store), then turn the brief on in
+Manage → Settings → Gisel's daily brief; "Make today's brief now" tries it
+at once. The audio is kept in the ledger for two weeks and served to the
+signed-in app at `/brief/audio/<date>.mp3`. The server calls
+`api.mistral.ai` outbound over HTTPS.
+
 ## Backups
 
 The server holds the ledger; the Mac keeps copies. `app/server/deploy/pull-backup.sh ubuntu@<tailnet host>`

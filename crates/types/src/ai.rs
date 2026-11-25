@@ -13,15 +13,17 @@ pub enum Classifier {
     /// No suggestions are made.
     #[default]
     Off,
-    /// A local Ollama model (`api/generate`).
-    Ollama,
+    /// Mistral AI (EU-hosted); the API key lives in the secret store.
+    /// Settings saved when this was the local Ollama read as Mistral.
+    #[serde(alias = "ollama")]
+    Mistral,
     /// TypeSafe System One ("Jev"); the API key lives in the secret store.
     #[serde(rename = "typesafe")]
     TypeSafe,
 }
 
-pub const DEFAULT_OLLAMA_URL: &str = "http://127.0.0.1:11434";
-pub const DEFAULT_OLLAMA_MODEL: &str = "qwen3:8b";
+pub const DEFAULT_MISTRAL_MODEL: &str = "mistral-small-latest";
+pub const MISTRAL_EMBED_MODEL: &str = "mistral-embed";
 pub const DEFAULT_TYPESAFE_MODEL: &str = "jev-latest";
 /// `PFA_CATEGORY_SUGGESTION_BATCH_SIZE`.
 pub const DEFAULT_BATCH_SIZE: u32 = 20;
@@ -31,13 +33,14 @@ pub const DEFAULT_BATCH_SIZE: u32 = 20;
 pub struct AiSettings {
     #[serde(default)]
     pub classifier: Classifier,
-    #[serde(default = "AiSettings::default_url")]
-    pub ollama_url: String,
+    /// The Mistral chat model that proposes categories and writes Gisel's
+    /// lines.
     #[serde(default = "AiSettings::default_model")]
-    pub ollama_model: String,
-    /// Empty: no embedding retrieval (text matches only).
+    pub mistral_model: String,
+    /// Find similar past transactions with `mistral-embed`; off: text
+    /// matches only.
     #[serde(default)]
-    pub embedding_model: String,
+    pub embeddings: bool,
     #[serde(default = "AiSettings::default_typesafe_model")]
     pub typesafe_model: String,
     /// Look up public merchant names on Wikipedia (and SEC EDGAR).
@@ -51,11 +54,8 @@ pub struct AiSettings {
 }
 
 impl AiSettings {
-    fn default_url() -> String {
-        DEFAULT_OLLAMA_URL.into()
-    }
     fn default_model() -> String {
-        DEFAULT_OLLAMA_MODEL.into()
+        DEFAULT_MISTRAL_MODEL.into()
     }
     fn default_typesafe_model() -> String {
         DEFAULT_TYPESAFE_MODEL.into()
@@ -68,13 +68,13 @@ impl AiSettings {
     pub fn classifier_model(&self) -> &str {
         match self.classifier {
             Classifier::TypeSafe => &self.typesafe_model,
-            _ => &self.ollama_model,
+            _ => &self.mistral_model,
         }
     }
 
-    /// The embedding model, when one is configured.
+    /// The embedding model, when embeddings are on.
     pub fn embedding(&self) -> Option<&str> {
-        Some(self.embedding_model.trim()).filter(|m| !m.is_empty())
+        self.embeddings.then_some(MISTRAL_EMBED_MODEL)
     }
 }
 
@@ -103,16 +103,9 @@ pub struct AiRun {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AiStatus {
     pub settings: AiSettings,
-    /// Ollama answered at the configured URL.
-    pub ollama_detected: bool,
-    /// The models Ollama has installed.
-    pub ollama_models: Vec<String>,
-    /// The configured Ollama model is among them.
+    /// Whether a Mistral API key is stored.
     #[serde(default)]
-    pub model_available: bool,
-    /// The configured embedding model (if any) is among them.
-    #[serde(default)]
-    pub embedding_available: bool,
+    pub mistral_key_set: bool,
     pub typesafe_key_set: bool,
     pub running: bool,
     #[serde(default)]

@@ -1,4 +1,4 @@
-//! Manage → Settings → Daily email: the Rafael spending email the Python
+//! Manage → Settings → Daily email: the Gisel spending email the Python
 //! service sent (its `PFA_SPENDING_EMAIL_*` and `PFA_SMTP_*` settings), with
 //! the SMTP password kept in the secret store and a "Send test" button.
 
@@ -30,7 +30,7 @@ struct Draft {
     username: RwSignal<String>,
     hour: RwSignal<String>,
     digest: RwSignal<bool>,
-    ollama: RwSignal<bool>,
+    ai_writer: RwSignal<bool>,
     alerts: RwSignal<bool>,
 }
 
@@ -47,7 +47,7 @@ impl Draft {
             username: s(),
             hour: s(),
             digest: RwSignal::new(true),
-            ollama: RwSignal::new(true),
+            ai_writer: RwSignal::new(true),
             alerts: RwSignal::new(false),
         }
     }
@@ -68,7 +68,7 @@ impl Draft {
         self.username.set(s.username.clone());
         self.hour.set(s.hour.to_string());
         self.digest.set(s.daily_digest);
-        self.ollama.set(s.ollama);
+        self.ai_writer.set(s.ai_writer);
         self.alerts.set(s.alerts);
     }
 
@@ -103,7 +103,7 @@ impl Draft {
             username: self.username.get_untracked(),
             hour,
             daily_digest: self.digest.get_untracked(),
-            ollama: self.ollama.get_untracked(),
+            ai_writer: self.ai_writer.get_untracked(),
             alerts: self.alerts.get_untracked(),
         })
     }
@@ -263,9 +263,9 @@ pub fn EmailCard() -> impl IntoView {
                             busy,
                         )}
                         {check(
-                            "Let the local Qwen model write the opening lines",
-                            "Ollama on this Mac writes two sentences without figures; every amount is added by the app. Off, or if the model is not running, fixed text is used.",
-                            draft.ollama,
+                            "Let Gisel (Mistral) write the opening lines",
+                            "Mistral writes two sentences without figures; every amount is added by the app. Off, without a Mistral key, or if Mistral is down, fixed text is used.",
+                            draft.ai_writer,
                             busy,
                         )}
                     </div>
