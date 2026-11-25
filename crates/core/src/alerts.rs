@@ -111,6 +111,9 @@ pub struct Candidate {
     pub evaluated_at: Timestamp,
     /// What to show instead of the dispatcher's generic message.
     pub message: Option<Notification>,
+    /// What the owner calls the subject: the goal's or plan line's name
+    /// (the subject id when there is none).
+    pub name: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -120,11 +123,16 @@ pub struct Decision {
     pub notify: bool,
 }
 
-/// What a notification shows.
+/// What a notification shows, and what it is about (for Rafael's voice,
+/// `crate::rafael`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Notification {
     pub title: String,
     pub body: String,
+    pub severity: AlertSeverity,
+    pub kind: SubjectKind,
+    /// The goal's or plan line's name.
+    pub name: String,
 }
 
 impl Notification {
@@ -132,7 +140,12 @@ impl Notification {
     /// first reason in the body (at most 96 and 512 characters).
     pub fn for_candidate(c: &Candidate) -> Self {
         if let Some(message) = &c.message {
-            return message.clone();
+            return Self {
+                severity: c.severity,
+                kind: c.subject_kind,
+                name: c.name.clone(),
+                ..message.clone()
+            };
         }
         let title = format!(
             "Personal finance: {}",
@@ -146,6 +159,9 @@ impl Notification {
         Self {
             title: title.chars().take(96).collect(),
             body: body.chars().take(512).collect(),
+            severity: c.severity,
+            kind: c.subject_kind,
+            name: c.name.clone(),
         }
     }
 }
@@ -250,6 +266,7 @@ fn candidate(
         fingerprint,
         evaluated_at: micros(evaluated_at),
         message: None,
+        name: subject_id.to_owned(),
     }
 }
 
@@ -302,7 +319,7 @@ pub fn goal_candidate(
             "goal is behind its contribution schedule",
         )
     };
-    candidate(
+    let mut c = candidate(
         SubjectKind::Goal,
         &goal.goal_id,
         severity,
@@ -310,7 +327,9 @@ pub fn goal_candidate(
         policy,
         evaluated_at,
         &goal_evidence(&e),
-    )
+    );
+    c.name = goal.name.clone();
+    c
 }
 
 /// Python `evaluate_budget` + `budget_alert_candidate`.
@@ -450,6 +469,7 @@ pub fn budget_line_candidates(
                 evaluated_at,
                 &evidence,
             );
+            c.name = row.name.clone();
             c.message = Some(Notification {
                 title: match severity {
                     AlertSeverity::Critical => format!("{} is over budget", row.name),
@@ -459,6 +479,9 @@ pub fn budget_line_candidates(
                 .take(96)
                 .collect(),
                 body: reason.chars().take(512).collect(),
+                severity,
+                kind: SubjectKind::Budget,
+                name: row.name.clone(),
             });
             out.push(c);
         }

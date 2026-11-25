@@ -423,14 +423,19 @@ where
         let Ok(subscriptions) = (self.subscriptions)() else {
             return Outcome::Unavailable;
         };
+        let now = jiff::Timestamp::now();
+        let (title, body) = finance_core::rafael::alert(
+            n,
+            finance_core::rafael::seed(&n.name, now.to_zoned(jiff::tz::TimeZone::UTC).date()),
+        );
         let message = PushMessage {
-            title: n.title.clone(),
-            body: n.body.clone(),
+            title,
+            body,
             url: "/".into(),
-            tag: format!("alert:{}", n.body.split(':').next().unwrap_or("")),
+            tag: format!("alert:{}", n.name),
             urgent: true,
         };
-        let now = jiff::Timestamp::now().as_second();
+        let now = now.as_second();
         self.pusher
             .push_all(&subscriptions, &message, now, &self.gone)
     }
