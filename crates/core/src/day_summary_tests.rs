@@ -121,10 +121,11 @@ fn an_over_day_names_what_pushed_it_over_and_what_could_be_skipped() {
     );
     assert_eq!(s.avoidable[1].time.as_deref(), Some("08:40"));
     let (title, body) = push_text(&s);
-    assert_eq!(title, "Today went €8.00 over the plan");
+    assert!(title.starts_with("Rafael: ") && title.contains("€8.00 over"));
     assert!(body.starts_with(
-        "Thuisbezorgd €18.50: could have been cooking at home, or picking it up on a walk."
+        "Thuisbezorgd €18.50: next time, try cooking at home, or picking it up on a walk."
     ));
+    assert!(body.ends_with("— Rafael"));
     let lines = text_lines(&s);
     assert_eq!(
         lines[0],

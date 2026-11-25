@@ -147,6 +147,9 @@ fn alert() -> Notification {
     Notification {
         title: "Personal finance: warning".into(),
         body: "Groceries: 80% of the plan is used".into(),
+        severity: finance_types::report::reporting::AlertSeverity::HeadsUp,
+        kind: finance_core::alerts::SubjectKind::Budget,
+        name: "Groceries".into(),
     }
 }
 
@@ -176,12 +179,10 @@ fn alerts_are_emailed_to_the_recipient_when_turned_on() {
     assert_eq!(smtp.to, "you@example.com");
     assert_eq!(smtp.from, "me@example.com");
     assert_eq!(smtp.host, "smtp.gmail.com");
-    assert_eq!(message.subject, "Personal finance: warning");
-    assert!(
-        message
-            .body
-            .starts_with("Groceries: 80% of the plan is used")
-    );
+    // In Rafael's voice: his title, the facts, his line and sign-off.
+    assert_eq!(message.subject, "Rafael: Groceries needs a look 👀");
+    assert!(message.body.starts_with("80% of the plan is used. "));
+    assert!(message.body.contains("— Rafael\n\nOpen your plan: "));
     assert!(message.html_body.is_none());
 }
 
@@ -195,8 +196,13 @@ fn the_alert_email_goes_through_the_mailer() {
     assert_eq!(notifier.send(&alert()), Outcome::Delivered);
     let sent = mailer.transport().messages();
     assert_eq!(sent.len(), 1);
-    assert!(sent[0].1.contains("Subject: Personal finance: warning"));
-    assert!(sent[0].1.contains("Groceries: 80% of the plan is used"));
+    // The emoji is encoded (RFC 2047); the words stay readable.
+    assert!(
+        sent[0]
+            .1
+            .contains("Subject: Rafael: Groceries needs a look =?utf-8?")
+    );
+    assert!(sent[0].1.contains("To: you@example.com"));
 }
 
 #[test]

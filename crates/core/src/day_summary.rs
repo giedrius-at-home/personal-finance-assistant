@@ -315,39 +315,10 @@ fn money(amount: Decimal, currency: &Currency) -> String {
     }
 }
 
-/// The phone notification: how far over, then the avoidable purchases with
-/// what to do instead.
+/// The phone notification, in Rafael's voice (`crate::rafael`).
 pub fn push_text(s: &DaySummary) -> (String, String) {
-    let over: Vec<String> = s
-        .totals
-        .iter()
-        .filter(|t| t.over_by > Decimal::ZERO)
-        .map(|t| money(t.over_by, &t.currency))
-        .collect();
-    let title = format!("Today went {} over the plan", over.join(" and "));
-    let mut lines: Vec<String> = s
-        .avoidable
-        .iter()
-        .take(3)
-        .map(|p| {
-            format!(
-                "{} {}: could have been {}.",
-                p.merchant,
-                money(p.amount, &p.currency),
-                p.instead
-            )
-        })
-        .collect();
-    if lines.is_empty() {
-        let groups: Vec<&str> = s
-            .totals
-            .iter()
-            .flat_map(|t| t.groups.iter().map(|g| g.group.as_str()))
-            .take(3)
-            .collect();
-        lines.push(format!("Most of it went to {}.", groups.join(", ")));
-    }
-    (title, lines.join(" "))
+    let day = s.date.parse().unwrap_or_default();
+    crate::rafael::day_summary(s, crate::rafael::seed("day", day))
 }
 
 /// The summary as plain lines, for the email.
