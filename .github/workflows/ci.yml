@@ -18,6 +18,18 @@ jobs:
     env:
       CARGO_TARGET_DIR: /home/dev/ci-target
     steps:
+      # The runner's disk is shared with dev's own builds; a full disk failed
+      # every job at checkout. Before anything else, drop this job's
+      # incremental cache, then its whole debug build, until 8 GiB are free.
+      - name: Free disk space
+        run: |
+          avail() { df --output=avail -B1G / | tail -1 | tr -d ' '; }
+          for dir in "$CARGO_TARGET_DIR/debug/incremental" "$CARGO_TARGET_DIR/debug"; do
+            [ "$(avail)" -ge 8 ] && break
+            echo "only $(avail) GiB free: removing $dir"
+            rm -rf "$dir"
+          done
+          echo "$(avail) GiB free"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Toolchain from rust-toolchain.toml
         run: |
@@ -62,6 +74,18 @@ jobs:
       CARGO_TARGET_DIR: /home/dev/deploy-target
       TRUNK: 0.22.1
     steps:
+      # The runner's disk is shared with dev's own builds; a full disk failed
+      # every job at checkout. Before anything else, drop this job's
+      # incremental cache, then its whole debug build (release stays warm), until 8 GiB are free.
+      - name: Free disk space
+        run: |
+          avail() { df --output=avail -B1G / | tail -1 | tr -d ' '; }
+          for dir in "$CARGO_TARGET_DIR/debug/incremental" "$CARGO_TARGET_DIR/debug"; do
+            [ "$(avail)" -ge 8 ] && break
+            echo "only $(avail) GiB free: removing $dir"
+            rm -rf "$dir"
+          done
+          echo "$(avail) GiB free"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Toolchain from rust-toolchain.toml
         run: |
