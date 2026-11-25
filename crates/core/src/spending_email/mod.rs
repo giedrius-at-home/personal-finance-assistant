@@ -87,6 +87,8 @@ pub struct Risk {
     pub groups: Vec<AtRiskGroup>,
     pub forecasts: Vec<DailySpendingForecast>,
     pub recent_purchases: Vec<RecentPurchase>,
+    /// Today's overspend summary, on a day that went over.
+    pub day: Option<finance_types::notify::DaySummary>,
 }
 
 /// One email (Python `SpendingEmailMessage`).
@@ -265,6 +267,7 @@ pub fn spending_risk(report: &Dashboard, snap: &Snapshot, now: &Zoned) -> Option
         groups,
         forecasts: report.daily_forecasts.clone(),
         recent_purchases: purchases,
+        day: None,
     })
 }
 
@@ -484,6 +487,9 @@ pub fn factual_summary(risk: &Risk) -> String {
             "Next month funding shortfall: {code} {}.",
             s(*amount)
         ));
+    }
+    if let Some(day) = risk.day.as_ref().filter(|d| d.over()) {
+        lines.extend(crate::day_summary::text_lines(day));
     }
     if !risk.forecasts.is_empty() {
         lines.push(forecast_summary(&risk.forecasts, false));
@@ -843,6 +849,24 @@ fn fresh(snap: &Snapshot, now: Timestamp) -> bool {
         .is_some_and(|t| now.duration_since(t) <= SignedDuration::from_secs(STALE_SECONDS))
 }
 
+/// The risk email also says what pushed today over, when it did.
+fn with_day(
+    risk: Option<Risk>,
+    report: &Dashboard,
+    store: &finance_storage::Store,
+    snap: &Snapshot,
+    now: &Zoned,
+) -> Result<Option<Risk>> {
+    let Some(mut risk) = risk else {
+        return Ok(None);
+    };
+    let ticks = crate::day_summary::load_ticks(store.connection())?;
+    let day =
+        crate::day_summary::day_summary(&crate::day_summary::limits(report), snap, now, &ticks);
+    risk.day = day.over().then_some(day);
+    Ok(Some(risk))
+}
+
 impl Service {
     pub fn email_settings(&self) -> std::result::Result<EmailSettings, String> {
         self.read_store(load_settings)
@@ -895,6 +919,25 @@ impl Service {
         })
     }
 
+    /// Whether today's risk email already went out (it carries the
+    /// overspend summary, so the summary is not emailed twice).
+    pub fn risk_email_sent_today(&self, now: Timestamp) -> std::result::Result<bool, String> {
+        let last = self.read_store(|c| {
+            let has: Option<i64> = c
+                .query_row(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'email_receipts'",
+                    [],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if has.is_none() {
+                return Ok(None);
+            }
+            receipt(c, ReceiptKind::Alert)
+        })?;
+        Ok(sent_today(last.as_ref(), now))
+    }
+
     /// Python `run_scheduled` with `DailySpendingEmailRunner`: at most one
     /// run per daily slot; a failed run keeps its lease and is retried after
     /// it expires.
@@ -932,7 +975,13 @@ impl Service {
             }
             let zoned = zoned.clone();
             let report = crate::dashboard::dashboard(store, snap, &zoned, model)?;
-            let risk = spending_risk(&report, snap, &zoned);
+            let risk = with_day(
+                spending_risk(&report, snap, &zoned),
+                &report,
+                store,
+                snap,
+                &zoned,
+            )?;
             Ok(Some((report, risk, !snap.accounts.is_empty())))
         })?;
         let Some((report, risk, has_accounts)) = built else {
@@ -991,7 +1040,13 @@ impl Service {
         let (report, risk) = self.read_forecast_at(now, |store, snap, zoned, model| {
             let zoned = zoned.clone();
             let report = crate::dashboard::dashboard(store, snap, &zoned, model)?;
-            let risk = spending_risk(&report, snap, &zoned);
+            let risk = with_day(
+                spending_risk(&report, snap, &zoned),
+                &report,
+                store,
+                snap,
+                &zoned,
+            )?;
             Ok((report, risk))
         })?;
         let plan = if risk.is_some() {

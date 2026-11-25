@@ -137,6 +137,13 @@ fn request<T: serde::de::DeserializeOwned>(args: Value) -> Result<T, String> {
     arg(args, "request")
 }
 
+#[derive(Deserialize)]
+struct AvoidableArgs {
+    group: String,
+    /// `None` puts the group back to its default.
+    avoidable: Option<bool>,
+}
+
 fn parse<T: serde::de::DeserializeOwned>(args: Value) -> Result<T, String> {
     serde_json::from_value(args).map_err(|e| e.to_string())
 }
@@ -150,6 +157,11 @@ pub fn run(
 ) -> Option<Result<Value, String>> {
     Some(match cmd {
         "dashboard" => ok(service.dashboard()),
+        "day_summary" => ok(service.day_summary()),
+        "avoidable_groups" => ok(service.avoidable_groups()),
+        "set_avoidable_group" => parse::<AvoidableArgs>(args)
+            .and_then(|a| ok(service.set_avoidable_group(&a.group, a.avoidable))),
+        "purchase_timing" => ok(service.purchase_timing()),
         "review" => ok(service.review()),
         "status" => ok(service.status()),
         "refresh" => {

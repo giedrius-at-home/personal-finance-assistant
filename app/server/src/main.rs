@@ -16,6 +16,7 @@
 
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
@@ -25,14 +26,15 @@ use finance_core::daily::SeriesForecaster;
 use finance_core::forecast_model::ForecastModel;
 use finance_core::service::Service;
 use finance_core::spending_email::{Message, Sender, Smtp};
-use finance_notify::{EmailAlerts, Mailer, Ollama};
+use finance_notify::push::{self, Http, PushAlerts, PushMessage, Pusher, Vapid};
+use finance_notify::{EmailAlerts, Fanout, Mailer, Ollama};
 use finance_secrets::{Item, Secret};
 use finance_server::access::{self, Access};
 use finance_server::auth;
 use finance_server::commands::{self, arg, ok};
 use finance_server::http::{self, Request, respond, respond_with};
 use finance_timesfm::{FILES, NAME, TimesFm};
-use finance_types::notify::EmailSettings;
+use finance_types::notify::{DaySummary, EmailSettings, PushStatus, PushSubscription};
 use serde_json::Value;
 
 /// Bank sync checks for due banks this often; each bank syncs once a day.
@@ -56,6 +58,9 @@ struct App {
     access: Option<Access>,
     dist: PathBuf,
     model_dir: PathBuf,
+    /// Web Push to the installed web app; `None` when the key could not be
+    /// made or read (logged at start).
+    pusher: Option<Arc<Pusher<Http>>>,
 }
 
 fn required(name: &str) -> Result<String> {
@@ -93,6 +98,7 @@ fn main() -> Result<()> {
         access: Access::from_env().map_err(anyhow::Error::msg)?,
         dist,
         model_dir,
+        pusher: pusher(),
     }));
     install_model(app);
     register_alerts(app);
@@ -323,6 +329,20 @@ fn run(app: &App, cmd: &str, args: Value) -> Result<Value, String> {
             .map_err(|e| e.to_string())
             .map(|()| Value::Null),
         "send_test_email" => ok(send_test_email(service)),
+        "push_status" => ok(push_status(app)),
+        "push_subscribe" => arg::<PushSubscription>(args, "subscription").and_then(|s| {
+            app.pusher
+                .as_ref()
+                .ok_or("Push is not set up on this server.")?;
+            push::check_subscription(&s)?;
+            service.save_push_subscription(&s)?;
+            ok(push_status(app))
+        }),
+        "push_unsubscribe" => arg::<String>(args, "endpoint").and_then(|e| {
+            service.forget_push_subscription(&e)?;
+            ok(push_status(app))
+        }),
+        "push_test" => ok(push_test(app)),
         "forecast_model_status" => {
             let available = finance_timesfm::is_complete(&app.model_dir);
             let run = service.forecast_model_status().unwrap_or_default();
@@ -366,12 +386,40 @@ fn send_test_email(service: &Service) -> Result<String, String> {
     Ok(format!("Test email sent to {}.", settings.recipient))
 }
 
-/// Alerts go out by email (Manage → Settings → Email alerts); the phone
-/// shows them as they arrive. Every evaluation (after a bank sync, after a
-/// refresh) records how delivery went.
+/// The server's VAPID key from the secret store, made on first start.
+fn pusher() -> Option<Arc<Pusher<Http>>> {
+    let vapid = match finance_secrets::get(Item::VapidKey) {
+        Ok(Some(stored)) => Vapid::from_pkcs8(stored.expose()),
+        Ok(None) => Vapid::generate().and_then(|(vapid, stored)| {
+            finance_secrets::set(Item::VapidKey, &Secret::new(stored))
+                .map_err(|e| e.to_string())?;
+            Ok(vapid)
+        }),
+        Err(e) => Err(e.to_string()),
+    };
+    match vapid.and_then(|v| Ok(Pusher::new(v, Http::new()?))) {
+        Ok(p) => Some(Arc::new(p)),
+        Err(e) => {
+            eprintln!("web push: off ({e})");
+            None
+        }
+    }
+}
+
+fn forget_gone(app: &App, s: &PushSubscription) {
+    eprintln!(
+        "web push: forgetting a device at {}",
+        finance_core::push::device_label(&s.endpoint)
+    );
+    let _ = app.service.forget_push_subscription(&s.endpoint);
+}
+
+/// Alerts go to every phone that turned on notifications, and by email when
+/// "Email budget and goal alerts" is on. Every evaluation (after a bank
+/// sync, after a refresh) records how delivery went.
 fn register_alerts(app: &'static App) {
-    app.service
-        .set_alert_notifier(std::sync::Arc::new(EmailAlerts::new(
+    let mut channels: Vec<Box<dyn finance_core::alerts::Notifier + Send + Sync>> =
+        vec![Box::new(EmailAlerts::new(
             move || app.service.email_settings(),
             |smtp: &Smtp, message: &Message| {
                 let sent = StoredMailer(smtp.clone()).send(message);
@@ -380,7 +428,99 @@ fn register_alerts(app: &'static App) {
                 }
                 sent
             },
+        ))];
+    if let Some(pusher) = &app.pusher {
+        channels.push(Box::new(PushAlerts::new(
+            pusher.clone(),
+            move || app.service.push_subscriptions(),
+            move |s: &PushSubscription| forget_gone(app, s),
         )));
+    }
+    app.service.set_alert_notifier(Arc::new(Fanout(channels)));
+}
+
+/// The evening overspend summary: to every phone, and by email when "Email
+/// budget and goal alerts" is on and today's risk email did not carry it.
+fn deliver_summary(app: &App, summary: &DaySummary, now: jiff::Timestamp) -> bool {
+    let (title, body) = finance_core::day_summary::push_text(summary);
+    let mut sent = false;
+    if let Some(pusher) = &app.pusher {
+        let devices = app.service.push_subscriptions().unwrap_or_default();
+        let message = PushMessage {
+            title: title.clone(),
+            body,
+            url: "/".into(),
+            tag: "day-summary".into(),
+            urgent: false,
+        };
+        sent |= pusher.push_all(&devices, &message, now.as_second(), &|s| {
+            forget_gone(app, s)
+        }) == finance_core::alerts::Outcome::Delivered;
+    }
+    let emailed = app.service.email_settings().and_then(|settings| {
+        if !settings.alerts || app.service.risk_email_sent_today(now)? {
+            return Ok(false);
+        }
+        let settings =
+            finance_core::spending_email::validate(settings).map_err(|e| e.to_string())?;
+        let mut text = finance_core::day_summary::text_lines(summary).join("\n");
+        text.push_str(&format!(
+            "\n\nOpen your plan: {}\n",
+            finance_core::spending_email::PLAN_LINK
+        ));
+        StoredMailer(Smtp::from_settings(&settings)).send(&Message {
+            subject: title,
+            body: text,
+            html_body: None,
+        })?;
+        Ok(true)
+    });
+    match emailed {
+        Ok(e) => sent |= e,
+        Err(e) => eprintln!("day summary email failed: {e}"),
+    }
+    sent
+}
+
+fn push_status(app: &App) -> Result<PushStatus, String> {
+    Ok(PushStatus {
+        public_key: app.pusher.as_ref().map(|p| p.public_key()),
+        devices: app
+            .service
+            .push_subscriptions()?
+            .iter()
+            .map(|s| finance_core::push::device_label(&s.endpoint))
+            .collect(),
+    })
+}
+
+/// The card's "Send a test": one notification to every device.
+fn push_test(app: &App) -> Result<String, String> {
+    let pusher = app
+        .pusher
+        .as_ref()
+        .ok_or("Push is not set up on this server.")?;
+    let devices = app.service.push_subscriptions()?;
+    if devices.is_empty() {
+        return Err("Turn on notifications on a phone first.".into());
+    }
+    let message = PushMessage {
+        title: "Finance".into(),
+        body: "Notifications work on this device.".into(),
+        url: "/".into(),
+        tag: "test".into(),
+        urgent: true,
+    };
+    let outcome = pusher.push_all(
+        &devices,
+        &message,
+        jiff::Timestamp::now().as_second(),
+        &|s| forget_gone(app, s),
+    );
+    match outcome {
+        finance_core::alerts::Outcome::Delivered => Ok("Test notification sent.".into()),
+        _ => Err("The push service did not take the test notification.".into()),
+    }
 }
 
 /// Give the service the forecast model when its weights are on the server.
@@ -445,6 +585,15 @@ fn schedule(app: &'static App) {
             });
             if let Err(e) = outcome {
                 eprintln!("spending email failed: {e}");
+            }
+            let now = jiff::Timestamp::now();
+            match app
+                .service
+                .run_day_summary(now, &|summary| deliver_summary(app, summary, now))
+            {
+                Ok(true) => eprintln!("day summary sent"),
+                Ok(false) => {}
+                Err(e) => eprintln!("day summary failed: {e}"),
             }
             std::thread::sleep(EMAIL_EVERY);
         }

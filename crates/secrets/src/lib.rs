@@ -30,6 +30,9 @@ pub enum Item {
     TypeSafeApiKey,
     /// The token the Finance server asks of the app and the phone.
     ServerToken,
+    /// The server's Web Push (VAPID) signing key, PKCS#8 in base64url; made
+    /// on first use.
+    VapidKey,
 }
 
 /// The banks with a stored consent.
@@ -64,6 +67,7 @@ impl Item {
             Self::SmtpPassword => "smtp-password",
             Self::TypeSafeApiKey => "typesafe-api-key",
             Self::ServerToken => "server-token",
+            Self::VapidKey => "web-push-vapid-key",
         }
     }
 }

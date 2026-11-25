@@ -50,6 +50,38 @@ fn dashboard(service: State<'_, Service>) -> Result<Dashboard, String> {
     traced("dashboard", service.dashboard())
 }
 
+/// Overview → Today: the overspend summary.
+#[tauri::command(async)]
+fn day_summary(service: State<'_, Service>) -> Result<finance_types::notify::DaySummary, String> {
+    traced("day_summary", service.day_summary())
+}
+
+#[tauri::command(async)]
+fn avoidable_groups(
+    service: State<'_, Service>,
+) -> Result<Vec<finance_types::notify::AvoidableGroup>, String> {
+    traced("avoidable_groups", service.avoidable_groups())
+}
+
+#[tauri::command(async)]
+fn set_avoidable_group(
+    service: State<'_, Service>,
+    group: String,
+    avoidable: Option<bool>,
+) -> Result<Vec<finance_types::notify::AvoidableGroup>, String> {
+    traced(
+        "set_avoidable_group",
+        service.set_avoidable_group(&group, avoidable),
+    )
+}
+
+#[tauri::command(async)]
+fn purchase_timing(
+    service: State<'_, Service>,
+) -> Result<finance_types::bank::PurchaseTiming, String> {
+    traced("purchase_timing", service.purchase_timing())
+}
+
 #[tauri::command(async)]
 fn review(service: State<'_, Service>) -> Result<ReviewReport, String> {
     traced("review", service.review())
@@ -546,6 +578,10 @@ fn main() {
     let local: Box<dyn Fn(tauri::ipc::Invoke) -> bool + Send + Sync> =
         Box::new(tauri::generate_handler![
             dashboard,
+            day_summary,
+            avoidable_groups,
+            set_avoidable_group,
+            purchase_timing,
             review,
             search_transactions,
             refresh,

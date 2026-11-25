@@ -1518,9 +1518,12 @@ dependencies = [
 name = "finance-notify"
 version = "0.3.0"
 dependencies = [
+ "aws-lc-rs",
+ "base64 0.23.1",
  "finance-core",
  "finance-secrets",
  "finance-types",
+ "jiff",
  "lettre",
  "reqwest",
  "serde_json",

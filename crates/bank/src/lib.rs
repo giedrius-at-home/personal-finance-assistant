@@ -476,9 +476,13 @@ impl Syncer {
         let Ok(runs) = service.bank_runs() else {
             return Vec::new();
         };
+        // The extra syncs after the owner's usual buying hours.
+        let slots = service.sync_slots(now).unwrap_or_default();
         let mut results = Vec::new();
         for (bank, _) in BANKS {
-            let due = runs.get(bank).is_none_or(|run| bank_sync::is_due(run, now));
+            let due = runs
+                .get(bank)
+                .is_none_or(|run| finance_core::timing::is_due_adaptive(run, now, &slots));
             if !due || !matches!(consent(bank), Ok(Some(_))) {
                 continue;
             }

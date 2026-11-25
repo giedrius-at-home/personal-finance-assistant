@@ -6,6 +6,8 @@
 //! to the mail server and to Ollama. Both block, so callers run them on
 //! their own thread, never on the async runtime.
 
+pub mod push;
+
 use std::io::Read;
 use std::time::Duration;
 
@@ -175,6 +177,33 @@ where
             Ok(()) => Outcome::Delivered,
             Err(_) => Outcome::Failed,
         }
+    }
+}
+
+/// Every alert to each notifier (email and push on the server); the record
+/// keeps the best outcome: `delivered` if any delivered, then `failed`,
+/// `unavailable`, and `disabled` only when every channel is off.
+pub struct Fanout(pub Vec<Box<dyn Notifier + Send + Sync>>);
+
+impl std::fmt::Debug for Fanout {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Fanout({})", self.0.len())
+    }
+}
+
+impl Notifier for Fanout {
+    fn send(&self, message: &Notification) -> Outcome {
+        let rank = |o: Outcome| match o {
+            Outcome::Delivered => 3,
+            Outcome::Failed => 2,
+            Outcome::Unavailable => 1,
+            Outcome::Disabled => 0,
+        };
+        self.0
+            .iter()
+            .map(|n| n.send(message))
+            .max_by_key(|o| rank(*o))
+            .unwrap_or(Outcome::Unavailable)
     }
 }
 

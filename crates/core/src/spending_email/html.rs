@@ -273,6 +273,57 @@ fn forecast_section(f: &DailySpendingForecast) -> String {
     )
 }
 
+/// "What pushed today over": the day against its allowance, then the
+/// purchases that could have been skipped and what to do instead.
+fn day_section(day: &finance_types::notify::DaySummary) -> String {
+    let totals: String = day
+        .totals
+        .iter()
+        .filter(|t| t.over_by > Decimal::ZERO)
+        .map(|t| {
+            let code = t.currency.code.as_str();
+            format!(
+                "<p style=\"font-size:13px;line-height:1.7;margin:0 0 10px\">Spent today: <b>{}</b> \
+                 · the plan allows <b>{}</b> a day · <b>{} over</b></p>",
+                money(t.spent, code),
+                money(t.allowance, code),
+                money(t.over_by, code)
+            )
+        })
+        .collect();
+    let rows: String = day
+        .avoidable
+        .iter()
+        .map(|p| {
+            format!(
+                "<tr><td style=\"padding:10px 0;border-bottom:1px solid {LINE}\">{}{}<br>\
+                 <span style=\"font-size:11px;color:{FG_MUTED}\">Instead: {}</span></td>\
+                 <td align=\"right\" style=\"padding:10px 0;border-bottom:1px solid {LINE}\"><b>{}</b></td></tr>",
+                escape(&p.merchant),
+                p.time
+                    .as_ref()
+                    .map(|t| format!(" <span style=\"color:{FG_MUTED}\">{}</span>", escape(t)))
+                    .unwrap_or_default(),
+                escape(&p.instead),
+                money(p.amount, &p.currency.code)
+            )
+        })
+        .collect();
+    let skipped = if rows.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "<div style=\"font-size:10px;letter-spacing:2px;color:{FG_MUTED};margin-top:8px\">COULD HAVE BEEN AVOIDED</div>\
+             <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" style=\"font-size:13px\">{rows}</table>"
+        )
+    };
+    format!(
+        "<tr><td style=\"padding:25px 28px;border-bottom:1px solid {BORDER}\">\
+         <div style=\"font-size:10px;letter-spacing:2px;color:{FG_MUTED}\">TODAY</div>\
+         <h2 style=\"font-size:23px;margin:9px 0\">What pushed today over.</h2>{totals}{skipped}</td></tr>"
+    )
+}
+
 fn absolute_max(values: &[Decimal]) -> Decimal {
     values
         .iter()
@@ -287,6 +338,9 @@ fn absolute_max(values: &[Decimal]) -> Decimal {
 /// Python `render_spending_email`.
 pub fn render(risk: &Risk, intro: &str, sample: bool, digest: bool) -> String {
     let mut sections = Vec::new();
+    if let Some(today) = risk.day.as_ref().filter(|d| d.over()) {
+        sections.push(day_section(today));
+    }
     for window in risk.windows.iter().take(3) {
         let s = &window.signal;
         let code = window.currency.code.as_str();
