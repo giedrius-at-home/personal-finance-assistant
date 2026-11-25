@@ -579,8 +579,9 @@ fn deliver_brief(app: &App, brief: &Brief, now: jiff::Timestamp) -> bool {
         return false;
     };
     let devices = app.service.push_subscriptions().unwrap_or_default();
-    let mut body: String = brief.script.chars().take(160).collect();
-    if brief.script.chars().count() > 160 {
+    let words = finance_types::notify::plain_script(&brief.script);
+    let mut body: String = words.chars().take(160).collect();
+    if words.chars().count() > 160 {
         body.push('…');
     }
     let who = if brief.persona.is_empty() {

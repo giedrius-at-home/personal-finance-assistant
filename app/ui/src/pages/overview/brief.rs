@@ -3,7 +3,7 @@
 //! `/?brief=play`: the page scrolls here and starts playing when the browser
 //! allows it (an installed iPhone app needs the tap on Play).
 
-use finance_types::notify::Brief;
+use finance_types::notify::{Brief, plain_script};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use wasm_bindgen::prelude::*;
@@ -115,7 +115,7 @@ pub fn OverviewBrief() -> impl IntoView {
                 })
             }}
             {no_audio}
-            <p class=format!("mt-3 {MUTED}")>{b.script.clone()}</p>
+            <p class=format!("mt-3 {MUTED}")>{plain_script(&b.script)}</p>
             {(!habits.is_empty()).then(|| view! {
                 <ul class="mt-3 grid gap-1">
                     {habits.into_iter().map(|h| view! { <li class=HINT>{h}</li> }).collect_view()}

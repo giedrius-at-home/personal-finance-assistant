@@ -200,7 +200,9 @@ fn the_model_may_only_use_numbers_from_the_facts() {
 
 #[test]
 fn the_fixed_script_is_honest_about_habits() {
-    let (title, script) = fixed_brief(&today_facts(), "Gisel");
+    let (title, tagged) = fixed_brief(&today_facts(), "Gisel");
+    assert!(tagged.starts_with("[emotion=warm]Hola, Gisel here."));
+    let script = plain_script(&tagged);
     assert_eq!(title, "€160 left, €27 a day");
     assert!(script.starts_with("Hola, Gisel here. Vale, you have €160 left"));
     assert!(script.contains("Ojo, Going out is over its limit"));
@@ -208,8 +210,39 @@ fn the_fixed_script_is_honest_about_habits() {
     assert!(script.contains("It is changing, bueno."));
     assert!(!script.to_lowercase().contains("lesson"));
     // Every number in the fixed script passes the model's check too.
-    let reply = serde_json::json!({ "title": title, "script": script }).to_string();
+    let reply = serde_json::json!({ "title": title, "script": tagged }).to_string();
     assert!(parse_brief(&reply, &today_facts(), BriefLength::Normal).is_ok());
+}
+
+#[test]
+fn delivery_tags_reach_the_voice_and_unknown_ones_are_refused() {
+    let f = today_facts();
+    let script = "[emotion=warm]Hola, Gisel here. Vale, you have €160 left for the next 6 days, about €27 a day. [sigh] Ojo, coffee is at 90 percent, and rent of €950 goes out Friday. [emotion=playful]But hombre, your coffee habit is actually changing: €20 this week against €36 usually, two weeks in a row. [chuckle] Make it at home once more today; [pace=slow]nobody needs a new life, just a slightly better Wednesday.";
+    let reply = |s: &str| serde_json::json!({ "title": "€160 left", "script": s }).to_string();
+    let (_, kept) = parse_brief(&reply(script), &f, BriefLength::Normal).unwrap();
+    assert_eq!(kept, script);
+    assert_eq!(
+        plain_script("[emotion=warm]Hola. [sigh] Ojo , rent [pace=slow]goes out."),
+        "Hola. Ojo, rent goes out."
+    );
+    for bad in [
+        "[emotion=furious]",
+        "[whispers]",
+        "[pace=warp]",
+        "[note: 12]",
+    ] {
+        let s = script.replacen("[sigh]", bad, 1);
+        assert!(
+            parse_brief(&reply(&s), &f, BriefLength::Normal).is_err(),
+            "{bad}"
+        );
+    }
+    let loose = script.replacen("[sigh]", "sigh]", 1);
+    assert!(parse_brief(&reply(&loose), &f, BriefLength::Normal).is_err());
+    let many = format!("{}{script}", "[breath] ".repeat(6));
+    assert!(parse_brief(&reply(&many), &f, BriefLength::Normal).is_err());
+    let prompt = system_prompt(&BriefSettings::default());
+    assert!(prompt.contains("wistful") && prompt.contains("[chuckle]") && !prompt.contains('{'));
 }
 
 struct Failing;
@@ -231,7 +264,7 @@ fn a_failing_writer_falls_back_to_the_fixed_script() {
     };
     let (_, script, source) = compose(&today_facts(), &rafael, &Failing);
     assert_eq!(source, "fixed");
-    assert!(script.starts_with("Hola, Rafael here."));
+    assert!(plain_script(&script).starts_with("Hola, Rafael here."));
 }
 
 #[test]
@@ -393,11 +426,18 @@ fn personas_bring_their_own_voice() {
     // Settings saved before personas still load, as Gisel.
     let old: BriefSettings = serde_json::from_str(r#"{"enabled":true,"hour":7}"#).unwrap();
     assert_eq!(old.persona, Persona::Gisel);
-    assert_eq!(old.expressiveness, 14);
+    assert_eq!(old.expressiveness, 20);
     assert!(old.match_mood);
     assert!(
         validate(BriefSettings {
-            expressiveness: 25,
+            expressiveness: 45,
+            ..BriefSettings::default()
+        })
+        .is_ok()
+    );
+    assert!(
+        validate(BriefSettings {
+            expressiveness: 51,
             ..BriefSettings::default()
         })
         .is_err()
