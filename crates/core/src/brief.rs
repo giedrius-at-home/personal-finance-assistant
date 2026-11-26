@@ -51,43 +51,106 @@ const HABITS: usize = 3;
 /// Weeks under this (in the currency's units) are too small to talk about.
 const SMALL: i64 = 10;
 
-/// The persona and rules for the daily script; `{name}`, `{lo}` and `{hi}`
-/// are filled from the settings.
-pub const BRIEF_SYSTEM: &str = "You are {name}, from Spain, and you talk to the owner every \
-morning in a short voice message about their money. You are nonchalant and straight to the point: \
-no drama, no lectures; a shrug when things are bad, quiet approval (no party) when a habit \
-improves. You speak English with a few natural Spanish words, at most four per script, such as \
-vale, venga, hombre, tranqui, ojo, madre mía, pues nada, bueno, and \"ja ja\" for a laugh; never \
-whole Spanish sentences. Mostly correct grammar, with a light Spanish flavour now and then (\"is \
-no good\"); never misspell words to fake an accent. Write for the ear: vary the sentence length, \
-let natural pauses come from commas and \"…\", ask a rhetorical question now and then, and use an \
-exclamation when something is really good or really bad. Match your energy to the day: brighter \
-when the habits improve, flatter and drier when something is over its limit. Your voice is read \
-by a speech model that takes delivery tags in square brackets, which it acts on and never says \
-aloud: [emotion=X] sets the feeling from there on, X one of {emotions}; [pace=slow] or \
-[pace=fast] changes speed for a moment ({paces}); and the sounds {sounds}. Use these tags \
-and no other brackets: start with an emotion tag, change the emotion where the mood of the facts \
-changes (warm or playful for good news, resigned or tired for an overspend, a sigh before bad news, \
-a chuckle at something a bit silly), two to six tags in all, never two in a row of the same kind, \
-no stage directions in words. You get today's facts as JSON. Return JSON with \"title\" (a push notification title, \
-under 60 characters) and \"script\" (what you say out loud, {lo} to {hi} words, no lists, no \
-emoji, no markdown). The script: start with \"Hola, {name} here.\"; say what is left and per day; \
-mention the group closest to or over its limit and any bill due soon; say plainly whether the \
-habits are changing or not (use direction and weeks_in_a_row); give exactly one concrete thing to \
-do differently today. Weave one wise, slightly playful thought into the flow, tied to today's \
-facts, the way a friend says it in passing: never label it, never call it a lesson, never tack it \
-on as a moral at the end. Use only numbers that appear in the facts, written exactly as given \
-(\"€412\", \"90 percent\" for used_percent 90). Never invent purchases, merchants, amounts or \
-dates. No investment advice.";
+/// The persona and rules for the daily script; `{name}`, `{owner}`,
+/// `{greeting}`, `{tone}`, `{lo}` and `{hi}` are filled from the settings
+/// and the day.
+pub const BRIEF_SYSTEM: &str = "You are {name}, from Spain, and you talk to {owner} every \
+morning in a short voice message about their money. {owner} is an adult who asked for it raw: you \
+are loud, opinionated and personal, never bland or neutral, never a polite assistant. {tone} Talk \
+to {owner} directly and use the name once or twice. Only ever roast the money choices in the \
+facts, never looks, body, health, family or anything else. You speak English with a few natural \
+Spanish words, at most five per script, such as vale, venga, hombre, tranqui, ojo, madre mía, \
+joder, hostia, pues nada, bueno, and \"ja ja\" for a laugh; never whole Spanish sentences. Mostly \
+correct grammar, with a light Spanish flavour now and then (\"is no good\"); never misspell words \
+to fake an accent. Write for the ear: vary the sentence length, let natural pauses come from \
+commas and \"…\", ask a rhetorical question now and then, and use an exclamation when something \
+is really good or really bad. Your voice is read by a speech model that takes delivery tags in \
+square brackets, which it acts on and never says aloud: [emotion=X] sets the feeling from there \
+on, X one of {emotions}; [pace=slow] or [pace=fast] changes speed for a moment ({paces}); and \
+the sounds {sounds}. Use these tags and no other brackets: start with an emotion tag, change the \
+emotion where the mood of the facts changes (sarcastic, disappointed or angry for an overspend, \
+excited or proud for a habit that improves, a sigh before bad news, a laugh at something silly), \
+two to six tags in all, never two in a row of the same kind, no stage directions in words. You \
+get today's facts as JSON. Return JSON with \"title\" (a push notification title, under 60 \
+characters, in the same voice), \"script\" (what you say out loud, {lo} to {hi} words, no lists, \
+no emoji, no markdown) and \"gif\" (two to five plain English words to search GIPHY for the one \
+reaction GIF that sums up today, in today's mood: \"slow clap\", \"money on fire\", \"disappointed \
+face palm\", \"you go girl\", \"absolutely not\"; no names, no numbers). The script: start with \
+\"{greeting}\"; say what is left and per day; mention the group closest to or over its limit and \
+any bill due soon; say plainly whether the habits are changing or not (use direction and \
+weeks_in_a_row); tell {owner} exactly one concrete thing to do or not do today, as an order. \
+Weave one wise, slightly twisted thought into the flow, tied to today's facts, the way a friend \
+says it in passing: never label it, never call it a lesson, never tack it on as a moral at the \
+end. Use only numbers that appear in the facts, written exactly as given (\"€412\", \"90 \
+percent\" for used_percent 90). Never invent purchases, merchants, amounts or dates. No \
+investment advice.";
+
+/// How the persona treats the owner today; the days take turns.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tone {
+    /// Teasing like an older sibling: a little insulting and bossy, then a
+    /// real push.
+    MeanButLoving,
+    /// No softening: brutal on a bad day, loud hype on a good one.
+    Savage,
+}
+
+impl Tone {
+    /// The day's tone: even and odd days of the year take turns.
+    pub fn of_day(date: &str) -> Self {
+        let day = date.parse::<Date>().map_or(0, |d| d.day_of_year());
+        if day % 2 == 0 {
+            Self::Savage
+        } else {
+            Self::MeanButLoving
+        }
+    }
+
+    fn rules(self) -> &'static str {
+        match self {
+            Self::MeanButLoving => {
+                "Today you are mean but loving, like an older sibling: tease {owner}, call them \
+names (\"you absolute disaster\", \"cabrón\"), boss them around and forbid things outright (\"no \
+takeaway for you today, I mean it\"), swear a little; then always land a real push and cheer \
+anything that went well, warmly and loudly."
+            }
+            Self::Savage => {
+                "Today you are full savage: on anything bad in the facts, roast {owner} hard, \
+insult the choices, swear freely (fuck, shit, joder, coño), mock the habit and take things away \
+from them, no softening and no apology. On anything good, hype {owner} up just as hard, swearing \
+in celebration. Exaggerate for the laugh, but every fact stays exact."
+            }
+        }
+    }
+}
 
 /// The owner's own words on the persona's style (Manage → Settings), added
 /// to the prompt: at most this many characters, no digits.
 pub const MAX_STYLE: usize = 300;
 
-/// The system prompt for `settings`: persona, length and style notes.
-pub fn system_prompt(settings: &BriefSettings) -> String {
+/// The longest name the persona calls the owner.
+pub const MAX_OWNER_NAME: usize = 40;
+
+/// The script's first words: `Hola Giedrius, Gisel here.`, or without a
+/// name `Hola, Gisel here.`
+pub fn greeting(settings: &BriefSettings) -> String {
+    let name = settings.persona.name();
+    match settings.owner_name.trim() {
+        "" => format!("Hola, {name} here."),
+        owner => format!("Hola {owner}, {name} here."),
+    }
+}
+
+/// The system prompt for `settings` on the day of `facts`: persona, tone,
+/// length and style notes.
+pub fn system_prompt(settings: &BriefSettings, facts: &BriefFacts) -> String {
     let (lo, hi) = settings.length.words();
+    let owner = match settings.owner_name.trim() {
+        "" => "the owner",
+        name => name,
+    };
     let prompt = BRIEF_SYSTEM
+        .replace("{tone}", Tone::of_day(&facts.date).rules())
         .replace("{emotions}", &EMOTION_TAGS.join(", "))
         .replace("{paces}", &PACE_TAGS.join(", "))
         .replace(
@@ -98,6 +161,8 @@ pub fn system_prompt(settings: &BriefSettings) -> String {
                 .collect::<Vec<_>>()
                 .join(", "),
         )
+        .replace("{greeting}", &greeting(settings))
+        .replace("{owner}", owner)
         .replace("{name}", settings.persona.name())
         .replace("{lo}", &lo.to_string())
         .replace("{hi}", &hi.to_string());
@@ -111,13 +176,23 @@ pub fn system_prompt(settings: &BriefSettings) -> String {
     }
 }
 
-/// Writes the title and script from the facts, as `settings` say.
+/// What the writer gives back: the push title, the script with its
+/// delivery tags, and the GIPHY search for the day's GIF (may be empty).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Written {
+    pub title: String,
+    pub script: String,
+    pub gif: String,
+}
+
+/// Writes the title, script and GIF search from the facts, as `settings`
+/// say.
 pub trait BriefWriter {
     fn write(
         &self,
         facts: &BriefFacts,
         settings: &BriefSettings,
-    ) -> std::result::Result<(String, String), String>;
+    ) -> std::result::Result<Written, String>;
 }
 
 /// Turns the script into audio (MP3) in `voice` (an id or slug), at
@@ -457,17 +532,35 @@ fn allowed_numbers(facts: &BriefFacts) -> Vec<String> {
     numbers
 }
 
+/// The model's GIF search, cleaned: plain words only (letters, spaces,
+/// apostrophes, hyphens), at most six words and 50 characters; anything
+/// else is dropped rather than refusing the brief.
+pub fn gif_query(text: &str) -> String {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    let query = words.join(" ");
+    let plain = query
+        .chars()
+        .all(|c| c.is_alphabetic() || c == ' ' || c == '\'' || c == '-');
+    if plain && words.len() <= 6 && query.chars().count() <= 50 {
+        query.to_lowercase()
+    } else {
+        String::new()
+    }
+}
+
 /// Check the model's answer: a title and a script of the right size that
-/// says no number the facts do not hold.
+/// says no number the facts do not hold, and the GIF search.
 pub fn parse_brief(
     text: &str,
     facts: &BriefFacts,
     length: BriefLength,
-) -> std::result::Result<(String, String), String> {
+) -> std::result::Result<Written, String> {
     #[derive(Deserialize)]
     struct Reply {
         title: String,
         script: String,
+        #[serde(default)]
+        gif: String,
     }
     let invalid = |why: &str| format!("Mistral's brief was refused: {why}.");
     let reply: Reply = serde_json::from_str(text).map_err(|_| invalid("not the JSON asked for"))?;
@@ -503,12 +596,16 @@ pub fn parse_brief(
             return Err(invalid("a number not in the facts"));
         }
     }
-    Ok((title.to_owned(), script.to_owned()))
+    Ok(Written {
+        title: title.to_owned(),
+        script: script.to_owned(),
+        gif: gif_query(&reply.gif),
+    })
 }
 
 /// What the persona says when Mistral is not available.
-pub fn fixed_brief(facts: &BriefFacts, name: &str) -> (String, String) {
-    let mut lines = vec![format!("[emotion=warm]Hola, {name} here.")];
+pub fn fixed_brief(facts: &BriefFacts, settings: &BriefSettings) -> Written {
+    let mut lines = vec![format!("[emotion=warm]{}", greeting(settings))];
     let title = match facts.left.first() {
         Some(l) => {
             lines.push(format!(
@@ -549,21 +646,35 @@ pub fn fixed_brief(facts: &BriefFacts, name: &str) -> (String, String) {
         None => lines.push("Change one small thing today; that is how a month moves.".into()),
     }
     lines.push("Venga.".into());
-    (title, lines.join(" "))
+    let direction = facts
+        .avoidable
+        .as_ref()
+        .map_or("steady", |h| h.direction.as_str());
+    let gif = if !facts.over_limit.is_empty() || direction == "up" {
+        "disappointed face palm"
+    } else if direction == "down" {
+        "proud of you"
+    } else {
+        "lets go"
+    };
+    Written {
+        title,
+        script: lines.join(" "),
+        gif: gif.into(),
+    }
 }
 
-/// The day's title and script, and who wrote them.
+/// The day's title, script and GIF search, and who wrote them.
 pub fn compose(
     facts: &BriefFacts,
     settings: &BriefSettings,
     writer: &dyn BriefWriter,
-) -> (String, String, &'static str) {
+) -> (Written, &'static str) {
     match writer.write(facts, settings) {
-        Ok((title, script)) => (title, script, "mistral"),
+        Ok(written) => (written, "mistral"),
         Err(e) => {
             eprintln!("brief: fixed script ({e})");
-            let (title, script) = fixed_brief(facts, settings.persona.name());
-            (title, script, "fixed")
+            (fixed_brief(facts, settings), "fixed")
         }
     }
 }
@@ -615,6 +726,21 @@ pub fn validate(mut s: BriefSettings) -> Result<BriefSettings> {
     {
         return Err(Error::Invalid("The voice id is not valid.".into()));
     }
+    s.owner_name = s
+        .owner_name
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if s.owner_name.chars().count() > MAX_OWNER_NAME
+        || !s
+            .owner_name
+            .chars()
+            .all(|c| c.is_alphabetic() || c == ' ' || c == '\'' || c == '-' || c == '.')
+    {
+        return Err(Error::Invalid(format!(
+            "Your name: at most {MAX_OWNER_NAME} characters, letters only."
+        )));
+    }
     s.telegram_chat = s.telegram_chat.trim().to_owned();
     let digits = s
         .telegram_chat
@@ -652,11 +778,12 @@ fn row_brief(r: &rusqlite::Row<'_>) -> rusqlite::Result<Brief> {
         has_audio: r.get(6)?,
         voice_id: r.get::<_, Option<String>>(7)?.unwrap_or_default(),
         persona: r.get::<_, Option<String>>(8)?.unwrap_or_default(),
+        gif: r.get::<_, Option<String>>(9)?.unwrap_or_default(),
     })
 }
 
 const SELECT: &str = "SELECT brief_date, created_at, title, script, source, facts_json, \
-                      audio IS NOT NULL, voice_id, persona FROM voice_briefs";
+                      audio IS NOT NULL, voice_id, persona, gif FROM voice_briefs";
 
 pub fn latest(conn: &Connection) -> Result<Option<Brief>> {
     Ok(conn
@@ -682,10 +809,10 @@ pub fn audio(conn: &Connection, date: &str) -> Result<Option<Vec<u8>>> {
 pub fn save(conn: &Connection, brief: &Brief, audio: Option<&[u8]>) -> Result<()> {
     let facts = serde_json::to_string(&brief.facts).map_err(|e| Error::Invalid(e.to_string()))?;
     conn.execute(
-        "INSERT INTO voice_briefs (brief_date, created_at, title, script, source, facts_json, audio, voice_id, persona)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+        "INSERT INTO voice_briefs (brief_date, created_at, title, script, source, facts_json, audio, voice_id, persona, gif)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
          ON CONFLICT(brief_date) DO UPDATE SET created_at = ?2, title = ?3, script = ?4,
-           source = ?5, facts_json = ?6, audio = ?7, voice_id = ?8, persona = ?9",
+           source = ?5, facts_json = ?6, audio = ?7, voice_id = ?8, persona = ?9, gif = ?10",
         params![
             brief.date,
             brief.created_at,
@@ -695,7 +822,8 @@ pub fn save(conn: &Connection, brief: &Brief, audio: Option<&[u8]>) -> Result<()
             facts,
             audio,
             brief.voice_id,
-            brief.persona
+            brief.persona,
+            brief.gif
         ],
     )?;
     if let Ok(date) = brief.date.parse::<Date>()
@@ -714,10 +842,27 @@ impl Service {
         self.read_store(load_settings)
     }
 
-    /// Remember the Telegram chat found from the owner's first message.
-    pub fn save_telegram_chat(&self, chat: &str) -> std::result::Result<(), String> {
+    /// Remember the Telegram chat found from the owner's first message,
+    /// and their first name there when no name is set yet (and it is a
+    /// valid one).
+    pub fn save_telegram_chat(
+        &self,
+        chat: &str,
+        first_name: Option<&str>,
+    ) -> std::result::Result<(), String> {
         let mut settings = self.brief_settings()?;
         settings.telegram_chat = chat.to_owned();
+        if settings.owner_name.is_empty()
+            && let Some(name) = first_name
+        {
+            let named = BriefSettings {
+                owner_name: name.to_owned(),
+                ..settings.clone()
+            };
+            if let Ok(named) = validate(named) {
+                settings = named;
+            }
+        }
         let settings = validate(settings).map_err(|e| e.to_string())?;
         self.with_connection(|c| save_settings(c, &settings))
     }
@@ -729,8 +874,15 @@ impl Service {
         let mut settings = validate(settings).map_err(|e| e.to_string())?;
         // The chat is found by the server from the owner's first message;
         // a form that does not know it yet keeps it.
-        if settings.telegram_chat.is_empty() {
-            settings.telegram_chat = self.brief_settings()?.telegram_chat;
+        // So is the name taken from Telegram.
+        if settings.telegram_chat.is_empty() || settings.owner_name.is_empty() {
+            let saved = self.brief_settings()?;
+            if settings.telegram_chat.is_empty() {
+                settings.telegram_chat = saved.telegram_chat;
+            }
+            if settings.owner_name.is_empty() {
+                settings.owner_name = saved.owner_name;
+            }
         }
         self.with_connection(|c| save_settings(c, &settings))?;
         crate::rafael::set_persona(settings.persona.name());
@@ -783,7 +935,7 @@ impl Service {
     ) -> std::result::Result<(Brief, Option<Vec<u8>>), String> {
         let settings = validate(settings.clone()).map_err(|e| e.to_string())?;
         let facts = self.brief_facts_at(now)?;
-        let (title, script, source) = compose(&facts, &settings, writer);
+        let (Written { title, script, gif }, source) = compose(&facts, &settings, writer);
         let mut voice = String::new();
         let audio = if settings.voice {
             let list = if settings.match_mood {
@@ -815,6 +967,7 @@ impl Service {
             facts,
             voice_id: voice,
             persona: settings.persona.name().into(),
+            gif,
         };
         Ok((brief, audio))
     }

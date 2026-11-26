@@ -6,13 +6,14 @@
 //! and to Mistral. Both block, so callers run them on their own thread,
 //! never on the async runtime.
 
+pub mod giphy;
 pub mod push;
 pub mod telegram;
 
 use std::time::Duration;
 
 use finance_core::alerts::{Notification, Notifier, Outcome};
-use finance_core::brief::{BriefWriter, Speaker, parse_brief, system_prompt};
+use finance_core::brief::{BriefWriter, Speaker, Written, parse_brief, system_prompt};
 use finance_core::spending_email::{
     Copy, Message, Risk, Sender, Smtp, Writer, parse_writer_reply, writer_prompt, writer_system,
 };
@@ -256,14 +257,10 @@ impl MistralBrief {
 }
 
 impl BriefWriter for MistralBrief {
-    fn write(
-        &self,
-        facts: &BriefFacts,
-        settings: &BriefSettings,
-    ) -> Result<(String, String), String> {
+    fn write(&self, facts: &BriefFacts, settings: &BriefSettings) -> Result<Written, String> {
         let client = self.client()?;
         let prompt = serde_json::to_string(facts).map_err(|e| e.to_string())?;
-        let system = system_prompt(settings);
+        let system = system_prompt(settings, facts);
         let mut last = String::new();
         for _ in 0..2 {
             let reply = client

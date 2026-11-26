@@ -180,9 +180,21 @@ fn facts_name_what_is_left_the_limits_bills_and_habits() {
 fn the_model_may_only_use_numbers_from_the_facts() {
     let f = today_facts();
     let ok = r#"{"title":"€160 left, €27 a day","script":"Hola, Gisel here. Vale, you have €160 left for the next 6 days, about €27 a day. Ojo, coffee is at 90 percent, and rent of €950 goes out Friday. But hombre, your coffee habit is actually changing: €20 this week against €36 usually, two weeks in a row. Make it at home once more today; nobody needs a new life, just a slightly better Wednesday."}"#;
-    let (title, script) = parse_brief(ok, &f, BriefLength::Normal).unwrap();
+    let Written { title, script, gif } = parse_brief(ok, &f, BriefLength::Normal).unwrap();
     assert_eq!(title, "€160 left, €27 a day");
     assert!(script.starts_with("Hola, Gisel here."));
+    assert_eq!(gif, "", "no gif asked for, none given");
+    let with_gif = ok.replacen("{", r#"{"gif":"Money On  Fire","#, 1);
+    assert_eq!(
+        parse_brief(&with_gif, &f, BriefLength::Normal).unwrap().gif,
+        "money on fire"
+    );
+    // A bad GIF search is dropped, the brief stays.
+    let odd_gif = ok.replacen("{", r#"{"gif":"https://x.y/€160","#, 1);
+    assert_eq!(
+        parse_brief(&odd_gif, &f, BriefLength::Normal).unwrap().gif,
+        ""
+    );
     let labelled = ok.replace("nobody needs", "life lesson: nobody needs");
     assert!(parse_brief(&labelled, &f, BriefLength::Normal).is_err());
     let invented = ok.replace("€160 left for", "€175 left for");
@@ -200,8 +212,22 @@ fn the_model_may_only_use_numbers_from_the_facts() {
 
 #[test]
 fn the_fixed_script_is_honest_about_habits() {
-    let (title, tagged) = fixed_brief(&today_facts(), "Gisel");
+    let Written {
+        title,
+        script: tagged,
+        gif,
+    } = fixed_brief(&today_facts(), &BriefSettings::default());
     assert!(tagged.starts_with("[emotion=warm]Hola, Gisel here."));
+    assert_eq!(gif, "disappointed face palm");
+    let named = BriefSettings {
+        owner_name: "Giedrius".into(),
+        ..BriefSettings::default()
+    };
+    assert!(
+        fixed_brief(&today_facts(), &named)
+            .script
+            .starts_with("[emotion=warm]Hola Giedrius, Gisel here.")
+    );
     let script = plain_script(&tagged);
     assert_eq!(title, "€160 left, €27 a day");
     assert!(script.starts_with("Hola, Gisel here. Vale, you have €160 left"));
@@ -219,7 +245,9 @@ fn delivery_tags_reach_the_voice_and_unknown_ones_are_refused() {
     let f = today_facts();
     let script = "[emotion=warm]Hola, Gisel here. Vale, you have €160 left for the next 6 days, about €27 a day. [sigh] Ojo, coffee is at 90 percent, and rent of €950 goes out Friday. [emotion=playful]But hombre, your coffee habit is actually changing: €20 this week against €36 usually, two weeks in a row. [chuckle] Make it at home once more today; [pace=slow]nobody needs a new life, just a slightly better Wednesday.";
     let reply = |s: &str| serde_json::json!({ "title": "€160 left", "script": s }).to_string();
-    let (_, kept) = parse_brief(&reply(script), &f, BriefLength::Normal).unwrap();
+    let kept = parse_brief(&reply(script), &f, BriefLength::Normal)
+        .unwrap()
+        .script;
     assert_eq!(kept, script);
     assert_eq!(
         plain_script("[emotion=warm]Hola. [sigh] Ojo , rent [pace=slow]goes out."),
@@ -241,17 +269,13 @@ fn delivery_tags_reach_the_voice_and_unknown_ones_are_refused() {
     assert!(parse_brief(&reply(&loose), &f, BriefLength::Normal).is_err());
     let many = format!("{}{script}", "[breath] ".repeat(6));
     assert!(parse_brief(&reply(&many), &f, BriefLength::Normal).is_err());
-    let prompt = system_prompt(&BriefSettings::default());
+    let prompt = system_prompt(&BriefSettings::default(), &f);
     assert!(prompt.contains("wistful") && prompt.contains("[chuckle]") && !prompt.contains('{'));
 }
 
 struct Failing;
 impl BriefWriter for Failing {
-    fn write(
-        &self,
-        _: &BriefFacts,
-        _: &BriefSettings,
-    ) -> std::result::Result<(String, String), String> {
+    fn write(&self, _: &BriefFacts, _: &BriefSettings) -> std::result::Result<Written, String> {
         Err("down".into())
     }
 }
@@ -262,15 +286,17 @@ fn a_failing_writer_falls_back_to_the_fixed_script() {
         persona: Persona::Rafael,
         ..BriefSettings::default()
     };
-    let (_, script, source) = compose(&today_facts(), &rafael, &Failing);
+    let (written, source) = compose(&today_facts(), &rafael, &Failing);
     assert_eq!(source, "fixed");
-    assert!(plain_script(&script).starts_with("Hola, Rafael here."));
+    assert!(plain_script(&written.script).starts_with("Hola, Rafael here."));
 }
 
 #[test]
 fn briefs_are_saved_with_audio_and_pruned() {
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch(include_str!("../../storage/src/brief.sql"))
+        .unwrap();
+    conn.execute_batch(include_str!("../../storage/src/brief_gif.sql"))
         .unwrap();
     assert_eq!(load_settings(&conn).unwrap(), BriefSettings::default());
     let brief = |date: &str| Brief {
@@ -283,6 +309,7 @@ fn briefs_are_saved_with_audio_and_pruned() {
         facts: BriefFacts::default(),
         voice_id: "voice_483".into(),
         persona: "Rafael".into(),
+        gif: "slow clap".into(),
     };
     save(&conn, &brief("2026-11-01"), None).unwrap();
     save(&conn, &brief("2026-11-25"), Some(b"ID3")).unwrap();
@@ -291,6 +318,7 @@ fn briefs_are_saved_with_audio_and_pruned() {
     assert!(latest.has_audio);
     assert_eq!(latest.voice_id, "voice_483");
     assert_eq!(latest.persona, "Rafael");
+    assert_eq!(latest.gif, "slow clap");
     assert_eq!(audio(&conn, "2026-11-25").unwrap().unwrap(), b"ID3");
     // More than two weeks old: gone.
     assert!(audio(&conn, "2026-11-01").unwrap().is_none());
@@ -302,20 +330,48 @@ fn briefs_are_saved_with_audio_and_pruned() {
 
 #[test]
 fn the_prompt_follows_persona_length_and_style() {
-    let gisel = system_prompt(&BriefSettings::default());
+    let facts = today_facts();
+    let gisel = system_prompt(&BriefSettings::default(), &facts);
     assert!(gisel.starts_with("You are Gisel, from Spain"));
     assert!(gisel.contains("\"Hola, Gisel here.\""));
     assert!(gisel.contains("70 to 140 words"));
     assert!(!gisel.contains('{'));
-    let rafael = system_prompt(&BriefSettings {
-        persona: Persona::Rafael,
-        length: BriefLength::Short,
-        style: "Be drier.".into(),
-        ..BriefSettings::default()
-    });
+    assert!(gisel.contains("talk to the owner every morning"));
+    let rafael = system_prompt(
+        &BriefSettings {
+            persona: Persona::Rafael,
+            length: BriefLength::Short,
+            style: "Be drier.".into(),
+            owner_name: "Giedrius".into(),
+            ..BriefSettings::default()
+        },
+        &facts,
+    );
     assert!(rafael.starts_with("You are Rafael"));
     assert!(rafael.contains("45 to 85 words"));
     assert!(rafael.ends_with("Be drier."));
+    assert!(rafael.contains("talk to Giedrius every morning"));
+    assert!(rafael.contains("start with \"Hola Giedrius, Rafael here.\""));
+    assert!(rafael.contains("\"gif\"") && !rafael.contains('{'));
+    assert!(
+        validate(BriefSettings {
+            owner_name: "  Giedrius   M. ".into(),
+            ..BriefSettings::default()
+        })
+        .unwrap()
+        .owner_name
+            == "Giedrius M."
+    );
+    for bad in ["{name}", "R2D2", &"a".repeat(MAX_OWNER_NAME + 1)] {
+        assert!(
+            validate(BriefSettings {
+                owner_name: bad.into(),
+                ..BriefSettings::default()
+            })
+            .is_err(),
+            "{bad}"
+        );
+    }
     assert!(
         validate(BriefSettings {
             style: "Say 3 jokes".into(),
@@ -482,4 +538,21 @@ fn settings_are_checked() {
         });
         assert_eq!(checked.is_ok(), ok, "{chat:?}");
     }
+}
+
+#[test]
+fn the_days_take_turns_between_loving_and_savage() {
+    assert_eq!(Tone::of_day("2026-11-26"), Tone::Savage);
+    assert_eq!(Tone::of_day("2026-11-27"), Tone::MeanButLoving);
+    let mut facts = today_facts();
+    let settings = BriefSettings {
+        owner_name: "Giedrius".into(),
+        ..BriefSettings::default()
+    };
+    facts.date = "2026-11-27".into();
+    let loving = system_prompt(&settings, &facts);
+    facts.date = "2026-11-26".into();
+    let savage = system_prompt(&settings, &facts);
+    assert!(loving.contains("mean but loving") && !loving.contains("full savage"));
+    assert!(savage.contains("full savage") && savage.contains("roast Giedrius hard"));
 }

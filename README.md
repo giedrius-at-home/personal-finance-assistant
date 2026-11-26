@@ -109,14 +109,19 @@ All off until switched on in Manage → Settings:
 - **Gisel's daily voice brief**: at the chosen hour (08:00 by default) Mistral
   writes a short script from the day's facts (what is left, groups near their
   limit, bills this week, habits against the four weeks before, one thing to
-  change, a passing thought in her laid-back Spanish style), Voxtral speaks it, and the phone gets a push that
+  change, a passing thought), Voxtral speaks it, and the phone gets a push that
   opens the player on Overview. Every number Gisel says is checked against
   the facts; otherwise fixed words are used. With "Also send it on Telegram",
   the brief also arrives as a Telegram voice message from the speaker's own
   bot: make one bot each for Gisel and Rafael with @BotFather, paste the
   tokens in the brief card (stored as `telegram-bot-gisel` and
   `telegram-bot-rafael` in the secret store), send each bot a message, and
-  press Test; the chat is found and saved from that message.
+  press Test; the chat (and your first name, which the persona calls you
+  by) is found and saved from that message. The tone takes turns by day:
+  mean but loving one day, full savage the next, loud cheering when the
+  habits improve. With "Send a GIF after it", the persona also picks a
+  reaction GIF for the day, found on GIPHY (rating R) with the key stored
+  as `giphy-api-key`.
 
 ## Checks
 

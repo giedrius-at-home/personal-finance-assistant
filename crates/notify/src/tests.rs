@@ -264,7 +264,8 @@ fn the_brief_retries_once_when_a_number_is_invented_then_speaks() {
         steady, which is fine, but steady is not the same as better. Today, try one meal you \
         cook yourself; the best budget is the one you actually look at. Venga.";
     let bad = serde_json::json!({"title": "€999 left", "script": script}).to_string();
-    let good = serde_json::json!({"title": "€160 left", "script": script}).to_string();
+    let good = serde_json::json!({"title": "€160 left", "script": script, "gif": "Slow  clap"})
+        .to_string();
     let audio = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b"ID3");
     let (url, server) = finance_mistral::fake::serve(vec![
         (200, finance_mistral::fake::chat(&bad)),
@@ -288,9 +289,10 @@ fn the_brief_retries_once_when_a_number_is_invented_then_speaks() {
         style: "More jokes.".into(),
         ..BriefSettings::default()
     };
-    let (title, said) = brief.write(&facts, &settings).unwrap();
-    assert_eq!(title, "€160 left");
-    assert_eq!(brief.speak(&said, "v1", 1.4).unwrap(), b"ID3");
+    let written = brief.write(&facts, &settings).unwrap();
+    assert_eq!(written.title, "€160 left");
+    assert_eq!(written.gif, "slow clap");
+    assert_eq!(brief.speak(&written.script, "v1", 1.4).unwrap(), b"ID3");
     let seen = server.join().unwrap();
     let prompt: Value = serde_json::from_str(&seen[0].body).unwrap();
     let system = prompt["messages"][0]["content"].as_str().unwrap();
