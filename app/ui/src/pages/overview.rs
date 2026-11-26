@@ -3,7 +3,6 @@
 //! monthly budget (`monthly-budget.tsx` and the panels it holds) and the
 //! trends card (`overview-money.tsx` with `showMoney={false}`).
 
-mod brief;
 mod budget;
 mod extras;
 mod forecast;
@@ -49,17 +48,6 @@ pub const PANELS: &[PanelDef] = &[
         render: || nudges::OverviewNudges().into_any(),
         summary: Some(nudges::summary),
         shown: Some(|| report_is(|r| r.monthly_allocation.is_some())),
-    },
-    PanelDef {
-        id: "overview.brief",
-        title: "Today's brief",
-        page: PAGE,
-        movable: true,
-        initial: Initial::Open,
-        half: false,
-        render: || brief::OverviewBrief().into_any(),
-        summary: None,
-        shown: None,
     },
     PanelDef {
         id: "overview.today",

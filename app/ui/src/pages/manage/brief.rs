@@ -292,7 +292,7 @@ pub fn BriefCard() -> impl IntoView {
             let spoken = s.latest.as_ref().is_some_and(|b| b.has_audio);
             latest.set(s.latest);
             ops.notice.set(if spoken {
-                "Today's brief is ready; it is on Overview and on your phone.".into()
+                "Today's brief is ready: it pops up when you open the app, and tapping the phone's notification plays it.".into()
             } else {
                 "Today's brief is ready as text (no audio this time).".into()
             });
