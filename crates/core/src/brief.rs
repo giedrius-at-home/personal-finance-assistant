@@ -615,6 +615,18 @@ pub fn validate(mut s: BriefSettings) -> Result<BriefSettings> {
     {
         return Err(Error::Invalid("The voice id is not valid.".into()));
     }
+    s.telegram_chat = s.telegram_chat.trim().to_owned();
+    let digits = s
+        .telegram_chat
+        .strip_prefix('-')
+        .unwrap_or(&s.telegram_chat);
+    if !s.telegram_chat.is_empty()
+        && (digits.is_empty() || digits.len() > 20 || !digits.bytes().all(|b| b.is_ascii_digit()))
+    {
+        return Err(Error::Invalid(
+            "The Telegram chat id is a number, like 123456789.".into(),
+        ));
+    }
     Ok(s)
 }
 
@@ -702,11 +714,24 @@ impl Service {
         self.read_store(load_settings)
     }
 
+    /// Remember the Telegram chat found from the owner's first message.
+    pub fn save_telegram_chat(&self, chat: &str) -> std::result::Result<(), String> {
+        let mut settings = self.brief_settings()?;
+        settings.telegram_chat = chat.to_owned();
+        let settings = validate(settings).map_err(|e| e.to_string())?;
+        self.with_connection(|c| save_settings(c, &settings))
+    }
+
     pub fn save_brief_settings(
         &self,
         settings: BriefSettings,
     ) -> std::result::Result<BriefSettings, String> {
-        let settings = validate(settings).map_err(|e| e.to_string())?;
+        let mut settings = validate(settings).map_err(|e| e.to_string())?;
+        // The chat is found by the server from the owner's first message;
+        // a form that does not know it yet keeps it.
+        if settings.telegram_chat.is_empty() {
+            settings.telegram_chat = self.brief_settings()?.telegram_chat;
+        }
         self.with_connection(|c| save_settings(c, &settings))?;
         crate::rafael::set_persona(settings.persona.name());
         Ok(settings)

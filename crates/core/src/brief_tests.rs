@@ -469,4 +469,17 @@ fn settings_are_checked() {
         .voice_id,
         "v1"
     );
+    for (chat, ok) in [
+        ("", true),
+        (" 123456789 ", true),
+        ("-1001234567890", true),
+        ("@me", false),
+        ("-", false),
+    ] {
+        let checked = validate(BriefSettings {
+            telegram_chat: chat.into(),
+            ..BriefSettings::default()
+        });
+        assert_eq!(checked.is_ok(), ok, "{chat:?}");
+    }
 }

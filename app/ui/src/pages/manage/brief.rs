@@ -1,28 +1,43 @@
 //! Manage → Settings → Daily voice brief: once a day at the chosen hour,
 //! Gisel or Rafael (Mistral) talks through what is left, what is close to
 //! its limit, the bills coming and how your habits moved; Voxtral speaks it
-//! and the phone gets a push that opens the player on Overview. Every dial
-//! is here, with "Preview" to hear the form as it stands before saving.
+//! and the phone gets a push that plays it in a pop-up, and a voice
+//! message on Telegram from that persona's own bot when that is on. Every
+//! dial is here, with "Preview" to hear the form as it stands before saving.
 
 use finance_types::notify::{
     BriefLength, BriefPreview, BriefSettings, BriefStatus, DEFAULT_EXPRESSIVENESS, Persona,
     VoiceOption, mood_versions, plain_script,
 };
+use leptos::html::Input as InputElement;
 use leptos::prelude::*;
 use serde::Serialize;
 
 use super::ui::{ERROR, FEEDBACK, Ops};
 use crate::api::{NoArgs, load};
 use crate::ds::patterns::{
-    ACTIONS, CHECK_SLOT, HINT, MUTED, OPTION_SPACED, SETTINGS_GRID, SMALL, STATUS_NOTE,
+    ACTIONS, CHECK_SLOT, HINT, MUTED, OPTION_SPACED, SECRET_FORM, SETTINGS_GRID, SMALL,
+    STATUS_NOTE, SUBPANEL,
 };
 use crate::ds::{
-    Button, Card, CardTitle, Checkbox, Eyebrow, Field, Heading, Help, Input, Select, Variant, cn,
+    Button, CONTROL, Card, CardTitle, Checkbox, Eyebrow, Field, Heading, Help, Input, Select,
+    Variant, cn,
 };
 
 #[derive(Serialize)]
 struct SettingsArgs {
     settings: BriefSettings,
+}
+
+#[derive(Serialize)]
+struct PersonaArgs {
+    persona: Persona,
+}
+
+#[derive(Serialize)]
+struct TokenArgs {
+    persona: Persona,
+    token: String,
 }
 
 #[derive(Clone, Copy)]
@@ -36,6 +51,8 @@ struct Draft {
     length: RwSignal<String>,
     match_mood: RwSignal<bool>,
     style: RwSignal<String>,
+    telegram: RwSignal<bool>,
+    telegram_chat: RwSignal<String>,
 }
 
 fn persona_value(p: Persona) -> &'static str {
@@ -87,6 +104,8 @@ impl Draft {
             length: RwSignal::new("normal".into()),
             match_mood: RwSignal::new(true),
             style: RwSignal::new(String::new()),
+            telegram: RwSignal::new(false),
+            telegram_chat: RwSignal::new(String::new()),
         }
     }
 
@@ -101,6 +120,8 @@ impl Draft {
         self.length.set(length_value(s.length).into());
         self.match_mood.set(s.match_mood);
         self.style.set(s.style.clone());
+        self.telegram.set(s.telegram);
+        self.telegram_chat.set(s.telegram_chat.clone());
     }
 
     fn settings(&self) -> Result<BriefSettings, String> {
@@ -124,6 +145,8 @@ impl Draft {
             length: length_of(&self.length.get_untracked()),
             match_mood: self.match_mood.get_untracked(),
             style: self.style.get_untracked(),
+            telegram: self.telegram.get_untracked(),
+            telegram_chat: self.telegram_chat.get_untracked(),
         })
     }
 }
@@ -173,6 +196,82 @@ fn voice_label(v: &VoiceOption) -> String {
     format!("{}{details}{mine}", v.name)
 }
 
+/// One persona's Telegram bot: its token (kept in the server's secret
+/// store, never shown again), and a test message from it.
+fn bot_row(
+    persona: Persona,
+    stored: Signal<bool>,
+    ops: Ops,
+    bots: RwSignal<(bool, bool)>,
+) -> impl IntoView {
+    let busy = ops.busy;
+    let token = NodeRef::<InputElement>::new();
+    let name = persona.name();
+    let keep = move |s: BriefStatus| bots.set((s.telegram_gisel, s.telegram_rafael));
+    let save = move |e: leptos::ev::SubmitEvent| {
+        e.prevent_default();
+        let Some(el) = token.get() else { return };
+        let value = el.value();
+        el.set_value("");
+        ops.run(
+            "set_telegram_token",
+            TokenArgs {
+                persona,
+                token: value,
+            },
+            move |s: BriefStatus| {
+                keep(s);
+                ops.notice.set(format!(
+                    "{name}'s bot is saved. Send it any message in Telegram, then press Test."
+                ));
+            },
+        );
+    };
+    let forget = move |_| {
+        ops.run(
+            "forget_telegram_token",
+            PersonaArgs { persona },
+            move |s: BriefStatus| {
+                keep(s);
+                ops.notice.set(format!("{name}'s bot token is removed."));
+            },
+        );
+    };
+    let test = move |_| {
+        ops.run(
+            "telegram_test",
+            PersonaArgs { persona },
+            move |m: String| {
+                ops.notice.set(m);
+            },
+        );
+    };
+    view! {
+        <form class=SECRET_FORM on:submit=save>
+            <span class="min-w-20 text-sm font-semibold">{name}</span>
+            <input
+                node_ref=token
+                class=cn([CONTROL, "sm:max-w-sm"])
+                type="password"
+                autocomplete="off"
+                placeholder=move || if stored.get() { "Token saved" } else { "Bot token from @BotFather" }
+                aria-label=format!("{name}'s Telegram bot token")
+            />
+            <Button submit=true variant=Variant::Secondary disabled=Signal::derive(move || busy.get())>
+                {move || if stored.get() { "Replace" } else { "Save token" }}
+            </Button>
+            {move || stored.get().then(|| view! {
+                <Button variant=Variant::Ghost disabled=Signal::derive(move || busy.get()) on_click=Callback::new(test)>
+                    "Test"
+                </Button>
+                <Button variant=Variant::Ghost disabled=Signal::derive(move || busy.get()) on_click=Callback::new(forget)>
+                    "Remove"
+                </Button>
+            })}
+        </form>
+    }
+}
+
 #[component]
 pub fn BriefCard() -> impl IntoView {
     let status = load::<BriefStatus, _>("brief_status", || NoArgs {});
@@ -182,11 +281,13 @@ pub fn BriefCard() -> impl IntoView {
     let filled = RwSignal::new(false);
     let latest = RwSignal::new(None::<finance_types::notify::Brief>);
     let preview = RwSignal::new(None::<BriefPreview>);
+    let bots = RwSignal::new((false, false));
     Effect::new(move |_| {
         if let Some(Ok(s)) = status.data.get()
             && !filled.get_untracked()
         {
             draft.fill(&s.settings);
+            bots.set((s.telegram_gisel, s.telegram_rafael));
             latest.set(s.latest.clone());
             filled.set(true);
         }
@@ -292,7 +393,7 @@ pub fn BriefCard() -> impl IntoView {
             let spoken = s.latest.as_ref().is_some_and(|b| b.has_audio);
             latest.set(s.latest);
             ops.notice.set(if spoken {
-                "Today's brief is ready: it pops up when you open the app, and tapping the phone's notification plays it.".into()
+                "Today's brief is ready: it pops up when you open the app, tapping the phone's notification plays it, and it is on Telegram when that is on.".into()
             } else {
                 "Today's brief is ready as text (no audio this time).".into()
             });
@@ -368,6 +469,25 @@ pub fn BriefCard() -> impl IntoView {
                 busy,
             )}
             {move || mood_note().map(|n| view! { <p class=cn([HINT, "mb-4"])>{n}</p> })}
+            {check(
+                "Also send it on Telegram",
+                "A voice message from the bot of whoever talks: Gisel's bot for Gisel, Rafael's for Rafael.",
+                draft.telegram,
+                busy,
+            )}
+            {move || draft.telegram.get().then(|| view! {
+                <div class=SUBPANEL>
+                    <p class=MUTED>
+                        "Make a bot for each in Telegram with @BotFather (/newbot), paste its token here, then send the bot any message so it knows your chat. Tokens are kept privately on the server."
+                    </p>
+                    {bot_row(Persona::Gisel, Signal::derive(move || bots.get().0), ops, bots)}
+                    {bot_row(Persona::Rafael, Signal::derive(move || bots.get().1), ops, bots)}
+                    {move || {
+                        let chat = draft.telegram_chat.get();
+                        (!chat.is_empty()).then(|| view! { <p class=HINT>{format!("Sending to chat {chat}.")}</p> })
+                    }}
+                </div>
+            })}
             <div class=ACTIONS>
                 <Button variant=Variant::Secondary disabled=Signal::derive(move || busy.get()) on_click=Callback::new(try_it)>
                     {move || if busy.get() { "Working…" } else { "Preview" }}

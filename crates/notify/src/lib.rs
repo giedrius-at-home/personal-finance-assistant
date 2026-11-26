@@ -7,6 +7,7 @@
 //! never on the async runtime.
 
 pub mod push;
+pub mod telegram;
 
 use std::time::Duration;
 

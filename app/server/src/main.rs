@@ -28,6 +28,7 @@ use finance_core::forecast_model::ForecastModel;
 use finance_core::service::Service;
 use finance_core::spending_email::{Message, Sender, Smtp};
 use finance_notify::push::{self, Http, PushAlerts, PushMessage, Pusher, Vapid};
+use finance_notify::telegram::{self, Bot, Https};
 use finance_notify::{EmailAlerts, Fanout, Mailer, MistralBrief, MistralWriter};
 use finance_secrets::{Item, Secret};
 use finance_server::access::{self, Access};
@@ -36,8 +37,8 @@ use finance_server::commands::{self, arg, ok};
 use finance_server::http::{self, Request, respond, respond_with};
 use finance_timesfm::{FILES, NAME, TimesFm};
 use finance_types::notify::{
-    Brief, BriefPreview, BriefSettings, BriefStatus, DaySummary, EmailSettings, PushStatus,
-    PushSubscription, VoiceOption,
+    Brief, BriefPreview, BriefSettings, BriefStatus, DaySummary, EmailSettings, Persona,
+    PushStatus, PushSubscription, VoiceOption,
 };
 use serde_json::Value;
 
@@ -69,6 +70,8 @@ struct App {
     /// Web Push to the installed web app; `None` when the key could not be
     /// made or read (logged at start).
     pusher: Option<Arc<Pusher<Http>>>,
+    /// The Telegram Bot API client; `None` when it could not be built.
+    telegram: Option<Https>,
 }
 
 fn required(name: &str) -> Result<String> {
@@ -107,6 +110,9 @@ fn main() -> Result<()> {
         dist,
         model_dir,
         pusher: pusher(),
+        telegram: Https::new()
+            .inspect_err(|e| eprintln!("telegram: {e}"))
+            .ok(),
     }));
     // Notifications are signed by the owner's persona (Gisel or Rafael).
     finance_core::rafael::set_persona(app.service.persona_name());
@@ -375,6 +381,14 @@ fn run(app: &App, cmd: &str, args: Value) -> Result<Value, String> {
             ok(brief_status(app, false))
         }),
         "brief_now" => ok(brief_now(app)),
+        "set_telegram_token" => arg::<Persona>(args.clone(), "persona").and_then(|p| {
+            arg::<String>(args, "token").and_then(|t| ok(set_telegram_token(app, p, t)))
+        }),
+        "forget_telegram_token" => arg::<Persona>(args, "persona").and_then(|p| {
+            finance_secrets::delete(telegram_item(p)).map_err(|e| e.to_string())?;
+            ok(brief_status(app, false))
+        }),
+        "telegram_test" => arg::<Persona>(args, "persona").and_then(|p| ok(telegram_test(app, p))),
         "brief_preview" => {
             arg::<BriefSettings>(args, "settings").and_then(|s| ok(brief_preview(app, &s)))
         }
@@ -573,8 +587,119 @@ fn voices(app: &App) -> Vec<VoiceOption> {
         .collect()
 }
 
-/// The brief to every phone: tapping it opens Overview, where it plays.
+/// The brief to every phone, and on Telegram when that is on.
 fn deliver_brief(app: &App, brief: &Brief, now: jiff::Timestamp) -> bool {
+    let pushed = push_brief(app, brief, now);
+    let sent = match telegram_brief(app, brief) {
+        Ok(sent) => sent,
+        Err(e) => {
+            eprintln!("brief on telegram failed: {e}");
+            false
+        }
+    };
+    pushed || sent
+}
+
+/// The secret holding `persona`'s bot token.
+fn telegram_item(persona: Persona) -> Item {
+    match persona {
+        Persona::Gisel => Item::TelegramGisel,
+        Persona::Rafael => Item::TelegramRafael,
+    }
+}
+
+/// The persona a brief was spoken by (its stored name).
+fn persona_named(name: &str) -> Persona {
+    if name == Persona::Rafael.name() {
+        Persona::Rafael
+    } else {
+        Persona::Gisel
+    }
+}
+
+/// The owner's chat with `bot`: the saved one, else the private chat that
+/// last wrote to it (then saved).
+fn telegram_chat(app: &App, bot: &Bot<'_, Https>) -> Result<String, String> {
+    let saved = app.service.brief_settings()?.telegram_chat;
+    if !saved.is_empty() {
+        return Ok(saved);
+    }
+    let found = bot.find_chat()?.ok_or_else(|| {
+        format!(
+            "Open {} in Telegram and send it any message first, so it knows where to write.",
+            bot.username().unwrap_or_else(|_| "the bot".into())
+        )
+    })?;
+    app.service.save_telegram_chat(&found)?;
+    Ok(found)
+}
+
+/// `persona`'s bot, when its token is stored.
+fn telegram_token(persona: Persona) -> Result<Secret, String> {
+    finance_secrets::get(telegram_item(persona))
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("No Telegram bot token for {} yet.", persona.name()))
+}
+
+/// The day's brief from the speaking persona's bot: a voice message, or
+/// text when there is no audio. `Ok(false)` when Telegram is off.
+fn telegram_brief(app: &App, brief: &Brief) -> Result<bool, String> {
+    if !app.service.brief_settings()?.telegram {
+        return Ok(false);
+    }
+    let api = app.telegram.as_ref().ok_or("Telegram is not set up.")?;
+    let who = if brief.persona.is_empty() {
+        app.service.persona_name().to_owned()
+    } else {
+        brief.persona.clone()
+    };
+    let token = telegram_token(persona_named(&who))?;
+    let bot = Bot { api, token: &token };
+    let chat = telegram_chat(app, &bot)?;
+    let audio = if brief.has_audio {
+        app.service.brief_audio(&brief.date)?
+    } else {
+        None
+    };
+    let words = finance_types::notify::plain_script(&brief.script);
+    bot.send_brief(&chat, &brief.title, &words, audio)?;
+    Ok(true)
+}
+
+/// Store `persona`'s bot token once Telegram accepts it.
+fn set_telegram_token(app: &App, persona: Persona, token: String) -> Result<BriefStatus, String> {
+    let token = Secret::new(token.trim().to_owned());
+    if !telegram::valid_token(token.expose()) {
+        return Err(
+            "That is not a bot token: @BotFather gives one like 123456789:AAH… (numbers, a colon, then letters)."
+                .into(),
+        );
+    }
+    let api = app.telegram.as_ref().ok_or("Telegram is not set up.")?;
+    Bot { api, token: &token }.username()?;
+    finance_secrets::set(telegram_item(persona), &token).map_err(|e| e.to_string())?;
+    brief_status(app, false)
+}
+
+/// "Send a test" on Telegram: a hello from `persona`'s bot.
+fn telegram_test(app: &App, persona: Persona) -> Result<String, String> {
+    let api = app.telegram.as_ref().ok_or("Telegram is not set up.")?;
+    let token = telegram_token(persona)?;
+    let bot = Bot { api, token: &token };
+    let name = bot.username()?;
+    let chat = telegram_chat(app, &bot)?;
+    bot.send_text(
+        &chat,
+        &format!(
+            "Hola, soy {}. Your morning money brief will come here.",
+            persona.name()
+        ),
+    )?;
+    Ok(format!("{name} sent you a test message."))
+}
+
+/// The brief to every phone: tapping it opens Overview, where it plays.
+fn push_brief(app: &App, brief: &Brief, now: jiff::Timestamp) -> bool {
     let Some(pusher) = &app.pusher else {
         return false;
     };
@@ -617,6 +742,8 @@ fn brief_status(app: &App, voices: bool) -> Result<BriefStatus, String> {
         settings: app.service.brief_settings()?,
         latest: app.service.latest_brief()?,
         voices,
+        telegram_gisel: matches!(finance_secrets::get(Item::TelegramGisel), Ok(Some(_))),
+        telegram_rafael: matches!(finance_secrets::get(Item::TelegramRafael), Ok(Some(_))),
     })
 }
 

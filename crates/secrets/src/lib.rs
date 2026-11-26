@@ -35,6 +35,10 @@ pub enum Item {
     /// The server's Web Push (VAPID) signing key, PKCS#8 in base64url; made
     /// on first use.
     VapidKey,
+    /// Gisel's Telegram bot token (from @BotFather).
+    TelegramGisel,
+    /// Rafael's Telegram bot token.
+    TelegramRafael,
 }
 
 /// The banks with a stored consent.
@@ -71,6 +75,8 @@ impl Item {
             Self::MistralApiKey => "mistral-api-key",
             Self::ServerToken => "server-token",
             Self::VapidKey => "web-push-vapid-key",
+            Self::TelegramGisel => "telegram-bot-gisel",
+            Self::TelegramRafael => "telegram-bot-rafael",
         }
     }
 }

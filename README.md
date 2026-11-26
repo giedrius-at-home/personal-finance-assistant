@@ -111,7 +111,12 @@ All off until switched on in Manage → Settings:
   limit, bills this week, habits against the four weeks before, one thing to
   change, a passing thought in her laid-back Spanish style), Voxtral speaks it, and the phone gets a push that
   opens the player on Overview. Every number Gisel says is checked against
-  the facts; otherwise fixed words are used.
+  the facts; otherwise fixed words are used. With "Also send it on Telegram",
+  the brief also arrives as a Telegram voice message from the speaker's own
+  bot: make one bot each for Gisel and Rafael with @BotFather, paste the
+  tokens in the brief card (stored as `telegram-bot-gisel` and
+  `telegram-bot-rafael` in the secret store), send each bot a message, and
+  press Test; the chat is found and saved from that message.
 
 ## Checks
 
