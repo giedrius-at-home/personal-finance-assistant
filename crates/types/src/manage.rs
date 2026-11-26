@@ -69,6 +69,12 @@ pub struct SettingsForm {
     pub payday_day: String,
     pub monthly_salary_eur: String,
     pub salary_account_id: String,
+    #[serde(default)]
+    pub hourly_rate_eur: String,
+    #[serde(default)]
+    pub contract_hours_week: String,
+    #[serde(default)]
+    pub overtime_tax_percent: String,
     pub safety_buffer_eur: String,
     pub heads_up_spent_ratio: String,
     pub heads_up_pace_ratio: String,

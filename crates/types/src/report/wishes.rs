@@ -174,6 +174,46 @@ pub struct GoalOutlook {
     pub uncovered: Decimal,
     /// `None` when the fund is switched off.
     pub fund: Option<EmergencyFund>,
+    /// The same outlook with overtime worked; `None` until the hourly rate
+    /// is set.
+    #[serde(default)]
+    pub overtime: Option<OvertimeOutlook>,
+}
+
+/// What working more than the contract would change. Overtime is paid at
+/// the plain hourly rate (holiday pay is already in it, there is no
+/// premium) and taxed at the payslip's special rate.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OvertimeOutlook {
+    pub hourly_gross: Decimal,
+    /// What is withheld from an extra hour, in percent.
+    pub tax_percent: Decimal,
+    pub hourly_net: Decimal,
+    pub contract_hours_week: Option<Decimal>,
+    /// The monthly salary the settings expect, without overtime.
+    pub salary: Option<Decimal>,
+    /// The month (`YYYY-MM-01`) overtime worked from now on first pays for.
+    pub from_month: String,
+    /// One per extra hour a week, from one hour up.
+    pub scenarios: Vec<OvertimeScenario>,
+}
+
+/// The goals with this many extra hours worked every week.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OvertimeScenario {
+    pub hours_week: u32,
+    /// Net, in an average month (52 weeks over 12 months).
+    pub extra_monthly: Decimal,
+    pub habit_free: Decimal,
+    pub gap: Decimal,
+    pub coverage: Option<u32>,
+    pub goals: Vec<GoalStatus>,
+    /// How the gap that is left could be closed.
+    pub cuts: Vec<HabitCut>,
+    pub uncovered: Decimal,
+    /// The month the emergency fund is full; `None` when it never is or
+    /// the fund is off.
+    pub fund_eta: Option<String>,
 }
 
 /// One planned wish at current habits.
@@ -196,6 +236,10 @@ pub struct GoalStatus {
     pub on_card: Decimal,
     /// What cannot be paid even when the budgets are kept.
     pub plan_short: Decimal,
+    /// The month (`YYYY-MM-01`) the last of a one-off wish's money is put
+    /// down at current habits; `None` when part of it is never found.
+    #[serde(default)]
+    pub ready_in: Option<String>,
 }
 
 /// What one spending group would give a month to close the gap.
