@@ -27,6 +27,7 @@ use finance_core::daily::SeriesForecaster;
 use finance_core::forecast_model::ForecastModel;
 use finance_core::service::Service;
 use finance_core::spending_email::{Message, Sender, Smtp};
+use finance_notify::giphy::{self, Giphy};
 use finance_notify::push::{self, Http, PushAlerts, PushMessage, Pusher, Vapid};
 use finance_notify::telegram::{self, Bot, Https};
 use finance_notify::{EmailAlerts, Fanout, Mailer, MistralBrief, MistralWriter};
@@ -72,6 +73,8 @@ struct App {
     pusher: Option<Arc<Pusher<Http>>>,
     /// The Telegram Bot API client; `None` when it could not be built.
     telegram: Option<Https>,
+    /// GIPHY, for the GIF after the Telegram brief.
+    giphy: Option<Giphy>,
 }
 
 fn required(name: &str) -> Result<String> {
@@ -113,6 +116,7 @@ fn main() -> Result<()> {
         telegram: Https::new()
             .inspect_err(|e| eprintln!("telegram: {e}"))
             .ok(),
+        giphy: Giphy::new().inspect_err(|e| eprintln!("giphy: {e}")).ok(),
     }));
     // Notifications are signed by the owner's persona (Gisel or Rafael).
     finance_core::rafael::set_persona(app.service.persona_name());
@@ -388,6 +392,10 @@ fn run(app: &App, cmd: &str, args: Value) -> Result<Value, String> {
             finance_secrets::delete(telegram_item(p)).map_err(|e| e.to_string())?;
             ok(brief_status(app, false))
         }),
+        "set_giphy_key" => arg::<String>(args, "key").and_then(|k| ok(set_giphy_key(app, k))),
+        "forget_giphy_key" => finance_secrets::delete(Item::GiphyApiKey)
+            .map_err(|e| e.to_string())
+            .and_then(|()| ok(brief_status(app, false))),
         "telegram_test" => arg::<Persona>(args, "persona").and_then(|p| ok(telegram_test(app, p))),
         "brief_preview" => {
             arg::<BriefSettings>(args, "settings").and_then(|s| ok(brief_preview(app, &s)))
@@ -624,14 +632,15 @@ fn telegram_chat(app: &App, bot: &Bot<'_, Https>) -> Result<String, String> {
     if !saved.is_empty() {
         return Ok(saved);
     }
-    let found = bot.find_chat()?.ok_or_else(|| {
+    let found = bot.find_owner()?.ok_or_else(|| {
         format!(
             "Open {} in Telegram and send it any message first, so it knows where to write.",
             bot.username().unwrap_or_else(|_| "the bot".into())
         )
     })?;
-    app.service.save_telegram_chat(&found)?;
-    Ok(found)
+    app.service
+        .save_telegram_chat(&found.chat, found.first_name.as_deref())?;
+    Ok(found.chat)
 }
 
 /// `persona`'s bot, when its token is stored.
@@ -663,7 +672,42 @@ fn telegram_brief(app: &App, brief: &Brief) -> Result<bool, String> {
     };
     let words = finance_types::notify::plain_script(&brief.script);
     bot.send_brief(&chat, &brief.title, &words, audio)?;
+    if let Err(e) = send_gif(app, &bot, &chat, brief) {
+        eprintln!("brief gif: {e}");
+    }
     Ok(true)
+}
+
+/// The reaction GIF after the brief, when it is on, a key is stored and
+/// the search finds one. A missing GIF never fails the brief.
+fn send_gif(app: &App, bot: &Bot<'_, Https>, chat: &str, brief: &Brief) -> Result<(), String> {
+    if !app.service.brief_settings()?.gif || brief.gif.is_empty() {
+        return Ok(());
+    }
+    let Some(key) = finance_secrets::get(Item::GiphyApiKey).map_err(|e| e.to_string())? else {
+        return Ok(());
+    };
+    let api = app.giphy.as_ref().ok_or("GIPHY is not set up.")?;
+    let seed = jiff::Timestamp::now()
+        .subsec_nanosecond()
+        .unsigned_abs()
+        .into();
+    match api.pick(&key, &brief.gif, seed)? {
+        Some(url) => bot.send_animation(chat, &url),
+        None => Ok(()),
+    }
+}
+
+/// Store the GIPHY key once a search with it works.
+fn set_giphy_key(app: &App, key: String) -> Result<BriefStatus, String> {
+    let key = Secret::new(key.trim().to_owned());
+    if !giphy::valid_key(key.expose()) {
+        return Err("That is not a GIPHY API key: it is letters and digits, from developers.giphy.com → Create an App → API.".into());
+    }
+    let api = app.giphy.as_ref().ok_or("GIPHY is not set up.")?;
+    api.search(&key, "hello")?;
+    finance_secrets::set(Item::GiphyApiKey, &key).map_err(|e| e.to_string())?;
+    brief_status(app, false)
 }
 
 /// Store `persona`'s bot token once Telegram accepts it.
@@ -688,13 +732,23 @@ fn telegram_test(app: &App, persona: Persona) -> Result<String, String> {
     let bot = Bot { api, token: &token };
     let name = bot.username()?;
     let chat = telegram_chat(app, &bot)?;
+    let owner = app.service.brief_settings()?.owner_name;
+    let hello = if owner.is_empty() {
+        format!("Hola, soy {}.", persona.name())
+    } else {
+        format!("Hola {}, soy {}.", telegram::escape(&owner), persona.name())
+    };
     bot.send_text(
         &chat,
-        &format!(
-            "Hola, soy {}. Your morning money brief will come here.",
-            persona.name()
-        ),
+        &format!("{hello} Your morning money brief will come here, no mercy."),
     )?;
+    let hi = Brief {
+        gif: "hey there wave".into(),
+        ..Brief::default()
+    };
+    if let Err(e) = send_gif(app, &bot, &chat, &hi) {
+        return Ok(format!("{name} sent you a test message, but no GIF: {e}"));
+    }
     Ok(format!("{name} sent you a test message."))
 }
 
@@ -744,6 +798,7 @@ fn brief_status(app: &App, voices: bool) -> Result<BriefStatus, String> {
         voices,
         telegram_gisel: matches!(finance_secrets::get(Item::TelegramGisel), Ok(Some(_))),
         telegram_rafael: matches!(finance_secrets::get(Item::TelegramRafael), Ok(Some(_))),
+        giphy: matches!(finance_secrets::get(Item::GiphyApiKey), Ok(Some(_))),
     })
 }
 
