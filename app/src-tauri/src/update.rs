@@ -16,7 +16,12 @@ use tauri::{AppHandle, Emitter, Manager, Url};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 const REPO: &str = "giedrius-at-home/personal-finance-assistant";
-const EVERY: Duration = Duration::from_secs(6 * 60 * 60);
+/// How often the app looks for a release. Every passing push to main is
+/// released, so a short wait keeps the app in step with the server.
+const EVERY: Duration = Duration::from_secs(15 * 60);
+/// While the window is in use, how often to see whether it still is before
+/// restarting into an installed update.
+const IDLE_POLL: Duration = Duration::from_secs(30);
 /// Event the UI listens to so it can refresh the update state.
 pub const CHANGED: &str = "update-status";
 
@@ -141,7 +146,16 @@ pub async fn check(app: AppHandle) {
     }
 }
 
+/// Install the update a check found and restart into it (the Install
+/// button).
 pub async fn install(app: AppHandle) -> Result<(), String> {
+    download(&app).await?;
+    app.restart();
+}
+
+/// Download, verify and put the found update in place of the app. The
+/// running app carries on as it is until it restarts.
+async fn download(app: &AppHandle) -> Result<(), String> {
     let updates = app.state::<Updates>();
     let update = updates
         .pending
@@ -149,24 +163,44 @@ pub async fn install(app: AppHandle) -> Result<(), String> {
         .map_err(|_| "update state poisoned".to_owned())?
         .take()
         .ok_or_else(|| "No update to install".to_owned())?;
-    updates.update(&app, |s| s.installing = true);
+    updates.update(app, |s| s.installing = true);
     if let Err(e) = update.download_and_install(|_, _| {}, || {}).await {
         let message = e.to_string();
-        updates.update(&app, |s| {
+        updates.update(app, |s| {
             s.installing = false;
             s.error = Some(message.clone());
         });
         return Err(message);
     }
-    app.restart();
+    Ok(())
 }
 
-/// Check at launch and then every few hours.
+/// The window has the owner's attention: a restart now could cut off what
+/// they are typing.
+fn in_use(app: &AppHandle) -> bool {
+    app.get_webview_window("main")
+        .and_then(|w| w.is_focused().ok())
+        .unwrap_or(false)
+}
+
+/// Check at launch and then every few minutes. A release found is installed
+/// on its own, and the app restarts into it once the window is not in use.
 pub fn schedule(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         loop {
             if matches!(finance_secrets::get(Item::ReleaseToken), Ok(Some(_))) {
                 check(app.clone()).await;
+                let found = app
+                    .state::<Updates>()
+                    .pending
+                    .lock()
+                    .is_ok_and(|p| p.is_some());
+                if found && download(&app).await.is_ok() {
+                    while in_use(&app) {
+                        tokio::time::sleep(IDLE_POLL).await;
+                    }
+                    app.restart();
+                }
             }
             tokio::time::sleep(EVERY).await;
         }

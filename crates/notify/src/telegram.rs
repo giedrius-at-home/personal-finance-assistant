@@ -73,19 +73,33 @@ pub fn escape(text: &str) -> String {
         .replace('>', "&gt;")
 }
 
+/// The owner, as Telegram knows them: their private chat with the bot and
+/// their first name there.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Owner {
+    pub chat: String,
+    pub first_name: Option<String>,
+}
+
 /// The private chat that last wrote to the bot, from a `getUpdates` reply:
-/// how the owner's chat is found after they send the bot "hi".
-pub fn chat_from_updates(reply: &Value) -> Option<String> {
-    reply
+/// how the owner's chat (and name) is found after they send the bot "hi".
+pub fn owner_from_updates(reply: &Value) -> Option<Owner> {
+    let chat = reply
         .as_array()?
         .iter()
         .rev()
         .filter_map(|u| u.get("message").or_else(|| u.get("my_chat_member")))
         .filter_map(|m| m.get("chat"))
-        .find(|c| c.get("type").and_then(Value::as_str) == Some("private"))
-        .and_then(|c| c.get("id"))
-        .and_then(Value::as_i64)
-        .map(|id| id.to_string())
+        .find(|c| c.get("type").and_then(Value::as_str) == Some("private"))?;
+    Some(Owner {
+        chat: chat.get("id").and_then(Value::as_i64)?.to_string(),
+        first_name: chat
+            .get("first_name")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|n| !n.is_empty())
+            .map(str::to_owned),
+    })
 }
 
 /// A file upload with its text fields, as `multipart/form-data`.
@@ -222,8 +236,8 @@ impl<A: Api> Bot<'_, A> {
             .ok_or_else(|| "Telegram did not name the bot.".to_owned())
     }
 
-    /// The owner's chat, once they have written to the bot.
-    pub fn find_chat(&self) -> Result<Option<String>, String> {
+    /// The owner's chat and name, once they have written to the bot.
+    pub fn find_owner(&self) -> Result<Option<Owner>, String> {
         let updates = self.api.call(
             self.token,
             "getUpdates",
@@ -231,7 +245,7 @@ impl<A: Api> Bot<'_, A> {
                 json!({ "limit": 100, "allowed_updates": ["message", "my_chat_member"] }),
             ),
         )?;
-        Ok(chat_from_updates(&updates))
+        Ok(owner_from_updates(&updates))
     }
 
     pub fn send_text(&self, chat: &str, html: &str) -> Result<(), String> {
@@ -244,6 +258,16 @@ impl<A: Api> Bot<'_, A> {
                 "parse_mode": "HTML",
                 "link_preview_options": { "is_disabled": true },
             })),
+        )?;
+        Ok(())
+    }
+
+    /// A GIF (or its MP4) by URL; Telegram fetches it.
+    pub fn send_animation(&self, chat: &str, url: &str) -> Result<(), String> {
+        self.api.call(
+            self.token,
+            "sendAnimation",
+            Request::Json(json!({ "chat_id": chat, "animation": url })),
         )?;
         Ok(())
     }

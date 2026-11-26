@@ -39,6 +39,8 @@ pub enum Item {
     TelegramGisel,
     /// Rafael's Telegram bot token.
     TelegramRafael,
+    /// The GIPHY API key for the reaction GIF after the Telegram brief.
+    GiphyApiKey,
 }
 
 /// The banks with a stored consent.
@@ -77,6 +79,7 @@ impl Item {
             Self::VapidKey => "web-push-vapid-key",
             Self::TelegramGisel => "telegram-bot-gisel",
             Self::TelegramRafael => "telegram-bot-rafael",
+            Self::GiphyApiKey => "giphy-api-key",
         }
     }
 }

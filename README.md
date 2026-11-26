@@ -109,14 +109,19 @@ All off until switched on in Manage → Settings:
 - **Gisel's daily voice brief**: at the chosen hour (08:00 by default) Mistral
   writes a short script from the day's facts (what is left, groups near their
   limit, bills this week, habits against the four weeks before, one thing to
-  change, a passing thought in her laid-back Spanish style), Voxtral speaks it, and the phone gets a push that
+  change, a passing thought), Voxtral speaks it, and the phone gets a push that
   opens the player on Overview. Every number Gisel says is checked against
   the facts; otherwise fixed words are used. With "Also send it on Telegram",
   the brief also arrives as a Telegram voice message from the speaker's own
   bot: make one bot each for Gisel and Rafael with @BotFather, paste the
   tokens in the brief card (stored as `telegram-bot-gisel` and
   `telegram-bot-rafael` in the secret store), send each bot a message, and
-  press Test; the chat is found and saved from that message.
+  press Test; the chat (and your first name, which the persona calls you
+  by) is found and saved from that message. The tone takes turns by day:
+  mean but loving one day, full savage the next, loud cheering when the
+  habits improve. With "Send a GIF after it", the persona also picks a
+  reaction GIF for the day, found on GIPHY (rating R) with the key stored
+  as `giphy-api-key`.
 
 ## Checks
 
@@ -130,11 +135,13 @@ cargo deny check
 
 ## Releases and updates
 
-A release ships only when asked: **Actions → Release → Run workflow** (or
-`gh workflow run release.yml`). The workflow builds and signs
+Every push to `main` that passes CI is released: once CI has passed (and
+deployed the Oracle server), the Release workflow builds and signs
 `Finance.app.tar.gz`, tags the commit and publishes it with `latest.json`.
-(Releasing on every merge used up the free plan's Actions minutes: macOS
-counts ten times.)
+It can also be started by hand: **Actions → Release → Run workflow** (or
+`gh workflow run release.yml`).
+
+The repository is public, so GitHub's macOS runners build it for free.
 
 - The version is the latest release's patch plus one, stamped into the build
   only; `main` keeps the last hand-set version.
@@ -142,9 +149,11 @@ counts ten times.)
   `app/src-tauri/tauri.conf.json` and `[workspace.package]` in the PR; the
   workflow uses it when it is newer than the latest release.
 
-The installed app checks at launch and every 6 hours. Because the repository
-is private it needs a fine-grained GitHub token with read-only **Contents**
-access to this repository; paste it once under **Manage → Settings → Updates** (stored in
+The installed app checks at launch and every 15 minutes, installs a new
+release by itself and restarts into it once its window is not in front. It
+reads the releases with a fine-grained GitHub token with read-only
+**Contents** access to this repository (from when the repository was
+private); paste it once under **Manage → Settings → Updates** (stored in
 the secret store). Updates whose signature does not match the public key in
 `tauri.conf.json` are rejected.
 
