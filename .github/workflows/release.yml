@@ -1,32 +1,48 @@
 name: Release
 
-# Builds, signs and publishes Finance.app as a new release, only when asked
-# (Actions -> Release -> Run workflow, or `gh workflow run release.yml`):
-# macOS minutes count ten times against the free plan's quota, and a release
-# per merge used it up. The installed app finds a release through
-# latest.json and verifies the update signature.
+# Builds, signs and publishes Finance.app as a new release after every push
+# to main that passes CI (which also deploys the Oracle server), so the app
+# and the server stay in step. It can also be started by hand (Actions ->
+# Release -> Run workflow, or `gh workflow run release.yml`).
+# The repository is public, so GitHub's macOS runners cost nothing. The
+# installed app finds a release through latest.json and verifies the update
+# signature.
 #
 # The version is the one in tauri.conf.json when a PR raised it past the
 # latest release (minor and major bumps); otherwise the latest release's
 # patch plus one, stamped into this build and the tag, not committed back.
 on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: write
 
-# One release at a time, in merge order.
+# One release at a time; while one builds, only the newest waiting push is
+# kept (it contains the others).
 concurrency:
   group: release
   cancel-in-progress: false
 
 jobs:
   macos:
+    # Only a push to main whose CI passed; never a pull request's run.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
     runs-on: macos-latest
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # The commit CI passed, not whatever main points at by now.
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - name: Toolchain from rust-toolchain.toml
         run: rustup show
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
@@ -65,7 +81,7 @@ jobs:
       - name: Publish release
         run: |
           bundle=target/release/bundle
-          gh release create "$TAG" --target "$GITHUB_SHA" --title "Finance $TAG" --generate-notes \
+          gh release create "$TAG" --target "$SHA" --title "Finance $TAG" --generate-notes \
             "$bundle/macos/Finance.app.tar.gz" \
             "$bundle/macos/Finance.app.tar.gz.sig"
 
