@@ -8,6 +8,9 @@ name: Release
 # installed app finds a release through latest.json and verifies the update
 # signature.
 #
+# No tests here: a release starts only after CI passed on the same commit
+# (and main takes only pull requests that are up to date and passed CI).
+#
 # The version is the one in tauri.conf.json when a PR raised it past the
 # latest release (minor and major bumps); otherwise the latest release's
 # patch plus one, stamped into this build and the tag, not committed back.
@@ -67,9 +70,6 @@ jobs:
           open(os.environ["GITHUB_ENV"], "a").write(f"TAG=v{conf['version']}\n")
           print(f"latest {os.environ['LATEST']}, releasing v{conf['version']}")
           PY
-
-      - name: Test
-        run: cargo test --locked -p finance-storage -p finance-core
 
       - name: Build and sign
         working-directory: app/src-tauri
