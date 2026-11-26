@@ -30,6 +30,17 @@ pub struct OwnerSettings {
     pub monthly_salary_eur: Option<Decimal>,
     #[serde(default)]
     pub salary_account_id: Option<String>,
+    /// Gross pay for one hour, as the payslip states it; overtime is paid
+    /// at this rate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hourly_rate_eur: Option<Decimal>,
+    /// The contract's hours a week.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contract_hours_week: Option<Decimal>,
+    /// Wage tax withheld from pay on top of the salary, in percent: the
+    /// payslip's special rate ("Variant BT"), its parts added up.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overtime_tax_percent: Option<Decimal>,
     #[serde(default = "OwnerSettings::buffer")]
     pub safety_buffer_eur: Decimal,
     #[serde(default = "OwnerSettings::spent_ratio")]

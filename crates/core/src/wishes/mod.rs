@@ -3,6 +3,7 @@
 pub mod baseline;
 pub mod goals;
 pub mod ladder;
+pub mod overtime;
 pub mod schedule;
 pub mod store;
 
@@ -11,8 +12,8 @@ use finance_types::gateway::{
 };
 use finance_types::report::allocation::CurrencyAllocation;
 use finance_types::report::wishes::{
-    ChangeableBill, Cut, EventOption, GoalOutlook, GoalStatus, Verdict, WishMonth, WishRow,
-    WishesView,
+    ChangeableBill, Cut, EventOption, GoalOutlook, GoalStatus, OvertimeOutlook, OvertimeScenario,
+    Verdict, WishMonth, WishRow, WishesView,
 };
 use finance_types::report::{Currency, Dashboard};
 use jiff::civil::Date;
@@ -47,6 +48,9 @@ pub fn wishes_view(
             &allocation(dashboard).map_or_else(Currency::eur, |a| a.currency.clone()),
             &settings.essential_groups,
         ),
+        // The pay settings are in euro.
+        overtime: overtime::Pay::from_settings(&dashboard.settings)
+            .filter(|_| allocation(dashboard).is_some_and(|a| a.currency.code == "EUR")),
         events: event_needs(dashboard, wishes),
     }
     .view(wishes, settings)
@@ -179,6 +183,7 @@ pub fn events_view(
         card_bills,
         bills: &bills,
         habits: Vec::new(),
+        overtime: None,
         events: needs.clone(),
     }
     .event_rows(wishes, settings);
@@ -305,6 +310,7 @@ pub fn purchase_cuts(
         card_bills,
         bills: &bills,
         habits: Vec::new(),
+        overtime: None,
         events: event_needs(dashboard, wishes),
     }
     .purchase_cuts(wishes, settings, wish_id, purchase)
@@ -415,6 +421,23 @@ fn bills_now(dashboard: &Dashboard, bills: &[Bill]) -> HashMap<String, BillNow> 
         .collect()
 }
 
+/// The first month (0 is the running one) overtime worked from now on pays
+/// for: a payday funds the month after it, and this month's pay is fixed
+/// once it has arrived.
+fn overtime_from(alloc: &CurrencyAllocation) -> usize {
+    if alloc.salary_received_on.is_some() {
+        2
+    } else {
+        1
+    }
+}
+
+/// Whole months from `from` to `to`, never negative.
+fn months_between(from: Date, to: Date) -> usize {
+    let index = |d: Date| i32::from(d.year()) * 12 + i32::from(d.month());
+    usize::try_from(index(to) - index(from)).unwrap_or(0)
+}
+
 /// What the judging reads besides the wishes.
 #[derive(Debug)]
 pub struct Inputs<'a> {
@@ -429,6 +452,8 @@ pub struct Inputs<'a> {
     /// The spending groups at their typical month; empty leaves the goals
     /// unjudged against habits.
     pub habits: Vec<goals::HabitRow>,
+    /// What an extra hour pays; `None` leaves overtime out of the goals.
+    pub overtime: Option<overtime::Pay>,
     /// What each event still asks, month by month; an event without an
     /// entry is judged as the plain wish it also is.
     pub events: Vec<EventNeed>,
@@ -497,13 +522,54 @@ impl Inputs<'_> {
         (self.run(&bases, month0, items), stale_cards)
     }
 
-    /// The same wishes judged with spending as usual, and the emergency
-    /// fund that takes what they leave. `plan_rows` are the view's rows.
+    /// The goals at current habits, and again for every extra hour a week
+    /// the owner could work. `plan_rows` are the view's rows.
     fn goals(
         &self,
         wishes: &[Wish],
         settings: &WishSettings,
         plan_rows: &[WishRow],
+    ) -> Option<GoalOutlook> {
+        let mut outlook = self.outlook(wishes, settings, plan_rows, Decimal::ZERO)?;
+        let alloc = self.alloc?;
+        let month0 = baseline::current_month(alloc)?;
+        outlook.overtime = self.overtime.as_ref().map(|pay| OvertimeOutlook {
+            hourly_gross: pay.hourly_gross,
+            tax_percent: pay.tax_percent,
+            hourly_net: pay.hourly_net(),
+            contract_hours_week: pay.contract_hours_week,
+            salary: pay.salary,
+            from_month: crate::period::shift_month(month0, overtime_from(alloc) as i32).to_string(),
+            scenarios: (1..=pay.max_hours_week())
+                .filter_map(|hours_week| {
+                    let extra_monthly = pay.extra_monthly(hours_week);
+                    let with = self.outlook(wishes, settings, plan_rows, extra_monthly)?;
+                    Some(OvertimeScenario {
+                        hours_week,
+                        extra_monthly,
+                        habit_free: with.habit_free,
+                        gap: with.gap,
+                        coverage: with.coverage,
+                        goals: with.goals,
+                        cuts: with.cuts,
+                        uncovered: with.uncovered,
+                        fund_eta: with.fund.and_then(|f| f.eta),
+                    })
+                })
+                .collect(),
+        });
+        Some(outlook)
+    }
+
+    /// The same wishes judged with spending as usual, and the emergency
+    /// fund that takes what they leave. `extra` is more income a month
+    /// (overtime), from the first month it can pay for.
+    fn outlook(
+        &self,
+        wishes: &[Wish],
+        settings: &WishSettings,
+        plan_rows: &[WishRow],
+        extra: Decimal,
     ) -> Option<GoalOutlook> {
         let alloc = self.alloc.filter(|_| !self.habits.is_empty())?;
         let month0 = baseline::current_month(alloc)?;
@@ -511,10 +577,22 @@ impl Inputs<'_> {
             schedule::plan_items_with(wishes, month0, self.bills, &self.events);
         self.open_statement(&mut items, month0);
         let months = schedule::horizon(&items, month0);
-        let (plan_bases, _) = self.bases(alloc, month0, wishes, settings, months);
+        let (mut plan_bases, _) = self.bases(alloc, month0, wishes, settings, months);
         let habits = goals::with_next_budgets(&self.habits, alloc);
-        let habit_bases = goals::habit_baselines(&plan_bases, &habits);
+        let mut habit_bases = goals::habit_baselines(&plan_bases, &habits);
+        // A later month's free money, the extra income included.
+        let plan_free = (plan_bases.get(1)?.free + extra).round_dp(2);
+        let habit_free = (habit_bases.get(1)?.free + extra).round_dp(2);
+        for base in plan_bases
+            .iter_mut()
+            .chain(&mut habit_bases)
+            .filter(|b| months_between(month0, b.month) >= overtime_from(alloc))
+        {
+            base.free += extra;
+        }
         let habit_months = self.run(&habit_bases, month0, &items);
+        // More income also changes what the budgets themselves cannot pay.
+        let plan_months = (extra > Decimal::ZERO).then(|| self.run(&plan_bases, month0, &items));
         let ctx = RowContext {
             wishes,
             months: &habit_months,
@@ -546,8 +624,27 @@ impl Inputs<'_> {
                     .sum::<Decimal>()
                     .round_dp(2);
                 let short = ctx.row(w).short.round_dp(2);
+                let ready_in = habit_months
+                    .iter()
+                    .rev()
+                    .find(|m| {
+                        m.verdicts.iter().any(|v| {
+                            let paid = v.amount - v.short;
+                            paid > Decimal::ZERO
+                                && v.wish_id.as_deref().is_some_and(|id| {
+                                    id == w.wish_id
+                                        || wishes.iter().any(|c| {
+                                            c.wish_id == id
+                                                && c.parent_id.as_deref() == Some(&w.wish_id)
+                                        })
+                                })
+                        })
+                    })
+                    .map(|m| m.month.clone())
+                    .filter(|_| short.is_zero() && matches!(w.kind, WishKind::OneOff));
                 let card_short = card_short.min(short);
                 GoalStatus {
+                    ready_in,
                     wish_id: w.wish_id.clone(),
                     name: w.name.clone(),
                     due_on: w.due_on.clone(),
@@ -572,10 +669,13 @@ impl Inputs<'_> {
                         .map(|v| v.on_card)
                         .sum::<Decimal>()
                         .round_dp(2),
-                    plan_short: plan_rows
-                        .iter()
-                        .find(|r| r.wish.wish_id == w.wish_id)
-                        .map_or(Decimal::ZERO, |r| r.short),
+                    plan_short: match &plan_months {
+                        Some(months) => RowContext { months, ..ctx }.row(w).short.round_dp(2),
+                        None => plan_rows
+                            .iter()
+                            .find(|r| r.wish.wish_id == w.wish_id)
+                            .map_or(Decimal::ZERO, |r| r.short),
+                    },
                 }
             })
             .collect();
@@ -613,8 +713,6 @@ impl Inputs<'_> {
         let needed_monthly = (purchases + goals::repeating_monthly(&items))
             .max(Decimal::ZERO)
             .round_dp(2);
-        let plan_free = plan_bases.get(1)?.free.round_dp(2);
-        let habit_free = habit_bases.get(1)?.free.round_dp(2);
         let coverage = (needed_monthly > Decimal::ZERO).then(|| {
             let share = (habit_free.max(Decimal::ZERO) / needed_monthly * Decimal::ONE_HUNDRED)
                 .floor()
@@ -645,6 +743,7 @@ impl Inputs<'_> {
                 &habit_months,
                 steady,
             ),
+            overtime: None,
         })
     }
 
@@ -1008,6 +1107,7 @@ mod tests {
             card_bills,
             bills,
             habits: Vec::new(),
+            overtime: None,
             events: Vec::new(),
         }
         .view(wishes, settings)
@@ -1321,6 +1421,7 @@ mod tests {
             card_bills: Vec::new(),
             bills: &bills,
             habits: Vec::new(),
+            overtime: None,
             events: Vec::new(),
         };
         // While planned, month 0 only sets aside a third of the gap, and a
@@ -1377,6 +1478,7 @@ mod tests {
             card_bills: Vec::new(),
             bills: &bills,
             habits: Vec::new(),
+            overtime: None,
             events: Vec::new(),
         };
         let view = inputs.view(&[late, gym], &WishSettings::default());
@@ -1410,6 +1512,7 @@ mod tests {
             card_bills: Vec::new(),
             bills: &bills,
             habits: Vec::new(),
+            overtime: None,
             events: Vec::new(),
         };
         let cuts = inputs.purchase_cuts(
@@ -1453,6 +1556,7 @@ mod tests {
             card_bills: Vec::new(),
             bills: &bills,
             habits: Vec::new(),
+            overtime: None,
             events: Vec::new(),
         };
         let view = inputs.view(&wishes, &no_card_room());
@@ -1688,6 +1792,7 @@ mod tests {
             card_bills: Vec::new(),
             bills: &HashMap::new(),
             habits,
+            overtime: None,
             events: Vec::new(),
         }
         .view(wishes, &WishSettings::default())
@@ -1714,6 +1819,7 @@ mod tests {
             card_bills: Vec::new(),
             bills: &HashMap::new(),
             habits: Vec::new(),
+            overtime: None,
             events: vec![EventNeed {
                 wish_id: "e".into(),
                 months: vec![
@@ -1750,6 +1856,59 @@ mod tests {
     fn free_after(months: &[WishMonth]) -> Decimal {
         // October (the fixture's running month) to December.
         months[..3].iter().map(|m| m.free_left).min().unwrap()
+    }
+
+    #[test]
+    fn overtime_adds_its_net_pay_to_every_month_it_can_reach() {
+        // As below: habits leave 30 a month against the 450 a 900 trip asks.
+        let a = alloc("0", "500", vec![], vec![]);
+        let trip = wish("trip", None, "900", "2026-12-20");
+        let view = Inputs {
+            alloc: Some(&a),
+            today: None,
+            plans: Vec::new(),
+            card_bills: Vec::new(),
+            bills: &HashMap::new(),
+            habits: vec![habit("Food", "570", "100", false)],
+            overtime: Some(overtime::Pay {
+                hourly_gross: d("23.59"),
+                tax_percent: d("50.47"),
+                contract_hours_week: Some(d("36")),
+                salary: Some(d("3127.27")),
+            }),
+            events: Vec::new(),
+        }
+        .view(&[trip], &WishSettings::default());
+        let goals = view.goals.unwrap();
+        // Overtime changes nothing of the outlook without it.
+        assert_eq!((goals.habit_free, goals.gap), (d("30"), d("420")));
+        let overtime = goals.overtime.unwrap();
+        assert_eq!(overtime.hourly_net, d("11.68"));
+        // No salary arrived this month, so its payday still takes the hours.
+        assert_eq!(overtime.from_month, "2026-11-01");
+        // Any number of hours may be tried: a 36-hour contract leaves 132.
+        let hours: Vec<u32> = overtime.scenarios.iter().map(|s| s.hours_week).collect();
+        assert_eq!(hours, (1..=132).collect::<Vec<_>>());
+        let four = &overtime.scenarios[3];
+        assert_eq!(four.extra_monthly, d("202.52"));
+        assert_eq!((four.habit_free, four.gap), (d("232.52"), d("217.48")));
+        assert_eq!(four.coverage, Some(51));
+        // November and December each bring 202.52 more for the trip.
+        let (plain, with) = (&goals.goals[0], &four.goals[0]);
+        assert_eq!(
+            (plain.short + plain.on_card) - (with.short + with.on_card),
+            d("405.04")
+        );
+        // An hour more never leaves a wider gap.
+        assert!(overtime.scenarios.windows(2).all(|w| w[1].gap <= w[0].gap));
+        // Nine hours a week bring 455.68: the gap is closed.
+        assert_eq!(overtime.scenarios[8].gap, d("0"));
+        // As it stands the card pays the rest in December; at forty hours
+        // November alone saves it, a month sooner.
+        assert_eq!(plain.ready_in.as_deref(), Some("2026-12-01"));
+        let forty = &overtime.scenarios[39].goals[0];
+        assert_eq!((forty.short, forty.on_card), (d("0"), d("0")));
+        assert_eq!(forty.ready_in.as_deref(), Some("2026-11-01"));
     }
 
     #[test]

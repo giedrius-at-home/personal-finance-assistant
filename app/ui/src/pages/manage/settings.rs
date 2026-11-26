@@ -31,6 +31,9 @@ fn label(key: &str) -> &str {
         "payday_day" => "Monthly payday",
         "monthly_salary_eur" => "Monthly salary (EUR)",
         "salary_account_id" => "Salary account",
+        "hourly_rate_eur" => "Hourly rate, gross (EUR)",
+        "contract_hours_week" => "Contract hours a week",
+        "overtime_tax_percent" => "Tax on extra pay (%)",
         "safety_buffer_eur" => "Safety buffer (EUR)",
         "evaluation_hour" => "Evaluation hour",
         "notifications_enabled" => "Desktop notifications",
@@ -64,6 +67,18 @@ fn values(s: &OwnerSettings) -> Vec<(&'static str, String)> {
             or(s.monthly_salary_eur.map(|d| d.to_string())),
         ),
         ("salary_account_id", or(s.salary_account_id.clone())),
+        (
+            "hourly_rate_eur",
+            or(s.hourly_rate_eur.map(|d| d.to_string())),
+        ),
+        (
+            "contract_hours_week",
+            or(s.contract_hours_week.map(|d| d.to_string())),
+        ),
+        (
+            "overtime_tax_percent",
+            or(s.overtime_tax_percent.map(|d| d.to_string())),
+        ),
         ("safety_buffer_eur", s.safety_buffer_eur.to_string()),
         ("heads_up_spent_ratio", s.heads_up_spent_ratio.to_string()),
         ("heads_up_pace_ratio", s.heads_up_pace_ratio.to_string()),
@@ -95,6 +110,9 @@ fn values(s: &OwnerSettings) -> Vec<(&'static str, String)> {
 struct Draft {
     payday: RwSignal<String>,
     salary: RwSignal<String>,
+    hourly_rate: RwSignal<String>,
+    contract_hours: RwSignal<String>,
+    overtime_tax: RwSignal<String>,
     buffer: RwSignal<String>,
     excluded: RwSignal<String>,
     predicted: RwSignal<String>,
@@ -115,6 +133,9 @@ impl Draft {
         Self {
             payday: s(),
             salary: s(),
+            hourly_rate: s(),
+            contract_hours: s(),
+            overtime_tax: s(),
             buffer: s(),
             excluded: s(),
             predicted: s(),
@@ -138,6 +159,10 @@ impl Draft {
                 .map(|d| d.to_string())
                 .unwrap_or_default(),
         );
+        let text = |v: Option<rust_decimal::Decimal>| v.map(|d| d.to_string()).unwrap_or_default();
+        self.hourly_rate.set(text(s.hourly_rate_eur));
+        self.contract_hours.set(text(s.contract_hours_week));
+        self.overtime_tax.set(text(s.overtime_tax_percent));
         self.buffer.set(s.safety_buffer_eur.to_string());
         self.excluded.set(s.forecast_excluded_categories.join(", "));
         self.predicted.set(s.predicted_bill_categories.join(", "));
@@ -163,6 +188,9 @@ impl Draft {
             payday_day: self.payday.get_untracked(),
             monthly_salary_eur: self.salary.get_untracked(),
             salary_account_id: self.salary_account.get_untracked(),
+            hourly_rate_eur: self.hourly_rate.get_untracked(),
+            contract_hours_week: self.contract_hours.get_untracked(),
+            overtime_tax_percent: self.overtime_tax.get_untracked(),
             safety_buffer_eur: self.buffer.get_untracked(),
             heads_up_spent_ratio: self.spent_ratio.get_untracked(),
             heads_up_pace_ratio: self.pace_ratio.get_untracked(),
@@ -441,6 +469,15 @@ fn SettingsCard(
                         </Field>
                         <Field label="Monthly salary (EUR)" id="set-salary" hint="Expected income each payday; credited only when imported.">
                             <Input id="set-salary" value=draft.salary kind="number" min="0.01" step="0.01" />
+                        </Field>
+                        <Field label="Hourly rate, gross (EUR)" id="set-hourly-rate" hint="From your payslip. Overtime is counted at this rate: holiday pay is in it and there is no premium.">
+                            <Input id="set-hourly-rate" value=draft.hourly_rate kind="number" min="0.01" step="0.01" placeholder="Not configured" />
+                        </Field>
+                        <Field label="Contract hours a week" id="set-contract-hours" hint="Overtime is offered up to an average week of 48 hours.">
+                            <Input id="set-contract-hours" value=draft.contract_hours kind="number" min="1" max="60" step="0.25" placeholder="Not configured" />
+                        </Field>
+                        <Field label="Tax on extra pay (%)" id="set-overtime-tax" hint="What is withheld from pay on top of your salary: the special rate on your payslip (Variant BT), its two parts added up.">
+                            <Input id="set-overtime-tax" value=draft.overtime_tax kind="number" min="0" max="99.99" step="0.01" placeholder="Not configured" />
                         </Field>
                         <Field label="Safety buffer (EUR)" id="set-buffer" hint="Kept on your spending accounts before month closure suggests saving the rest.">
                             <Input id="set-buffer" value=draft.buffer kind="number" min="0" step="0.01" />

@@ -177,6 +177,25 @@ pub fn from_form(form: &SettingsForm, current: &OwnerSettings) -> Result<OwnerSe
             })?),
         },
         salary_account_id: optional(&form.salary_account_id).map(str::to_owned),
+        hourly_rate_eur: match optional(&form.hourly_rate_eur) {
+            None => None,
+            Some(text) => Some(money(text).ok_or_else(|| {
+                invalid("Hourly rate must be an amount with at most two decimals.")
+            })?),
+        },
+        contract_hours_week: match optional(&form.contract_hours_week) {
+            None => None,
+            Some(text) => Some(
+                money(text).ok_or_else(|| invalid("Contract hours must be a number of hours."))?,
+            ),
+        },
+        overtime_tax_percent: match optional(&form.overtime_tax_percent) {
+            None => None,
+            Some(text) => Some(
+                money(text)
+                    .ok_or_else(|| invalid("Overtime tax must be a percentage below 100."))?,
+            ),
+        },
         safety_buffer_eur: match optional(&form.safety_buffer_eur) {
             None => current.safety_buffer_eur,
             Some(text) => money(text).ok_or_else(|| {
@@ -230,6 +249,24 @@ pub fn validate(mut s: OwnerSettings) -> Result<OwnerSettings> {
         return Err(invalid(
             "Safety buffer must be an amount with at most two decimals.",
         ));
+    }
+    let amount = |v: Option<Decimal>| v.is_none_or(|m| money(&m.to_string()).is_some());
+    if s.hourly_rate_eur.is_some_and(|r| r <= Decimal::ZERO) || !amount(s.hourly_rate_eur) {
+        return Err(invalid(
+            "Hourly rate must be an amount with at most two decimals.",
+        ));
+    }
+    if s.contract_hours_week
+        .is_some_and(|h| h <= Decimal::ZERO || h > Decimal::from(60))
+        || !amount(s.contract_hours_week)
+    {
+        return Err(invalid("Contract hours must be a number of hours."));
+    }
+    if s.overtime_tax_percent
+        .is_some_and(|t| t >= Decimal::ONE_HUNDRED)
+        || !amount(s.overtime_tax_percent)
+    {
+        return Err(invalid("Overtime tax must be a percentage below 100."));
     }
     if s.salary_account_id.as_ref().is_some_and(|a| a.len() > 128) {
         return Err(invalid("Unknown salary account."));
@@ -451,6 +488,15 @@ mod tests {
                 .map(|d| d.to_string())
                 .unwrap_or_default(),
             salary_account_id: s.salary_account_id.clone().unwrap_or_default(),
+            hourly_rate_eur: s.hourly_rate_eur.map(|d| d.to_string()).unwrap_or_default(),
+            contract_hours_week: s
+                .contract_hours_week
+                .map(|d| d.to_string())
+                .unwrap_or_default(),
+            overtime_tax_percent: s
+                .overtime_tax_percent
+                .map(|d| d.to_string())
+                .unwrap_or_default(),
             safety_buffer_eur: s.safety_buffer_eur.to_string(),
             heads_up_spent_ratio: s.heads_up_spent_ratio.to_string(),
             heads_up_pace_ratio: s.heads_up_pace_ratio.to_string(),
@@ -479,6 +525,26 @@ mod tests {
         let mut f = form(&base);
         f.monthly_salary_eur = "0".into();
         assert!(ok(f).is_err());
+        let mut f = form(&base);
+        f.hourly_rate_eur = "23.59".into();
+        f.contract_hours_week = "36".into();
+        f.overtime_tax_percent = "50.47".into();
+        let pay = ok(f).expect("pay settings");
+        assert_eq!(pay.hourly_rate_eur, Some(Decimal::new(2359, 2)));
+        assert_eq!(pay.contract_hours_week, Some(Decimal::from(36)));
+        assert_eq!(pay.overtime_tax_percent, Some(Decimal::new(5047, 2)));
+        for (rate, hours, tax) in [
+            ("0", "36", "50"),
+            ("23.591", "36", "50"),
+            ("23", "61", "50"),
+            ("23", "36", "100"),
+        ] {
+            let mut f = form(&base);
+            f.hourly_rate_eur = rate.into();
+            f.contract_hours_week = hours.into();
+            f.overtime_tax_percent = tax.into();
+            assert!(ok(f).is_err(), "{rate} {hours} {tax}");
+        }
         let mut f = form(&base);
         f.heads_up_spent_ratio = "1.5".into();
         assert!(ok(f).is_err());
