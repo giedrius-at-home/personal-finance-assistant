@@ -1,7 +1,7 @@
 //! Manage → Settings → Daily voice brief: once a day at the chosen hour,
 //! Gisel or Rafael (Mistral) talks through what is left, what is close to
 //! its limit, the bills coming and how your habits moved; Voxtral speaks it
-//! and the phone gets a push that opens the player on Overview, and a voice
+//! and the phone gets a push that plays it in a pop-up, and a voice
 //! message on Telegram from that persona's own bot when that is on. Every
 //! dial is here, with "Preview" to hear the form as it stands before saving.
 
@@ -393,7 +393,7 @@ pub fn BriefCard() -> impl IntoView {
             let spoken = s.latest.as_ref().is_some_and(|b| b.has_audio);
             latest.set(s.latest);
             ops.notice.set(if spoken {
-                "Today's brief is ready; it is on Overview, on your phone and on Telegram when that is on.".into()
+                "Today's brief is ready: it pops up when you open the app, tapping the phone's notification plays it, and it is on Telegram when that is on.".into()
             } else {
                 "Today's brief is ready as text (no audio this time).".into()
             });

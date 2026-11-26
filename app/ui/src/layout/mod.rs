@@ -958,7 +958,7 @@ mod tests {
         let defs: Vec<_> = registry().collect();
         let ids: std::collections::HashSet<_> = defs.iter().map(|d| d.id).collect();
         assert_eq!(ids.len(), defs.len()); // ids are unique
-        assert_eq!(defs.len(), 54); // the spec's 48, plus Today, phone notifications, avoidable spending, buying hours and Gisel's brief (Overview and Settings)
+        assert_eq!(defs.len(), 53); // the spec's 48, plus Today, phone notifications, avoidable spending, buying hours and the voice brief settings
         for d in &defs {
             assert!(
                 d.id.starts_with(d.page) && PAGES.contains(&d.page),
