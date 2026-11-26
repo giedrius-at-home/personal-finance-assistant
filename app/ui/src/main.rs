@@ -310,6 +310,7 @@ fn App() -> impl IntoView {
                     }}
                 </div>
             </div>
+            <pages::brief_popup::BriefPopup />
         </div>
     }
 }
