@@ -253,6 +253,11 @@ pub struct BriefSettings {
     /// The owner's own words on how the persona talks (at most 300
     /// characters, no digits); added to the prompt.
     pub style: String,
+    /// Also send the brief on Telegram, from the speaking persona's own bot.
+    pub telegram: bool,
+    /// The owner's Telegram chat id; empty until it is found from the first
+    /// message they send a bot (in a private chat it is the same for both).
+    pub telegram_chat: String,
 }
 
 impl Default for BriefSettings {
@@ -267,6 +272,8 @@ impl Default for BriefSettings {
             length: BriefLength::default(),
             match_mood: true,
             style: String::new(),
+            telegram: false,
+            telegram_chat: String::new(),
         }
     }
 }
@@ -535,4 +542,10 @@ pub struct BriefStatus {
     /// Empty when Mistral has no key or could not be reached.
     #[serde(default)]
     pub voices: Vec<VoiceOption>,
+    /// Whether Gisel's and Rafael's Telegram bot tokens are stored (the
+    /// tokens never reach the UI).
+    #[serde(default)]
+    pub telegram_gisel: bool,
+    #[serde(default)]
+    pub telegram_rafael: bool,
 }
