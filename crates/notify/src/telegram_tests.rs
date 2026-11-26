@@ -25,11 +25,17 @@ fn finds_the_latest_private_chat() {
     let updates = json!([
         { "update_id": 1, "message": { "chat": { "id": 111, "type": "private" } } },
         { "update_id": 2, "message": { "chat": { "id": -500, "type": "group" } } },
-        { "update_id": 3, "message": { "chat": { "id": 222, "type": "private" } } },
+        { "update_id": 3, "message": { "chat": { "id": 222, "type": "private", "first_name": "Giedrius" } } },
         { "update_id": 4, "message": { "chat": { "id": -600, "type": "supergroup" } } },
     ]);
-    assert_eq!(chat_from_updates(&updates).as_deref(), Some("222"));
-    assert_eq!(chat_from_updates(&json!([])), None);
+    assert_eq!(
+        owner_from_updates(&updates),
+        Some(Owner {
+            chat: "222".into(),
+            first_name: Some("Giedrius".into())
+        })
+    );
+    assert_eq!(owner_from_updates(&json!([])), None);
 }
 
 #[test]
@@ -110,6 +116,8 @@ fn sends_voice_when_there_is_audio_and_text_otherwise() {
     bot.send_brief("42", "Hola", "Your money.", Some(b"mp3".to_vec()))
         .unwrap();
     bot.send_brief("42", "Hola", "Your money.", None).unwrap();
+    bot.send_animation("42", "https://media.giphy.com/media/x/giphy.mp4")
+        .unwrap();
     let calls = api.calls.borrow();
     assert_eq!(calls[1].0, "sendVoice");
     let Request::Upload(upload) = &calls[1].1 else {
@@ -127,4 +135,12 @@ fn sends_voice_when_there_is_audio_and_text_otherwise() {
     };
     assert_eq!(body["chat_id"], "42");
     assert_eq!(body["parse_mode"], "HTML");
+    assert_eq!(calls[3].0, "sendAnimation");
+    let Request::Json(body) = &calls[3].1 else {
+        panic!("animation is JSON")
+    };
+    assert_eq!(
+        body["animation"],
+        "https://media.giphy.com/media/x/giphy.mp4"
+    );
 }

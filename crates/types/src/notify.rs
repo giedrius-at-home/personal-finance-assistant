@@ -258,6 +258,11 @@ pub struct BriefSettings {
     /// The owner's Telegram chat id; empty until it is found from the first
     /// message they send a bot (in a private chat it is the same for both).
     pub telegram_chat: String,
+    /// What the persona calls the owner; filled from their Telegram first
+    /// name when the chat is found, editable. Empty: no name.
+    pub owner_name: String,
+    /// Send a GIF that fits the day after the Telegram brief (GIPHY).
+    pub gif: bool,
 }
 
 impl Default for BriefSettings {
@@ -274,6 +279,8 @@ impl Default for BriefSettings {
             style: String::new(),
             telegram: false,
             telegram_chat: String::new(),
+            owner_name: String::new(),
+            gif: true,
         }
     }
 }
@@ -506,6 +513,10 @@ pub struct Brief {
     /// Who spoke: "Gisel" or "Rafael".
     #[serde(default)]
     pub persona: String,
+    /// A short GIPHY search for the reaction GIF that fits the day
+    /// ("slow clap"); empty for none.
+    #[serde(default)]
+    pub gif: String,
 }
 
 /// "Preview" in the settings card: a brief from the form as it stands,
@@ -548,4 +559,7 @@ pub struct BriefStatus {
     pub telegram_gisel: bool,
     #[serde(default)]
     pub telegram_rafael: bool,
+    /// Whether the GIPHY key is stored.
+    #[serde(default)]
+    pub giphy: bool,
 }

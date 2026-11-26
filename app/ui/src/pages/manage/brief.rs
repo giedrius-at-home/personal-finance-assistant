@@ -35,6 +35,11 @@ struct PersonaArgs {
 }
 
 #[derive(Serialize)]
+struct KeyArgs {
+    key: String,
+}
+
+#[derive(Serialize)]
 struct TokenArgs {
     persona: Persona,
     token: String,
@@ -53,6 +58,8 @@ struct Draft {
     style: RwSignal<String>,
     telegram: RwSignal<bool>,
     telegram_chat: RwSignal<String>,
+    owner_name: RwSignal<String>,
+    gif: RwSignal<bool>,
 }
 
 fn persona_value(p: Persona) -> &'static str {
@@ -106,6 +113,8 @@ impl Draft {
             style: RwSignal::new(String::new()),
             telegram: RwSignal::new(false),
             telegram_chat: RwSignal::new(String::new()),
+            owner_name: RwSignal::new(String::new()),
+            gif: RwSignal::new(true),
         }
     }
 
@@ -122,6 +131,8 @@ impl Draft {
         self.style.set(s.style.clone());
         self.telegram.set(s.telegram);
         self.telegram_chat.set(s.telegram_chat.clone());
+        self.owner_name.set(s.owner_name.clone());
+        self.gif.set(s.gif);
     }
 
     fn settings(&self) -> Result<BriefSettings, String> {
@@ -147,6 +158,8 @@ impl Draft {
             style: self.style.get_untracked(),
             telegram: self.telegram.get_untracked(),
             telegram_chat: self.telegram_chat.get_untracked(),
+            owner_name: self.owner_name.get_untracked(),
+            gif: self.gif.get_untracked(),
         })
     }
 }
@@ -272,6 +285,55 @@ fn bot_row(
     }
 }
 
+/// The GIPHY key for the GIF after the Telegram brief (kept in the
+/// server's secret store, never shown again).
+fn giphy_row(stored: RwSignal<bool>, ops: Ops) -> impl IntoView {
+    let busy = ops.busy;
+    let key = NodeRef::<InputElement>::new();
+    let save = move |e: leptos::ev::SubmitEvent| {
+        e.prevent_default();
+        let Some(el) = key.get() else { return };
+        let value = el.value();
+        el.set_value("");
+        ops.run(
+            "set_giphy_key",
+            KeyArgs { key: value },
+            move |s: BriefStatus| {
+                stored.set(s.giphy);
+                ops.notice
+                    .set("GIPHY key saved. Press Test on a bot to get a GIF.".into());
+            },
+        );
+    };
+    let forget = move |_| {
+        ops.run("forget_giphy_key", NoArgs {}, move |s: BriefStatus| {
+            stored.set(s.giphy);
+            ops.notice.set("GIPHY key removed.".into());
+        });
+    };
+    view! {
+        <form class=SECRET_FORM on:submit=save>
+            <span class="min-w-20 text-sm font-semibold">"GIPHY"</span>
+            <input
+                node_ref=key
+                class=cn([CONTROL, "sm:max-w-sm"])
+                type="password"
+                autocomplete="off"
+                placeholder=move || if stored.get() { "Key saved" } else { "API key from developers.giphy.com" }
+                aria-label="GIPHY API key"
+            />
+            <Button submit=true variant=Variant::Secondary disabled=Signal::derive(move || busy.get())>
+                {move || if stored.get() { "Replace" } else { "Save key" }}
+            </Button>
+            {move || stored.get().then(|| view! {
+                <Button variant=Variant::Ghost disabled=Signal::derive(move || busy.get()) on_click=Callback::new(forget)>
+                    "Remove"
+                </Button>
+            })}
+        </form>
+    }
+}
+
 #[component]
 pub fn BriefCard() -> impl IntoView {
     let status = load::<BriefStatus, _>("brief_status", || NoArgs {});
@@ -282,12 +344,14 @@ pub fn BriefCard() -> impl IntoView {
     let latest = RwSignal::new(None::<finance_types::notify::Brief>);
     let preview = RwSignal::new(None::<BriefPreview>);
     let bots = RwSignal::new((false, false));
+    let giphy = RwSignal::new(false);
     Effect::new(move |_| {
         if let Some(Ok(s)) = status.data.get()
             && !filled.get_untracked()
         {
             draft.fill(&s.settings);
             bots.set((s.telegram_gisel, s.telegram_rafael));
+            giphy.set(s.giphy);
             latest.set(s.latest.clone());
             filled.set(true);
         }
@@ -421,7 +485,10 @@ pub fn BriefCard() -> impl IntoView {
                 busy,
             )}
             <div class=SETTINGS_GRID>
-                <Field label="Who talks" id="brief-persona" hint="Both are laid-back Spaniards; the emails are signed by the same one.">
+                <Field label="Your name" id="brief-owner" hint="What they call you. Taken from Telegram when you first message a bot; change it here.">
+                    <Input id="brief-owner" value=draft.owner_name />
+                </Field>
+                <Field label="Who talks" id="brief-persona" hint="Two loud Spaniards who take turns roasting you (mean but loving one day, full savage the next) and cheer when you do well; the emails are signed by the same one.">
                     <Select
                         id="brief-persona"
                         value=persona_choice
@@ -482,6 +549,13 @@ pub fn BriefCard() -> impl IntoView {
                     </p>
                     {bot_row(Persona::Gisel, Signal::derive(move || bots.get().0), ops, bots)}
                     {bot_row(Persona::Rafael, Signal::derive(move || bots.get().1), ops, bots)}
+                    {check(
+                        "Send a GIF after it",
+                        "A reaction GIF that fits the day, picked by the persona and found on GIPHY (rated up to R). Needs a free GIPHY API key.",
+                        draft.gif,
+                        busy,
+                    )}
+                    {move || draft.gif.get().then(|| giphy_row(giphy, ops))}
                     {move || {
                         let chat = draft.telegram_chat.get();
                         (!chat.is_empty()).then(|| view! { <p class=HINT>{format!("Sending to chat {chat}.")}</p> })
@@ -517,6 +591,7 @@ pub fn BriefCard() -> impl IntoView {
                         <p class=MUTED>{plain_script(&p.brief.script)}</p>
                         <p class=cn([HINT, "flex flex-wrap gap-x-3"])>
                             <span>{voice}</span>
+                            {(!p.brief.gif.is_empty()).then(|| view! { <span>{format!("GIF: “{}”", p.brief.gif)}</span> })}
                             {fixed.map(|f| view! { <span>{f}</span> })}
                         </p>
                     </div>
