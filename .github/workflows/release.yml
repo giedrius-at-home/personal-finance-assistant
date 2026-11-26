@@ -4,10 +4,9 @@ name: Release
 # to main that passes CI (which also deploys the Oracle server), so the app
 # and the server stay in step. It can also be started by hand (Actions ->
 # Release -> Run workflow, or `gh workflow run release.yml`).
-# It runs on the owner's Mac as a self-hosted runner, not on GitHub's macOS
-# runners, which are paid. While the Mac sleeps the job waits and runs when
-# it wakes. The installed app finds a release through latest.json and
-# verifies the update signature.
+# The repository is public, so GitHub's macOS runners cost nothing. The
+# installed app finds a release through latest.json and verifies the update
+# signature.
 #
 # The version is the one in tauri.conf.json when a PR raised it past the
 # latest release (minor and major bumps); otherwise the latest release's
@@ -35,7 +34,7 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.event == 'push')
-    runs-on: [self-hosted, macOS, ARM64]
+    runs-on: macos-latest
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # The commit CI passed, not whatever main points at by now.
@@ -45,11 +44,7 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - name: Toolchain from rust-toolchain.toml
-        run: |
-          # The runner service may start without the login shell's PATH.
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-          export PATH="$HOME/.cargo/bin:$PATH"
-          rustup show
+        run: rustup show
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
         with:

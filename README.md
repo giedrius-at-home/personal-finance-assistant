@@ -136,21 +136,7 @@ deployed the Oracle server), the Release workflow builds and signs
 It can also be started by hand: **Actions → Release → Run workflow** (or
 `gh workflow run release.yml`).
 
-The build runs on this Mac as a self-hosted GitHub runner (GitHub's own
-macOS runners are paid), so the runner must be started; while the Mac sleeps a release waits and
-builds when it wakes.
-
-Set the runner up once: GitHub → repository Settings → Actions → Runners →
-New self-hosted runner → macOS, ARM64, and run the commands it shows in a
-folder such as `~/actions-runner`. Then, in that folder:
-
-```bash
-./svc.sh install && ./svc.sh start   # starts with the Mac from now on
-```
-
-The runner needs `rustup` (above), Xcode's command line tools and the
-GitHub CLI (`brew install gh`); the workflow installs Trunk and the Tauri CLI
-itself.
+The repository is public, so GitHub's macOS runners build it for free.
 
 - The version is the latest release's patch plus one, stamped into the build
   only; `main` keeps the last hand-set version.
@@ -159,9 +145,10 @@ itself.
   workflow uses it when it is newer than the latest release.
 
 The installed app checks at launch and every 15 minutes, installs a new
-release by itself and restarts into it once its window is not in front. Because the repository is
-private it needs a fine-grained GitHub token with read-only **Contents**
-access to this repository; paste it once under **Manage → Settings → Updates** (stored in
+release by itself and restarts into it once its window is not in front. It
+reads the releases with a fine-grained GitHub token with read-only
+**Contents** access to this repository (from when the repository was
+private); paste it once under **Manage → Settings → Updates** (stored in
 the secret store). Updates whose signature does not match the public key in
 `tauri.conf.json` are rejected.
 
